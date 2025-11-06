@@ -4,7 +4,7 @@ import numpy as np
 import numba as nb
 from chess_engine.move import (
     get_from_square, get_to_square, get_special_move_flag, get_promotion_piece,
-    PROMOTION, EN_PASSANT, CASTLING, KNIGHT
+    SPECIAL_MOVE_FLAG_PROMOTION, SPECIAL_MOVE_FLAG_EN_PASSANT, SPECIAL_MOVE_FLAG_CASTLING
 )
 from chess_engine.zobrist import (
     PIECE_SQUARE_KEYS, SIDE_TO_MOVE_KEY, EN_PASSANT_FILE_KEYS, CASTLING_RIGHTS_KEYS,
@@ -41,7 +41,7 @@ def find_piece_type_for_square(piece_bbs: tuple, square: int, color: int) -> int
             return i
     return -1
 
-@nb.jit(nopython=True)
+@nb.jit(nb.types.Tuple((piece_bbs_signature, occupancy_bbs_signature, game_state_signature, unmake_info_signature))(piece_bbs_signature, occupancy_bbs_signature, game_state_signature, nb.uint16), nopython=True)
 def make_move(piece_bbs: tuple, occupancy_bbs: tuple, game_state: tuple, move: np.uint16):
     """
     Applies a move and returns new state tuples and unmake_info.
@@ -64,7 +64,7 @@ def make_move(piece_bbs: tuple, occupancy_bbs: tuple, game_state: tuple, move: n
     new_piece_bbs[moving_piece_bb_idx] ^= (np.uint64(1) << from_sq) | (np.uint64(1) << to_sq)
 
     is_capture = False
-    if flag != EN_PASSANT and (occupancy_bbs[2] & (np.uint64(1) << to_sq)):
+    if flag != SPECIAL_MOVE_FLAG_EN_PASSANT and (occupancy_bbs[2] & (np.uint64(1) << to_sq)):
         is_capture = True
         opponent_color = 1 - side
         captured_piece_type = find_piece_type_for_square(piece_bbs, to_sq, opponent_color)
@@ -74,8 +74,8 @@ def make_move(piece_bbs: tuple, occupancy_bbs: tuple, game_state: tuple, move: n
         key ^= PIECE_SQUARE_KEYS[captured_piece_bb_idx, to_sq]
 
     # --- Handle Special Moves ---
-    if flag == PROMOTION:
-        promo_piece_type = get_promotion_piece(move) + KNIGHT
+    if flag == SPECIAL_MOVE_FLAG_PROMOTION:
+        promo_piece_type = get_promotion_piece(move) + 1 # PROMO_KNIGHT is 0, maps to piece type 1
         promo_piece_bb_idx = side * 6 + promo_piece_type
 
         new_piece_bbs[moving_piece_bb_idx] &= ~(np.uint64(1) << to_sq)
@@ -84,7 +84,7 @@ def make_move(piece_bbs: tuple, occupancy_bbs: tuple, game_state: tuple, move: n
         key ^= PIECE_SQUARE_KEYS[moving_piece_bb_idx, to_sq] # XOR out pawn
         key ^= PIECE_SQUARE_KEYS[promo_piece_bb_idx, to_sq]   # XOR in promoted piece
 
-    elif flag == EN_PASSANT:
+    elif flag == SPECIAL_MOVE_FLAG_EN_PASSANT:
         is_capture = True
         captured_piece_type = np.int8(PAWN)
         opponent_color = 1 - side
@@ -95,7 +95,7 @@ def make_move(piece_bbs: tuple, occupancy_bbs: tuple, game_state: tuple, move: n
         new_piece_bbs[captured_pawn_bb_idx] &= ~(np.uint64(1) << captured_pawn_sq)
         key ^= PIECE_SQUARE_KEYS[captured_pawn_bb_idx, captured_pawn_sq]
 
-    elif flag == CASTLING:
+    elif flag == SPECIAL_MOVE_FLAG_CASTLING:
         king_side_castle = to_sq > from_sq
         rook_from_sq, rook_to_sq = ((7, 5) if king_side_castle else (0, 3)) if side == WHITE else ((63, 61) if king_side_castle else (56, 59))
         rook_bb_idx = side * 6 + ROOK
@@ -111,13 +111,15 @@ def make_move(piece_bbs: tuple, occupancy_bbs: tuple, game_state: tuple, move: n
         key ^= CASTLING_RIGHTS_KEYS[current_castling_rights]
         key ^= CASTLING_RIGHTS_KEYS[new_castling_rights]
 
-    if current_ep_square != -1:
-        key ^= EN_PASSANT_FILE_KEYS[current_ep_square % 8]
-
     new_ep_square = np.int8(-1)
     if moving_piece_type == PAWN and abs(to_sq - from_sq) == 16:
         new_ep_square = np.int8(from_sq + (8 if side == WHITE else -8))
-        key ^= EN_PASSANT_FILE_KEYS[new_ep_square % 8]
+
+    if new_ep_square != current_ep_square:
+        if current_ep_square != -1:
+            key ^= EN_PASSANT_FILE_KEYS[current_ep_square % 8]
+        if new_ep_square != -1:
+            key ^= EN_PASSANT_FILE_KEYS[new_ep_square % 8]
 
     key ^= SIDE_TO_MOVE_KEY
 
@@ -150,7 +152,7 @@ def make_move(piece_bbs: tuple, occupancy_bbs: tuple, game_state: tuple, move: n
 
     return final_piece_bbs, new_occupancy_bbs, new_game_state, unmake_info
 
-@nb.jit(nopython=True)
+@nb.jit(nb.types.Tuple((piece_bbs_signature, occupancy_bbs_signature, game_state_signature))(piece_bbs_signature, occupancy_bbs_signature, game_state_signature, nb.uint16, unmake_info_signature), nopython=True)
 def unmake_move(piece_bbs: tuple, occupancy_bbs: tuple, game_state: tuple, move: np.uint16, unmake_info: tuple):
     """
     Reverts a move using the unmake_info tuple, returning the original state tuples.
@@ -165,7 +167,7 @@ def unmake_move(piece_bbs: tuple, occupancy_bbs: tuple, game_state: tuple, move:
     move_bb = (np.uint64(1) << from_sq) | (np.uint64(1) << to_sq)
 
     moving_piece_type = find_piece_type_for_square(piece_bbs, to_sq, side)
-    if flag == PROMOTION:
+    if flag == SPECIAL_MOVE_FLAG_PROMOTION:
         moving_piece_type = PAWN
     moving_piece_bb_idx = side * 6 + moving_piece_type
 
@@ -173,25 +175,25 @@ def unmake_move(piece_bbs: tuple, occupancy_bbs: tuple, game_state: tuple, move:
 
     new_piece_bbs[moving_piece_bb_idx] ^= move_bb
 
-    if flag == PROMOTION:
-        promo_piece_type = get_promotion_piece(move) + KNIGHT
+    if flag == SPECIAL_MOVE_FLAG_PROMOTION:
+        promo_piece_type = get_promotion_piece(move) + 1 # PROMO_KNIGHT is 0, maps to piece type 1
         promo_piece_bb_idx = side * 6 + promo_piece_type
         new_piece_bbs[promo_piece_bb_idx] &= ~(np.uint64(1) << to_sq)
 
-    elif flag == EN_PASSANT:
+    elif flag == SPECIAL_MOVE_FLAG_EN_PASSANT:
         opponent_color = 1 - side
         captured_pawn_bb_idx = opponent_color * 6 + PAWN
         captured_pawn_sq = to_sq + (8 if side == BLACK else -8)
         new_piece_bbs[captured_pawn_bb_idx] |= (np.uint64(1) << captured_pawn_sq)
 
-    elif flag == CASTLING:
+    elif flag == SPECIAL_MOVE_FLAG_CASTLING:
         king_side_castle = to_sq > from_sq
         rook_from_sq, rook_to_sq = ((7, 5) if king_side_castle else (0, 3)) if side == WHITE else ((63, 61) if king_side_castle else (56, 59))
         rook_bb_idx = side * 6 + ROOK
         rook_move_bb = (np.uint64(1) << rook_from_sq) | (np.uint64(1) << rook_to_sq)
         new_piece_bbs[rook_bb_idx] ^= rook_move_bb
 
-    if captured_piece_type != -1 and flag != EN_PASSANT:
+    if captured_piece_type != -1 and flag != SPECIAL_MOVE_FLAG_EN_PASSANT:
         opponent_color = 1 - side
         captured_piece_bb_idx = opponent_color * 6 + captured_piece_type
         new_piece_bbs[captured_piece_bb_idx] |= (np.uint64(1) << to_sq)
