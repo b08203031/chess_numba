@@ -1,91 +1,60 @@
 # chess_engine/move.py
-
-import numba
 import numpy as np
+import numba as nb
 
-# --- Constants for Encoding/Decoding ---
-# Using 16-bit unsigned integers for moves
-# Bits 0-5:   From square (0-63)
-# Bits 6-11:  To square (0-63)
-# Bits 12-13: Promotion piece type (00: None, 01: N, 10: B, 11: R)
-# Bits 14-15: Special move flags (00: Normal, 01: Promotion, 10: En Passant, 11: Castling)
+# --- Move Encoding Blueprint ---
+# A move is encoded as a 16-bit unsigned integer.
+# Bits | 15, 14       | 13, 12           | 11, 10, 9, 8, 7, 6  | 5, 4, 3, 2, 1, 0
+# Use  | Special Flag | Promotion Piece  | To Square           | From Square
 
-FROM_MASK = np.uint16(0x003F)      # 0b0000000000111111
-TO_MASK = np.uint16(0x0FC0)       # 0b0000111111000000
-PROMO_PIECE_MASK = np.uint16(0x3000)   # 0b0011000000000000
-FLAG_MASK = np.uint16(0xC000)    # 0b1100000000000000
+# --- Constants for Bit Manipulation ---
+FROM_SQUARE_MASK = np.uint16(0x003F)  # 0000 0000 0011 1111
+TO_SQUARE_MASK = np.uint16(0x0FC0)    # 0000 1111 1100 0000
+PROMOTION_PIECE_MASK = np.uint16(0x3000) # 0011 0000 0000 0000
+SPECIAL_MOVE_MASK = np.uint16(0xC000) # 1100 0000 0000 0000
 
-# Promotion Piece Types (encoded in bits 12-13)
-PROMO_TYPE_NONE = np.uint16(0)
-PROMO_TYPE_KNIGHT = np.uint16(1)
-PROMO_TYPE_BISHOP = np.uint16(2)
-PROMO_TYPE_ROOK = np.uint16(3)
-# Note: Queen promotion is handled by a combination of the promotion flag and this piece type.
-# For simplicity, we can use one of the flags to signify Queen, e.g. PROMO_TYPE_ROOK + FLAG_PROMOTION might signify queen
-# Let's adjust the flags to be more specific.
+TO_SQUARE_SHIFT = 6
+PROMOTION_PIECE_SHIFT = 12
+SPECIAL_MOVE_SHIFT = 14
 
-# Special Move Flags (encoded in bits 14-15)
-FLAG_NORMAL = np.uint16(0)
-FLAG_PROMOTION = np.uint16(1)
-FLAG_EN_PASSANT = np.uint16(2)
-FLAG_CASTLING = np.uint16(3)
+# --- Constants for Special Move Flags ---
+NORMAL_MOVE = np.uint16(0)
+PROMOTION = np.uint16(1)
+EN_PASSANT = np.uint16(2)
+CASTLING = np.uint16(3)
 
-# Let's refine the promotion logic. A better way is to use the promo piece bits for all four pieces.
-# We need 2 bits for 4 pieces. Let's make it simpler.
-# Bits 12-13 for promotion piece type
-# 00 -> Knight, 01 -> Bishop, 10 -> Rook, 11 -> Queen
-# We will use the promotion FLAG to indicate if it's a promotion move.
+# --- Constants for Promotion Pieces ---
+# Note: These values (0-3) map directly to the piece types offset.
+# e.g., KNIGHT = 0, so promotion to knight adds 0 to the piece type base.
+KNIGHT, BISHOP, ROOK, QUEEN = 0, 1, 2, 3
 
-PROMO_KNIGHT = np.uint16(0)
-PROMO_BISHOP = np.uint16(1)
-PROMO_ROOK = np.uint16(2)
-PROMO_QUEEN = np.uint16(3)
-
-
-# --- Numba JIT'd Helper Functions ---
-
-@numba.jit(nopython=True, inline='always')
-def encode_move(from_sq, to_sq, flag, promo_piece=PROMO_TYPE_NONE):
+@nb.jit(nopython=True, inline='always')
+def encode_move(from_square: int, to_square: int, promotion_piece: int, special_flag: int) -> np.uint16:
     """
-    Encodes a move into a 16-bit integer.
-    - from_sq: The starting square (0-63).
-    - to_sq: The destination square (0-63).
-    - flag: The move type (FLAG_NORMAL, FLAG_PROMOTION, etc.).
-    - promo_piece: The piece to promote to (PROMO_KNIGHT, etc.).
+    Encodes move information into a 16-bit unsigned integer.
     """
-    return np.uint16(from_sq | (to_sq << 6) | (promo_piece << 12) | (flag << 14))
+    move = np.uint16(from_square)
+    move |= np.uint16(to_square << TO_SQUARE_SHIFT)
+    move |= np.uint16(promotion_piece << PROMOTION_PIECE_SHIFT)
+    move |= np.uint16(special_flag << SPECIAL_MOVE_SHIFT)
+    return move
 
-@numba.jit(nopython=True, inline='always')
-def get_from_square(move):
-    """Extracts the starting square from an encoded move."""
-    return np.uint8(move & FROM_MASK)
+@nb.jit(nopython=True, inline='always')
+def get_from_square(move: np.uint16) -> int:
+    """Extracts the from_square from a move."""
+    return int(move & FROM_SQUARE_MASK)
 
-@numba.jit(nopython=True, inline='always')
-def get_to_square(move):
-    """Extracts the destination square from an encoded move."""
-    return np.uint8((move & TO_MASK) >> 6)
+@nb.jit(nopython=True, inline='always')
+def get_to_square(move: np.uint16) -> int:
+    """Extracts the to_square from a move."""
+    return int((move & TO_SQUARE_MASK) >> TO_SQUARE_SHIFT)
 
-@numba.jit(nopython=True, inline='always')
-def get_promotion_piece(move):
-    """Extracts the promotion piece type from an encoded move."""
-    return np.uint8((move & PROMO_PIECE_MASK) >> 12)
+@nb.jit(nopython=True, inline='always')
+def get_promotion_piece(move: np.uint16) -> int:
+    """Extracts the promotion piece type from a move."""
+    return int((move & PROMOTION_PIECE_MASK) >> PROMOTION_PIECE_SHIFT)
 
-@numba.jit(nopython=True, inline='always')
-def get_move_flag(move):
-    """Extracts the special move flag from an encoded move."""
-    return np.uint8((move & FLAG_MASK) >> 14)
-
-@numba.jit(nopython=True, inline='always')
-def is_promotion(move):
-    """Checks if the move is a promotion."""
-    return get_move_flag(move) == FLAG_PROMOTION
-
-@numba.jit(nopython=True, inline='always')
-def is_en_passant(move):
-    """Checks if the move is an en passant capture."""
-    return get_move_flag(move) == FLAG_EN_PASSANT
-
-@numba.jit(nopython=True, inline='always')
-def is_castling(move):
-    """Checks if the move is a castling move."""
-    return get_move_flag(move) == FLAG_CASTLING
+@nb.jit(nopython=True, inline='always')
+def get_special_move_flag(move: np.uint16) -> int:
+    """Extracts the special move flag from a move."""
+    return int((move & SPECIAL_MOVE_MASK) >> SPECIAL_MOVE_SHIFT)
