@@ -1,5 +1,4 @@
 # main.py
-from chess_engine.board import Board
 import chess_engine.move_generator as move_gen
 import numpy
 
@@ -19,32 +18,92 @@ def print_bitboard(bb: numpy.uint64):
 
 
 if __name__ == "__main__":
-    board = Board()
-    print("Initial Board State:")
-    board.print_board()
+    # =========================================================================
+    # --- Test Case 1: Rook Moves (Center) ---
+    # =========================================================================
+    print("--- Testing Magic Bitboard Rook Moves ---")
 
-    # --- Test python-chess style sliding piece attacks ---
-    print("--- Testing python-chess Style Sliding Attacks ---")
+    # --- Setup ---
+    # Position: White Rook on d4, White Pawn on f4, Black Pawn on d7.
+    rook_square_1 = 27  # d4
+    white_pawn_square_1 = 29 # f4
+    black_pawn_square_1 = 51 # d7
 
-    # Create a custom board setup for testing rooks
-    test_board = Board()
-    test_board.P = numpy.uint64(0) # Clear pawns for simplicity
-    test_board.p = numpy.uint64(0)
+    white_rooks_1 = move_gen.BB_SQUARES[rook_square_1]
+    white_pawns_1 = move_gen.BB_SQUARES[white_pawn_square_1]
+    black_pawns_1 = move_gen.BB_SQUARES[black_pawn_square_1]
 
-    # Place a white rook on d4 (square 27)
-    # Place some blockers: a black pawn on d7 (sq 51) and a white pawn on f4 (sq 29)
-    test_board.R = move_gen.BB_SQUARES[27]
-    test_board.p = move_gen.BB_SQUARES[51]
-    test_board.P = move_gen.BB_SQUARES[29]
+    white_pieces_1 = white_rooks_1 | white_pawns_1
+    black_pieces_1 = black_pawns_1
+    all_pieces_1 = white_pieces_1 | black_pieces_1
 
-    print("--- Rook Test ---")
-    test_board.print_board()
+    print("\n--- Initial Position (Rook Test 1) ---")
+    print("All Occupied Squares:")
+    print_bitboard(all_pieces_1)
 
-    # Get all pieces on the test board
-    occupied = test_board.all_pieces
+    # --- Generate and Test Rook Moves ---
+    rook_moves_1 = move_gen.get_rook_moves(rook_square_1, all_pieces_1, white_pieces_1)
 
-    # Get rook attacks from d4
-    rook_attacks = move_gen.get_rook_attacks(27, occupied)
+    print("\n--- Legal Rook Moves from d4 ---")
+    print("Should attack up to and including d7, and up to but not including f4.")
+    print_bitboard(rook_moves_1)
 
-    print("--- Rook Attacks from d4 ---")
-    print_bitboard(rook_attacks)
+    # =========================================================================
+    # --- Test Case 2: Bishop Moves ---
+    # =========================================================================
+    print("\n\n--- Testing Magic Bitboard Bishop Moves ---")
+
+    # --- Setup ---
+    # Position: White Bishop on c4, White Pawn on e6, Black Pawn on a6.
+    bishop_square_2 = 26 # c4
+    white_pawn_square_2 = 44 # e6
+    black_pawn_square_2 = 40 # a6
+
+    white_bishops_2 = move_gen.BB_SQUARES[bishop_square_2]
+    white_pawns_2 = move_gen.BB_SQUARES[white_pawn_square_2]
+    black_pawns_2 = move_gen.BB_SQUARES[black_pawn_square_2]
+
+    white_pieces_2 = white_bishops_2 | white_pawns_2
+    black_pieces_2 = black_pawns_2
+    all_pieces_2 = white_pieces_2 | black_pieces_2
+
+    print("\n--- Initial Position (Bishop Test) ---")
+    print("All Occupied Squares:")
+    print_bitboard(all_pieces_2)
+
+    # --- Generate and Test Bishop Moves ---
+    bishop_moves_2 = move_gen.get_bishop_moves(bishop_square_2, all_pieces_2, white_pieces_2)
+
+    print("\n--- Legal Bishop Moves from c4 ---")
+    print("Should attack up to and including a6, and up to but not including e6.")
+    print_bitboard(bishop_moves_2)
+
+    # =========================================================================
+    # --- Test Case 3: Rook Moves (Corner) ---
+    # =========================================================================
+    print("\n\n--- Testing Magic Bitboard Rook Moves (Corner Case) ---")
+
+    # --- Setup ---
+    # Position: White Rook on a1, White Pawn on a4, Black Pawn on e1.
+    rook_square_3 = 0   # a1
+    white_pawn_square_3 = 24  # a4
+    black_pawn_square_3 = 4   # e1
+
+    white_rooks_3 = move_gen.BB_SQUARES[rook_square_3]
+    white_pawns_3 = move_gen.BB_SQUARES[white_pawn_square_3]
+    black_pawns_3 = move_gen.BB_SQUARES[black_pawn_square_3]
+
+    white_pieces_3 = white_rooks_3 | white_pawns_3
+    black_pieces_3 = black_pawns_3
+    all_pieces_3 = white_pieces_3 | black_pieces_3
+
+    print("\n--- Initial Position (Rook Test 2) ---")
+    print("All Occupied Squares:")
+    print_bitboard(all_pieces_3)
+
+    # --- Generate and Test Rook Moves ---
+    rook_moves_3 = move_gen.get_rook_moves(rook_square_3, all_pieces_3, white_pieces_3)
+
+    print("\n--- Legal Rook Moves from a1 ---")
+    print("Should attack up to e1 (inclusive) and up to a3 (exclusive of a4).")
+    print_bitboard(rook_moves_3)
