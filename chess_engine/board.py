@@ -66,3 +66,21 @@ class Board:
             print(f"|")
         print(" +-----------------+")
         print("  a b c d e f g h\n")
+
+    # --------------------------------------------------------------------------
+    # Properties for accessing combined bitboards
+    # --------------------------------------------------------------------------
+    @property
+    def white_pieces(self) -> numpy.uint64:
+        """Bitboard of all white pieces."""
+        return self.P | self.R | self.N | self.B | self.Q | self.K
+
+    @property
+    def black_pieces(self) -> numpy.uint64:
+        """Bitboard of all black pieces."""
+        return self.p | self.r | self.n | self.b | self.q | self.k
+
+    @property
+    def all_pieces(self) -> numpy.uint64:
+        """Bitboard of all pieces on the board."""
+        return self.white_pieces | self.black_pieces
