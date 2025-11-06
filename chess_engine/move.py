@@ -18,15 +18,14 @@ PROMOTION_PIECE_SHIFT = 12
 SPECIAL_MOVE_SHIFT = 14
 
 # --- Constants for Special Move Flags ---
-NORMAL_MOVE = np.uint16(0)
-PROMOTION = np.uint16(1)
-EN_PASSANT = np.uint16(2)
-CASTLING = np.uint16(3)
+SPECIAL_MOVE_FLAG_NORMAL = np.uint16(0)
+SPECIAL_MOVE_FLAG_PROMOTION = np.uint16(1)
+SPECIAL_MOVE_FLAG_EN_PASSANT = np.uint16(2)
+SPECIAL_MOVE_FLAG_CASTLING = np.uint16(3)
 
 # --- Constants for Promotion Pieces ---
-# Note: These values (0-3) map directly to the piece types offset.
-# e.g., KNIGHT = 0, so promotion to knight adds 0 to the piece type base.
-KNIGHT, BISHOP, ROOK, QUEEN = 0, 1, 2, 3
+# These values, when shifted, will be stored in the promotion piece bits.
+PROMO_KNIGHT, PROMO_BISHOP, PROMO_ROOK, PROMO_QUEEN = 0, 1, 2, 3
 
 @nb.jit(nopython=True, inline='always')
 def encode_move(from_square: int, to_square: int, promotion_piece: int, special_flag: int) -> np.uint16:
