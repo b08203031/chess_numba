@@ -2,25 +2,12 @@
 import numpy as np
 import time
 
-# Import the new search and move modules
-from chess_engine.search import find_best_move
-from chess_engine.move import get_from_square, get_to_square
-
-def print_bitboard(bb: np.uint64):
-    """Prints a bitboard in a human-readable 8x8 format."""
-    print("\n  a b c d e f g h")
-    print(" +-----------------+")
-    for rank in range(7, -1, -1):
-        print(f"{rank + 1}|", end=" ")
-        for file in range(8):
-            square = rank * 8 + file
-            mask = np.uint64(1) << np.uint64(square)
-            print("X" if bb & mask else ".", end=" ")
-        print(f"|")
-    print(" +-----------------+")
+from chess_engine.move import get_from_square, get_to_square, encode_move, NORMAL_MOVE
+from chess_engine.board_operations import make_move, unmake_move
+from chess_engine.zobrist import compute_initial_hash
 
 def square_to_algebraic(sq):
-    """Converts a square index (0-63) to algebraic notation (e.g., 'e4')."""
+    """Converts a square index (0-63) to algebraic notation."""
     file = 'abcdefgh'[sq % 8]
     rank = str((sq // 8) + 1)
     return f"{file}{rank}"
@@ -33,68 +20,86 @@ def pretty_print_move(move):
     to_sq = get_to_square(move)
     return f"{square_to_algebraic(from_sq)}{square_to_algebraic(to_sq)}"
 
+def test_make_unmake(piece_bbs, occupancy_bbs, game_state):
+    """
+    Tests the make_move and unmake_move functions with the new separated state structure.
+    """
+    print("\n--- Testing Make/Unmake Move Logic (Refactored) ---")
+
+    from_sq, to_sq = 12, 28 # e2 -> e4
+    pawn_double_move = encode_move(from_sq, to_sq, 0, NORMAL_MOVE)
+
+    print(f"Original Board State Hash: {game_state[-1]}")
+    print(f"Testing move: {pretty_print_move(pawn_double_move)}")
+
+    new_piece_bbs, new_occupancy_bbs, new_game_state, unmake_info = make_move(
+        piece_bbs, occupancy_bbs, game_state, pawn_double_move
+    )
+
+    incremental_key = new_game_state[-1]
+    recalculated_key = compute_initial_hash(new_piece_bbs, new_game_state)
+
+    print(f"Incrementally Updated Hash: {incremental_key}")
+    print(f"Recalculated Hash on New State: {recalculated_key}")
+
+    if incremental_key == recalculated_key:
+        print("SUCCESS: Zobrist key was updated correctly.")
+    else:
+        print("ERROR: Zobrist key mismatch!")
+        return False
+
+    restored_piece_bbs, restored_occupancy_bbs, restored_game_state = unmake_move(
+        new_piece_bbs, new_occupancy_bbs, new_game_state, pawn_double_move, unmake_info
+    )
+
+    if restored_piece_bbs == piece_bbs and restored_occupancy_bbs == occupancy_bbs and restored_game_state == game_state:
+        print("SUCCESS: Board state was perfectly restored after unmake_move.")
+    else:
+        print("ERROR: Board state mismatch after unmake_move!")
+        if restored_piece_bbs != piece_bbs:
+            print("  - Mismatch in piece_bbs")
+        if restored_occupancy_bbs != occupancy_bbs:
+            print("  - Mismatch in occupancy_bbs")
+        if restored_game_state != game_state:
+            print("  - Mismatch in game_state")
+            for i in range(len(game_state)):
+                if restored_game_state[i] != game_state[i]:
+                    print(f"    - At index {i}: Original={game_state[i]}, Restored={restored_game_state[i]}")
+        return False
+
+    print("--- Make/Unmake Test Passed ---")
+    return True
+
 
 if __name__ == "__main__":
     # =========================================================================
-    # --- Test Case for the Full Search Engine ---
+    # --- Setup: Initial Board State (Refactored Structure) ---
     # =========================================================================
-    print("--- Testing Full Alpha-Beta Search Engine ---")
+    wp, wn, wb, wr, wq, wk = (np.uint64(0x000000000000FF00), np.uint64(0x0000000000000042),
+                             np.uint64(0x0000000000000024), np.uint64(0x0000000000000081),
+                             np.uint64(0x0000000000000008), np.uint64(0x0000000000000010))
+    bp, bn, bb, br, bq, bk = (np.uint64(0x00FF000000000000), np.uint64(0x4200000000000000),
+                             np.uint64(0x2400000000000000), np.uint64(0x8100000000000000),
+                             np.uint64(0x0800000000000000), np.uint64(0x1000000000000000))
 
-    # --- Setup: Initial Board State (Standard Opening Position) ---
-    # This matches the tuple structure expected by our Numba functions.
-    wp = np.uint64(0b00000000_00000000_00000000_00000000_00000000_00000000_11111111_00000000)
-    wn = np.uint64(0b00000000_00000000_00000000_00000000_00000000_00000000_00000000_01000010)
-    wb = np.uint64(0b00000000_00000000_00000000_00000000_00000000_00000000_00000000_00100100)
-    wr = np.uint64(0b00000000_00000000_00000000_00000000_00000000_00000000_00000000_10000001)
-    wq = np.uint64(0b00000000_00000000_00000000_00000000_00000000_00000000_00000000_00001000)
-    wk = np.uint64(0b00000000_00000000_00000000_00000000_00000000_00000000_00000000_00010000)
-
-    bp = np.uint64(0b00000000_11111111_00000000_00000000_00000000_00000000_00000000_00000000)
-    bn = np.uint64(0b01000010_00000000_00000000_00000000_00000000_00000000_00000000_00000000)
-    bb = np.uint64(0b00100100_00000000_00000000_00000000_00000000_00000000_00000000_00000000)
-    br = np.uint64(0b10000001_00000000_00000000_00000000_00000000_00000000_00000000_00000000)
-    bq = np.uint64(0b00001000_00000000_00000000_00000000_00000000_00000000_00000000_00000000)
-    bk = np.uint64(0b00010000_00000000_00000000_00000000_00000000_00000000_00000000_00000000)
+    initial_piece_bbs = (wp, wn, wb, wr, wq, wk, bp, bn, bb, br, bq, bk)
 
     white_pieces_bb = wp | wn | wb | wr | wq | wk
     black_pieces_bb = bp | bn | bb | br | bq | bk
-    all_pieces_bb = white_pieces_bb | black_pieces_bb
+    initial_occupancy_bbs = (white_pieces_bb, black_pieces_bb, white_pieces_bb | black_pieces_bb)
 
-    initial_board_state = (
-        wp, wn, wb, wr, wq, wk,
-        bp, bn, bb, br, bq, bk,
-        white_pieces_bb, black_pieces_bb, all_pieces_bb,
-        np.uint8(15),  # Castling rights (WK, WQ, BK, BQ)
-        np.int8(-1),   # En passant square (-1 for none)
+    game_state_no_hash = (
         np.uint8(0),   # Side to move (0 for White)
-        np.uint8(0)    # Halfmove clock
+        np.uint8(15),  # Castling rights
+        np.int8(-1),   # En passant square
+        np.uint8(0),   # Halfmove clock
+        np.uint64(0)   # Zobrist key placeholder
     )
 
-    print("\nInitial board state:")
-    print_bitboard(all_pieces_bb)
+    initial_zobrist_key = compute_initial_hash(initial_piece_bbs, game_state_no_hash)
+    initial_game_state = game_state_no_hash[:-1] + (initial_zobrist_key,)
 
-    # --- Run the search ---
-    search_depth = 3 # A reasonable depth for a quick test
-    print(f"Searching for the best move at depth {search_depth}...")
-
-    # The first run will include Numba's JIT compilation time.
-    start_time_first_run = time.time()
-    best_move_encoded = find_best_move(initial_board_state, search_depth)
-    end_time_first_run = time.time()
-
-    print(f"\nFirst run (including JIT compilation) took: {end_time_first_run - start_time_first_run:.4f} seconds.")
-    print(f"Engine's choice: {pretty_print_move(best_move_encoded)}")
-
-    # --- Run the search again to measure pure performance ---
-    print("\nRunning search again to measure performance without compilation overhead...")
-    start_time_second_run = time.time()
-    best_move_encoded_2 = find_best_move(initial_board_state, search_depth)
-    end_time_second_run = time.time()
-
-    print(f"\nSecond run took: {end_time_second_run - start_time_second_run:.4f} seconds.")
-    print(f"Engine's choice (should be the same): {pretty_print_move(best_move_encoded_2)}")
-
-    if best_move_encoded == best_move_encoded_2:
-        print("\nSUCCESS: The search is deterministic and produces consistent results.")
-    else:
-        print("\nERROR: The search produced different results on subsequent runs.")
+    # =========================================================================
+    # --- Run Tests ---
+    # =========================================================================
+    test_make_unmake(initial_piece_bbs, initial_occupancy_bbs, initial_game_state)
