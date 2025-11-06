@@ -1,7 +1,10 @@
 # main.py
 import numpy as np
-from chess_engine.evaluation import evaluate_position
-import chess_engine.move_generator as move_gen # Keep for old tests
+import time
+
+# Import the new search and move modules
+from chess_engine.search import find_best_move
+from chess_engine.move import get_from_square, get_to_square
 
 def print_bitboard(bb: np.uint64):
     """Prints a bitboard in a human-readable 8x8 format."""
@@ -15,16 +18,30 @@ def print_bitboard(bb: np.uint64):
             print("X" if bb & mask else ".", end=" ")
         print(f"|")
     print(" +-----------------+")
-    print(f"Decimal value: {bb}\n")
+
+def square_to_algebraic(sq):
+    """Converts a square index (0-63) to algebraic notation (e.g., 'e4')."""
+    file = 'abcdefgh'[sq % 8]
+    rank = str((sq // 8) + 1)
+    return f"{file}{rank}"
+
+def pretty_print_move(move):
+    """Converts an encoded move to a human-readable string."""
+    if move == 0:
+        return "NULL_MOVE"
+    from_sq = get_from_square(move)
+    to_sq = get_to_square(move)
+    return f"{square_to_algebraic(from_sq)}{square_to_algebraic(to_sq)}"
 
 
 if __name__ == "__main__":
     # =========================================================================
-    # --- Test Case for Evaluation Function ---
+    # --- Test Case for the Full Search Engine ---
     # =========================================================================
-    print("--- Testing Evaluation Function ---")
+    print("--- Testing Full Alpha-Beta Search Engine ---")
 
     # --- Setup: Initial Board State (Standard Opening Position) ---
+    # This matches the tuple structure expected by our Numba functions.
     wp = np.uint64(0b00000000_00000000_00000000_00000000_00000000_00000000_11111111_00000000)
     wn = np.uint64(0b00000000_00000000_00000000_00000000_00000000_00000000_00000000_01000010)
     wb = np.uint64(0b00000000_00000000_00000000_00000000_00000000_00000000_00000000_00100100)
@@ -39,39 +56,45 @@ if __name__ == "__main__":
     bq = np.uint64(0b00001000_00000000_00000000_00000000_00000000_00000000_00000000_00000000)
     bk = np.uint64(0b00010000_00000000_00000000_00000000_00000000_00000000_00000000_00000000)
 
-    # --- Create the bitboards NumPy array ---
-    # This matches the 'u8[:]' part of the Numba signature.
-    bitboards = np.array([
+    white_pieces_bb = wp | wn | wb | wr | wq | wk
+    black_pieces_bb = bp | bn | bb | br | bq | bk
+    all_pieces_bb = white_pieces_bb | black_pieces_bb
+
+    initial_board_state = (
         wp, wn, wb, wr, wq, wk,
-        bp, bn, bb, br, bq, bk
-    ], dtype=np.uint64)
+        bp, bn, bb, br, bq, bk,
+        white_pieces_bb, black_pieces_bb, all_pieces_bb,
+        np.uint8(15),  # Castling rights (WK, WQ, BK, BQ)
+        np.int8(-1),   # En passant square (-1 for none)
+        np.uint8(0),   # Side to move (0 for White)
+        np.uint8(0)    # Halfmove clock
+    )
 
-    # --- Other game state variables ---
-    # Explicitly cast to np.int64 to match the 'i8' part of the Numba signature.
-    castling_rights = np.int64(15)
-    ep_square = np.int64(-1)
-    side_to_move_white = np.int64(0)
-    side_to_move_black = np.int64(1)
+    print("\nInitial board state:")
+    print_bitboard(all_pieces_bb)
 
-    # --- Call the evaluation function ---
-    # Numba JIT compilation happens on the first call.
-    print("\nEvaluating initial board state...")
-    score = evaluate_position(bitboards, castling_rights, ep_square, side_to_move_white)
-    print(f"Initial Score from White's perspective: {score}")
+    # --- Run the search ---
+    search_depth = 3 # A reasonable depth for a quick test
+    print(f"Searching for the best move at depth {search_depth}...")
 
-    # --- Test from Black's perspective ---
-    print("\nEvaluating initial board state (Black to move)...")
-    score_black = evaluate_position(bitboards, castling_rights, ep_square, side_to_move_black)
-    print(f"Initial Score from Black's perspective: {score_black}")
+    # The first run will include Numba's JIT compilation time.
+    start_time_first_run = time.time()
+    best_move_encoded = find_best_move(initial_board_state, search_depth)
+    end_time_first_run = time.time()
 
-    # The absolute scores should be identical because the position is symmetrical.
-    # The sign should be opposite.
-    if score == -score_black:
-        print("\nSUCCESS: Perspective scoring is working correctly.")
+    print(f"\nFirst run (including JIT compilation) took: {end_time_first_run - start_time_first_run:.4f} seconds.")
+    print(f"Engine's choice: {pretty_print_move(best_move_encoded)}")
+
+    # --- Run the search again to measure pure performance ---
+    print("\nRunning search again to measure performance without compilation overhead...")
+    start_time_second_run = time.time()
+    best_move_encoded_2 = find_best_move(initial_board_state, search_depth)
+    end_time_second_run = time.time()
+
+    print(f"\nSecond run took: {end_time_second_run - start_time_second_run:.4f} seconds.")
+    print(f"Engine's choice (should be the same): {pretty_print_move(best_move_encoded_2)}")
+
+    if best_move_encoded == best_move_encoded_2:
+        print("\nSUCCESS: The search is deterministic and produces consistent results.")
     else:
-        print(f"\nERROR: Perspective scoring is incorrect. White: {score}, Black: {score_black}")
-
-    # --- Old Tests for Move Generation (Disabled but kept for reference) ---
-    if False:
-        # (Old test code remains here, unchanged)
-        pass
+        print("\nERROR: The search produced different results on subsequent runs.")
