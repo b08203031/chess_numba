@@ -1,7 +1,7 @@
 # chess_engine/board_operations.py
 
 import numpy as np
-import numba as nb
+import numba as numba
 from chess_engine.move import (
     get_from_square, get_to_square, get_special_move_flag, get_promotion_piece,
     SPECIAL_MOVE_FLAG_PROMOTION, SPECIAL_MOVE_FLAG_EN_PASSANT, SPECIAL_MOVE_FLAG_CASTLING
@@ -31,7 +31,7 @@ CASTLING_UPDATE_MASK[56] -= BQ_CASTLE
 CASTLING_UPDATE_MASK[60] -= (BK_CASTLE | BQ_CASTLE)
 CASTLING_UPDATE_MASK[63] -= BK_CASTLE
 
-@nb.jit(nb.int8(piece_bbs_signature, nb.int8, nb.uint8), nopython=True, inline='always')
+@numba.jit(numba.int8(piece_bbs_signature, numba.int8, numba.uint8), nopython=True, inline='always')
 def find_piece_type_for_square(piece_bbs: tuple, square: int, color: int) -> int:
     """Finds which piece type occupies a given square.
 
@@ -50,7 +50,7 @@ def find_piece_type_for_square(piece_bbs: tuple, square: int, color: int) -> int
             return i
     return -1
 
-@nb.jit(nb.types.Tuple((piece_bbs_signature, occupancy_bbs_signature, game_state_signature, unmake_info_signature))(piece_bbs_signature, occupancy_bbs_signature, game_state_signature, nb.uint16), nopython=True)
+@numba.jit(numba.types.Tuple((piece_bbs_signature, occupancy_bbs_signature, game_state_signature, unmake_info_signature))(piece_bbs_signature, occupancy_bbs_signature, game_state_signature, numba.uint16), nopython=True)
 def make_move(piece_bbs: tuple, occupancy_bbs: tuple, game_state: tuple, move: np.uint16):
     """
     Applies a move and returns new state tuples and unmake_info.
@@ -176,7 +176,7 @@ def make_move(piece_bbs: tuple, occupancy_bbs: tuple, game_state: tuple, move: n
 
     return final_piece_bbs, new_occupancy_bbs, new_game_state, unmake_info
 
-@nb.jit(nb.types.Tuple((piece_bbs_signature, occupancy_bbs_signature, game_state_signature))(piece_bbs_signature, occupancy_bbs_signature, game_state_signature, nb.uint16, unmake_info_signature), nopython=True)
+@numba.jit(numba.types.Tuple((piece_bbs_signature, occupancy_bbs_signature, game_state_signature))(piece_bbs_signature, occupancy_bbs_signature, game_state_signature, numba.uint16, unmake_info_signature), nopython=True)
 def unmake_move(piece_bbs: tuple, occupancy_bbs: tuple, game_state: tuple, move: np.uint16, unmake_info: tuple):
     """
     Reverts a move using the unmake_info tuple, returning the original state tuples.

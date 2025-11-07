@@ -1,5 +1,5 @@
 
-import numba as nb
+import numba
 import numpy as np
 
 from .board_operations import make_move
@@ -33,7 +33,7 @@ SQUARE_TO_ALGEBRAIC = {i: f"{chr(ord('a') + i % 8)}{i // 8 + 1}" for i in range(
 A dictionary that maps square indices to algebraic notation.
 """
 
-@nb.jit(nbt.uint64(piece_bbs_signature, occupancy_bbs_signature, game_state_signature, nbt.intc), nopython=True)
+@numba.jit(nbt.uint64(piece_bbs_signature, occupancy_bbs_signature, game_state_signature, nbt.intc), nopython=True)
 def perft(piece_bbs, occupancy_bbs, game_state, depth: int):
     """
     Core recursive Perft function.
@@ -64,7 +64,7 @@ def perft(piece_bbs, occupancy_bbs, game_state, depth: int):
         nodes += perft(new_piece_bbs, new_occupancy_bbs, new_game_state, depth - 1)
     return nodes
 
-@nb.jit(nbt.types.Array(nbt.uint64, 2, "C")(piece_bbs_signature, occupancy_bbs_signature, game_state_signature, nbt.intc), nopython=True)
+@numba.jit(nbt.types.Array(nbt.uint64, 2, "C")(piece_bbs_signature, occupancy_bbs_signature, game_state_signature, nbt.intc), nopython=True)
 def _jit_perft_divide(piece_bbs, occupancy_bbs, game_state, depth: int):
     """
     JIT-compiled core logic for perft_divide.
