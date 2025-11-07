@@ -186,13 +186,17 @@ PST_EG = np.array([
 # --- Bitboard Utilities Constants ---
 # =============================================================================
 
-NOT_A_FILE = np.uint64(0xfefefefefefefefe) # ~0x0101010101010101
-NOT_H_FILE = np.uint64(0x7f7f7f7f7f7f7f7f) # ~0x8080808080808080
+# De Bruijn sequence for fast bit scanning
+DE_BRUIJN_SEQUENCE = np.uint64(0x03f79d71b4cb0a89)
 
-# =============================================================================
-# --- Miscellaneous ---
-# =============================================================================
-
-# For printing the board in utils.py
-# Maps piece type index (0-11) to its character representation
-PIECE_CHAR = ('P', 'N', 'B', 'R', 'Q', 'K', 'p', 'n', 'b', 'r', 'q', 'k')
+# Lookup table for mapping the De Bruijn hash to a square index (0-63)
+DE_BRUIJN_INDEX = np.array([
+     0,  1, 48,  2, 57, 49, 28,  3,
+    61, 58, 50, 42, 38, 29, 17,  4,
+    62, 55, 59, 36, 53, 51, 43, 22,
+    45, 39, 33, 30, 24, 18, 12,  5,
+    63, 47, 56, 27, 60, 41, 37, 16,
+    54, 35, 52, 21, 44, 32, 23, 11,
+    46, 26, 40, 15, 34, 20, 31, 10,
+    25, 14, 19,  9, 13,  8,  7,  6
+], dtype=np.int32)

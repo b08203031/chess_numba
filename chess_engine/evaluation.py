@@ -1,71 +1,158 @@
 # chess_engine/evaluation.py
-import numba as nb
+
+import numba
 import numpy as np
 
-from .constants import (
-    MG_MATERIAL_VALUES, EG_MATERIAL_VALUES,
-    PST_MG, PST_EG,
-    PHASE_WEIGHTS, MAX_PHASE
-)
-from .bitboard_utils import get_ls1b_index, count_bits
+# =============================================================================
+# EVALUATION CONSTANTS
+# =============================================================================
 
-# --- Piece Type Constants (for indexing) ---
-# PAWN, KNIGHT, BISHOP, ROOK, QUEEN, KING
-#  0  ,   1   ,   2   ,  3  ,   4  ,  5
-WHITE_PAWN, WHITE_KNIGHT, WHITE_BISHOP, WHITE_ROOK, WHITE_QUEEN, WHITE_KING = 0, 1, 2, 3, 4, 5
-BLACK_PAWN, BLACK_KNIGHT, BLACK_BISHOP, BLACK_ROOK, BLACK_QUEEN, BLACK_KING = 6, 7, 8, 9, 10, 11
+# Piece values in centipawns
+PAWN_VALUE = 100
+KNIGHT_VALUE = 320
+BISHOP_VALUE = 330
+ROOK_VALUE = 500
+QUEEN_VALUE = 900
+KING_VALUE = 20000
+
+MATERIAL_VALUES = np.array([
+    PAWN_VALUE, KNIGHT_VALUE, BISHOP_VALUE, ROOK_VALUE, QUEEN_VALUE, KING_VALUE,
+    -PAWN_VALUE, -KNIGHT_VALUE, -BISHOP_VALUE, -ROOK_VALUE, -QUEEN_VALUE, -KING_VALUE
+], dtype=np.int32)
+
+# Piece-Square Tables (PSTs)
+# These tables are for White's perspective. Black's scores are mirrored.
+# The values are chosen to encourage good development and control of the center.
+
+PAWN_PST = np.array([
+     0,  0,  0,  0,  0,  0,  0,  0,
+    50, 50, 50, 50, 50, 50, 50, 50,
+    10, 10, 20, 30, 30, 20, 10, 10,
+     5,  5, 10, 25, 25, 10,  5,  5,
+     0,  0,  0, 20, 20,  0,  0,  0,
+     5, -5,-10,  0,  0,-10, -5,  5,
+     5, 10, 10,-20,-20, 10, 10,  5,
+     0,  0,  0,  0,  0,  0,  0,  0
+], dtype=np.int32)
+
+KNIGHT_PST = np.array([
+    -50,-40,-30,-30,-30,-30,-40,-50,
+    -40,-20,  0,  0,  0,  0,-20,-40,
+    -30,  0, 10, 15, 15, 10,  0,-30,
+    -30,  5, 15, 20, 20, 15,  5,-30,
+    -30,  0, 15, 20, 20, 15,  0,-30,
+    -30,  5, 10, 15, 15, 10,  5,-30,
+    -40,-20,  0,  5,  5,  0,-20,-40,
+    -50,-40,-30,-30,-30,-30,-40,-50,
+], dtype=np.int32)
+
+BISHOP_PST = np.array([
+    -20,-10,-10,-10,-10,-10,-10,-20,
+    -10,  0,  0,  0,  0,  0,  0,-10,
+    -10,  0,  5, 10, 10,  5,  0,-10,
+    -10,  5,  5, 10, 10,  5,  5,-10,
+    -10,  0, 10, 10, 10, 10,  0,-10,
+    -10, 10, 10, 10, 10, 10, 10,-10,
+    -10,  5,  0,  0,  0,  0,  5,-10,
+    -20,-10,-10,-10,-10,-10,-10,-20,
+], dtype=np.int32)
+
+ROOK_PST = np.array([
+     0,  0,  0,  0,  0,  0,  0,  0,
+     5, 10, 10, 10, 10, 10, 10,  5,
+    -5,  0,  0,  0,  0,  0,  0, -5,
+    -5,  0,  0,  0,  0,  0,  0, -5,
+    -5,  0,  0,  0,  0,  0,  0, -5,
+    -5,  0,  0,  0,  0,  0,  0, -5,
+    -5,  0,  0,  0,  0,  0,  0, -5,
+     0,  0,  0,  5,  5,  0,  0,  0
+], dtype=np.int32)
+
+QUEEN_PST = np.array([
+    -20,-10,-10, -5, -5,-10,-10,-20,
+    -10,  0,  0,  0,  0,  0,  0,-10,
+    -10,  0,  5,  5,  5,  5,  0,-10,
+     -5,  0,  5,  5,  5,  5,  0, -5,
+      0,  0,  5,  5,  5,  5,  0, -5,
+    -10,  5,  5,  5,  5,  5,  0,-10,
+    -10,  0,  5,  0,  0,  0,  0,-10,
+    -20,-10,-10, -5, -5,-10,-10,-20
+], dtype=np.int32)
+
+KING_PST = np.array([
+    -30,-40,-40,-50,-50,-40,-40,-30,
+    -30,-40,-40,-50,-50,-40,-40,-30,
+    -30,-40,-40,-50,-50,-40,-40,-30,
+    -30,-40,-40,-50,-50,-40,-40,-30,
+    -20,-30,-30,-40,-40,-30,-30,-20,
+    -10,-20,-20,-20,-20,-20,-20,-10,
+     20, 20,  0,  0,  0,  0, 20, 20,
+     20, 30, 10,  0,  0, 10, 30, 20
+], dtype=np.int32)
+
+PIECE_PSTS = (
+    PAWN_PST, KNIGHT_PST, BISHOP_PST, ROOK_PST, QUEEN_PST, KING_PST
+)
+
+# Numba helper to get LSB index
+@numba.njit(numba.int32(numba.uint64), cache=True)
+def count_bits(bb: np.uint64) -> int:
+    count = 0
+    while bb > 0:
+        bb &= (bb - np.uint64(1))
+        count += 1
+    return count
+
+@numba.njit(numba.uint8(numba.uint64), cache=True)
+def get_ls1b_index(bb):
+    return count_bits((bb & -bb) - np.uint64(1))
 
 # =============================================================================
 # CORE EVALUATION FUNCTION
 # =============================================================================
 
-@nb.jit(nopython=True, cache=True)
-def evaluate_position(board_state_flat):
+@numba.jit(nopython=True, cache=True)
+def evaluate_position(board_state):
     """
-    Evaluates the board state using a tapered evaluation and returns a score
-    from the perspective of the side to move.
+    Evaluates the board state and returns a score from White's perspective.
+    Positive score = White's advantage.
+    Negative score = Black's advantage.
     """
-    piece_bbs = board_state_flat[0:12]
-    side_to_move = board_state_flat[17]
+    (wp_bb, wn_bb, wb_bb, wr_bb, wq_bb, wk_bb,
+     bp_bb, bn_bb, bb_bb, br_bb, bq_bb, bk_bb,
+     _, _, _, _, _, side_to_move, _) = board_state
 
-    # --- Game Phase Calculation ---
-    game_phase = 0
-    # Loop over knights, bishops, rooks, queens for both sides
-    for piece_type in range(1, 5): # KNIGHT to QUEEN
-        # White pieces (index 1-4)
-        game_phase += PHASE_WEIGHTS[piece_type] * count_bits(piece_bbs[piece_type])
-        # Black pieces (index 7-10)
-        game_phase += PHASE_WEIGHTS[piece_type] * count_bits(piece_bbs[piece_type + 6])
+    score = 0
 
-    # Ensure phase is within bounds [0, MAX_PHASE]
-    game_phase = min(game_phase, MAX_PHASE)
+    # Pack bitboards into arrays for easier iteration
+    white_bbs = (wp_bb, wn_bb, wb_bb, wr_bb, wq_bb, wk_bb)
+    black_bbs = (bp_bb, bn_bb, bb_bb, br_bb, bq_bb, bk_bb)
 
-    # --- Tapered Score Calculation ---
-    mg_score = 0
-    eg_score = 0
-
-    # Evaluate White pieces
-    for piece_type in range(6): # PAWN to KING
-        bb = piece_bbs[piece_type]
-        while bb > 0:
+    # 1. Material and Positional Score
+    # White pieces
+    for piece_type in range(6):
+        bb = np.uint64(white_bbs[piece_type])
+        pst = PIECE_PSTS[piece_type]
+        while bb:
             sq = get_ls1b_index(bb)
-            mg_score += MG_MATERIAL_VALUES[piece_type] + PST_MG[piece_type, sq]
-            eg_score += EG_MATERIAL_VALUES[piece_type] + PST_EG[piece_type, sq]
-            bb &= (bb - np.uint64(1))
+            score += MATERIAL_VALUES[piece_type]
+            score += pst[sq]
+            bb &= (bb - np.uint64(1)) # Clear LSB
 
-    # Evaluate Black pieces
-    for piece_type in range(6): # PAWN to KING
-        bb = piece_bbs[piece_type + 6] # Black piece bitboards
-        while bb > 0:
+    # Black pieces
+    for piece_type in range(6):
+        bb = np.uint64(black_bbs[piece_type])
+        pst = PIECE_PSTS[piece_type]
+        while bb:
             sq = get_ls1b_index(bb)
-            # Subtract black's score
-            mg_score -= MG_MATERIAL_VALUES[piece_type] + PST_MG[piece_type, sq ^ 56]
-            eg_score -= EG_MATERIAL_VALUES[piece_type] + PST_EG[piece_type, sq ^ 56]
-            bb &= (bb - np.uint64(1))
+            score += MATERIAL_VALUES[piece_type + 6] # Black piece values
+            # For black, the PST index is flipped vertically
+            score -= pst[sq ^ 56]
+            bb &= (bb - np.uint64(1)) # Clear LSB
 
-    # --- Interpolation ---
-    # Final score is interpolated between middlegame and endgame scores
-    final_score = ((mg_score * game_phase) + (eg_score * (MAX_PHASE - game_phase))) / MAX_PHASE
-
-    # Return score from the perspective of the side to move
-    return final_score if side_to_move == 0 else -final_score
+    # 2. Return score relative to the current player
+    # The search function expects the score from the perspective of the side to move.
+    if side_to_move == 0: # WHITE
+        return score
+    else: # BLACK
+        return -score

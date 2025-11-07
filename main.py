@@ -1,105 +1,186 @@
-# main.py
+
+import argparse
 import numpy as np
+import sys
+import os
+import subprocess
 import time
 
-from chess_engine.move import get_from_square, get_to_square, encode_move, NORMAL_MOVE
+from chess_engine.fen_parser import parse_fen
+from chess_engine.move_generator import generate_legal_moves, generate_pseudo_legal_moves
 from chess_engine.board_operations import make_move, unmake_move
-from chess_engine.zobrist import compute_initial_hash
+from chess_engine.move import get_from_square, get_to_square
+from chess_engine.core import perft, _jit_perft_divide, SQUARE_TO_ALGEBRAIC, PERFT_RESULTS
 
-def square_to_algebraic(sq):
-    """Converts a square index (0-63) to algebraic notation."""
-    file = 'abcdefgh'[sq % 8]
-    rank = str((sq // 8) + 1)
-    return f"{file}{rank}"
+STOCKFISH_PATH = os.path.abspath(os.path.join(os.path.dirname(__file__), 'Stockfish', 'src', 'stockfish'))
 
-def pretty_print_move(move):
-    """Converts an encoded move to a human-readable string."""
-    if move == 0:
-        return "NULL_MOVE"
-    from_sq = get_from_square(move)
-    to_sq = get_to_square(move)
-    return f"{square_to_algebraic(from_sq)}{square_to_algebraic(to_sq)}"
+# --- High-Level Command Functions ---
 
-def test_make_unmake(piece_bbs, occupancy_bbs, game_state):
-    """
-    Tests the make_move and unmake_move functions with the new separated state structure.
-    """
-    print("\n--- Testing Make/Unmake Move Logic (Refactored) ---")
+def do_perft(args):
+    """Handler for the 'perft' command."""
+    fen = args.fen
+    depth = args.depth
 
-    from_sq, to_sq = 12, 28 # e2 -> e4
-    pawn_double_move = encode_move(from_sq, to_sq, 0, NORMAL_MOVE)
+    # Determine the test key for comparing with known results
+    if fen == "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1":
+        test_key = "startpos"
+    elif fen == "r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq -":
+        test_key = "kiwipete"
+    else:
+        test_key = "custom"
 
-    print(f"Original Board State Hash: {game_state[-1]}")
-    print(f"Testing move: {pretty_print_move(pawn_double_move)}")
+    run_perft_test(fen, depth, test_key, divide_on_mismatch=True)
 
-    new_piece_bbs, new_occupancy_bbs, new_game_state, unmake_info = make_move(
-        piece_bbs, occupancy_bbs, game_state, pawn_double_move
+def do_divide(args):
+    """Handler for the 'divide' command."""
+    perft_divide(args.fen, args.depth)
+
+def do_test_reversibility(args):
+    """Handler for the 'test-reversibility' command."""
+    test_make_unmake_for_fen(args.fen)
+
+# --- Logic Migrated from perft.py and test_board_operations.py ---
+
+def run_perft_test(fen_string: str, max_depth: int, test_key: str, divide_on_mismatch: bool = False):
+    # This is the logic from the original chess_engine/perft.py
+    print("--- Starting Perft Test ---")
+    print(f"FEN: {fen_string}")
+    print(f"Max Depth: {max_depth}")
+    print("---------------------------------")
+
+    total_nodes = 0
+    total_time = 0.0
+
+    piece_bbs, occupancy_bbs, game_state = parse_fen(fen_string)
+    game_state_typed = (
+        np.uint8(game_state[0]), np.uint8(game_state[1]), np.int8(game_state[2]),
+        np.uint8(game_state[3]), np.uint64(game_state[4])
     )
 
-    incremental_key = new_game_state[-1]
-    recalculated_key = compute_initial_hash(new_piece_bbs, new_game_state)
+    # JIT Compilation Warm-up
+    if max_depth > 0:
+        perft(piece_bbs, occupancy_bbs, game_state_typed, 1)
 
-    print(f"Incrementally Updated Hash: {incremental_key}")
-    print(f"Recalculated Hash on New State: {recalculated_key}")
+    for depth in range(1, max_depth + 1):
+        start_time = time.time()
+        # Re-parse state for each run to ensure clean state
+        p_bbs, o_bbs, g_state = parse_fen(fen_string)
+        g_state_typed = (
+            np.uint8(g_state[0]), np.uint8(g_state[1]), np.int8(g_state[2]),
+            np.uint8(g_state[3]), np.uint64(g_state[4])
+        )
+        nodes = perft(p_bbs, o_bbs, g_state_typed, depth)
+        end_time = time.time()
 
-    if incremental_key == recalculated_key:
-        print("SUCCESS: Zobrist key was updated correctly.")
-    else:
-        print("ERROR: Zobrist key mismatch!")
-        return False
+        elapsed_time = end_time - start_time
+        total_nodes += nodes
+        total_time += elapsed_time
+        nps = int(nodes / elapsed_time) if elapsed_time > 0 else 0
 
-    restored_piece_bbs, restored_occupancy_bbs, restored_game_state = unmake_move(
-        new_piece_bbs, new_occupancy_bbs, new_game_state, pawn_double_move, unmake_info
+        expected_results_for_key = PERFT_RESULTS.get(test_key)
+        expected = -1
+        if expected_results_for_key:
+            expected = expected_results_for_key.get(depth, -1)
+
+        status = "OK" if nodes == expected else "MISMATCH!"
+
+        print(f"Depth {depth}: Nodes: {nodes:<10} Time: {elapsed_time:.3f}s, NPS: {nps:<10} Expected: {expected:<10} -> {status}")
+
+        if status == "MISMATCH!" and divide_on_mismatch:
+            perft_divide(fen_string, depth)
+            break
+
+    avg_nps = int(total_nodes / total_time) if total_time > 0 else 0
+    print("---------------------------------")
+    if total_time > 0:
+      print(f"Total Nodes: {total_nodes}")
+      print(f"Total Time: {total_time:.3f}s")
+      print(f"Average NPS: {avg_nps}")
+    print("--- Perft Test Complete ---")
+
+
+def perft_divide(fen_string: str, depth: int):
+    # This is the logic from the original chess_engine/perft.py
+    print(f"--- Perft Divide for Depth {depth} ---")
+    piece_bbs, occupancy_bbs, game_state = parse_fen(fen_string)
+    game_state_typed = (
+        np.uint8(game_state[0]), np.uint8(game_state[1]), np.int8(game_state[2]),
+        np.uint8(game_state[3]), np.uint64(game_state[4])
     )
 
-    if restored_piece_bbs == piece_bbs and restored_occupancy_bbs == occupancy_bbs and restored_game_state == game_state:
-        print("SUCCESS: Board state was perfectly restored after unmake_move.")
-    else:
-        print("ERROR: Board state mismatch after unmake_move!")
-        if restored_piece_bbs != piece_bbs:
-            print("  - Mismatch in piece_bbs")
-        if restored_occupancy_bbs != occupancy_bbs:
-            print("  - Mismatch in occupancy_bbs")
-        if restored_game_state != game_state:
-            print("  - Mismatch in game_state")
-            for i in range(len(game_state)):
-                if restored_game_state[i] != game_state[i]:
-                    print(f"    - At index {i}: Original={game_state[i]}, Restored={restored_game_state[i]}")
-        return False
+    results = _jit_perft_divide(piece_bbs, occupancy_bbs, game_state_typed, depth)
 
-    print("--- Make/Unmake Test Passed ---")
-    return True
+    total_nodes = 0
+    for i in range(len(results)):
+        move, nodes = results[i]
+        from_sq_alg = SQUARE_TO_ALGEBRAIC[get_from_square(np.uint16(move))]
+        to_sq_alg = SQUARE_TO_ALGEBRAIC[get_to_square(np.uint16(move))]
+        print(f"{from_sq_alg}{to_sq_alg}: {nodes}")
+        total_nodes += nodes
+
+    print(f"\nTotal Nodes: {total_nodes}")
+
+
+def test_make_unmake_for_fen(fen: str):
+    # This is the logic from the original tests/test_board_operations.py
+    print(f"--- Testing make/unmake for FEN: {fen} ---")
+
+    piece_bbs, occupancy_bbs, game_state = parse_fen(fen)
+    game_state_typed = (
+        np.uint8(game_state[0]), np.uint8(game_state[1]), np.int8(game_state[2]),
+        np.uint8(game_state[3]), np.uint64(game_state[4])
+    )
+
+    board_state_flat = piece_bbs + occupancy_bbs + (game_state_typed[1], game_state_typed[2], game_state_typed[0])
+    legal_moves = generate_legal_moves(board_state_flat)
+
+    failures = []
+    for move in legal_moves:
+        new_piece_bbs, new_occupancy_bbs, new_game_state, unmake_info = make_move(
+            piece_bbs, occupancy_bbs, game_state_typed, move
+        )
+        unmade_piece_bbs, unmade_occupancy_bbs, unmade_game_state = unmake_move(
+            new_piece_bbs, new_occupancy_bbs, new_game_state, move, unmake_info
+        )
+
+        is_equal = (
+            piece_bbs == unmade_piece_bbs and
+            occupancy_bbs == unmade_occupancy_bbs and
+            game_state_typed[:-1] == unmade_game_state[:-1] # Ignore Zobrist key
+        )
+
+        if not is_equal:
+            from_sq_alg = SQUARE_TO_ALGEBRAIC[get_from_square(move)]
+            to_sq_alg = SQUARE_TO_ALGEBRAIC[get_to_square(move)]
+            failures.append(f"{from_sq_alg}{to_sq_alg}")
+
+    if not failures:
+        print(f"OK! All {len(legal_moves)} moves successfully reverted the board state.")
+    else:
+        print("--- FAILURE ---")
+        print(f"The following moves failed to revert the board state: {failures}")
 
 
 if __name__ == "__main__":
-    # =========================================================================
-    # --- Setup: Initial Board State (Refactored Structure) ---
-    # =========================================================================
-    wp, wn, wb, wr, wq, wk = (np.uint64(0x000000000000FF00), np.uint64(0x0000000000000042),
-                             np.uint64(0x0000000000000024), np.uint64(0x0000000000000081),
-                             np.uint64(0x0000000000000008), np.uint64(0x0000000000000010))
-    bp, bn, bb, br, bq, bk = (np.uint64(0x00FF000000000000), np.uint64(0x4200000000000000),
-                             np.uint64(0x2400000000000000), np.uint64(0x8100000000000000),
-                             np.uint64(0x0800000000000000), np.uint64(0x1000000000000000))
+    parser = argparse.ArgumentParser(description="A command-line interface for the chess engine.")
+    subparsers = parser.add_subparsers(dest="command", required=True, help="Available commands")
 
-    initial_piece_bbs = (wp, wn, wb, wr, wq, wk, bp, bn, bb, br, bq, bk)
+    # --- Perft Command ---
+    parser_perft = subparsers.add_parser("perft", help="Run a performance test to a certain depth.")
+    parser_perft.add_argument("--fen", type=str, default="rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1", help="FEN string of the position.")
+    parser_perft.add_argument("--depth", type=int, required=True, help="The depth to run the test to.")
+    parser_perft.set_defaults(func=do_perft)
 
-    white_pieces_bb = wp | wn | wb | wr | wq | wk
-    black_pieces_bb = bp | bn | bb | br | bq | bk
-    initial_occupancy_bbs = (white_pieces_bb, black_pieces_bb, white_pieces_bb | black_pieces_bb)
+    # --- Divide Command ---
+    parser_divide = subparsers.add_parser("divide", help="Show node count for each move at depth 1 for a given position.")
+    parser_divide.add_argument("--fen", type=str, default="rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1", help="FEN string of the position.")
+    parser_divide.add_argument("--depth", type=int, default=1, help="The depth for the divide test.")
+    parser_divide.set_defaults(func=do_divide)
 
-    game_state_no_hash = (
-        np.uint8(0),   # Side to move (0 for White)
-        np.uint8(15),  # Castling rights
-        np.int8(-1),   # En passant square
-        np.uint8(0),   # Halfmove clock
-        np.uint64(0)   # Zobrist key placeholder
-    )
+    # --- Test Reversibility Command ---
+    parser_reversibility = subparsers.add_parser("test-reversibility", help="Test if make_move and unmake_move are perfectly reversible.")
+    parser_reversibility.add_argument("--fen", type=str, default="rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1", help="FEN string of the position.")
+    parser_reversibility.set_defaults(func=do_test_reversibility)
 
-    initial_zobrist_key = compute_initial_hash(initial_piece_bbs, game_state_no_hash)
-    initial_game_state = game_state_no_hash[:-1] + (initial_zobrist_key,)
-
-    # =========================================================================
-    # --- Run Tests ---
-    # =========================================================================
-    test_make_unmake(initial_piece_bbs, initial_occupancy_bbs, initial_game_state)
+    args = parser.parse_args()
+    args.func(args)
