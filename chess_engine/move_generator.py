@@ -8,6 +8,7 @@ from chess_engine.move import (
 )
 from chess_engine.board_operations import make_move
 from chess_engine.engine_types import board_state_flat_signature
+from chess_engine.constants import BB_SQUARES
 import numba.types as nbt
 
 # =============================================================================
@@ -26,7 +27,6 @@ RANK_6 = np.uint64(0xFF0000000000)
 RANK_7 = np.uint64(0xFF000000000000)
 RANK_8 = np.uint64(0xFF00000000000000)
 WHITE, BLACK = 0, 1
-BB_SQUARES = np.array([np.uint64(1) << i for i in range(64)], dtype=np.uint64)
 EMPTY = np.uint64(0)
 
 BISHOP_RELEVANT_BITS = np.array([6,5,5,5,5,5,5,6,5,5,5,5,5,5,5,5,5,5,7,7,7,7,5,5,5,5,7,9,9,7,5,5,5,5,7,9,9,7,5,5,5,5,7,7,7,7,5,5,5,5,5,5,5,5,5,5,6,5,5,5,5,5,5,6], dtype=np.uint8)

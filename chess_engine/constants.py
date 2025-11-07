@@ -195,6 +195,11 @@ MAX_QUIESCENCE_DEPTH = 8
 # --- Bitboard Utilities Constants ---
 # =============================================================================
 
+BB_SQUARES = np.array([np.uint64(1) << i for i in range(64)], dtype=np.uint64)
+"""
+An array of bitboards, where each bitboard has a single bit set at the corresponding square index.
+"""
+
 # De Bruijn sequence for fast bit scanning
 DE_BRUIJN_SEQUENCE = np.uint64(0x03f79d71b4cb0a89)
 

@@ -6,9 +6,10 @@ import numpy as np
 from chess_engine.evaluation import evaluate_position
 from chess_engine.move_generator import generate_legal_moves, get_ls1b_index, is_square_attacked
 from chess_engine.board_operations import make_move
-from chess_engine.move import get_to_square, get_special_move_flag, SPECIAL_MOVE_FLAG_EN_PASSANT
+from chess_engine.move import get_to_square, get_from_square, get_special_move_flag, SPECIAL_MOVE_FLAG_EN_PASSANT
 import numba as nb
-from chess_engine.constants import NEG_INFINITY, POS_INFINITY, MAX_QUIESCENCE_DEPTH
+from chess_engine.constants import BB_SQUARES, MG_MATERIAL_VALUES, NEG_INFINITY, POS_INFINITY, MAX_QUIESCENCE_DEPTH
+from chess_engine.bitboard_utils import find_piece_type_on_square
 
 # Import TT components
 from chess_engine.transposition_table import (
@@ -22,10 +23,62 @@ from chess_engine.engine_types import piece_bbs_signature, occupancy_bbs_signatu
 
 # Define the Numba type for the transposition table
 tt_signature = nb.types.Array(numba_tt_entry_type, 1, 'C')
+killer_moves_signature = nb.types.Array(nb.uint16, 2, 'C')
+
+@nb.njit(cache=True)
+def sort_moves(piece_bbs, occupancy_bbs, game_state, moves, tt_move, killer_moves_at_ply):
+    """
+    對棋步列表進行排序。
+    返回一個根據啟發式評分排序後的新列表。
+    """
+    move_scores = np.zeros(len(moves), dtype=np.int32)
+    opponent_pieces_bb = occupancy_bbs[1] if game_state[0] == 0 else occupancy_bbs[0]
+
+    for i in range(len(moves)):
+        move = moves[i]
+        score = 0
+
+        if move == tt_move:
+            score += 100_000
+            move_scores[i] = score
+            continue
+
+        to_square = get_to_square(move)
+        is_capture = (opponent_pieces_bb & BB_SQUARES[to_square]) != 0
+        is_en_passant = get_special_move_flag(move) == SPECIAL_MOVE_FLAG_EN_PASSANT
+
+        if is_capture:
+            aggressor_type = find_piece_type_on_square(piece_bbs, get_from_square(move))
+            victim_type = find_piece_type_on_square(piece_bbs, to_square)
+            if victim_type != -1: # Ensure a piece is actually on the square
+                score += 10_000 + (MG_MATERIAL_VALUES[victim_type % 6] - MG_MATERIAL_VALUES[aggressor_type % 6])
+        elif is_en_passant:
+            # En passant is always Pawn captures Pawn
+            aggressor_type = find_piece_type_on_square(piece_bbs, get_from_square(move))
+            score += 10_000 + (MG_MATERIAL_VALUES[0] - MG_MATERIAL_VALUES[aggressor_type % 6])
+        else:
+            if move == killer_moves_at_ply[0]:
+                score += 5_000
+            elif move == killer_moves_at_ply[1]:
+                score += 4_000
+        
+        move_scores[i] = score
+
+    for i in range(1, len(moves)):
+        key_move = moves[i]
+        key_score = move_scores[i]
+        j = i - 1
+        while j >= 0 and move_scores[j] < key_score:
+            moves[j + 1] = moves[j]
+            move_scores[j + 1] = move_scores[j]
+            j -= 1
+        moves[j + 1] = key_move
+        move_scores[j + 1] = key_score
+
+    return moves
 
 quiescence_search_return_type = nb.types.Tuple([
-    nb.int32,  # evaluation
-    nb.uint64  # q_nodes
+    nb.int32, nb.uint64
 ])
 
 @numba.njit(quiescence_search_return_type(piece_bbs_signature, occupancy_bbs_signature, game_state_signature, nb.int32, nb.int32, nb.int32), cache=True)
@@ -42,13 +95,11 @@ def quiescence_search(piece_bbs, occupancy_bbs, game_state, alpha, beta, ply):
 
     moves = generate_legal_moves(piece_bbs, occupancy_bbs, game_state)
     
-    # Move Ordering (captures only)
     capture_moves = []
-    opponent_pieces = occupancy_bbs[1] if game_state[0] == 0 else occupancy_bbs[0]
+    opponent_pieces_bb = occupancy_bbs[1] if game_state[0] == 0 else occupancy_bbs[0]
     for move in moves:
         to_sq = get_to_square(move)
-        # Check if the destination square has an opponent's piece or if it's an en passant capture
-        is_capture = ((opponent_pieces >> to_sq) & 1) != 0
+        is_capture = (opponent_pieces_bb & BB_SQUARES[to_sq]) != 0
         is_en_passant = get_special_move_flag(move) == SPECIAL_MOVE_FLAG_EN_PASSANT
 
         if is_capture or is_en_passant:
@@ -56,7 +107,7 @@ def quiescence_search(piece_bbs, occupancy_bbs, game_state, alpha, beta, ply):
 
     if not capture_moves:
         return stand_pat, q_nodes
-
+    
     for move in capture_moves:
         new_piece_bbs, new_occupancy_bbs, new_game_state, _ = make_move(
             piece_bbs, occupancy_bbs, game_state, move
@@ -73,32 +124,23 @@ def quiescence_search(piece_bbs, occupancy_bbs, game_state, alpha, beta, ply):
 
     return alpha, q_nodes
 
-
-# Define the return type for the _search function
 search_return_type = nb.types.Tuple([
-    nb.int32,   # evaluation
-    nb.uint16,  # best_move
-    nb.uint64,  # nodes_searched
-    nb.uint64,   # quiescence_nodes
-    nb.uint64   # cutoffs
+    nb.int32, nb.uint16, nb.uint64, nb.uint64, nb.uint64
 ])
 
 @numba.njit(search_return_type(
     piece_bbs_signature, occupancy_bbs_signature, game_state_signature, 
-    nb.int32, nb.int32, nb.int32, tt_signature
+    nb.int32, nb.int32, nb.int32, tt_signature, killer_moves_signature, nb.int32
 ), cache=True)
-def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, transposition_table):
-    """
-    The core negamax search function with alpha-beta pruning and transposition table integration.
-    """
+def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, transposition_table, killer_moves, ply):
     nodes_searched = np.uint64(1)
     quiescence_nodes = np.uint64(0)
     cutoffs = np.uint64(0)
 
-    # --- 1. Transposition Table Probe ---
     original_alpha = alpha
-    zobrist_key = game_state[4]  # Zobrist key is the 5th element (index 4)
+    zobrist_key = game_state[4]
 
+    tt_move = NO_MOVE
     tt_entry = probe_tt(transposition_table, zobrist_key)
     if tt_entry['flag'] != TT_FLAG_NONE and tt_entry['depth'] >= depth:
         if tt_entry['flag'] == TT_FLAG_EXACT:
@@ -107,46 +149,35 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, transposit
             beta = min(beta, tt_entry['score'])
         elif tt_entry['flag'] == TT_FLAG_BETA:
             alpha = max(alpha, tt_entry['score'])
-
         if alpha >= beta:
             return tt_entry['score'], tt_entry['best_move'], nodes_searched, quiescence_nodes, cutoffs
+        tt_move = tt_entry['best_move']
 
-    # --- 2. Base Case & Quiescence Search ---
     if depth == 0:
         eval_score, q_nodes = quiescence_search(piece_bbs, occupancy_bbs, game_state, alpha, beta, 0)
         return eval_score, NO_MOVE, nodes_searched, q_nodes, cutoffs
 
-    # --- 3. Move Generation & Mate/Stalemate Check ---
     moves = generate_legal_moves(piece_bbs, occupancy_bbs, game_state)
     if len(moves) == 0:
         side_to_move = game_state[0]
         king_bb = piece_bbs[5] if side_to_move == 0 else piece_bbs[11]
         king_sq = get_ls1b_index(king_bb)
         if is_square_attacked(piece_bbs, occupancy_bbs, game_state, king_sq, 1 - side_to_move):
-            return NEG_INFINITY, NO_MOVE, nodes_searched, quiescence_nodes, cutoffs  # Checkmate
+            return NEG_INFINITY, NO_MOVE, nodes_searched, quiescence_nodes, cutoffs
         else:
-            return np.int32(0), NO_MOVE, nodes_searched, quiescence_nodes, cutoffs  # Stalemate
+            return np.int32(0), NO_MOVE, nodes_searched, quiescence_nodes, cutoffs
 
-    # --- 4. Move Ordering (Simple version: captures first) ---
-    move_scores = np.zeros(len(moves), dtype=np.int32)
-    all_pieces_bb = occupancy_bbs[0] | occupancy_bbs[1]
-    for i, move in enumerate(moves):
-        to_sq = get_to_square(move)
-        if (all_pieces_bb >> to_sq) & 1:
-            move_scores[i] = 100
-    sorted_indices = np.argsort(move_scores)[::-1]
+    sorted_moves = sort_moves(piece_bbs, occupancy_bbs, game_state, moves, tt_move, killer_moves[ply])
     
-    # --- 5. Iterate through moves and search ---
     best_move = NO_MOVE
     max_eval = NEG_INFINITY
 
-    for i in range(len(sorted_indices)):
-        move = moves[sorted_indices[i]]
+    for move in sorted_moves:
         new_piece_bbs, new_occupancy_bbs, new_game_state, _ = make_move(
             piece_bbs, occupancy_bbs, game_state, move
         )
         evaluation, _, child_nodes, child_q_nodes, child_cutoffs = _search(
-            new_piece_bbs, new_occupancy_bbs, new_game_state, depth - 1, -beta, -alpha, transposition_table
+            new_piece_bbs, new_occupancy_bbs, new_game_state, depth - 1, -beta, -alpha, transposition_table, killer_moves, ply + 1
         )
         nodes_searched += child_nodes
         quiescence_nodes += child_q_nodes
@@ -160,9 +191,15 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, transposit
         alpha = max(alpha, evaluation)
         if alpha >= beta:
             cutoffs += 1
-            break  # Beta cutoff
+            opponent_pieces_bb = occupancy_bbs[1] if game_state[0] == 0 else occupancy_bbs[0]
+            is_capture = (opponent_pieces_bb & BB_SQUARES[get_to_square(move)]) != 0
+            is_en_passant = get_special_move_flag(move) == SPECIAL_MOVE_FLAG_EN_PASSANT
+            if not is_capture and not is_en_passant:
+                if move != killer_moves[ply, 0]:
+                    killer_moves[ply, 1] = killer_moves[ply, 0]
+                    killer_moves[ply, 0] = move
+            break
 
-    # --- 6. Transposition Table Store ---
     if max_eval <= original_alpha:
         final_flag = TT_FLAG_ALPHA
     elif max_eval >= beta:
@@ -171,48 +208,34 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, transposit
         final_flag = TT_FLAG_EXACT
     
     if best_move == NO_MOVE and len(moves) > 0:
-        best_move = moves[sorted_indices[0]]
+        best_move = sorted_moves[0]
 
     store_tt(transposition_table, zobrist_key, depth, max_eval, final_flag, best_move)
 
     return max_eval, best_move, nodes_searched, quiescence_nodes, cutoffs
 
-# Define the return type for the numba entry point
 numba_entry_return_type = nb.types.Tuple([
-    nb.uint16,  # best_move
-    nb.int32,   # best_eval
-    nb.uint64,  # nodes_searched
-    nb.uint64,  # quiescence_nodes
-    nb.uint64   # cutoffs
+    nb.uint16, nb.int32, nb.uint64, nb.uint64, nb.uint64
 ])
 
 @numba.njit(numba_entry_return_type(
     piece_bbs_signature, occupancy_bbs_signature, game_state_signature, 
-    nb.int32, tt_signature
+    nb.int32, tt_signature, killer_moves_signature
 ), cache=True)
-def _find_best_move_numba(piece_bbs, occupancy_bbs, game_state, max_depth, transposition_table):
-    """
-    A Numba-compatible entry point for the search.
-    """
+def _find_best_move_numba(piece_bbs, occupancy_bbs, game_state, max_depth, transposition_table, killer_moves):
     best_eval, best_move, nodes_searched, quiescence_nodes, cutoffs = _search(
-        piece_bbs, occupancy_bbs, game_state, max_depth, NEG_INFINITY, POS_INFINITY, transposition_table
+        piece_bbs, occupancy_bbs, game_state, max_depth, NEG_INFINITY, POS_INFINITY, transposition_table, killer_moves, 0
     )
     return best_move, best_eval, nodes_searched, quiescence_nodes, cutoffs
 
-def search_position(board_state, max_depth, transposition_table):
-    """
-    The top-level function to find the best move. This is the main interface.
-    It unpacks the board_state tuple and calls the Numba-compiled function.
-    """
-    # Unpack the board state into the structures Numba expects
+def search_position(board_state, max_depth, transposition_table, killer_moves):
     piece_bbs = board_state[:12]
     occupancy_bbs = board_state[12:15]
     side_to_move, castling_rights, en_passant_square, halfmove_clock, zobrist_key = board_state[15:]
     game_state = (side_to_move, castling_rights, en_passant_square, halfmove_clock, zobrist_key)
 
-    # Call the JIT'd function
     best_move, best_eval, nodes_searched, quiescence_nodes, cutoffs = _find_best_move_numba(
-        piece_bbs, occupancy_bbs, game_state, max_depth, transposition_table
+        piece_bbs, occupancy_bbs, game_state, max_depth, transposition_table, killer_moves
     )
     
     return best_move, best_eval, nodes_searched, quiescence_nodes, cutoffs
