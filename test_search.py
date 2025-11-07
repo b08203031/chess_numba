@@ -4,6 +4,11 @@ import numpy as np
 import shutil
 from pathlib import Path
 
+# --- Transposition Table Setup ---
+from chess_engine.transposition_table import TT_SIZE_MB, create_transposition_table, clear_transposition_table
+transposition_table = create_transposition_table(TT_SIZE_MB)
+
+
 def clear_numba_cache():
     """
     Finds and removes all __pycache__ directories in the project.
@@ -26,6 +31,9 @@ from chess_engine.search import search_position
 from chess_engine.move import get_from_square, get_to_square
 from chess_engine.core import SQUARE_TO_ALGEBRAIC
 
+# Maximum search depth (Ply) for arrays like killer moves
+MAX_PLY = 64
+
 def run_search_test():
     """
     Runs a search test from the initial position and prints statistics.
@@ -41,9 +49,15 @@ def run_search_test():
     piece_bbs, occupancy_bbs, game_state = parse_fen(fen)
     board_state_flat = piece_bbs + occupancy_bbs + game_state
     
+    # Initialize Killer Moves table
+    killer_moves = np.zeros((MAX_PLY, 2), dtype=np.uint16)
+    
+    # Clear TT before each search
+    clear_transposition_table(transposition_table)
+
     start_time = time.time()
     
-    best_move, best_eval, nodes_searched, quiescence_nodes, cutoffs = search_position(board_state_flat, depth)
+    best_move, best_eval, nodes_searched, quiescence_nodes, cutoffs = search_position(board_state_flat, depth, transposition_table, killer_moves)
     
     end_time = time.time()
 

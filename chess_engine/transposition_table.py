@@ -25,18 +25,22 @@ numba_tt_entry_type = nb.from_dtype(tt_entry_dtype)
 _EMPTY_TT_ENTRY = np.zeros(1, dtype=tt_entry_dtype)[0]
 _EMPTY_TT_ENTRY['flag'] = TT_FLAG_NONE
 
-def initialize_tt():
-    """Initializes the transposition table based on the size specified in constants.py."""
-    # Calculate the size of a single entry in bytes
+def create_transposition_table(size_mb):
+    """Initializes the transposition table based on the specified size in MB."""
     entry_size_bytes = tt_entry_dtype.itemsize
-    
-    # Calculate the total number of entries based on the desired table size in MB
-    num_entries = (TT_SIZE_MB * 1024 * 1024) // entry_size_bytes
-    
-    # Create the transposition table and initialize it with zeros
+    num_entries = (size_mb * 1024 * 1024) // entry_size_bytes
     transposition_table = np.zeros(num_entries, dtype=tt_entry_dtype)
-    
     return transposition_table
+
+@nb.njit(cache=True)
+def clear_transposition_table(tt):
+    """Clears all entries in the transposition table by setting each field to zero."""
+    for i in range(len(tt)):
+        tt[i]['key'] = np.uint64(0)
+        tt[i]['score'] = np.int16(0)
+        tt[i]['depth'] = np.uint8(0)
+        tt[i]['flag'] = np.uint8(0)
+        tt[i]['best_move'] = np.uint16(0)
 
 @nb.njit(cache=True)
 def probe_tt(tt, zobrist_key):
@@ -46,7 +50,6 @@ def probe_tt(tt, zobrist_key):
     if entry['key'] == zobrist_key:
         return entry
     else:
-        # Return the pre-defined empty entry if the key doesn't match (cache miss)
         return _EMPTY_TT_ENTRY
 
 @nb.njit(cache=True)
@@ -55,7 +58,6 @@ def store_tt(tt, zobrist_key, depth, score, flag, best_move):
     index = zobrist_key % len(tt)
     existing_entry = tt[index]
 
-    # Depth-first replacement strategy: only overwrite if the new entry has a greater or equal depth
     if depth >= existing_entry['depth']:
         tt[index]['key'] = zobrist_key
         tt[index]['depth'] = np.uint8(depth)

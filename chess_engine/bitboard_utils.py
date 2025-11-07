@@ -1,6 +1,20 @@
 
 import numpy as np
 import numba
+from chess_engine.constants import BB_SQUARES
+from chess_engine.engine_types import piece_bbs_signature
+
+@numba.njit(numba.int8(piece_bbs_signature, numba.uint8), cache=True)
+def find_piece_type_on_square(piece_bbs, square):
+    """
+    Finds the piece type (0-11) on a given square.
+    Returns -1 if no piece is found.
+    """
+    bb_square = BB_SQUARES[square]
+    for piece_type in range(12):
+        if piece_bbs[piece_type] & bb_square:
+            return numba.int8(piece_type)
+    return numba.int8(-1)
 
 @numba.njit(numba.int32(numba.uint64), cache=True)
 def count_bits(bb):
