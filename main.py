@@ -39,7 +39,51 @@ def do_test_reversibility(args):
     """Handler for the 'test-reversibility' command."""
     test_make_unmake_for_fen(args.fen)
 
+def do_run_tests(args):
+    """Handler for the 'run-tests' command."""
+    test_perft()
+
 # --- Logic Migrated from perft.py and test_board_operations.py ---
+
+def test_perft():
+    """Runs a suite of Perft tests to validate move generation."""
+    print("--- Running Perft Test Suite ---")
+
+    PERFT_TESTS = [
+        # (FEN, depth, expected_nodes, description)
+        ("r3kb1Q/p1ppqp2/bn2pnp1/3PN3/4P3/1pN5/PPPBBPPP/R3K2R w KQq - 0 1", 1, 56, "Bug test: Queen diagonal capture (h8f6)"),
+        ("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1", 1, 20, "Start position depth 1"),
+        ("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1", 2, 400, "Start position depth 2"),
+        ("r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq -", 1, 48, "Kiwipete depth 1"),
+        ("r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq -", 2, 2039, "Kiwipete depth 2"),
+    ]
+
+    passed = 0
+    failed = 0
+
+    for fen, depth, expected, description in PERFT_TESTS:
+        piece_bbs, occupancy_bbs, game_state = parse_fen(fen)
+        game_state_typed = (
+            np.uint8(game_state[0]), np.uint8(game_state[1]), np.int8(game_state[2]),
+            np.uint8(game_state[3]), np.uint64(game_state[4])
+        )
+
+        # JIT warm-up
+        perft(piece_bbs, occupancy_bbs, game_state_typed, 1)
+
+        result = perft(piece_bbs, occupancy_bbs, game_state_typed, depth)
+
+        if result == expected:
+            print(f"  ✓ {description}: got {result}")
+            passed += 1
+        else:
+            print(f"  ✗ {description}: got {result}, expected {expected}")
+            failed += 1
+
+    print("---------------------------------")
+    print(f"Results: {passed} passed, {failed} failed")
+    print("--- Test Suite Complete ---")
+    return failed == 0
 
 def run_perft_test(fen_string: str, max_depth: int, test_key: str, divide_on_mismatch: bool = False):
     # This is the logic from the original chess_engine/perft.py
@@ -181,6 +225,10 @@ if __name__ == "__main__":
     parser_reversibility = subparsers.add_parser("test-reversibility", help="Test if make_move and unmake_move are perfectly reversible.")
     parser_reversibility.add_argument("--fen", type=str, default="rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1", help="FEN string of the position.")
     parser_reversibility.set_defaults(func=do_test_reversibility)
+
+    # --- Run Tests Command ---
+    parser_run_tests = subparsers.add_parser("run-tests", help="Run the full test suite.")
+    parser_run_tests.set_defaults(func=do_run_tests)
 
     args = parser.parse_args()
     args.func(args)
