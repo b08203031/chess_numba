@@ -87,4 +87,14 @@ def parse_fen(fen_string: str):
 
     game_state = (side_to_move, castling_rights, en_passant_square, halfmove_clock, zobrist_key)
 
+    # Add sanity checks (defensive programming)
+    all_pieces_bb = occupancy_bbs[2]
+    white_occupancy = occupancy_bbs[0]
+    black_occupancy = occupancy_bbs[1]
+
+    assert all_pieces_bb == (white_occupancy | black_occupancy), \
+        "FEN Parser Error: all_pieces_bb calculation is incorrect."
+    assert np.count_nonzero(white_occupancy & black_occupancy) == 0, \
+        "FEN Parser Error: White and black pieces overlap on the same square."
+
     return final_piece_bbs, occupancy_bbs, game_state
