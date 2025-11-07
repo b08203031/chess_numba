@@ -30,8 +30,8 @@ def run_search_test():
     """
     Runs a search test from the initial position and prints statistics.
     """
-    fen = "5r1k/4Qpq1/4p3/1p1p2P1/2p2P2/1p2P3/3P4/BK6 w - - 0 1"
-    depth = 0
+    fen = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
+    depth = 5
 
     print("--- Starting Search Performance Test ---")
     print(f"FEN: {fen}")
@@ -43,24 +43,29 @@ def run_search_test():
     
     start_time = time.time()
     
-    best_move, best_eval, nodes_searched, cutoffs = search_position(board_state_flat, depth)
+    best_move, best_eval, nodes_searched, quiescence_nodes, cutoffs = search_position(board_state_flat, depth)
     
     end_time = time.time()
 
     elapsed_time = end_time - start_time
-    nps = int(nodes_searched / elapsed_time) if elapsed_time > 0 else 0
+    
+    total_nodes = nodes_searched + quiescence_nodes
+    nps = int(total_nodes / elapsed_time) if elapsed_time > 0 else 0
     
     from_sq_alg = SQUARE_TO_ALGEBRAIC[get_from_square(best_move)]
     to_sq_alg = SQUARE_TO_ALGEBRAIC[get_to_square(best_move)]
+
+    q_node_percentage = (quiescence_nodes / total_nodes * 100) if total_nodes > 0 else 0
 
 
     print(f"Search complete.")
     print(f"Best move found: {from_sq_alg}{to_sq_alg} (raw: {best_move}), Evaluation: {best_eval}")
     print("--- Statistics ---")
-    print(f"1. Nodes Searched: {nodes_searched}")
-    print(f"2. Cutoffs:          {cutoffs}")
-    print(f"3. Time Spent:       {elapsed_time:.4f} seconds")
-    print(f"4. NPS (Nodes/Sec):  {nps}")
+    print(f"1. Nodes Searched:   {total_nodes}")
+    print(f"2. Quiescence Nodes: {quiescence_nodes} ({q_node_percentage:.2f}%)")
+    print(f"3. Cutoffs:          {cutoffs}")
+    print(f"4. Time Spent:       {elapsed_time:.4f} seconds")
+    print(f"5. NPS (Nodes/Sec):  {nps}")
     print("----------------------------------------")
 
 if __name__ == "__main__":
