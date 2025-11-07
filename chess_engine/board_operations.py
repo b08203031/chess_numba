@@ -33,7 +33,16 @@ CASTLING_UPDATE_MASK[63] -= BK_CASTLE
 
 @nb.jit(nb.int8(piece_bbs_signature, nb.int8, nb.uint8), nopython=True, inline='always')
 def find_piece_type_for_square(piece_bbs: tuple, square: int, color: int) -> int:
-    """Finds which piece type occupies a given square."""
+    """Finds which piece type occupies a given square.
+
+    Args:
+        piece_bbs: A tuple of 12 bitboards representing the pieces.
+        square: The square to check.
+        color: The color of the piece.
+
+    Returns:
+        The piece type of the piece on the square, or -1 if no piece is on the square.
+    """
     bit = np.uint64(1) << square
     start_index = color * 6
     for i in range(6):
@@ -45,6 +54,15 @@ def find_piece_type_for_square(piece_bbs: tuple, square: int, color: int) -> int
 def make_move(piece_bbs: tuple, occupancy_bbs: tuple, game_state: tuple, move: np.uint16):
     """
     Applies a move and returns new state tuples and unmake_info.
+
+    Args:
+        piece_bbs: A tuple of 12 bitboards representing the pieces.
+        occupancy_bbs: A tuple of 3 bitboards representing the occupancy of the board.
+        game_state: A tuple representing the current game state.
+        move: The move to make.
+
+    Returns:
+        A tuple containing the new piece_bbs, new_occupancy_bbs, new_game_state, and unmake_info.
     """
     new_piece_bbs = list(piece_bbs)
     side, current_castling_rights, current_ep_square, current_halfmove_clock, key = game_state
@@ -162,6 +180,16 @@ def make_move(piece_bbs: tuple, occupancy_bbs: tuple, game_state: tuple, move: n
 def unmake_move(piece_bbs: tuple, occupancy_bbs: tuple, game_state: tuple, move: np.uint16, unmake_info: tuple):
     """
     Reverts a move using the unmake_info tuple, returning the original state tuples.
+
+    Args:
+        piece_bbs: A tuple of 12 bitboards representing the pieces.
+        occupancy_bbs: A tuple of 3 bitboards representing the occupancy of the board.
+        game_state: A tuple representing the current game state.
+        move: The move to unmake.
+        unmake_info: A tuple containing the information needed to unmake the move.
+
+    Returns:
+        A tuple containing the original piece_bbs, original_occupancy_bbs, and original_game_state.
     """
     new_piece_bbs = list(piece_bbs)
     side = np.uint8(1 - game_state[0])

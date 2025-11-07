@@ -3,15 +3,10 @@ import numba as nb
 import numpy as np
 
 from .board_operations import make_move
-from .move_generator import generate_legal_moves, generate_pseudo_legal_moves, is_square_attacked
+from .move_generator import generate_legal_moves
 from .engine_types import piece_bbs_signature, occupancy_bbs_signature, game_state_signature
-from .bitboard_utils import get_ls1b_index
 import numba.types as nbt
 
-# --- Constants ---
-WHITE, BLACK = 0, 1
-
-# --- Standard Perft Results for Verification ---
 PERFT_RESULTS = {
     "startpos": {
         1: 20, 2: 400, 3: 8902, 4: 197281, 5: 4865609, 6: 119060324
@@ -28,16 +23,29 @@ PERFT_RESULTS = {
     "Position 5": {
         1: 44, 2: 1486, 3: 62379, 4: 2103487, 5: 89941194
     }
-
 }
+"""
+Standard Perft results for verification.
+"""
 
 SQUARE_TO_ALGEBRAIC = {i: f"{chr(ord('a') + i % 8)}{i // 8 + 1}" for i in range(64)}
+"""
+A dictionary that maps square indices to algebraic notation.
+"""
 
 @nb.jit(nbt.uint64(piece_bbs_signature, occupancy_bbs_signature, game_state_signature, nbt.intc), nopython=True)
 def perft(piece_bbs, occupancy_bbs, game_state, depth: int):
     """
     Core recursive Perft function.
-    Counts the total number of legal moves to a given depth.
+
+    Args:
+        piece_bbs: A tuple of 12 bitboards representing the pieces.
+        occupancy_bbs: A tuple of 3 bitboards representing the occupancy of the board.
+        game_state: A tuple representing the current game state.
+        depth: The depth to run the test to.
+
+    Returns:
+        The number of legal moves to a given depth.
     """
     if depth == 0:
         return np.uint64(1)
@@ -65,28 +73,29 @@ def perft(piece_bbs, occupancy_bbs, game_state, depth: int):
 def _jit_perft_divide(piece_bbs, occupancy_bbs, game_state, depth: int):
     """
     JIT-compiled core logic for perft_divide.
-    Returns an array of moves and their corresponding node counts.
-    This version uses generate_legal_moves to simplify the logic.
+
+    Args:
+        piece_bbs: A tuple of 12 bitboards representing the pieces.
+        occupancy_bbs: A tuple of 3 bitboards representing the occupancy of the board.
+        game_state: A tuple representing the current game state.
+        depth: The depth to run the test to.
+
+    Returns:
+        An array of moves and their corresponding node counts.
     """
     if depth == 0:
         return np.zeros((0, 2), dtype=np.uint64)
 
-    # Directly generate legal moves
     board_state_flat = piece_bbs + occupancy_bbs + (game_state[1], np.int8(game_state[2]), game_state[0])
     moves = generate_legal_moves(board_state_flat)
 
     results = np.zeros((len(moves), 2), dtype=np.uint64)
     for i in range(len(moves)):
         move = moves[i]
-
-        # All moves are legal, so we just need to count the nodes
         new_piece_bbs, new_occupancy_bbs, new_game_state, _ = make_move(
             piece_bbs, occupancy_bbs, game_state, move
         )
-
-        # Recursively call perft for the next depth
         nodes = perft(new_piece_bbs, new_occupancy_bbs, new_game_state, depth - 1)
-
         results[i, 0] = move
         results[i, 1] = nodes
 

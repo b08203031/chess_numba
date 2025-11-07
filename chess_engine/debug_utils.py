@@ -2,6 +2,9 @@
 import numpy as np
 
 PIECE_CHARS = ['P', 'N', 'B', 'R', 'Q', 'K', 'p', 'n', 'b', 'r', 'q', 'k']
+"""
+A list of characters representing the pieces.
+"""
 
 def print_board(piece_bbs, name: str = "Board State"):
     """
@@ -9,12 +12,12 @@ def print_board(piece_bbs, name: str = "Board State"):
 
     Args:
         piece_bbs: A tuple of 12 uint64 bitboards, one for each piece type.
+        name: The name of the board state.
     """
     print(f"\n--- {name} ---")
     print("   a b c d e f g h")
     print("  +-----------------+")
 
-    # Create a board representation array
     board_repr = ['.'] * 64
     for piece_idx, bb in enumerate(piece_bbs):
         while bb > 0:
@@ -33,8 +36,12 @@ def print_board(piece_bbs, name: str = "Board State"):
 
 def compare_move_lists(moves1, moves2, labels=("List 1", "List 2")):
     """
-    Compares two lists of moves (in any format, as long as they are comparable)
-    and prints the differences.
+    Compares two lists of moves and prints the differences.
+
+    Args:
+        moves1: The first list of moves.
+        moves2: The second list of moves.
+        labels: A tuple of two strings representing the names of the two lists.
     """
     set1 = set(moves1)
     set2 = set(moves2)
