@@ -10,10 +10,18 @@ from chess_engine.move import get_to_square, get_special_move_flag, SPECIAL_MOVE
 import numba as nb
 from chess_engine.constants import NEG_INFINITY, POS_INFINITY, MAX_QUIESCENCE_DEPTH
 
+# Import TT components
+from chess_engine.transposition_table import (
+    probe_tt, store_tt, numba_tt_entry_type,
+    TT_FLAG_NONE, TT_FLAG_EXACT, TT_FLAG_ALPHA, TT_FLAG_BETA
+)
 
 NO_MOVE = 0 # Represents an invalid or null move
 
 from chess_engine.engine_types import piece_bbs_signature, occupancy_bbs_signature, game_state_signature
+
+# Define the Numba type for the transposition table
+tt_signature = nb.types.Array(numba_tt_entry_type, 1, 'C')
 
 quiescence_search_return_type = nb.types.Tuple([
     nb.int32,  # evaluation
@@ -75,62 +83,70 @@ search_return_type = nb.types.Tuple([
     nb.uint64   # cutoffs
 ])
 
-@numba.njit(search_return_type(piece_bbs_signature, occupancy_bbs_signature, game_state_signature, nb.int32, nb.int32, nb.int32), cache=True)
-def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta):
+@numba.njit(search_return_type(
+    piece_bbs_signature, occupancy_bbs_signature, game_state_signature, 
+    nb.int32, nb.int32, nb.int32, tt_signature
+), cache=True)
+def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, transposition_table):
     """
-    The core negamax search function with alpha-beta pruning.
-    This function is fully Numba-compatible and uses the refactored board state.
+    The core negamax search function with alpha-beta pruning and transposition table integration.
     """
     nodes_searched = np.uint64(1)
     quiescence_nodes = np.uint64(0)
     cutoffs = np.uint64(0)
 
-    # 1. Base Case: If we've reached the desired depth, start quiescence search.
+    # --- 1. Transposition Table Probe ---
+    original_alpha = alpha
+    zobrist_key = game_state[4]  # Zobrist key is the 5th element (index 4)
+
+    tt_entry = probe_tt(transposition_table, zobrist_key)
+    if tt_entry['flag'] != TT_FLAG_NONE and tt_entry['depth'] >= depth:
+        if tt_entry['flag'] == TT_FLAG_EXACT:
+            return tt_entry['score'], tt_entry['best_move'], nodes_searched, quiescence_nodes, cutoffs
+        elif tt_entry['flag'] == TT_FLAG_ALPHA:
+            beta = min(beta, tt_entry['score'])
+        elif tt_entry['flag'] == TT_FLAG_BETA:
+            alpha = max(alpha, tt_entry['score'])
+
+        if alpha >= beta:
+            return tt_entry['score'], tt_entry['best_move'], nodes_searched, quiescence_nodes, cutoffs
+
+    # --- 2. Base Case & Quiescence Search ---
     if depth == 0:
         eval_score, q_nodes = quiescence_search(piece_bbs, occupancy_bbs, game_state, alpha, beta, 0)
         return eval_score, NO_MOVE, nodes_searched, q_nodes, cutoffs
 
-    # 2. Generate all legal moves for the current position.
+    # --- 3. Move Generation & Mate/Stalemate Check ---
     moves = generate_legal_moves(piece_bbs, occupancy_bbs, game_state)
-
-    # If there are no legal moves, it's either checkmate or stalemate.
     if len(moves) == 0:
         side_to_move = game_state[0]
         king_bb = piece_bbs[5] if side_to_move == 0 else piece_bbs[11]
         king_sq = get_ls1b_index(king_bb)
-
         if is_square_attacked(piece_bbs, occupancy_bbs, game_state, king_sq, 1 - side_to_move):
-            # CHECKMATE: Loss for the current player.
-            return NEG_INFINITY, NO_MOVE, nodes_searched, quiescence_nodes, cutoffs
+            return NEG_INFINITY, NO_MOVE, nodes_searched, quiescence_nodes, cutoffs  # Checkmate
         else:
-            # STALEMATE: Draw.
-            return np.int32(0), NO_MOVE, nodes_searched, quiescence_nodes, cutoffs
+            return np.int32(0), NO_MOVE, nodes_searched, quiescence_nodes, cutoffs  # Stalemate
 
-    # 3. Move Ordering (Simple version: captures first)
+    # --- 4. Move Ordering (Simple version: captures first) ---
     move_scores = np.zeros(len(moves), dtype=np.int32)
     all_pieces_bb = occupancy_bbs[0] | occupancy_bbs[1]
     for i, move in enumerate(moves):
         to_sq = get_to_square(move)
         if (all_pieces_bb >> to_sq) & 1:
             move_scores[i] = 100
-
     sorted_indices = np.argsort(move_scores)[::-1]
     
-    # 4. Iterate through sorted legal moves and perform the search.
-    best_move = moves[sorted_indices[0]]
+    # --- 5. Iterate through moves and search ---
+    best_move = NO_MOVE
     max_eval = NEG_INFINITY
 
     for i in range(len(sorted_indices)):
         move = moves[sorted_indices[i]]
-        
-        # Make the move on new board state representations
         new_piece_bbs, new_occupancy_bbs, new_game_state, _ = make_move(
             piece_bbs, occupancy_bbs, game_state, move
         )
-
-        # Recursive call with negated alpha/beta
         evaluation, _, child_nodes, child_q_nodes, child_cutoffs = _search(
-            new_piece_bbs, new_occupancy_bbs, new_game_state, depth - 1, -beta, -alpha
+            new_piece_bbs, new_occupancy_bbs, new_game_state, depth - 1, -beta, -alpha, transposition_table
         )
         nodes_searched += child_nodes
         quiescence_nodes += child_q_nodes
@@ -146,6 +162,19 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta):
             cutoffs += 1
             break  # Beta cutoff
 
+    # --- 6. Transposition Table Store ---
+    if max_eval <= original_alpha:
+        final_flag = TT_FLAG_ALPHA
+    elif max_eval >= beta:
+        final_flag = TT_FLAG_BETA
+    else:
+        final_flag = TT_FLAG_EXACT
+    
+    if best_move == NO_MOVE and len(moves) > 0:
+        best_move = moves[sorted_indices[0]]
+
+    store_tt(transposition_table, zobrist_key, depth, max_eval, final_flag, best_move)
+
     return max_eval, best_move, nodes_searched, quiescence_nodes, cutoffs
 
 # Define the return type for the numba entry point
@@ -157,17 +186,20 @@ numba_entry_return_type = nb.types.Tuple([
     nb.uint64   # cutoffs
 ])
 
-@numba.njit(numba_entry_return_type(piece_bbs_signature, occupancy_bbs_signature, game_state_signature, nb.int32), cache=True)
-def _find_best_move_numba(piece_bbs, occupancy_bbs, game_state, max_depth):
+@numba.njit(numba_entry_return_type(
+    piece_bbs_signature, occupancy_bbs_signature, game_state_signature, 
+    nb.int32, tt_signature
+), cache=True)
+def _find_best_move_numba(piece_bbs, occupancy_bbs, game_state, max_depth, transposition_table):
     """
     A Numba-compatible entry point for the search.
     """
     best_eval, best_move, nodes_searched, quiescence_nodes, cutoffs = _search(
-        piece_bbs, occupancy_bbs, game_state, max_depth, NEG_INFINITY, POS_INFINITY
+        piece_bbs, occupancy_bbs, game_state, max_depth, NEG_INFINITY, POS_INFINITY, transposition_table
     )
     return best_move, best_eval, nodes_searched, quiescence_nodes, cutoffs
 
-def search_position(board_state, max_depth):
+def search_position(board_state, max_depth, transposition_table):
     """
     The top-level function to find the best move. This is the main interface.
     It unpacks the board_state tuple and calls the Numba-compiled function.
@@ -180,7 +212,7 @@ def search_position(board_state, max_depth):
 
     # Call the JIT'd function
     best_move, best_eval, nodes_searched, quiescence_nodes, cutoffs = _find_best_move_numba(
-        piece_bbs, occupancy_bbs, game_state, max_depth
+        piece_bbs, occupancy_bbs, game_state, max_depth, transposition_table
     )
     
     return best_move, best_eval, nodes_searched, quiescence_nodes, cutoffs
