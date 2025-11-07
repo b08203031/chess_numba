@@ -1,6 +1,6 @@
 # chess_engine/zobrist.py
 import numpy as np
-import numba as nb
+import numba
 from chess_engine.engine_types import piece_bbs_signature, game_state_signature
 
 BLACK = 1
@@ -40,7 +40,7 @@ DEBRUIJN_MAGIC = np.uint64(0x03f79d71b4cb0a89)
 A De Bruijn sequence for fast bit scanning.
 """
 
-@nb.jit(nb.int8(nb.uint64), nopython=True, inline='always')
+@numba.jit(numba.int8(numba.uint64), nopython=True, inline='always')
 def get_lsb_index(bitboard: np.uint64) -> int:
     """
     Finds the index of the LSB using a De Bruijn sequence bitscan.
@@ -58,7 +58,7 @@ def get_lsb_index(bitboard: np.uint64) -> int:
     index = (lsb * DEBRUIJN_MAGIC) >> np.uint64(58)
     return BIT_TO_INDEX[index]
 
-@nb.jit(nb.uint64(piece_bbs_signature, game_state_signature), nopython=True)
+@numba.jit(numba.uint64(piece_bbs_signature, game_state_signature), nopython=True)
 def compute_initial_hash(piece_bbs: tuple, game_state: tuple) -> np.uint64:
     """
     Computes the Zobrist hash from scratch.

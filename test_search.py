@@ -30,8 +30,8 @@ def run_search_test():
     """
     Runs a search test from the initial position and prints statistics.
     """
-    fen = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
-    depth = 7
+    fen = "5r1k/4Qpq1/4p3/1p1p2P1/2p2P2/1p2P3/3P4/BK6 w - - 0 1"
+    depth = 0
 
     print("--- Starting Search Performance Test ---")
     print(f"FEN: {fen}")

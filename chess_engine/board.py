@@ -1,6 +1,6 @@
 # chess_engine/board.py
 
-import numpy
+import numpy as np
 
 class Board:
     """
@@ -16,20 +16,20 @@ class Board:
         Initializes the bitboards to the standard chess starting position.
         """
         # White pieces bitboards
-        self.P = numpy.uint64(0b11111111 << 8)
-        self.R = numpy.uint64(0b10000001)
-        self.N = numpy.uint64(0b01000010)
-        self.B = numpy.uint64(0b00100100)
-        self.Q = numpy.uint64(0b00001000)
-        self.K = numpy.uint64(0b00010000)
+        self.P = np.uint64(0b11111111 << 8)
+        self.R = np.uint64(0b10000001)
+        self.N = np.uint64(0b01000010)
+        self.B = np.uint64(0b00100100)
+        self.Q = np.uint64(0b00001000)
+        self.K = np.uint64(0b00010000)
 
         # Black pieces bitboards
-        self.p = numpy.uint64(0b11111111 << 48)
-        self.r = numpy.uint64(0b10000001 << 56)
-        self.n = numpy.uint64(0b01000010 << 56)
-        self.b = numpy.uint64(0b00100100 << 56)
-        self.q = numpy.uint64(0b00001000 << 56)
-        self.k = numpy.uint64(0b00010000 << 56)
+        self.p = np.uint64(0b11111111 << 48)
+        self.r = np.uint64(0b10000001 << 56)
+        self.n = np.uint64(0b01000010 << 56)
+        self.b = np.uint64(0b00100100 << 56)
+        self.q = np.uint64(0b00001000 << 56)
+        self.k = np.uint64(0b00010000 << 56)
 
     def print_board(self):
         """
@@ -46,7 +46,7 @@ class Board:
                 piece = "."
 
                 # Create a bitmask for the current square
-                mask = numpy.uint64(1) << numpy.uint64(square)
+                mask = np.uint64(1) << np.uint64(square)
 
                 # Check which bitboard has a piece on the current square
                 if self.P & mask: piece = "P"
@@ -71,16 +71,16 @@ class Board:
     # Properties for accessing combined bitboards
     # --------------------------------------------------------------------------
     @property
-    def white_pieces(self) -> numpy.uint64:
+    def white_pieces(self) -> np.uint64:
         """Bitboard of all white pieces."""
         return self.P | self.R | self.N | self.B | self.Q | self.K
 
     @property
-    def black_pieces(self) -> numpy.uint64:
+    def black_pieces(self) -> np.uint64:
         """Bitboard of all black pieces."""
         return self.p | self.r | self.n | self.b | self.q | self.k
 
     @property
-    def all_pieces(self) -> numpy.uint64:
+    def all_pieces(self) -> np.uint64:
         """Bitboard of all pieces on the board."""
         return self.white_pieces | self.black_pieces

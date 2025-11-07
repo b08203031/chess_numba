@@ -1,8 +1,8 @@
 
 import numpy as np
-import numba as nb
+import numba
 
-@nb.njit(nb.int32(nb.uint64), cache=True)
+@numba.njit(numba.int32(numba.uint64), cache=True)
 def count_bits(bb):
     """
     Counts the number of set bits in a bitboard (popcount).
@@ -14,7 +14,7 @@ def count_bits(bb):
         c += 1
     return c
 
-@nb.njit(nb.uint8(nb.uint64), cache=True)
+@numba.njit(numba.uint8(numba.uint64), cache=True)
 def get_ls1b_index(bb):
     """
     Gets the index of the least significant 1st bit (LSB).

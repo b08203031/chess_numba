@@ -1,6 +1,6 @@
 # chess_engine/move.py
 import numpy as np
-import numba as nb
+import numba
 
 # --- Move Encoding Blueprint ---
 # A move is encoded as a 16-bit unsigned integer.
@@ -59,7 +59,7 @@ PROMO_KNIGHT, PROMO_BISHOP, PROMO_ROOK, PROMO_QUEEN = 0, 1, 2, 3
 Constants for promotion pieces.
 """
 
-@nb.jit(nopython=True, inline='always')
+@numba.jit(nopython=True, inline='always')
 def encode_move(from_square: int, to_square: int, promotion_piece: int, special_flag: int) -> np.uint16:
     """
     Encodes move information into a 16-bit unsigned integer.
@@ -79,7 +79,7 @@ def encode_move(from_square: int, to_square: int, promotion_piece: int, special_
     move |= np.uint16(special_flag << SPECIAL_MOVE_SHIFT)
     return move
 
-@nb.jit(nopython=True, inline='always')
+@numba.jit(nopython=True, inline='always')
 def get_from_square(move: np.uint16) -> int:
     """
     Extracts the from_square from a move.
@@ -92,7 +92,7 @@ def get_from_square(move: np.uint16) -> int:
     """
     return int(move & FROM_SQUARE_MASK)
 
-@nb.jit(nopython=True, inline='always')
+@numba.jit(nopython=True, inline='always')
 def get_to_square(move: np.uint16) -> int:
     """
     Extracts the to_square from a move.
@@ -105,7 +105,7 @@ def get_to_square(move: np.uint16) -> int:
     """
     return int((move & TO_SQUARE_MASK) >> TO_SQUARE_SHIFT)
 
-@nb.jit(nopython=True, inline='always')
+@numba.jit(nopython=True, inline='always')
 def get_promotion_piece(move: np.uint16) -> int:
     """
     Extracts the promotion piece type from a move.
@@ -118,7 +118,7 @@ def get_promotion_piece(move: np.uint16) -> int:
     """
     return int((move & PROMOTION_PIECE_MASK) >> PROMOTION_PIECE_SHIFT)
 
-@nb.jit(nopython=True, inline='always')
+@numba.jit(nopython=True, inline='always')
 def get_special_move_flag(move: np.uint16) -> int:
     """
     Extracts the special move flag from a move.
