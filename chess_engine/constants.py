@@ -186,8 +186,9 @@ PST_EG = np.array([
 # --- Search Constants ---
 # =============================================================================
 
-NEG_INFINITY = np.int32(-999999)
-POS_INFINITY = np.int32(999999)
+INFINITY = 30000  # A large number, bigger than any possible evaluation
+ASPIRATION_WINDOW_SIZE = 100 # centipawns
+NULL_MOVE_REDUCTION = 2
 MAX_QUIESCENCE_DEPTH = 8
 
 
