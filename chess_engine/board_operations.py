@@ -4,13 +4,13 @@ import numpy as np
 import numba as nb
 from chess_engine.move import (
     get_from_square, get_to_square, get_special_move_flag, get_promotion_piece,
-    SPECIAL_MOVE_FLAG_PROMOTION, SPECIAL_MOVE_FLAG_EN_PASSANT, SPECIAL_MOVE_FLAG_CASTLING
+    SPECIAL_MOVE_FLAG_EN_PASSANT, SPECIAL_MOVE_FLAG_CASTLING
 )
 from chess_engine.zobrist import (
     PIECE_SQUARE_KEYS, SIDE_TO_MOVE_KEY, EN_PASSANT_FILE_KEYS, CASTLING_RIGHTS_KEYS,
     compute_initial_hash
 )
-from chess_engine.types import (
+from chess_engine.engine_types import (
     piece_bbs_signature, occupancy_bbs_signature, game_state_signature, unmake_info_signature
 )
 
@@ -53,9 +53,12 @@ def make_move(piece_bbs: tuple, occupancy_bbs: tuple, game_state: tuple, move: n
     to_sq = get_to_square(move)
     flag = get_special_move_flag(move)
 
+    # --- Unified Castling Rights Update ---
+    # This single line handles all cases: king moves, rook moves, and captures on rook squares.
+    new_castling_rights = current_castling_rights & CASTLING_UPDATE_MASK[from_sq] & CASTLING_UPDATE_MASK[to_sq]
+
     moving_piece_type = find_piece_type_for_square(piece_bbs, from_sq, side)
     moving_piece_bb_idx = side * 6 + moving_piece_type
-
     captured_piece_type = np.int8(-1)
 
     # --- Zobrist & Bitboard Updates for Piece Movement ---
@@ -74,13 +77,11 @@ def make_move(piece_bbs: tuple, occupancy_bbs: tuple, game_state: tuple, move: n
         key ^= PIECE_SQUARE_KEYS[captured_piece_bb_idx, to_sq]
 
     # --- Handle Special Moves ---
-    if flag == SPECIAL_MOVE_FLAG_PROMOTION:
-        promo_piece_type = get_promotion_piece(move) + 1 # PROMO_KNIGHT is 0, maps to piece type 1
+    promo_piece_type = get_promotion_piece(move)
+    if promo_piece_type > 0: # It's a promotion
         promo_piece_bb_idx = side * 6 + promo_piece_type
-
         new_piece_bbs[moving_piece_bb_idx] &= ~(np.uint64(1) << to_sq)
         new_piece_bbs[promo_piece_bb_idx] |= (np.uint64(1) << to_sq)
-
         key ^= PIECE_SQUARE_KEYS[moving_piece_bb_idx, to_sq] # XOR out pawn
         key ^= PIECE_SQUARE_KEYS[promo_piece_bb_idx, to_sq]   # XOR in promoted piece
 
@@ -89,9 +90,7 @@ def make_move(piece_bbs: tuple, occupancy_bbs: tuple, game_state: tuple, move: n
         captured_piece_type = np.int8(PAWN)
         opponent_color = 1 - side
         captured_pawn_bb_idx = opponent_color * 6 + PAWN
-
         captured_pawn_sq = to_sq + (8 if side == BLACK else -8)
-
         new_piece_bbs[captured_pawn_bb_idx] &= ~(np.uint64(1) << captured_pawn_sq)
         key ^= PIECE_SQUARE_KEYS[captured_pawn_bb_idx, captured_pawn_sq]
 
@@ -99,29 +98,29 @@ def make_move(piece_bbs: tuple, occupancy_bbs: tuple, game_state: tuple, move: n
         king_side_castle = to_sq > from_sq
         rook_from_sq, rook_to_sq = ((7, 5) if king_side_castle else (0, 3)) if side == WHITE else ((63, 61) if king_side_castle else (56, 59))
         rook_bb_idx = side * 6 + ROOK
-
         new_piece_bbs[rook_bb_idx] ^= (np.uint64(1) << rook_from_sq) | (np.uint64(1) << rook_to_sq)
         key ^= PIECE_SQUARE_KEYS[rook_bb_idx, rook_from_sq]
         key ^= PIECE_SQUARE_KEYS[rook_bb_idx, rook_to_sq]
 
-    # --- Update Castling, En Passant, Side to Move Keys ---
-    new_castling_rights = current_castling_rights & CASTLING_UPDATE_MASK[from_sq] & CASTLING_UPDATE_MASK[to_sq]
+    # --- Update Castling, En Passant, Side to Move ---
 
-    if new_castling_rights != current_castling_rights:
-        key ^= CASTLING_RIGHTS_KEYS[current_castling_rights]
-        key ^= CASTLING_RIGHTS_KEYS[new_castling_rights]
-
+    # En Passant Square Logic
     new_ep_square = np.int8(-1)
     if moving_piece_type == PAWN and abs(to_sq - from_sq) == 16:
         new_ep_square = np.int8(from_sq + (8 if side == WHITE else -8))
 
-    if new_ep_square != current_ep_square:
-        if current_ep_square != -1:
-            key ^= EN_PASSANT_FILE_KEYS[current_ep_square % 8]
-        if new_ep_square != -1:
-            key ^= EN_PASSANT_FILE_KEYS[new_ep_square % 8]
+    # Zobrist Key Updates
+    if new_castling_rights != current_castling_rights:
+        key ^= CASTLING_RIGHTS_KEYS[current_castling_rights]
+        key ^= CASTLING_RIGHTS_KEYS[new_castling_rights]
 
-    key ^= SIDE_TO_MOVE_KEY
+    if current_ep_square != -1:
+        key ^= EN_PASSANT_FILE_KEYS[current_ep_square % 8]
+    if new_ep_square != -1:
+        key ^= EN_PASSANT_FILE_KEYS[new_ep_square % 8]
+
+    if (1 - side) == BLACK:
+        key ^= SIDE_TO_MOVE_KEY
 
     # --- Update Clocks & Finalize State ---
     new_halfmove_clock = np.uint8(0) if (moving_piece_type == PAWN or is_capture) else np.uint8(current_halfmove_clock + 1)
@@ -167,20 +166,39 @@ def unmake_move(piece_bbs: tuple, occupancy_bbs: tuple, game_state: tuple, move:
     move_bb = (np.uint64(1) << from_sq) | (np.uint64(1) << to_sq)
 
     moving_piece_type = find_piece_type_for_square(piece_bbs, to_sq, side)
-    if flag == SPECIAL_MOVE_FLAG_PROMOTION:
+    promo_piece_type = get_promotion_piece(move)
+    if promo_piece_type > 0:
         moving_piece_type = PAWN
     moving_piece_bb_idx = side * 6 + moving_piece_type
 
     (captured_piece_type, old_castling_rights, old_ep_square, old_halfmove_clock) = unmake_info
 
-    new_piece_bbs[moving_piece_bb_idx] ^= move_bb
+    # --- Robust Unmake Logic for Bitboards ---
+    # The previous XOR logic was flawed, especially for promotions.
+    # This new logic is explicit and handles all cases correctly.
 
-    if flag == SPECIAL_MOVE_FLAG_PROMOTION:
-        promo_piece_type = get_promotion_piece(move) + 1 # PROMO_KNIGHT is 0, maps to piece type 1
+    # 1. Restore the moving piece to its from_square.
+    # For promotions, moving_piece_type is correctly identified as PAWN.
+    new_piece_bbs[moving_piece_bb_idx] |= (np.uint64(1) << from_sq)
+
+    # 2. Handle the to_square: Remove the piece that arrived there.
+    if promo_piece_type > 0:
+        # For a promotion, the piece on to_sq is the promoted piece. Remove it.
         promo_piece_bb_idx = side * 6 + promo_piece_type
         new_piece_bbs[promo_piece_bb_idx] &= ~(np.uint64(1) << to_sq)
+    else:
+        # For a normal move, the piece on to_sq is the moving piece. Remove it.
+        new_piece_bbs[moving_piece_bb_idx] &= ~(np.uint64(1) << to_sq)
 
-    elif flag == SPECIAL_MOVE_FLAG_EN_PASSANT:
+    # 3. Restore a captured piece (if any) on the to_square.
+    # This must happen *after* step 2. En-passant is a separate case.
+    if captured_piece_type != -1 and flag != SPECIAL_MOVE_FLAG_EN_PASSANT:
+        opponent_color = 1 - side
+        captured_piece_bb_idx = opponent_color * 6 + captured_piece_type
+        new_piece_bbs[captured_piece_bb_idx] |= (np.uint64(1) << to_sq)
+
+    # 4. Handle special move rollbacks
+    if flag == SPECIAL_MOVE_FLAG_EN_PASSANT:
         opponent_color = 1 - side
         captured_pawn_bb_idx = opponent_color * 6 + PAWN
         captured_pawn_sq = to_sq + (8 if side == BLACK else -8)
@@ -191,12 +209,7 @@ def unmake_move(piece_bbs: tuple, occupancy_bbs: tuple, game_state: tuple, move:
         rook_from_sq, rook_to_sq = ((7, 5) if king_side_castle else (0, 3)) if side == WHITE else ((63, 61) if king_side_castle else (56, 59))
         rook_bb_idx = side * 6 + ROOK
         rook_move_bb = (np.uint64(1) << rook_from_sq) | (np.uint64(1) << rook_to_sq)
-        new_piece_bbs[rook_bb_idx] ^= rook_move_bb
-
-    if captured_piece_type != -1 and flag != SPECIAL_MOVE_FLAG_EN_PASSANT:
-        opponent_color = 1 - side
-        captured_piece_bb_idx = opponent_color * 6 + captured_piece_type
-        new_piece_bbs[captured_piece_bb_idx] |= (np.uint64(1) << to_sq)
+        new_piece_bbs[rook_bb_idx] ^= rook_move_bb # XOR is fine here as it's a simple swap
 
     final_piece_bbs = (
         new_piece_bbs[0], new_piece_bbs[1], new_piece_bbs[2], new_piece_bbs[3],
