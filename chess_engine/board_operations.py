@@ -254,3 +254,24 @@ def unmake_move(piece_bbs: tuple, occupancy_bbs: tuple, game_state: tuple, move:
     )
 
     return final_piece_bbs, restored_occupancy_bbs, restored_game_state
+
+@numba.jit(numba.types.Tuple((piece_bbs_signature, occupancy_bbs_signature, game_state_signature))(piece_bbs_signature, occupancy_bbs_signature, game_state_signature), nopython=True)
+def make_null_move(piece_bbs: tuple, occupancy_bbs: tuple, game_state: tuple):
+    """
+    Performs a null move: flips the side to move and clears the en passant square.
+    """
+    side_to_move, castling_rights, en_passant_square, halfmove_clock, zobrist_key = game_state
+
+    new_key = zobrist_key ^ SIDE_TO_MOVE_KEY
+    if en_passant_square != -1:
+        new_key ^= EN_PASSANT_FILE_KEYS[en_passant_square % 8]
+
+    new_game_state = (
+        np.uint8(1 - side_to_move),
+        castling_rights,
+        np.int8(-1),
+        np.uint8(0), # halfmove clock resets
+        new_key
+    )
+    
+    return piece_bbs, occupancy_bbs, new_game_state

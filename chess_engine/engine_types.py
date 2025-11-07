@@ -43,3 +43,22 @@ unmake_info_signature = numba.types.Tuple([
 """
 Numba type signature for the unmake_info tuple.
 """
+
+# --- Search Context ---
+from numba.experimental import jitclass
+from chess_engine.transposition_table import numba_tt_entry_type
+
+# Define the specification for the SearchContext jitclass
+search_context_spec = [
+    ('transposition_table', numba.types.Array(numba_tt_entry_type, 1, 'C')),
+    ('killer_moves', numba.uint16[:, :]),
+]
+
+@jitclass(search_context_spec)
+class SearchContext:
+    def __init__(self, transposition_table, killer_moves):
+        self.transposition_table = transposition_table
+        self.killer_moves = killer_moves
+
+# Create the Numba type from the class
+search_context_type = SearchContext.class_type.instance_type

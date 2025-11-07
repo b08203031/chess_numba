@@ -525,3 +525,26 @@ def generate_tactical_moves(piece_bbs, occupancy_bbs, game_state):
             bb &= (bb - np.uint64(1))
             
     return moves[:move_count]
+
+@numba.njit(numba.boolean(piece_bbs_signature, occupancy_bbs_signature, game_state_signature), cache=True)
+def is_in_check(piece_bbs, occupancy_bbs, game_state):
+    """
+    Checks if the current side to move is in check.
+    """
+    side_to_move = game_state[0]
+    king_bb = piece_bbs[5] if side_to_move == WHITE else piece_bbs[11]
+    if king_bb == 0: # Should not happen in a legal position
+        return False
+    king_sq = get_ls1b_index(king_bb)
+    return is_square_attacked(piece_bbs, occupancy_bbs, game_state, king_sq, 1 - side_to_move)
+
+@numba.njit(numba.boolean(piece_bbs_signature, numba.uint8), cache=True)
+def has_sufficient_material(piece_bbs, side_to_move):
+    """
+    Checks if the side to move has major pieces (Rook or Queen).
+    Used as a condition for Null Move Pruning.
+    """
+    if side_to_move == WHITE:
+        return (piece_bbs[3] | piece_bbs[4]) != 0
+    else: # BLACK
+        return (piece_bbs[9] | piece_bbs[10]) != 0

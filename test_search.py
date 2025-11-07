@@ -27,8 +27,8 @@ def clear_numba_cache():
 clear_numba_cache()
 
 from chess_engine.fen_parser import parse_fen
-from chess_engine.search import search_position
-from chess_engine.move import get_from_square, get_to_square
+from chess_engine.search import iterative_deepening_search
+from chess_engine.move import move_to_uci
 from chess_engine.core import SQUARE_TO_ALGEBRAIC
 
 # Maximum search depth (Ply) for arrays like killer moves
@@ -38,12 +38,14 @@ def run_search_test():
     """
     Runs a search test from the initial position and prints statistics.
     """
-    fen = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
-    depth = 5
+    fen = "2kr2r1/1bp4n/1pq1p2p/p1P5/1P3B2/P6P/5RP1/RB3QK1 b - - 4 26"
+    depth = 20
+    time_limit_ms = 10000
 
-    print("--- Starting Search Performance Test ---")
+    print("--- Starting Iterative Deepening Search Test ---")
     print(f"FEN: {fen}")
-    print(f"Depth: {depth}")
+    print(f"Max Depth: {depth}")
+    print(f"Time Limit: {time_limit_ms / 1000}s")
     print("----------------------------------------")
 
     piece_bbs, occupancy_bbs, game_state = parse_fen(fen)
@@ -57,29 +59,31 @@ def run_search_test():
 
     start_time = time.time()
     
-    best_move, best_eval, nodes_searched, quiescence_nodes, cutoffs = search_position(board_state_flat, depth, transposition_table, killer_moves)
+    best_move, best_eval, nodes_searched, quiescence_nodes, cutoffs = iterative_deepening_search(
+        board_state_flat, depth, time_limit_ms, transposition_table, killer_moves
+    )
     
     end_time = time.time()
-
     elapsed_time = end_time - start_time
-    
+
+    total_entries = len(transposition_table)
+    used_entries = np.count_nonzero(transposition_table['key'])
+    usage_percentage = (used_entries / total_entries * 100) if total_entries > 0 else 0
+
     total_nodes = nodes_searched + quiescence_nodes
     nps = int(total_nodes / elapsed_time) if elapsed_time > 0 else 0
-    
-    from_sq_alg = SQUARE_TO_ALGEBRAIC[get_from_square(best_move)]
-    to_sq_alg = SQUARE_TO_ALGEBRAIC[get_to_square(best_move)]
-
     q_node_percentage = (quiescence_nodes / total_nodes * 100) if total_nodes > 0 else 0
 
-
-    print(f"Search complete.")
-    print(f"Best move found: {from_sq_alg}{to_sq_alg} (raw: {best_move}), Evaluation: {best_eval}")
+    print("----------------------------------------")
+    print(f"Search finished in {elapsed_time:.4f} seconds.")
+    print(f"Final best move: {move_to_uci(best_move)}")
+    print(f"Final evaluation: {best_eval}")
+    print(f"TT usage: {used_entries} / {total_entries} ({usage_percentage:.2f}%)")
     print("--- Statistics ---")
     print(f"1. Nodes Searched:   {total_nodes}")
     print(f"2. Quiescence Nodes: {quiescence_nodes} ({q_node_percentage:.2f}%)")
     print(f"3. Cutoffs:          {cutoffs}")
-    print(f"4. Time Spent:       {elapsed_time:.4f} seconds")
-    print(f"5. NPS (Nodes/Sec):  {nps}")
+    print(f"4. NPS (Nodes/Sec):  {nps}")
     print("----------------------------------------")
 
 if __name__ == "__main__":

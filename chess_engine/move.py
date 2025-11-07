@@ -130,3 +130,25 @@ def get_special_move_flag(move: np.uint16) -> int:
         The special move flag of the move.
     """
     return int((move & SPECIAL_MOVE_MASK) >> SPECIAL_MOVE_SHIFT)
+
+def move_to_uci(move: np.uint16) -> str:
+    """Converts a move to UCI format."""
+    from .core import SQUARE_TO_ALGEBRAIC
+    
+    from_sq = get_from_square(move)
+    to_sq = get_to_square(move)
+    
+    uci = SQUARE_TO_ALGEBRAIC[from_sq] + SQUARE_TO_ALGEBRAIC[to_sq]
+    
+    if get_special_move_flag(move) == SPECIAL_MOVE_FLAG_PROMOTION:
+        promo_piece = get_promotion_piece(move)
+        if promo_piece == PROMO_QUEEN:
+            uci += 'q'
+        elif promo_piece == PROMO_ROOK:
+            uci += 'r'
+        elif promo_piece == PROMO_BISHOP:
+            uci += 'b'
+        elif promo_piece == PROMO_KNIGHT:
+            uci += 'n'
+            
+    return uci
