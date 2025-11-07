@@ -15,8 +15,8 @@ CASTLING_MAP = {'K': 1, 'Q': 2, 'k': 4, 'q': 8}
 # --- Algebraic to Square Index Mapping ---
 # Example: 'a1' -> 0, 'h8' -> 63
 SQUARE_MAP = {
-    chr(ord('a') + f) + str(r + 1): r * 8 + f
-    for r in range(8) for f in range(8)
+    f"{chr(ord('a') + file)}{rank + 1}": rank * 8 + file
+    for rank in range(8) for file in range(8)
 }
 
 def parse_fen(fen_string: str):

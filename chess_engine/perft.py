@@ -6,7 +6,7 @@ import time
 from chess_engine.board_operations import make_move
 from chess_engine.move_generator import generate_pseudo_legal_moves, generate_legal_moves, is_square_attacked, get_ls1b_index
 from chess_engine.fen_parser import parse_fen
-from chess_engine.types import piece_bbs_signature, occupancy_bbs_signature, game_state_signature
+from chess_engine.engine_types import piece_bbs_signature, occupancy_bbs_signature, game_state_signature
 import numba.types as nbt
 from chess_engine.move import get_from_square, get_to_square
 
@@ -62,7 +62,7 @@ def _jit_perft_divide(piece_bbs, occupancy_bbs, game_state, depth: int):
     for i in range(len(moves)):
         move = moves[i]
 
-        new_piece_bbs, new_occupancy_bbs, new_game_state, _ = make_move(piece_bbs, occupancy_bbs, game_state, move)
+        new_piece_bbs, new_occupancy_bbs, new_game_state, unmake_info = make_move(piece_bbs, occupancy_bbs, game_state, move)
 
         king_bb = new_piece_bbs[5] if side_to_move == WHITE else new_piece_bbs[11]
         if king_bb == 0:
