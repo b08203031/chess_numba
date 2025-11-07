@@ -78,9 +78,9 @@ def search(board_state, depth, alpha, beta):
             best_move = move
 
         # Alpha-beta pruning.
-        if evaluation >= beta:
-            return beta, move # Fail-hard beta cutoff
         alpha = max(alpha, evaluation)
+        if alpha >= beta:
+            break # Beta cutoff
 
     return max_eval, best_move
 

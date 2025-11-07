@@ -19,13 +19,13 @@ SPECIAL_MOVE_SHIFT = 14
 
 # --- Constants for Special Move Flags ---
 SPECIAL_MOVE_FLAG_NORMAL = np.uint16(0)
-SPECIAL_MOVE_FLAG_EN_PASSANT = np.uint16(1)
-SPECIAL_MOVE_FLAG_CASTLING = np.uint16(2)
+SPECIAL_MOVE_FLAG_PROMOTION = np.uint16(1)
+SPECIAL_MOVE_FLAG_EN_PASSANT = np.uint16(2)
+SPECIAL_MOVE_FLAG_CASTLING = np.uint16(3)
 
 # --- Constants for Promotion Pieces ---
 # These values, when shifted, will be stored in the promotion piece bits.
-# Note: Promotion is not a special move flag, but is encoded in the promotion piece bits.
-PROMO_KNIGHT, PROMO_BISHOP, PROMO_ROOK, PROMO_QUEEN = 1, 2, 3, 4
+PROMO_KNIGHT, PROMO_BISHOP, PROMO_ROOK, PROMO_QUEEN = 0, 1, 2, 3
 
 @nb.jit(nopython=True, inline='always')
 def encode_move(from_square: int, to_square: int, promotion_piece: int, special_flag: int) -> np.uint16:
