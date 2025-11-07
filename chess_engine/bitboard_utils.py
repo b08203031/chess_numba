@@ -1,4 +1,4 @@
-# chess_engine/bitboard_utils.py
+
 import numpy as np
 import numba as nb
 
@@ -19,7 +19,6 @@ def get_ls1b_index(bb):
     """
     Gets the index of the least significant 1st bit (LSB).
     This is a Numba-jitted function.
-    Uses a robust log2 method to avoid type inference issues with popcount.
     """
     if bb == 0:
         return np.uint8(64) # Should not happen, but as a safeguard
