@@ -188,6 +188,7 @@ PST_EG = np.array([
 
 NEG_INFINITY = np.int32(-999999)
 POS_INFINITY = np.int32(999999)
+MAX_QUIESCENCE_DEPTH = 8
 
 
 # =============================================================================
