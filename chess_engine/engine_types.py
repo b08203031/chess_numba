@@ -20,9 +20,13 @@ game_state_signature = nb.types.Tuple([
     nb.uint64   # zobrist_key
 ])
 
-# 4. Flattened Board State for Move Generation: A uniform tuple of 18 uint64s.
+# 4. Flattened Board State for Move Generation: A heterogeneous tuple.
 # (12 piece_bbs, 3 occupancy_bbs, castling_rights, en_passant_square, side_to_move)
-board_state_flat_signature = nb.types.UniTuple(nb.uint64, 18)
+board_state_flat_signature = nb.types.Tuple(
+    list(piece_bbs_signature.types) +       # 12 x uint64
+    list(occupancy_bbs_signature.types) +   # 3 x uint64
+    [nb.uint8, nb.int8, nb.uint8]          # castling, ep_square, side_to_move
+)
 
 # --- Official Numba Type Signature for unmake_info ---
 # Corrected the type of old_en_passant_square to int8 to handle -1.
