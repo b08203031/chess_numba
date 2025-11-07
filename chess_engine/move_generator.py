@@ -108,24 +108,26 @@ def init_sliders_attacks():
         attack_mask, relevant_bits_count = BISHOP_MASKS[sq], count_bits(BISHOP_MASKS[sq])
         for i in range(1 << relevant_bits_count):
             occ = set_occupancy(i, relevant_bits_count, attack_mask)
-            magic_index = (numpy.uint64(occ) * BISHOP_MAGIC_NUMBERS[sq]) >> numpy.uint64(64 - BISHOP_RELEVANT_BITS[sq])
+            product = int(occ) * int(BISHOP_MAGIC_NUMBERS[sq])
+            magic_index = (product & 0xFFFFFFFFFFFFFFFF) >> (64 - BISHOP_RELEVANT_BITS[sq])
             bishop_attacks[sq][magic_index] = bishop_attacks_on_the_fly(sq, occ)
         attack_mask, relevant_bits_count = ROOK_MASKS[sq], count_bits(ROOK_MASKS[sq])
         for i in range(1 << relevant_bits_count):
             occ = set_occupancy(i, relevant_bits_count, attack_mask)
-            magic_index = (numpy.uint64(occ) * ROOK_MAGIC_NUMBERS[sq]) >> numpy.uint64(64 - ROOK_RELEVANT_BITS[sq])
+            product = int(occ) * int(ROOK_MAGIC_NUMBERS[sq])
+            magic_index = (product & 0xFFFFFFFFFFFFFFFF) >> (64 - ROOK_RELEVANT_BITS[sq])
             rook_attacks[sq][magic_index] = rook_attacks_on_the_fly(sq, occ)
     return bishop_attacks, rook_attacks
-BISHOP_ATTACKS, ROOK_ATTACKS = init_sliders_attacks()
+# BISHOP_ATTACKS, ROOK_ATTACKS = init_sliders_attacks()
+BISHOP_ATTACKS = numpy.empty((64, 512), dtype=numpy.uint64)
+ROOK_ATTACKS = numpy.empty((64, 4096), dtype=numpy.uint64)
 
 @nb.njit(nb.uint64(nb.uint8, nb.uint64), cache=True)
 def get_bishop_attacks(sq, occ):
-    occ &= BISHOP_MASKS[sq]; occ *= BISHOP_MAGIC_NUMBERS[sq]; occ >>= numpy.uint64(64-BISHOP_RELEVANT_BITS[sq])
-    return BISHOP_ATTACKS[sq][occ]
+    return bishop_attacks_on_the_fly(sq, occ)
 @nb.njit(nb.uint64(nb.uint8, nb.uint64), cache=True)
 def get_rook_attacks(sq, occ):
-    occ &= ROOK_MASKS[sq]; occ *= ROOK_MAGIC_NUMBERS[sq]; occ >>= numpy.uint64(64-ROOK_RELEVANT_BITS[sq])
-    return ROOK_ATTACKS[sq][occ]
+    return rook_attacks_on_the_fly(sq, occ)
 @nb.njit(nb.uint64(nb.uint8, nb.uint64), cache=True)
 def get_queen_attacks(sq, occ): return get_rook_attacks(sq, occ) | get_bishop_attacks(sq, occ)
 
