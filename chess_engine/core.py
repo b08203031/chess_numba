@@ -51,12 +51,7 @@ def perft(piece_bbs, occupancy_bbs, game_state, depth: int):
         return np.uint64(1)
 
     nodes = np.uint64(0)
-    side_to_move = game_state[0]
-    castling_rights = game_state[1]
-    en_passant_square = np.int8(game_state[2])
-
-    board_state_flat = piece_bbs + occupancy_bbs + (castling_rights, en_passant_square, side_to_move)
-    moves = generate_legal_moves(board_state_flat)
+    moves = generate_legal_moves(piece_bbs, occupancy_bbs, game_state)
 
     if depth == 1:
         return np.uint64(len(moves))
@@ -86,8 +81,7 @@ def _jit_perft_divide(piece_bbs, occupancy_bbs, game_state, depth: int):
     if depth == 0:
         return np.zeros((0, 2), dtype=np.uint64)
 
-    board_state_flat = piece_bbs + occupancy_bbs + (game_state[1], np.int8(game_state[2]), game_state[0])
-    moves = generate_legal_moves(board_state_flat)
+    moves = generate_legal_moves(piece_bbs, occupancy_bbs, game_state)
 
     results = np.zeros((len(moves), 2), dtype=np.uint64)
     for i in range(len(moves)):
