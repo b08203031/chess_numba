@@ -7,102 +7,126 @@ from chess_engine.evaluation import evaluate_position
 from chess_engine.move_generator import generate_legal_moves, get_ls1b_index, is_square_attacked
 from chess_engine.board_operations import make_move
 from chess_engine.move import get_to_square
+import numba as nb
+from chess_engine.constants import NEG_INFINITY, POS_INFINITY
 
-# A large number representing infinity for alpha-beta pruning
-NEG_INFINITY = -999999
-POS_INFINITY = 999999
+
 NO_MOVE = 0 # Represents an invalid or null move
 
-@numba.jit(nopython=True, cache=True)
-def search(board_state, depth, alpha, beta):
+from chess_engine.engine_types import piece_bbs_signature, occupancy_bbs_signature, game_state_signature
+
+
+# Define the return type for the _search function
+search_return_type = nb.types.Tuple([
+    nb.int32,   # evaluation
+    nb.uint16,  # best_move
+    nb.uint64,  # nodes_searched
+    nb.uint64   # cutoffs
+])
+
+@numba.njit(search_return_type(piece_bbs_signature, occupancy_bbs_signature, game_state_signature, nb.int32, nb.int32, nb.int32), cache=True)
+def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta):
     """
     The core negamax search function with alpha-beta pruning.
-    This function is fully Numba-compatible.
+    This function is fully Numba-compatible and uses the refactored board state.
     """
+    nodes_searched = np.uint64(1)
+    cutoffs = np.uint64(0)
+
     # 1. Base Case: If we've reached the desired depth, evaluate the position.
     if depth == 0:
-        return evaluate_position(board_state), NO_MOVE
+        eval_score = evaluate_position(piece_bbs, occupancy_bbs, game_state)
+        return eval_score, NO_MOVE, nodes_searched, cutoffs
 
     # 2. Generate all legal moves for the current position.
-    moves = generate_legal_moves(board_state)
+    moves = generate_legal_moves(piece_bbs, occupancy_bbs, game_state)
 
     # If there are no legal moves, it's either checkmate or stalemate.
     if len(moves) == 0:
-        # Check if the king is currently in check
-        side_to_move = board_state[17]
-        king_bb = board_state[5] if side_to_move == 0 else board_state[11]
+        side_to_move = game_state[0]
+        king_bb = piece_bbs[5] if side_to_move == 0 else piece_bbs[11]
         king_sq = get_ls1b_index(king_bb)
 
-        if is_square_attacked(king_sq, 1 - side_to_move, board_state):
-            # CHECKMATE: The current player is in check and has no legal moves.
-            # This is a loss for the current player. Return a very low score.
-            return NEG_INFINITY, NO_MOVE
+        if is_square_attacked(piece_bbs, occupancy_bbs, game_state, king_sq, 1 - side_to_move):
+            # CHECKMATE: Loss for the current player.
+            return NEG_INFINITY, NO_MOVE, nodes_searched, cutoffs
         else:
-            # STALEMATE: The current player is not in check but has no legal moves.
-            # This is a draw. Return a score of 0.
-            return 0, NO_MOVE
+            # STALEMATE: Draw.
+            return np.int32(0), NO_MOVE, nodes_searched, cutoffs
 
     # 3. Move Ordering (Simple version: captures first)
-    # A simple scoring system to sort moves. Higher score = better move to search first.
     move_scores = np.zeros(len(moves), dtype=np.int32)
-    (_, _, _, _, _, _, _, _, _, _, _, _, _, _, all_pieces_bb, _, _, _, _) = board_state
+    all_pieces_bb = occupancy_bbs[0] | occupancy_bbs[1]
     for i, move in enumerate(moves):
         to_sq = get_to_square(move)
-        to_bb = np.uint64(1) << to_sq
-        # If the destination square has a piece, it's a capture. Give it a higher score.
-        if (all_pieces_bb & to_bb):
-            move_scores[i] = 100 # Arbitrary high score for captures
+        if (all_pieces_bb >> to_sq) & 1:
+            move_scores[i] = 100
 
-    # Sort moves in descending order of their scores
     sorted_indices = np.argsort(move_scores)[::-1]
-    sorted_moves = moves[sorted_indices]
-
+    
     # 4. Iterate through sorted legal moves and perform the search.
-    best_move = sorted_moves[0]
+    best_move = moves[sorted_indices[0]]
     max_eval = NEG_INFINITY
 
-    for move in sorted_moves:
-        # Create a new board state by making the move.
-        new_board_state = make_move(board_state, move)
+    for i in range(len(sorted_indices)):
+        move = moves[sorted_indices[i]]
+        
+        # Make the move on new board state representations
+        new_piece_bbs, new_occupancy_bbs, new_game_state, _ = make_move(
+            piece_bbs, occupancy_bbs, game_state, move
+        )
 
-        # Recursively call search for the other player (hence the negative sign).
-        # The result of the recursive call is from the opponent's perspective.
-        evaluation, _ = search(new_board_state, depth - 1, -beta, -alpha)
-
-        # Negate the evaluation to get it back to our perspective.
+        # Recursive call with negated alpha/beta
+        evaluation, _, child_nodes, child_cutoffs = _search(
+            new_piece_bbs, new_occupancy_bbs, new_game_state, depth - 1, -beta, -alpha
+        )
+        nodes_searched += child_nodes
+        cutoffs += child_cutoffs
         evaluation = -evaluation
 
-        # Update the best evaluation and best move.
         if evaluation > max_eval:
             max_eval = evaluation
             best_move = move
 
-        # Alpha-beta pruning.
         alpha = max(alpha, evaluation)
         if alpha >= beta:
-            break # Beta cutoff
+            cutoffs += 1
+            break  # Beta cutoff
 
-    return max_eval, best_move
+    return max_eval, best_move, nodes_searched, cutoffs
 
-@numba.jit(nopython=True, cache=True)
-def find_best_move_numba(board_state, max_depth):
+# Define the return type for the numba entry point
+numba_entry_return_type = nb.types.Tuple([
+    nb.uint16,  # best_move
+    nb.int32,   # best_eval
+    nb.uint64,  # nodes_searched
+    nb.uint64   # cutoffs
+])
+
+@numba.njit(numba_entry_return_type(piece_bbs_signature, occupancy_bbs_signature, game_state_signature, nb.int32), cache=True)
+def _find_best_move_numba(piece_bbs, occupancy_bbs, game_state, max_depth):
     """
     A Numba-compatible entry point for the search.
     """
-    # Start the search from the root node.
-    best_eval, best_move = search(board_state, max_depth, NEG_INFINITY, POS_INFINITY)
-    return best_move, best_eval
+    best_eval, best_move, nodes_searched, cutoffs = _search(
+        piece_bbs, occupancy_bbs, game_state, max_depth, NEG_INFINITY, POS_INFINITY
+    )
+    return best_move, best_eval, nodes_searched, cutoffs
 
-def find_best_move(board_state, max_depth):
+def search_position(board_state, max_depth):
     """
     The top-level function to find the best move. This is the main interface.
-    It calls the Numba-compiled function.
+    It unpacks the board_state tuple and calls the Numba-compiled function.
     """
-    # Numba's first call has a compilation overhead. Subsequent calls are fast.
-    # We call the JIT'd function from this non-JIT'd wrapper.
-    best_move, best_eval = find_best_move_numba(board_state, max_depth)
+    # Unpack the board state into the structures Numba expects
+    piece_bbs = board_state[:12]
+    occupancy_bbs = board_state[12:15]
+    side_to_move, castling_rights, en_passant_square, halfmove_clock, zobrist_key = board_state[15:]
+    game_state = (side_to_move, castling_rights, en_passant_square, halfmove_clock, zobrist_key)
 
-    # Here you could add logic to print search statistics, etc.
-    print(f"Search complete. Best move found: {best_move}, Evaluation: {best_eval}")
-
-    return best_move
+    # Call the JIT'd function
+    best_move, best_eval, nodes_searched, cutoffs = _find_best_move_numba(
+        piece_bbs, occupancy_bbs, game_state, max_depth
+    )
+    
+    return best_move, best_eval, nodes_searched, cutoffs
