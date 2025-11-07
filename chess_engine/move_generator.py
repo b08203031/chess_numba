@@ -29,10 +29,17 @@ WHITE, BLACK = 0, 1
 BB_SQUARES = numpy.array([numpy.uint64(1) << i for i in range(64)], dtype=numpy.uint64)
 EMPTY = numpy.uint64(0)
 
-BISHOP_RELEVANT_BITS = numpy.array([6,5,5,5,5,5,5,6,5,5,5,5,5,5,5,5,5,5,7,7,7,7,5,5,5,5,7,9,9,7,5,5,5,5,7,9,9,7,5,5,5,5,7,7,7,7,5,5,5,5,5,5,5,5,5,5,6,5,5,5,5,5,5,6], dtype=numpy.uint8)
-ROOK_RELEVANT_BITS = numpy.array([12,11,11,11,11,11,11,12,11,10,10,10,10,10,10,11,11,10,10,10,10,10,10,11,11,10,10,10,10,10,10,11,11,10,10,10,10,10,10,11,11,10,10,10,10,10,10,11,11,10,10,10,10,10,10,11,12,11,11,11,11,11,11,12], dtype=numpy.uint8)
-ROOK_MAGIC_NUMBERS = numpy.array([0x8a80104000800020,0x140002000100040,0x2801880a0017001,0x100081001000420,0x200020010080420,0x3001c0002010008,0x8480008002000100,0x2080088004402900,0x800098204000,0x2024401000200040,0x100802000801000,0x120800800801000,0x208808088000400,0x2802200800400,0x2200800100020080,0x801000060821100,0x80044006422000,0x100808020004000,0x12108a0010204200,0x140848010000802,0x481828014002800,0x8094004002004100,0x4010040010010802,0x20008806104,0x100400080208000,0x2040002120081000,0x21200680100081,0x20100080080080,0x2000a00200410,0x20080800400,0x80088400100102,0x80004600042881,0x4040008040800020,0x440003000200801,0x4200011004500,0x188020010100100,0x14800401802800,0x2080040080800200,0x124080204001001,0x200046502000484,0x480400080088020,0x1000422010034000,0x30200100110040,0x100021010009,0x2002080100110004,0x202008004008002,0x20020004010100,0x2048440040820001,0x101002200408200,0x40802000401080,0x4008142004410100,0x2060820c0120200,0x1001004080100,0x20c020080040080,0x2935610830022400,0x44440041009200,0x280001040802101,0x2100190040002085,0x80c0084100102001,0x4024081001000421,0x20030a0244872,0x12001008414402,0x2006104900a0804,0x1004081002402], dtype=numpy.uint64)
-BISHOP_MAGIC_NUMBERS = numpy.array([0x40040844404084,0x2004208a004208,0x10190041080202,0x108060845042010,0x581104180800210,0x2112080446200010,0x1080820820060210,0x3c0808410220200,0x4050404440404,0x21001420088,0x24d0080801082102,0x1020a0a020400,0x40308200402,0x4011002100800,0x401484104104005,0x801010402020200,0x400210c3880100,0x404022024108200,0x810018200204102,0x4002801a02003,0x85040820080400,0x810102c808880400,0xe900410884800,0x8002020480840102,0x220200865090201,0x2010100a02021202,0x152048408022401,0x20080002081110,0x4001001021004000,0x800040400a011002,0xe4004081011002,0x1c004001012080,0x8004200962a00220,0x8422100208500202,0x2000402200300c08,0x8646020080080080,0x80020a0200100808,0x2010004880111000,0x623000a080011400,0x42008c0340209202,0x209188240001000,0x400408a884001800,0x110400a6080400,0x1840060a44020800,0x90080104000041,0x201011000808101,0x1a2208080504f080,0x8012020600211212,0x500861011240000,0x180806108200800,0x4000020e01040044,0x300000261044000a,0x802241102020002,0x20906061210001,0x5a84841004010310,0x4010801011c04,0xa010109502200,0x4a02012000,0x500201010098b028,0x8040002811040900,0x28000010020204,0x6000020202d0240,0x8918844842082200,0x401001102902002], dtype=numpy.uint64)
+# =============================================================================
+# Magic Bitboard Constants (Commented Out)
+# =============================================================================
+# BISHOP_RELEVANT_BITS = numpy.array([...])
+# ROOK_RELEVANT_BITS = numpy.array([...])
+# BISHOP_MAGIC_NUMBERS = numpy.array([...])
+# ROOK_MAGIC_NUMBERS = numpy.array([...])
+
+# =============================================================================
+# Helper Functions
+# =============================================================================
 
 @nb.njit(nb.int32(nb.uint64), cache=True)
 def count_bits(bb):
@@ -41,27 +48,23 @@ def count_bits(bb):
         bb &= (bb - numpy.uint64(1))
         c += 1
     return c
+
 @nb.njit(nb.uint8(nb.uint64), cache=True)
 def get_ls1b_index(bb):
     return count_bits((bb & -bb) - numpy.uint64(1))
 
-@nb.njit(nb.uint64(nb.uint8), cache=True)
-def mask_bishop_attacks(sq):
-    attacks, tr, tf = EMPTY, sq // 8, sq % 8
-    for r, f in zip(range(tr + 1, 7), range(tf + 1, 7)): attacks |= BB_SQUARES[r * 8 + f]
-    for r, f in zip(range(tr - 1, 0, -1), range(tf + 1, 7)): attacks |= BB_SQUARES[r * 8 + f]
-    for r, f in zip(range(tr + 1, 7), range(tf - 1, 0, -1)): attacks |= BB_SQUARES[r * 8 + f]
-    for r, f in zip(range(tr - 1, 0, -1), range(tf - 1, 0, -1)): attacks |= BB_SQUARES[r * 8 + f]
-    return attacks
-@nb.njit(nb.uint64(nb.uint8), cache=True)
-def mask_rook_attacks(sq):
-    attacks, tr, tf = EMPTY, sq // 8, sq % 8
-    for r in range(tr + 1, 7): attacks |= BB_SQUARES[r * 8 + tf]
-    for r in range(tr - 1, 0, -1): attacks |= BB_SQUARES[r * 8 + tf]
-    for f in range(tf + 1, 7): attacks |= BB_SQUARES[tr * 8 + f]
-    for f in range(tf - 1, 0, -1): attacks |= BB_SQUARES[tr * 8 + f]
-    return attacks
-BISHOP_MASKS, ROOK_MASKS = (numpy.fromiter((mask_bishop_attacks(sq) for sq in range(64)), dtype=numpy.uint64), numpy.fromiter((mask_rook_attacks(sq) for sq in range(64)), dtype=numpy.uint64))
+# =============================================================================
+# Attack Generation
+# =============================================================================
+
+# @nb.njit(nb.uint64(nb.uint8), cache=True)
+# def mask_bishop_attacks(sq):
+#     ...
+
+# @nb.njit(nb.uint64(nb.uint8), cache=True)
+# def mask_rook_attacks(sq):
+#     ...
+
 @nb.njit(nb.uint64(nb.uint8, nb.uint64), cache=True)
 def bishop_attacks_on_the_fly(sq, block):
     attacks, tr, tf = EMPTY, sq // 8, sq % 8
@@ -78,6 +81,7 @@ def bishop_attacks_on_the_fly(sq, block):
         attacks |= BB_SQUARES[r*8+f]
         if BB_SQUARES[r*8+f] & block: break
     return attacks
+
 @nb.njit(nb.uint64(nb.uint8, nb.uint64), cache=True)
 def rook_attacks_on_the_fly(sq, block):
     attacks, tr, tf = EMPTY, sq // 8, sq % 8
@@ -94,38 +98,22 @@ def rook_attacks_on_the_fly(sq, block):
         attacks |= BB_SQUARES[tr*8+f]
         if BB_SQUARES[tr*8+f] & block: break
     return attacks
-@nb.njit(nb.uint64(nb.int32, nb.uint8, nb.uint64), cache=True)
-def set_occupancy(index, bits_in_mask, attack_mask):
-    occupancy = EMPTY
-    for count in range(bits_in_mask):
-        sq = get_ls1b_index(attack_mask)
-        attack_mask &= ~BB_SQUARES[sq]
-        if index & (1 << count): occupancy |= BB_SQUARES[sq]
-    return occupancy
-def init_sliders_attacks():
-    bishop_attacks, rook_attacks = numpy.empty((64, 512), dtype=numpy.uint64), numpy.empty((64, 4096), dtype=numpy.uint64)
-    for sq in range(64):
-        attack_mask, relevant_bits_count = BISHOP_MASKS[sq], count_bits(BISHOP_MASKS[sq])
-        for i in range(1 << relevant_bits_count):
-            occ = set_occupancy(i, relevant_bits_count, attack_mask)
-            magic_index = (occ * BISHOP_MAGIC_NUMBERS[sq]) >> numpy.uint64(64 - BISHOP_RELEVANT_BITS[sq])
-            bishop_attacks[sq][magic_index] = bishop_attacks_on_the_fly(sq, occ)
-        attack_mask, relevant_bits_count = ROOK_MASKS[sq], count_bits(ROOK_MASKS[sq])
-        for i in range(1 << relevant_bits_count):
-            occ = set_occupancy(i, relevant_bits_count, attack_mask)
-            magic_index = (occ * ROOK_MAGIC_NUMBERS[sq]) >> numpy.uint64(64 - ROOK_RELEVANT_BITS[sq])
-            rook_attacks[sq][magic_index] = rook_attacks_on_the_fly(sq, occ)
-    return bishop_attacks, rook_attacks
-BISHOP_ATTACKS, ROOK_ATTACKS = init_sliders_attacks()
+
+# @nb.njit(nb.uint64(nb.int32, nb.uint8, nb.uint64), cache=True)
+# def set_occupancy(index, bits_in_mask, attack_mask):
+#     ...
+
+# def init_sliders_attacks():
+#     ...
+
+# BISHOP_MASKS, ROOK_MASKS, BISHOP_ATTACKS, ROOK_ATTACKS = init_sliders_attacks()
 
 @nb.njit(nb.uint64(nb.uint8, nb.uint64), cache=True)
 def get_bishop_attacks(sq, occ):
-    occ &= BISHOP_MASKS[sq]; occ *= BISHOP_MAGIC_NUMBERS[sq]; occ >>= numpy.uint64(64-BISHOP_RELEVANT_BITS[sq])
-    return BISHOP_ATTACKS[sq][occ]
+    return bishop_attacks_on_the_fly(sq, occ)
 @nb.njit(nb.uint64(nb.uint8, nb.uint64), cache=True)
 def get_rook_attacks(sq, occ):
-    occ &= ROOK_MASKS[sq]; occ *= ROOK_MAGIC_NUMBERS[sq]; occ >>= numpy.uint64(64-ROOK_RELEVANT_BITS[sq])
-    return ROOK_ATTACKS[sq][occ]
+    return rook_attacks_on_the_fly(sq, occ)
 @nb.njit(nb.uint64(nb.uint8, nb.uint64), cache=True)
 def get_queen_attacks(sq, occ): return get_rook_attacks(sq, occ) | get_bishop_attacks(sq, occ)
 
@@ -307,40 +295,24 @@ def generate_legal_moves(board_state):
     legal_moves = numpy.zeros(256, dtype=numpy.uint16)
     legal_move_count = 0
 
-    # Unpack the original side to move
-    # Note: board_state[17] is side_to_move
     side_that_moved = board_state[17]
-
-    # Keep the original bitboard tuples for make_move
     original_piece_bbs = board_state[0:12]
     original_occupancy_bbs = board_state[12:15]
-    # Reconstruct the game_state tuple for make_move
     original_game_state = (board_state[17], board_state[15], numpy.int8(board_state[16]), 0, numpy.uint64(0))
 
     for i in range(len(pseudo_legal_moves)):
         move = pseudo_legal_moves[i]
-
-        # Call make_move and correctly capture all return values
         new_piece_bbs, new_occupancy_bbs, new_game_state, _ = make_move(
             original_piece_bbs, original_occupancy_bbs, original_game_state, move
         )
 
-        # --- This is the key fix ---
-        # Construct the new flat board state for is_square_attacked
-        # using the CORRECT occupancy bitboards returned by make_move.
         new_board_state_flat = new_piece_bbs + new_occupancy_bbs + (new_game_state[1], new_game_state[2], new_game_state[0])
-
-        # Find the king of the side that just moved
         king_bb = new_piece_bbs[5] if side_that_moved == WHITE else new_piece_bbs[11]
 
-        # This can happen in illegal positions, but good practice for Perft
         if king_bb == 0:
             continue
 
         king_sq = get_ls1b_index(king_bb)
-
-        # Check if the king is attacked by the NEW side to move
-        # new_game_state[0] is the new side_to_move
         if not is_square_attacked(king_sq, new_game_state[0], new_board_state_flat):
             legal_moves[legal_move_count] = move
             legal_move_count += 1
