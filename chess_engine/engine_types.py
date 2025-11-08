@@ -38,7 +38,8 @@ unmake_info_signature = numba.types.Tuple([
     numba.int8,    # captured_piece_type
     numba.uint8,   # old_castling_rights
     numba.int8,    # old_en_passant_square
-    numba.uint8    # old_halfmove_clock
+    numba.uint8,   # old_halfmove_clock
+    numba.uint64   # old_zobrist_key
 ])
 """
 Numba type signature for the unmake_info tuple.
