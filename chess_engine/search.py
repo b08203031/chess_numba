@@ -17,10 +17,11 @@ from chess_engine.move import (
 import numba as nb
 from chess_engine.constants import (
     BB_SQUARES, MG_MATERIAL_VALUES, INFINITY, MAX_QUIESCENCE_DEPTH, ASPIRATION_WINDOW_SIZE,
-    NULL_MOVE_REDUCTION, MAX_PLY, LMR_MIN_DEPTH, LMR_MIN_QUIET_MOVE_INDEX, LMR_REDUCTION
+    NULL_MOVE_REDUCTION, MAX_PLY, LMR_MIN_DEPTH, LMR_MIN_QUIET_MOVE_INDEX, LMR_REDUCTION, SEE_THRESHOLD
 )
 from chess_engine.bitboard_utils import find_piece_type_on_square
 from chess_engine.debug_utils import log_info
+from chess_engine.see import see
 
 # Import TT components
 from chess_engine.transposition_table import (
@@ -201,6 +202,14 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
     quiet_move_counter = 0
 
     for i, move in enumerate(sorted_moves):
+        # --- Static Exchange Evaluation (SEE) Pruning ---
+        opponent_pieces_bb = occupancy_bbs[1] if game_state[0] == 0 else occupancy_bbs[0]
+        is_capture = (opponent_pieces_bb & BB_SQUARES[get_to_square(move)]) != 0
+        
+        if is_capture:
+            if see(piece_bbs, occupancy_bbs, game_state, get_from_square(move), get_to_square(move)) < SEE_THRESHOLD:
+                continue
+
         new_piece_bbs, new_occupancy_bbs, new_game_state, _ = make_move(
             piece_bbs, occupancy_bbs, game_state, move
         )

@@ -234,6 +234,8 @@ LMR_MIN_DEPTH = 3           # Minimum depth to apply LMR
 LMR_MIN_QUIET_MOVE_INDEX = 4 # Minimum number of quiet moves before LMR
 LMR_REDUCTION = 2           # Depth reduction for LMR
 
+# --- Static Exchange Evaluation (SEE) Threshold ---
+SEE_THRESHOLD = 0  # centipawns
 
 # =============================================================================
 # --- Bitboard Utilities Constants ---
