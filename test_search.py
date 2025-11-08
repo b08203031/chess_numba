@@ -62,7 +62,9 @@ def run_search_test():
 
     start_time = time.time()
     
-    best_move, best_eval, nodes_searched, quiescence_nodes, cutoffs = iterative_deepening_search(
+    # Unpack all 12 return values from the search function
+    (best_move, best_eval, nodes_searched, quiescence_nodes, cutoffs, tt_hits,
+     last_completed_depth, total_nmc, total_fp, total_ru, total_qdp, total_qsp) = iterative_deepening_search(
         board_state_flat, depth, time_limit_ms, transposition_table, killer_moves
     )
     
