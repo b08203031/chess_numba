@@ -187,9 +187,19 @@ PST_EG = np.array([
 # =============================================================================
 
 INFINITY = 30000  # A large number, bigger than any possible evaluation
+MAX_PLY = 64 # Max search depth to avoid infinite recursion
+
+# --- Aspiration Windows ---
 ASPIRATION_WINDOW_SIZE = 100 # centipawns
+
+# --- Pruning Techniques ---
 NULL_MOVE_REDUCTION = 2
 MAX_QUIESCENCE_DEPTH = 8
+
+# Late Move Reductions (LMR)
+LMR_MIN_DEPTH = 3           # Minimum depth to apply LMR
+LMR_MIN_QUIET_MOVE_INDEX = 4 # Minimum number of quiet moves before LMR
+LMR_REDUCTION = 2           # Depth reduction for LMR
 
 
 # =============================================================================
