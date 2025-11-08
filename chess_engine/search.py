@@ -10,11 +10,14 @@ from chess_engine.move_generator import (
 )
 from chess_engine.zobrist import get_lsb_index
 from chess_engine.board_operations import make_move, make_null_move
-from chess_engine.move import get_to_square, get_from_square, get_special_move_flag, SPECIAL_MOVE_FLAG_EN_PASSANT
+from chess_engine.move import (
+    get_to_square, get_from_square, get_special_move_flag, 
+    SPECIAL_MOVE_FLAG_EN_PASSANT, SPECIAL_MOVE_FLAG_PROMOTION
+)
 import numba as nb
 from chess_engine.constants import (
     BB_SQUARES, MG_MATERIAL_VALUES, INFINITY, MAX_QUIESCENCE_DEPTH, ASPIRATION_WINDOW_SIZE,
-    NULL_MOVE_REDUCTION
+    NULL_MOVE_REDUCTION, MAX_PLY, LMR_MIN_DEPTH, LMR_MIN_QUIET_MOVE_INDEX, LMR_REDUCTION
 )
 from chess_engine.bitboard_utils import find_piece_type_on_square
 from chess_engine.debug_utils import log_info
@@ -145,6 +148,9 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
     quiescence_nodes = np.uint64(0)
     cutoffs = np.uint64(0)
 
+    if ply >= MAX_PLY:
+        return evaluate_position(piece_bbs, occupancy_bbs, game_state), NO_MOVE, nodes_searched, quiescence_nodes, cutoffs
+
     original_alpha = alpha
     zobrist_key = game_state[4]
 
@@ -161,17 +167,16 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
             return tt_entry['score'], tt_entry['best_move'], nodes_searched, quiescence_nodes, cutoffs
         tt_move = tt_entry['best_move']
 
+    is_currently_in_check = is_in_check(piece_bbs, occupancy_bbs, game_state)
+
     # --- Null Move Pruning (NMP) ---
-    if depth >= 3 and not is_in_check(piece_bbs, occupancy_bbs, game_state) and has_sufficient_material(piece_bbs, game_state[0]):
+    if depth >= 3 and not is_currently_in_check and has_sufficient_material(piece_bbs, game_state[0]):
         null_move_piece_bbs, null_move_occupancy_bbs, null_move_game_state = make_null_move(piece_bbs, occupancy_bbs, game_state)
         
         null_move_score, _, _, _, _ = _search(
             null_move_piece_bbs, null_move_occupancy_bbs, null_move_game_state,
             depth - 1 - NULL_MOVE_REDUCTION,
-            -beta,
-            -beta + 1,
-            search_context,
-            ply + 1
+            -beta, -beta + 1, search_context, ply + 1
         )
         null_move_score = -null_move_score
 
@@ -184,10 +189,7 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
 
     moves = generate_legal_moves(piece_bbs, occupancy_bbs, game_state)
     if len(moves) == 0:
-        side_to_move = game_state[0]
-        king_bb = piece_bbs[5] if side_to_move == 0 else piece_bbs[11]
-        king_sq = get_lsb_index(king_bb)
-        if is_square_attacked(piece_bbs, occupancy_bbs, game_state, king_sq, 1 - side_to_move):
+        if is_currently_in_check:
             return -INFINITY, NO_MOVE, nodes_searched, quiescence_nodes, cutoffs
         else:
             return np.int32(0), NO_MOVE, nodes_searched, quiescence_nodes, cutoffs
@@ -196,18 +198,57 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
     
     best_move = NO_MOVE
     max_eval = -INFINITY
+    quiet_move_counter = 0
 
-    for move in sorted_moves:
+    for i, move in enumerate(sorted_moves):
         new_piece_bbs, new_occupancy_bbs, new_game_state, _ = make_move(
             piece_bbs, occupancy_bbs, game_state, move
         )
-        evaluation, _, child_nodes, child_q_nodes, child_cutoffs = _search(
-            new_piece_bbs, new_occupancy_bbs, new_game_state, depth - 1, -beta, -alpha, search_context, ply + 1
-        )
-        nodes_searched += child_nodes
-        quiescence_nodes += child_q_nodes
-        cutoffs += child_cutoffs
-        evaluation = -evaluation
+        
+        is_giving_check = is_in_check(new_piece_bbs, new_occupancy_bbs, new_game_state)
+
+        # --- Check Extensions ---
+        search_depth = depth - 1
+        if is_giving_check:
+             search_depth += 1
+
+        opponent_pieces_bb = occupancy_bbs[1] if game_state[0] == 0 else occupancy_bbs[0]
+        is_capture = (opponent_pieces_bb & BB_SQUARES[get_to_square(move)]) != 0
+        is_promotion = get_special_move_flag(move) == SPECIAL_MOVE_FLAG_PROMOTION
+        is_quiet_move = not is_capture and not is_promotion and not is_giving_check
+
+        evaluation = 0
+        
+        # --- Late Move Reductions (LMR) ---
+        if depth >= LMR_MIN_DEPTH and is_quiet_move and quiet_move_counter >= LMR_MIN_QUIET_MOVE_INDEX:
+            # First, search with a reduced depth and full window, as per user specification
+            reduced_depth = search_depth - LMR_REDUCTION
+            evaluation, _, child_nodes, child_q_nodes, child_cutoffs = _search(
+                new_piece_bbs, new_occupancy_bbs, new_game_state, reduced_depth, -beta, -alpha, search_context, ply + 1
+            )
+            nodes_searched += child_nodes
+            quiescence_nodes += child_q_nodes
+            cutoffs += child_cutoffs
+            evaluation = -evaluation
+            
+            # If the reduced search is promising, re-search with the full depth
+            if evaluation > alpha:
+                evaluation, _, child_nodes, child_q_nodes, child_cutoffs = _search(
+                    new_piece_bbs, new_occupancy_bbs, new_game_state, search_depth, -beta, -alpha, search_context, ply + 1
+                )
+                nodes_searched += child_nodes
+                quiescence_nodes += child_q_nodes
+                cutoffs += child_cutoffs
+                evaluation = -evaluation
+        else:
+            # Perform a full-depth search for promising moves
+            evaluation, _, child_nodes, child_q_nodes, child_cutoffs = _search(
+                new_piece_bbs, new_occupancy_bbs, new_game_state, search_depth, -beta, -alpha, search_context, ply + 1
+            )
+            nodes_searched += child_nodes
+            quiescence_nodes += child_q_nodes
+            cutoffs += child_cutoffs
+            evaluation = -evaluation
 
         if evaluation > max_eval:
             max_eval = evaluation
@@ -216,14 +257,14 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
         alpha = max(alpha, evaluation)
         if alpha >= beta:
             cutoffs += 1
-            opponent_pieces_bb = occupancy_bbs[1] if game_state[0] == 0 else occupancy_bbs[0]
-            is_capture = (opponent_pieces_bb & BB_SQUARES[get_to_square(move)]) != 0
-            is_en_passant = get_special_move_flag(move) == SPECIAL_MOVE_FLAG_EN_PASSANT
-            if not is_capture and not is_en_passant:
+            if is_quiet_move:
                 if move != search_context.killer_moves[ply, 0]:
                     search_context.killer_moves[ply, 1] = search_context.killer_moves[ply, 0]
                     search_context.killer_moves[ply, 0] = move
             break
+        
+        if is_quiet_move:
+            quiet_move_counter += 1
 
     if max_eval <= original_alpha:
         final_flag = TT_FLAG_ALPHA
