@@ -8,6 +8,7 @@ from pathlib import Path
 from chess_engine.transposition_table import TT_SIZE_MB, create_transposition_table, clear_transposition_table
 transposition_table = create_transposition_table(TT_SIZE_MB)
 
+from chess_engine.debug_utils import log_info
 
 def clear_numba_cache():
     """
@@ -22,8 +23,6 @@ def clear_numba_cache():
             log_info(f"Removing cache directory: {cache_dir}")
             shutil.rmtree(cache_dir)
     log_info("--- Cache Cleared ---")
-
-from chess_engine.debug_utils import log_info
 
 # Clear cache before importing the engine to avoid stale cache issues
 clear_numba_cache()

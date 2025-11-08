@@ -1,5 +1,5 @@
 import numpy as np
-import numba
+import numba as nb
 from chess_engine.constants import BB_SQUARES
 from chess_engine.engine_types import piece_bbs_signature
 
@@ -40,7 +40,7 @@ def _init_file_masks():
 
 FILE_MASKS = _init_file_masks()
 
-@numba.njit(numba.int8(piece_bbs_signature, numba.uint8), cache=True)
+@nb.njit(nb.int8(piece_bbs_signature, nb.uint8), cache=True)
 def find_piece_type_on_square(piece_bbs, square):
     """
     Finds the piece type (0-11) on a given square.
@@ -49,18 +49,17 @@ def find_piece_type_on_square(piece_bbs, square):
     bb_square = BB_SQUARES[square]
     for piece_type in range(12):
         if piece_bbs[piece_type] & bb_square:
-            return numba.int8(piece_type)
-    return numba.int8(-1)
+            return nb.int8(piece_type)
+    return nb.int8(-1)
 
-@numba.njit(numba.int32(numba.uint64), cache=True)
-def count_bits(bb):
+@nb.njit(nb.int32(nb.uint64), cache=True)
+def count_bits(bb: np.uint64) -> np.int32:
     """
-    Counts the number of set bits in a bitboard (popcount).
-    This is a Numba-jitted function.
+    Counts the number of set bits in a uint64 bitboard using SWAR.
+    This is an O(1) constant-time operation.
     """
-    c = 0
-    while bb > 0:
-        bb &= (bb - np.uint64(1))
-        c += 1
-    return c
-
+    # A series of parallel bitwise operations
+    bb = bb - ((bb >> np.uint64(1)) & np.uint64(0x5555555555555555))
+    bb = (bb & np.uint64(0x3333333333333333)) + ((bb >> np.uint64(2)) & np.uint64(0x3333333333333333))
+    bb = (bb + (bb >> np.uint64(4))) & np.uint64(0x0F0F0F0F0F0F0F0F)
+    return np.int32((bb * np.uint64(0x0101010101010101)) >> np.uint64(56))
