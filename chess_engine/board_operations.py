@@ -82,8 +82,8 @@ def make_move(piece_bbs: tuple, occupancy_bbs: tuple, game_state: tuple, move: n
     captured_piece_type = np.int8(-1)
 
     # --- Zobrist & Bitboard Updates for Piece Movement ---
-    key ^= PIECE_SQUARE_KEYS[moving_piece_bb_idx, from_sq]
-    key ^= PIECE_SQUARE_KEYS[moving_piece_bb_idx, to_sq]
+    key = np.uint64(key) ^ PIECE_SQUARE_KEYS[moving_piece_bb_idx, from_sq]
+    key = np.uint64(key) ^ PIECE_SQUARE_KEYS[moving_piece_bb_idx, to_sq]
     new_piece_bbs[moving_piece_bb_idx] ^= (np.uint64(1) << from_sq) | (np.uint64(1) << to_sq)
 
     is_capture = False
@@ -94,7 +94,7 @@ def make_move(piece_bbs: tuple, occupancy_bbs: tuple, game_state: tuple, move: n
         captured_piece_bb_idx = opponent_color * 6 + captured_piece_type
 
         new_piece_bbs[captured_piece_bb_idx] &= ~(np.uint64(1) << to_sq)
-        key ^= PIECE_SQUARE_KEYS[captured_piece_bb_idx, to_sq]
+        key = np.uint64(key) ^ PIECE_SQUARE_KEYS[captured_piece_bb_idx, to_sq]
 
     # --- Handle Special Moves ---
     if flag == SPECIAL_MOVE_FLAG_PROMOTION:
@@ -104,8 +104,8 @@ def make_move(piece_bbs: tuple, occupancy_bbs: tuple, game_state: tuple, move: n
         new_piece_bbs[moving_piece_bb_idx] &= ~(np.uint64(1) << to_sq)
         new_piece_bbs[promo_piece_bb_idx] |= (np.uint64(1) << to_sq)
 
-        key ^= PIECE_SQUARE_KEYS[moving_piece_bb_idx, to_sq] # XOR out pawn
-        key ^= PIECE_SQUARE_KEYS[promo_piece_bb_idx, to_sq]   # XOR in promoted piece
+        key = np.uint64(key) ^ PIECE_SQUARE_KEYS[moving_piece_bb_idx, to_sq] # XOR out pawn
+        key = np.uint64(key) ^ PIECE_SQUARE_KEYS[promo_piece_bb_idx, to_sq]   # XOR in promoted piece
 
     elif flag == SPECIAL_MOVE_FLAG_EN_PASSANT:
         is_capture = True
@@ -116,7 +116,7 @@ def make_move(piece_bbs: tuple, occupancy_bbs: tuple, game_state: tuple, move: n
         captured_pawn_sq = to_sq + (8 if side == BLACK else -8)
 
         new_piece_bbs[captured_pawn_bb_idx] &= ~(np.uint64(1) << captured_pawn_sq)
-        key ^= PIECE_SQUARE_KEYS[captured_pawn_bb_idx, captured_pawn_sq]
+        key = np.uint64(key) ^ PIECE_SQUARE_KEYS[captured_pawn_bb_idx, captured_pawn_sq]
 
     elif flag == SPECIAL_MOVE_FLAG_CASTLING:
         king_side_castle = to_sq > from_sq
@@ -124,15 +124,15 @@ def make_move(piece_bbs: tuple, occupancy_bbs: tuple, game_state: tuple, move: n
         rook_bb_idx = side * 6 + ROOK
 
         new_piece_bbs[rook_bb_idx] ^= (np.uint64(1) << rook_from_sq) | (np.uint64(1) << rook_to_sq)
-        key ^= PIECE_SQUARE_KEYS[rook_bb_idx, rook_from_sq]
-        key ^= PIECE_SQUARE_KEYS[rook_bb_idx, rook_to_sq]
+        key = np.uint64(key) ^ PIECE_SQUARE_KEYS[rook_bb_idx, rook_from_sq]
+        key = np.uint64(key) ^ PIECE_SQUARE_KEYS[rook_bb_idx, rook_to_sq]
 
     # --- Update Castling, En Passant, Side to Move Keys ---
     new_castling_rights = current_castling_rights & CASTLING_UPDATE_MASK[from_sq] & CASTLING_UPDATE_MASK[to_sq]
 
     if new_castling_rights != current_castling_rights:
-        key ^= CASTLING_RIGHTS_KEYS[current_castling_rights]
-        key ^= CASTLING_RIGHTS_KEYS[new_castling_rights]
+        key = np.uint64(key) ^ CASTLING_RIGHTS_KEYS[current_castling_rights]
+        key = np.uint64(key) ^ CASTLING_RIGHTS_KEYS[new_castling_rights]
 
     # --- En Passant Square Calculation (Rewritten for Numba compatibility) ---
     new_ep_square = np.int8(-1)
@@ -146,11 +146,11 @@ def make_move(piece_bbs: tuple, occupancy_bbs: tuple, game_state: tuple, move: n
 
     if new_ep_square != current_ep_square:
         if current_ep_square != -1:
-            key ^= EN_PASSANT_FILE_KEYS[current_ep_square % 8]
+            key = np.uint64(key) ^ EN_PASSANT_FILE_KEYS[current_ep_square % 8]
         if new_ep_square != -1:
-            key ^= EN_PASSANT_FILE_KEYS[new_ep_square % 8]
+            key = np.uint64(key) ^ EN_PASSANT_FILE_KEYS[new_ep_square % 8]
 
-    key ^= SIDE_TO_MOVE_KEY
+    key = np.uint64(key) ^ SIDE_TO_MOVE_KEY
 
     # --- Update Clocks & Finalize State ---
     new_halfmove_clock = np.uint8(0) if (moving_piece_type == PAWN or is_capture) else np.uint8(current_halfmove_clock + 1)
@@ -281,9 +281,9 @@ def make_null_move(piece_bbs: tuple, occupancy_bbs: tuple, game_state: tuple):
     """
     side_to_move, castling_rights, en_passant_square, halfmove_clock, zobrist_key = game_state
 
-    new_key = zobrist_key ^ SIDE_TO_MOVE_KEY
+    new_key = np.uint64(zobrist_key) ^ SIDE_TO_MOVE_KEY
     if en_passant_square != -1:
-        new_key ^= EN_PASSANT_FILE_KEYS[en_passant_square % 8]
+        new_key = np.uint64(new_key) ^ EN_PASSANT_FILE_KEYS[en_passant_square % 8]
 
     new_game_state = (
         np.uint8(1 - side_to_move),
