@@ -182,6 +182,39 @@ PST_EG = np.array([
     PAWN_PST_EG, KNIGHT_PST_EG, BISHOP_PST_EG, ROOK_PST_EG, QUEEN_PST_EG, KING_PST_EG
 ])
 
+
+# =============================================================================
+# --- King Safety Constants ---
+# =============================================================================
+# These values are added to the middlegame score. Endgame scores are all 0.
+
+# --- Pawn Shield ---
+# Bonus for having pawns in front of the king.
+# Index 0: Pawn on its starting rank (e.g., g2 for white king on g1)
+# Index 1: Pawn pushed one square (e.g., g3 for white king on g1)
+PAWN_SHIELD_BONUS = np.array([
+    [ 25, 10],  # MG, EG for perfect shield
+    [ 12,  5]   # MG, EG for advanced shield
+], dtype=np.int32)
+
+
+# --- Semi-Open Files near King ---
+# Penalty for semi-open files in the king's zone (king's file and adjacent files).
+SEMI_OPEN_FILE_PENALTY = np.array([-15, -5], dtype=np.int32) # MG, EG
+
+
+# --- Attacker Proximity ---
+# Penalty based on which enemy pieces are in the king's 5x5 zone.
+# Weights are for: Queen, Rook, Bishop, Knight, Pawn
+ATTACKER_WEIGHTS = np.array([
+    [10, 4],  # Queen
+    [ 5, 2],  # Rook
+    [ 3, 1],  # Bishop
+    [ 3, 1],  # Knight
+    [ 2, 1]   # Pawn
+], dtype=np.int32)
+
+
 # =============================================================================
 # --- Search Constants ---
 # =============================================================================
