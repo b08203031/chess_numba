@@ -17,6 +17,7 @@ from chess_engine.constants import (
     NULL_MOVE_REDUCTION
 )
 from chess_engine.bitboard_utils import find_piece_type_on_square
+from chess_engine.debug_utils import log_info
 
 # Import TT components
 from chess_engine.transposition_table import (
@@ -276,7 +277,7 @@ def iterative_deepening_search(board_state, max_depth, max_time_ms, transpositio
         score, _, nodes, q_nodes, cutoffs = _search_wrapper(piece_bbs, occupancy_bbs, game_state, current_depth, alpha, beta, transposition_table, killer_moves)
 
         if score <= alpha or score >= beta:
-            print(f"info depth {current_depth} aspiration window failed, re-searching...")
+            log_info(f"depth {current_depth} aspiration window failed, re-searching...")
             alpha, beta = -INFINITY, INFINITY
             score, _, nodes, q_nodes, cutoffs = _search_wrapper(piece_bbs, occupancy_bbs, game_state, current_depth, alpha, beta, transposition_table, killer_moves)
 
@@ -290,7 +291,7 @@ def iterative_deepening_search(board_state, max_depth, max_time_ms, transpositio
             best_move_total = tt_entry['best_move']
             
         elapsed_time = (time.time() - start_time) * 1000
-        print(f"info depth {current_depth} score cp {score} time {int(elapsed_time)} pv {move_to_uci(best_move_total)}")
+        log_info(f"depth {current_depth} score cp {score} time {int(elapsed_time)} pv {move_to_uci(best_move_total)}")
 
         if elapsed_time > max_time_ms:
             break
