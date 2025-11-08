@@ -60,6 +60,30 @@ def format_score_for_uci(score):
         return f"cp {score}"
 
 
+# chess_engine/search.py
+# ... (imports)
+
+@nb.njit(cache=True)
+def partition(moves, scores, low, high):
+    pivot_score = scores[high]
+    i = low - 1
+    for j in range(low, high):
+        if scores[j] >= pivot_score: # Sort descending
+            i += 1
+            moves[i], moves[j] = moves[j], moves[i]
+            scores[i], scores[j] = scores[j], scores[i]
+
+    moves[i + 1], moves[high] = moves[high], moves[i + 1]
+    scores[i + 1], scores[high] = scores[high], scores[i + 1]
+    return i + 1
+
+@nb.njit(cache=True)
+def quicksort_recursive(moves, scores, low, high):
+    if low < high:
+        pi = partition(moves, scores, low, high)
+        quicksort_recursive(moves, scores, low, pi - 1)
+        quicksort_recursive(moves, scores, pi + 1, high)
+
 @nb.njit(cache=True)
 def sort_moves(piece_bbs, occupancy_bbs, game_state, moves, tt_move, killer_moves_at_ply):
     """
@@ -99,16 +123,9 @@ def sort_moves(piece_bbs, occupancy_bbs, game_state, moves, tt_move, killer_move
         
         move_scores[i] = score
 
-    for i in range(1, len(moves)):
-        key_move = moves[i]
-        key_score = move_scores[i]
-        j = i - 1
-        while j >= 0 and move_scores[j] < key_score:
-            moves[j + 1] = moves[j]
-            move_scores[j + 1] = move_scores[j]
-            j -= 1
-        moves[j + 1] = key_move
-        move_scores[j + 1] = key_score
+    # <<< FIX: Replace insertion sort with Quicksort >>>
+    if len(moves) > 1:
+        quicksort_recursive(moves, move_scores, 0, len(moves) - 1)
 
     return moves
 
