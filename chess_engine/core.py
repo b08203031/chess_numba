@@ -3,9 +3,22 @@ import numba
 import numpy as np
 
 from .board_operations import make_move
-from .move_generator import generate_legal_moves
+from .move_generator import generate_legal_moves, is_square_attacked
 from .engine_types import piece_bbs_signature, occupancy_bbs_signature, game_state_signature
 import numba.types as nbt
+from .zobrist import get_lsb_index
+
+@numba.njit(numba.boolean(piece_bbs_signature, occupancy_bbs_signature, game_state_signature), cache=True)
+def is_king_in_check(piece_bbs, occupancy_bbs, game_state):
+    """
+    Checks if the king of the current side to move is in check.
+    """
+    side_to_move = game_state[0]
+    king_bb_index = 5 if side_to_move == 0 else 11
+    king_sq = get_lsb_index(piece_bbs[king_bb_index])
+
+    # Check if the king's square is attacked by the opponent
+    return is_square_attacked(piece_bbs, occupancy_bbs, game_state, king_sq, 1 - side_to_move)
 
 PERFT_RESULTS = {
     "startpos": {

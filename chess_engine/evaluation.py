@@ -14,6 +14,8 @@ from chess_engine.constants import (
 from chess_engine.zobrist import get_lsb_index
 from chess_engine.engine_types import piece_bbs_signature, occupancy_bbs_signature, game_state_signature
 from chess_engine.bitboard_utils import count_bits, KING_ATTACK_ZONES, FILE_MASKS
+from chess_engine.core import generate_legal_moves, is_king_in_check
+from chess_engine.constants import MATE_SCORE
 
 
 @numba.njit(numba.types.UniTuple(numba.int32, 2)(piece_bbs_signature), cache=True)
@@ -161,6 +163,24 @@ def evaluate_position(piece_bbs, occupancy_bbs, game_state):
         np.int32: 以百分之一兵為單位的分數。正分表示當前執棋方有優勢。
     """
     side_to_move = game_state[0]
+
+    # --- 0. 檢查遊戲是否結束 (Check for Game Over) ---
+    # 在進行靜態評估之前，首先檢查是否存在任何合法走法。
+    legal_moves = generate_legal_moves(piece_bbs, occupancy_bbs, game_state)
+    has_legal_moves = False
+    for move in legal_moves:
+        if move != 0:
+            has_legal_moves = True
+            break
+
+    if not has_legal_moves:
+        # 如果沒有合法走法，則判斷是將死還是逼和
+        if is_king_in_check(piece_bbs, occupancy_bbs, game_state):
+            # 當前玩家被將死，這是一個極大的負分
+            return np.int32(-MATE_SCORE)
+        else:
+            # 逼和，分數為 0
+            return np.int32(0)
 
     # --- 1. 計算遊戲階段 (Game Phase) ---
     # Game Phase 用於決定中局和殘局評估的權重。
