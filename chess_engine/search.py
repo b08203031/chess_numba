@@ -218,30 +218,9 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
         is_quiet_move = not is_capture and not is_promotion and not is_giving_check
 
         evaluation = 0
-        
-        # --- Late Move Reductions (LMR) ---
-        if depth >= LMR_MIN_DEPTH and is_quiet_move and quiet_move_counter >= LMR_MIN_QUIET_MOVE_INDEX:
-            # First, search with a reduced depth and full window, as per user specification
-            reduced_depth = search_depth - LMR_REDUCTION
-            evaluation, _, child_nodes, child_q_nodes, child_cutoffs = _search(
-                new_piece_bbs, new_occupancy_bbs, new_game_state, reduced_depth, -beta, -alpha, search_context, ply + 1
-            )
-            nodes_searched += child_nodes
-            quiescence_nodes += child_q_nodes
-            cutoffs += child_cutoffs
-            evaluation = -evaluation
-            
-            # If the reduced search is promising, re-search with the full depth
-            if evaluation > alpha:
-                evaluation, _, child_nodes, child_q_nodes, child_cutoffs = _search(
-                    new_piece_bbs, new_occupancy_bbs, new_game_state, search_depth, -beta, -alpha, search_context, ply + 1
-                )
-                nodes_searched += child_nodes
-                quiescence_nodes += child_q_nodes
-                cutoffs += child_cutoffs
-                evaluation = -evaluation
-        else:
-            # Perform a full-depth search for promising moves
+
+        # --- Principal Variation Search (PVS) & Late Move Reductions (LMR) ---
+        if i == 0:  # First move (PV node): Full window search
             evaluation, _, child_nodes, child_q_nodes, child_cutoffs = _search(
                 new_piece_bbs, new_occupancy_bbs, new_game_state, search_depth, -beta, -alpha, search_context, ply + 1
             )
@@ -249,6 +228,31 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
             quiescence_nodes += child_q_nodes
             cutoffs += child_cutoffs
             evaluation = -evaluation
+        else:  # Subsequent moves (Non-PV nodes): Zero-window search
+            lmr_reduction = 0
+            if depth >= LMR_MIN_DEPTH and is_quiet_move and quiet_move_counter >= LMR_MIN_QUIET_MOVE_INDEX:
+                lmr_reduction = LMR_REDUCTION
+            
+            reduced_search_depth = search_depth - lmr_reduction
+
+            # 1. Zero-window search with potential LMR
+            evaluation, _, child_nodes, child_q_nodes, child_cutoffs = _search(
+                new_piece_bbs, new_occupancy_bbs, new_game_state, reduced_search_depth, -alpha - 1, -alpha, search_context, ply + 1
+            )
+            nodes_searched += child_nodes
+            quiescence_nodes += child_q_nodes
+            cutoffs += child_cutoffs
+            evaluation = -evaluation
+
+            # 2. If it fails high, re-search with a full window
+            if evaluation > alpha: # Corrected PVS re-search condition
+                evaluation, _, child_nodes, child_q_nodes, child_cutoffs = _search(
+                    new_piece_bbs, new_occupancy_bbs, new_game_state, search_depth, -beta, -alpha, search_context, ply + 1
+                )
+                nodes_searched += child_nodes
+                quiescence_nodes += child_q_nodes
+                cutoffs += child_cutoffs
+                evaluation = -evaluation
 
         if evaluation > max_eval:
             max_eval = evaluation

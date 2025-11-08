@@ -227,7 +227,7 @@ ASPIRATION_WINDOW_SIZE = 100 # centipawns
 
 # --- Pruning Techniques ---
 NULL_MOVE_REDUCTION = 2
-MAX_QUIESCENCE_DEPTH = 8
+MAX_QUIESCENCE_DEPTH = 6
 
 # Late Move Reductions (LMR)
 LMR_MIN_DEPTH = 3           # Minimum depth to apply LMR
