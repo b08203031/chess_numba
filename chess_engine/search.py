@@ -233,11 +233,6 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
             return (np.int32(beta), NO_MOVE, nodes_searched, quiescence_nodes, cutoffs, tt_hits,
                     null_move_cutoffs, futility_pruned, razoring_used, qs_delta_pruned, qs_see_pruned)
 
-    if depth == 0:
-        eval_score, q_nodes = quiescence_search(piece_bbs, occupancy_bbs, game_state, alpha, beta, 0)
-        return (eval_score, NO_MOVE, nodes_searched, q_nodes, cutoffs, tt_hits,
-                null_move_cutoffs, futility_pruned, razoring_used, qs_delta_pruned, qs_see_pruned)
-
     moves = generate_legal_moves(piece_bbs, occupancy_bbs, game_state)
 
     has_legal_moves = False
@@ -255,6 +250,11 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
             # Stalemate
             return (np.int32(0), NO_MOVE, nodes_searched, quiescence_nodes, cutoffs, tt_hits,
                     null_move_cutoffs, futility_pruned, razoring_used, qs_delta_pruned, qs_see_pruned)
+
+    if depth == 0:
+        eval_score, q_nodes = quiescence_search(piece_bbs, occupancy_bbs, game_state, alpha, beta, 0)
+        return (eval_score, NO_MOVE, nodes_searched, q_nodes, cutoffs, tt_hits,
+                null_move_cutoffs, futility_pruned, razoring_used, qs_delta_pruned, qs_see_pruned)
 
     sorted_moves = sort_moves(piece_bbs, occupancy_bbs, game_state, moves, tt_move, search_context.killer_moves[ply])
     
@@ -320,12 +320,6 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                 nodes_searched += child_nodes; quiescence_nodes += child_q_nodes; cutoffs += child_cutoffs; tt_hits += child_tt_hits
                 null_move_cutoffs += child_nmc; futility_pruned += child_fp; razoring_used += child_ru; qs_delta_pruned += child_qdp; qs_see_pruned += child_qsp
                 evaluation = -evaluation
-
-        # --- Mate Score Adjustment ---
-        if evaluation > MATE_IN_MAX_PLY:
-            evaluation -= 1
-        elif evaluation < -MATE_IN_MAX_PLY:
-            evaluation += 1
 
         if evaluation > max_eval:
             max_eval = evaluation
