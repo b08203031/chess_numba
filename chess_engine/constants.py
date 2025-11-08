@@ -219,8 +219,11 @@ ATTACKER_WEIGHTS = np.array([
 # --- Search Constants ---
 # =============================================================================
 
-INFINITY = 30000  # A large number, bigger than any possible evaluation
-MAX_PLY = 64 # Max search depth to avoid infinite recursion
+INFINITY = 32000
+MATE_SCORE = 30000
+MAX_PLY = 128
+MATE_IN_MAX_PLY = MATE_SCORE - MAX_PLY
+
 
 # --- Aspiration Windows ---
 ASPIRATION_WINDOW_SIZE = 100 # centipawns

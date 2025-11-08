@@ -17,7 +17,8 @@ from chess_engine.move import (
 import numba as nb
 from chess_engine.constants import (
     BB_SQUARES, MG_MATERIAL_VALUES, INFINITY, MAX_QUIESCENCE_DEPTH, ASPIRATION_WINDOW_SIZE,
-    NULL_MOVE_REDUCTION, MAX_PLY, LMR_MIN_DEPTH, LMR_MIN_QUIET_MOVE_INDEX, LMR_REDUCTION, SEE_THRESHOLD
+    NULL_MOVE_REDUCTION, MAX_PLY, LMR_MIN_DEPTH, LMR_MIN_QUIET_MOVE_INDEX, LMR_REDUCTION, SEE_THRESHOLD,
+    MATE_SCORE, MATE_IN_MAX_PLY
 )
 from chess_engine.bitboard_utils import find_piece_type_on_square
 from chess_engine.debug_utils import log_info
@@ -35,6 +36,28 @@ from chess_engine.engine_types import (
     piece_bbs_signature, occupancy_bbs_signature, game_state_signature,
     SearchContext, search_context_type
 )
+
+
+def format_score_for_uci(score):
+    """
+    Converts the internal score to a UCI-compliant string.
+    Handles centipawn scores and mate scores.
+    """
+    if abs(score) > MATE_IN_MAX_PLY:
+        # It's a mate score
+        if score > 0:
+            # Mate in X for the engine
+            moves_to_mate = MATE_SCORE - score
+            mate_in_x = (moves_to_mate + 1) // 2
+            return f"mate {mate_in_x}"
+        else:
+            # Mate in X for the opponent
+            moves_to_mate = MATE_SCORE + score
+            mate_in_x = (moves_to_mate + 1) // 2
+            return f"mate -{mate_in_x}"
+    else:
+        # It's a centipawn score
+        return f"cp {score}"
 
 
 @nb.njit(cache=True)
@@ -168,16 +191,26 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
     tt_entry = probe_tt(search_context.transposition_table, zobrist_key)
     if tt_entry['flag'] != TT_FLAG_NONE and tt_entry['depth'] >= depth:
         tt_hits += 1
+        tt_score = np.int32(tt_entry['score'])
+
+        # Adjust mate score from TT
+        if tt_score > MATE_IN_MAX_PLY:
+            tt_score += ply
+        elif tt_score < -MATE_IN_MAX_PLY:
+            tt_score -= ply
+
         if tt_entry['flag'] == TT_FLAG_EXACT:
-            return (np.int32(tt_entry['score']), tt_entry['best_move'], nodes_searched, quiescence_nodes, cutoffs, tt_hits,
+            return (tt_score, tt_entry['best_move'], nodes_searched, quiescence_nodes, cutoffs, tt_hits,
                     null_move_cutoffs, futility_pruned, razoring_used, qs_delta_pruned, qs_see_pruned)
         elif tt_entry['flag'] == TT_FLAG_ALPHA:
-            beta = min(beta, np.int32(tt_entry['score']))
+            beta = min(beta, tt_score)
         elif tt_entry['flag'] == TT_FLAG_BETA:
-            alpha = max(alpha, np.int32(tt_entry['score']))
+            alpha = max(alpha, tt_score)
+
         if alpha >= beta:
-            return (np.int32(tt_entry['score']), tt_entry['best_move'], nodes_searched, quiescence_nodes, cutoffs, tt_hits,
+            return (tt_score, tt_entry['best_move'], nodes_searched, quiescence_nodes, cutoffs, tt_hits,
                     null_move_cutoffs, futility_pruned, razoring_used, qs_delta_pruned, qs_see_pruned)
+
         tt_move = tt_entry['best_move']
 
     is_currently_in_check = is_in_check(piece_bbs, occupancy_bbs, game_state)
@@ -206,11 +239,20 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                 null_move_cutoffs, futility_pruned, razoring_used, qs_delta_pruned, qs_see_pruned)
 
     moves = generate_legal_moves(piece_bbs, occupancy_bbs, game_state)
-    if len(moves) == 0:
+
+    has_legal_moves = False
+    for m in moves:
+        if m != 0:
+            has_legal_moves = True
+            break
+
+    if not has_legal_moves:
         if is_currently_in_check:
-            return (np.int32(-INFINITY), NO_MOVE, nodes_searched, quiescence_nodes, cutoffs, tt_hits,
+            # Checkmate
+            return (np.int32(-MATE_SCORE + ply), NO_MOVE, nodes_searched, quiescence_nodes, cutoffs, tt_hits,
                     null_move_cutoffs, futility_pruned, razoring_used, qs_delta_pruned, qs_see_pruned)
         else:
+            # Stalemate
             return (np.int32(0), NO_MOVE, nodes_searched, quiescence_nodes, cutoffs, tt_hits,
                     null_move_cutoffs, futility_pruned, razoring_used, qs_delta_pruned, qs_see_pruned)
 
@@ -279,9 +321,28 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                 null_move_cutoffs += child_nmc; futility_pruned += child_fp; razoring_used += child_ru; qs_delta_pruned += child_qdp; qs_see_pruned += child_qsp
                 evaluation = -evaluation
 
+        # --- Mate Score Adjustment ---
+        if evaluation > MATE_IN_MAX_PLY:
+            evaluation -= 1
+        elif evaluation < -MATE_IN_MAX_PLY:
+            evaluation += 1
+
         if evaluation > max_eval:
             max_eval = evaluation
             best_move = move
+
+            # --- PV Tracking ---
+            search_context.pv_table[ply, ply] = move
+            # Copy PV from child node
+            i = ply + 1
+            while i < MAX_PLY and search_context.pv_table[ply + 1, i] != NO_MOVE:
+                search_context.pv_table[ply, i] = search_context.pv_table[ply + 1, i]
+                i += 1
+            # Clear the rest of the line
+            while i < MAX_PLY and search_context.pv_table[ply, i] != NO_MOVE:
+                search_context.pv_table[ply, i] = NO_MOVE
+                i += 1
+
 
         alpha = max(alpha, evaluation)
         if alpha >= beta:
@@ -305,17 +366,25 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
     if best_move == NO_MOVE and len(moves) > 0:
         best_move = sorted_moves[0]
 
-    store_tt(search_context.transposition_table, zobrist_key, depth, max_eval, final_flag, best_move)
+    # Adjust mate score before storing
+    tt_score = max_eval
+    if tt_score > MATE_IN_MAX_PLY:
+        tt_score -= ply
+    elif tt_score < -MATE_IN_MAX_PLY:
+        tt_score += ply
+
+    store_tt(search_context.transposition_table, zobrist_key, depth, tt_score, final_flag, best_move)
 
     return (max_eval, best_move, nodes_searched, quiescence_nodes, cutoffs, tt_hits,
             null_move_cutoffs, futility_pruned, razoring_used, qs_delta_pruned, qs_see_pruned)
 
 @numba.njit(search_return_type(
     piece_bbs_signature, occupancy_bbs_signature, game_state_signature, 
-    nb.int32, nb.int32, nb.int32, numba.types.Array(numba_tt_entry_type, 1, 'C'), nb.types.Array(nb.uint16, 2, 'C')
+    nb.int32, nb.int32, nb.int32, numba.types.Array(numba_tt_entry_type, 1, 'C'),
+    nb.types.Array(nb.uint16, 2, 'C'), nb.types.Array(nb.uint16, 2, 'C')
 ), cache=True)
-def _search_wrapper(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, transposition_table, killer_moves):
-    search_context = SearchContext(transposition_table, killer_moves)
+def _search_wrapper(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, transposition_table, killer_moves, pv_table):
+    search_context = SearchContext(transposition_table, killer_moves, pv_table)
     return _search(
         piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_context, 0
     )
@@ -331,6 +400,7 @@ def iterative_deepening_search(board_state, max_depth, max_time_ms, transpositio
     side_to_move, castling_rights, en_passant_square, halfmove_clock, zobrist_key = board_state[15:]
     game_state = (side_to_move, castling_rights, en_passant_square, halfmove_clock, np.uint64(zobrist_key))
     
+    pv_table = np.zeros((MAX_PLY, MAX_PLY), dtype=np.uint16)
     last_score = 0
     best_move_total = NO_MOVE
     total_nodes_searched, total_quiescence_nodes, total_cutoffs, total_tt_hits = np.uint64(0), np.uint64(0), np.uint64(0), np.uint64(0)
@@ -344,15 +414,17 @@ def iterative_deepening_search(board_state, max_depth, max_time_ms, transpositio
         else:
             alpha, beta = -INFINITY, INFINITY
 
+        pv_table.fill(0)
         score, _, nodes, q_nodes, cutoffs, tt_hits, nmc, fp, ru, qdp, qsp = _search_wrapper(
-            piece_bbs, occupancy_bbs, game_state, current_depth, alpha, beta, transposition_table, killer_moves
+            piece_bbs, occupancy_bbs, game_state, current_depth, alpha, beta, transposition_table, killer_moves, pv_table
         )
 
         if score <= alpha or score >= beta:
             log_info(f"depth {current_depth} aspiration window failed, re-searching...")
             alpha, beta = -INFINITY, INFINITY
+            pv_table.fill(0)
             score, _, nodes, q_nodes, cutoffs, tt_hits, nmc, fp, ru, qdp, qsp = _search_wrapper(
-                piece_bbs, occupancy_bbs, game_state, current_depth, alpha, beta, transposition_table, killer_moves
+                piece_bbs, occupancy_bbs, game_state, current_depth, alpha, beta, transposition_table, killer_moves, pv_table
             )
 
         last_score = score
@@ -362,11 +434,35 @@ def iterative_deepening_search(board_state, max_depth, max_time_ms, transpositio
         tt_entry = probe_tt(transposition_table, game_state[4])
         if tt_entry['flag'] != TT_FLAG_NONE:
             best_move_total = tt_entry['best_move']
-            
+
         elapsed_time = (time.time() - start_time) * 1000
-        log_info(f"depth {current_depth} score cp {score} time {int(elapsed_time)} pv {move_to_uci(best_move_total)}")
+
+        # --- Format PV for UCI ---
+        pv_moves = []
+        for i in range(MAX_PLY):
+            move = pv_table[0, i]
+            if move == NO_MOVE:
+                break
+            pv_moves.append(move_to_uci(move))
+        pv_string = " ".join(pv_moves)
+
+        # --- Format Score for UCI ---
+        uci_score_string = format_score_for_uci(score)
+
+        # --- Print UCI Info String ---
+        nps = int(total_nodes_searched / (elapsed_time / 1000)) if elapsed_time > 0 else 0
+        print(f"info depth {current_depth} score {uci_score_string} nodes {total_nodes_searched} nps {nps} time {int(elapsed_time)} pv {pv_string}")
 
         last_completed_depth = current_depth
+
+        # --- Early exit if mate is found ---
+        if "mate" in uci_score_string:
+            # Check if the mate is positive (beneficial for us)
+            mate_value = int(uci_score_string.split()[1])
+            if mate_value > 0:
+                log_info(f"Mate in {mate_value} found, stopping search.")
+                break
+
         if elapsed_time > max_time_ms:
             break
             
