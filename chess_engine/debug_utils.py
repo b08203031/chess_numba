@@ -1,5 +1,6 @@
 
 import numpy as np
+import sys
 
 PIECE_CHARS = ['P', 'N', 'B', 'R', 'Q', 'K', 'p', 'n', 'b', 'r', 'q', 'k']
 """
@@ -66,3 +67,10 @@ def compare_move_lists(moves1, moves2, labels=("List 1", "List 2")):
             print(f"  - {move}")
 
     print("-------------------------------------------------")
+
+
+def log_info(message):
+    """
+    Prints debug information to stderr, prefixed with "info string" for UCI compatibility.
+    """
+    print(f"info string {message}", file=sys.stderr, flush=True)

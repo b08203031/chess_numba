@@ -13,15 +13,17 @@ def clear_numba_cache():
     """
     Finds and removes all __pycache__ directories in the project.
     """
-    print("--- Clearing Numba Cache ---")
+    log_info("--- Clearing Numba Cache ---")
     project_root = Path(__file__).parent
     cache_dirs = list(project_root.rglob("__pycache__"))
     
     for cache_dir in cache_dirs:
         if cache_dir.is_dir():
-            print(f"Removing cache directory: {cache_dir}")
+            log_info(f"Removing cache directory: {cache_dir}")
             shutil.rmtree(cache_dir)
-    print("--- Cache Cleared ---")
+    log_info("--- Cache Cleared ---")
+
+from chess_engine.debug_utils import log_info
 
 # Clear cache before importing the engine to avoid stale cache issues
 clear_numba_cache()
@@ -43,11 +45,11 @@ def run_search_test():
     time_limit = 20
     time_limit_ms = time_limit * 1000
 
-    print("--- Starting Iterative Deepening Search Test ---")
-    print(f"FEN: {fen}")
-    print(f"Max Depth: {depth}")
-    print(f"Time Limit: {time_limit_ms / 1000}s")
-    print("----------------------------------------")
+    log_info("--- Starting Iterative Deepening Search Test ---")
+    log_info(f"FEN: {fen}")
+    log_info(f"Max Depth: {depth}")
+    log_info(f"Time Limit: {time_limit_ms / 1000}s")
+    log_info("----------------------------------------")
 
     piece_bbs, occupancy_bbs, game_state = parse_fen(fen)
     board_state_flat = piece_bbs + occupancy_bbs + game_state
@@ -75,17 +77,17 @@ def run_search_test():
     nps = int(total_nodes / elapsed_time) if elapsed_time > 0 else 0
     q_node_percentage = (quiescence_nodes / total_nodes * 100) if total_nodes > 0 else 0
 
-    print("----------------------------------------")
-    print(f"Search finished in {elapsed_time:.4f} seconds.")
-    print(f"Final best move: {move_to_uci(best_move)}")
-    print(f"Final evaluation: {best_eval}")
-    print(f"TT usage: {used_entries} / {total_entries} ({usage_percentage:.2f}%)")
-    print("--- Statistics ---")
-    print(f"1. Nodes Searched:   {total_nodes}")
-    print(f"2. Quiescence Nodes: {quiescence_nodes} ({q_node_percentage:.2f}%)")
-    print(f"3. Cutoffs:          {cutoffs}")
-    print(f"4. NPS (Nodes/Sec):  {nps}")
-    print("----------------------------------------")
+    log_info("----------------------------------------")
+    log_info(f"Search finished in {elapsed_time:.4f} seconds.")
+    log_info(f"Final best move: {move_to_uci(best_move)}")
+    log_info(f"Final evaluation: {best_eval}")
+    log_info(f"TT usage: {used_entries} / {total_entries} ({usage_percentage:.2f}%)")
+    log_info("--- Statistics ---")
+    log_info(f"1. Nodes Searched:   {total_nodes}")
+    log_info(f"2. Quiescence Nodes: {quiescence_nodes} ({q_node_percentage:.2f}%)")
+    log_info(f"3. Cutoffs:          {cutoffs}")
+    log_info(f"4. NPS (Nodes/Sec):  {nps}")
+    log_info("----------------------------------------")
 
 if __name__ == "__main__":
     run_search_test()
