@@ -38,9 +38,10 @@ def run_search_test():
     """
     Runs a search test from the initial position and prints statistics.
     """
-    fen = "2kr2r1/1bp4n/1pq1p2p/p1P5/1P3B2/P6P/5RP1/RB3QK1 b - - 4 26"
-    depth = 20
-    time_limit_ms = 10000
+    fen = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
+    depth = 10
+    time_limit = 30
+    time_limit_ms = time_limit * 1000
 
     print("--- Starting Iterative Deepening Search Test ---")
     print(f"FEN: {fen}")
