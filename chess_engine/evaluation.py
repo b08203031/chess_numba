@@ -9,8 +9,9 @@ from chess_engine.constants import (
     PHASE_WEIGHTS, MAX_PHASE
 )
 
-from chess_engine.bitboard_utils import count_bits, get_ls1b_index
+from chess_engine.zobrist import get_lsb_index
 from chess_engine.engine_types import piece_bbs_signature, occupancy_bbs_signature, game_state_signature
+from chess_engine.bitboard_utils import count_bits
 
 
 @numba.njit(numba.int32(piece_bbs_signature, occupancy_bbs_signature, game_state_signature), cache=True)
@@ -58,7 +59,7 @@ def evaluate_position(piece_bbs, occupancy_bbs, game_state):
     for piece_type in range(6): # 0-5: P, N, B, R, Q, K
         bb = piece_bbs[piece_type]
         while bb:
-            sq = get_ls1b_index(bb)
+            sq = get_lsb_index(bb)
             mg_score += MG_MATERIAL_VALUES[piece_type] + PST_MG[piece_type][sq]
             eg_score += EG_MATERIAL_VALUES[piece_type] + PST_EG[piece_type][sq]
             bb &= bb - np.uint64(1) # Clear LSB
@@ -67,7 +68,7 @@ def evaluate_position(piece_bbs, occupancy_bbs, game_state):
     for piece_type in range(6): # 0-5 for piece type, but access bb at 6-11
         bb = piece_bbs[piece_type + 6]
         while bb:
-            sq = get_ls1b_index(bb)
+            sq = get_lsb_index(bb)
             # Scores are subtracted for the opponent
             mg_score -= MG_MATERIAL_VALUES[piece_type] + PST_MG[piece_type][sq ^ 56]
             eg_score -= EG_MATERIAL_VALUES[piece_type] + PST_EG[piece_type][sq ^ 56]

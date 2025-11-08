@@ -5,9 +5,10 @@ import numpy as np
 
 from chess_engine.evaluation import evaluate_position
 from chess_engine.move_generator import (
-    generate_legal_moves, get_ls1b_index, is_square_attacked,
+    generate_legal_moves, is_square_attacked,
     is_in_check, has_sufficient_material
 )
+from chess_engine.zobrist import get_lsb_index
 from chess_engine.board_operations import make_move, make_null_move
 from chess_engine.move import get_to_square, get_from_square, get_special_move_flag, SPECIAL_MOVE_FLAG_EN_PASSANT
 import numba as nb
@@ -184,7 +185,7 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
     if len(moves) == 0:
         side_to_move = game_state[0]
         king_bb = piece_bbs[5] if side_to_move == 0 else piece_bbs[11]
-        king_sq = get_ls1b_index(king_bb)
+        king_sq = get_lsb_index(king_bb)
         if is_square_attacked(piece_bbs, occupancy_bbs, game_state, king_sq, 1 - side_to_move):
             return -INFINITY, NO_MOVE, nodes_searched, quiescence_nodes, cutoffs
         else:

@@ -65,7 +65,8 @@ def make_move(piece_bbs: tuple, occupancy_bbs: tuple, game_state: tuple, move: n
         A tuple containing the new piece_bbs, new_occupancy_bbs, new_game_state, and unmake_info.
     """
     new_piece_bbs = list(piece_bbs)
-    side, current_castling_rights, current_ep_square, current_halfmove_clock, key = game_state
+    side, current_castling_rights, current_ep_square, current_halfmove_clock, zobrist_key = game_state
+    key = zobrist_key
 
     from_sq = get_from_square(move)
     to_sq = get_to_square(move)
@@ -210,6 +211,9 @@ def unmake_move(piece_bbs: tuple, occupancy_bbs: tuple, game_state: tuple, move:
     new_piece_bbs[moving_piece_bb_idx] ^= move_bb
 
     if flag == SPECIAL_MOVE_FLAG_PROMOTION:
+        # For promotions, the moving piece is a pawn. `move_bb` incorrectly added a pawn
+        # back to the 'to_sq'. We need to remove it.
+        new_piece_bbs[moving_piece_bb_idx] &= ~(np.uint64(1) << to_sq)
         promo_piece_type = get_promotion_piece(move) + 1 # PROMO_KNIGHT is 0, maps to piece type 1
         promo_piece_bb_idx = side * 6 + promo_piece_type
         new_piece_bbs[promo_piece_bb_idx] &= ~(np.uint64(1) << to_sq)
@@ -270,7 +274,7 @@ def make_null_move(piece_bbs: tuple, occupancy_bbs: tuple, game_state: tuple):
         np.uint8(1 - side_to_move),
         castling_rights,
         np.int8(-1),
-        np.uint8(0), # halfmove clock resets
+        np.uint8(halfmove_clock + 1), # halfmove clock increments
         new_key
     )
     

@@ -26,19 +26,7 @@ CASTLING_RIGHTS_KEYS = np.random.randint(1, 2**64 - 1, 16, dtype=np.uint64)
 A 1D array of random numbers for each castling rights combination.
 """
 
-BIT_TO_INDEX = np.array([
-    0, 47,  1, 56, 48, 27,  2, 60, 57, 49, 41, 37, 28, 16,  3, 61,
-   54, 58, 35, 50, 42, 21, 38, 31, 29, 17, 44,  4, 62, 52, 55, 34,
-   59, 36, 55, 51, 43, 22, 39, 32, 30, 18, 45,  5, 63, 53, 33, 23,
-   40, 19, 46,  6, 24,  7, 20,  8, 25,  9, 14, 10, 26, 11, 15, 12, 13
-], dtype=np.uint8)
-"""
-A lookup table for mapping the De Bruijn hash to a square index (0-63).
-"""
-DEBRUIJN_MAGIC = np.uint64(0x03f79d71b4cb0a89)
-"""
-A De Bruijn sequence for fast bit scanning.
-"""
+from chess_engine.constants import DE_BRUIJN_INDEX, DE_BRUIJN_SEQUENCE
 
 @numba.jit(numba.int8(numba.uint64), nopython=True, inline='always')
 def get_lsb_index(bitboard: np.uint64) -> int:
@@ -55,8 +43,8 @@ def get_lsb_index(bitboard: np.uint64) -> int:
     if bitboard == 0:
         return -1
     lsb = bitboard & (-bitboard)
-    index = (lsb * DEBRUIJN_MAGIC) >> np.uint64(58)
-    return BIT_TO_INDEX[index]
+    index = (lsb * DE_BRUIJN_SEQUENCE) >> np.uint64(58)
+    return DE_BRUIJN_INDEX[index]
 
 @numba.jit(numba.uint64(piece_bbs_signature, game_state_signature), nopython=True)
 def compute_initial_hash(piece_bbs: tuple, game_state: tuple) -> np.uint64:
