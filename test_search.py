@@ -40,7 +40,7 @@ def run_search_test():
     """
     Runs a search test from the initial position and prints statistics.
     """
-    fen = "r1b4k/pp2p3/q4nQ1/4p3/8/2P1R3/PP4PP/5R1K w - - 9 12"
+    fen = "2kr2r1/1bp4n/1pq1p2p/p1P5/1P3B2/P6P/5RP1/RB3QK1 b - - 4 26"
     depth = 10
     time_limit = 20
     time_limit_ms = time_limit * 1000
