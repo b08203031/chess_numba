@@ -1,6 +1,8 @@
 
 import sys
 import numpy as np
+import random
+import os
 
 from chess_engine.board_operations import make_move
 from chess_engine.core import generate_legal_moves
@@ -13,6 +15,7 @@ from chess_engine.transposition_table import (
     clear_transposition_table,
     TT_SIZE_MB,
 )
+from chess_engine.opening_book import OpeningBook
 
 # Maximum search depth (Ply) for arrays like killer moves
 MAX_PLY = 64
@@ -26,6 +29,14 @@ def uci_loop():
     # Initialize engine components before the loop starts
     transposition_table = create_transposition_table(TT_SIZE_MB)
     killer_moves = np.zeros((MAX_PLY, 2), dtype=np.uint16)
+
+    # --- Initialize Opening Book ---
+    # The book file is expected in the root directory
+    script_dir = os.path.dirname(os.path.realpath(__file__))
+    book_path = os.path.join(script_dir, "polyglot.bin")
+    opening_book = OpeningBook(book_path)
+    if opening_book.book is None:
+        log_info("Opening book not found or failed to load.")
 
     board_state = None
 
@@ -101,6 +112,22 @@ def uci_loop():
                 move_time_ms = time_for_move - 100 # Safety margin
 
             if board_state:
+                # --- Opening Book Logic ---
+                book_moves = []
+                # halfmove_clock is at index 18 of game_state tuple
+                zobrist_key = board_state[19]
+                if board_state[18] < 20: # Query book for the first 10 moves (20 half-moves)
+                    book_moves = opening_book.lookup(zobrist_key, board_state)
+
+                if book_moves:
+                    # If moves are found, choose one based on weight
+                    moves, weights = zip(*book_moves)
+                    selected_move = random.choices(moves, weights=weights, k=1)[0]
+                    log_info("Playing from book")
+                    print(f"bestmove {move_to_uci(selected_move)}")
+                    continue # Skip search
+
+                # --- Regular Search Logic ---
                 best_move, _, _, _, _ = iterative_deepening_search(
                     board_state, max_depth, move_time_ms, transposition_table, killer_moves
                 )
