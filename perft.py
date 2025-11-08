@@ -207,8 +207,7 @@ def test_make_unmake_for_fen(fen: str):
         np.uint8(game_state[3]), np.uint64(game_state[4])
     )
 
-    board_state_flat = piece_bbs + occupancy_bbs + (game_state_typed[1], game_state_typed[2], game_state_typed[0])
-    legal_moves = generate_legal_moves(board_state_flat)
+    legal_moves = generate_legal_moves(piece_bbs, occupancy_bbs, game_state_typed)
 
     failures = []
     for move in legal_moves:
@@ -222,7 +221,7 @@ def test_make_unmake_for_fen(fen: str):
         is_equal = (
             piece_bbs == unmade_piece_bbs and
             occupancy_bbs == unmade_occupancy_bbs and
-            game_state_typed[:-1] == unmade_game_state[:-1]
+            game_state_typed == unmade_game_state
         )
 
         if not is_equal:

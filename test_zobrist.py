@@ -12,7 +12,14 @@ def uci_to_move(piece_bbs, occupancy_bbs, game_state, uci_string):
     """
     Finds the encoded move corresponding to a UCI string.
     """
-    moves = generate_legal_moves(piece_bbs, occupancy_bbs, game_state)
+    # Ensure game_state tuple has Numba-compatible types, as it's passed to a JIT function
+    side, castling, ep, halfmove, zobrist = game_state
+    typed_game_state = (
+        np.uint8(side), np.uint8(castling), np.int8(ep),
+        np.uint8(halfmove), np.uint64(zobrist)
+    )
+    # The piece and occupancy bbs are already typed correctly when this is called from _test_zobrist_hash
+    moves = generate_legal_moves(piece_bbs, occupancy_bbs, typed_game_state)
     for move in moves:
         if move_to_uci(move) == uci_string:
             return move
@@ -30,29 +37,49 @@ def _test_zobrist_hash(fen, uci_move):
     """
     # 1. Load position and get initial hash
     piece_bbs, occupancy_bbs, game_state = parse_fen(fen)
-    original_key = game_state[4]
+    
+    # Ensure all tuples have Numba-compatible types before passing to JIT functions
+    typed_piece_bbs = tuple(np.uint64(bb) for bb in piece_bbs)
+    typed_occupancy_bbs = tuple(np.uint64(bb) for bb in occupancy_bbs)
+    typed_game_state = (
+        np.uint8(game_state[0]), np.uint8(game_state[1]), np.int8(game_state[2]),
+        np.uint8(game_state[3]), np.uint64(game_state[4])
+    )
+    original_key = typed_game_state[4]
 
     # Find the move object corresponding to the UCI string
-    move = uci_to_move(piece_bbs, occupancy_bbs, game_state, uci_move)
+    move = uci_to_move(typed_piece_bbs, typed_occupancy_bbs, typed_game_state, uci_move)
     assert move is not None, f"Could not find legal move for {uci_move} in FEN {fen}"
 
     # 2. Make the move and get the incrementally updated key
     new_piece_bbs, new_occupancy_bbs, new_game_state, unmake_info = make_move(
-        piece_bbs, occupancy_bbs, game_state, move
+        typed_piece_bbs, typed_occupancy_bbs, typed_game_state, move
     )
     updated_key = new_game_state[4]
+
+    # Re-cast the tuples returned from the JIT function to ensure correct types before passing them back in
+    typed_new_piece_bbs = tuple(np.uint64(bb) for bb in new_piece_bbs)
+    typed_new_occupancy_bbs = tuple(np.uint64(bb) for bb in new_occupancy_bbs)
+    typed_new_game_state = (
+        np.uint8(new_game_state[0]), np.uint8(new_game_state[1]), np.int8(new_game_state[2]),
+        np.uint8(new_game_state[3]), np.uint64(new_game_state[4])
+    )
+    typed_unmake_info = (
+        np.int8(unmake_info[0]), np.uint8(unmake_info[1]), np.int8(unmake_info[2]),
+        np.uint8(unmake_info[3]), np.uint64(unmake_info[4])
+    )
 
     # 3. Recompute the hash from the new position and verify
     # We create a temporary game state with a zeroed key to ensure the re-computation is truly from scratch.
     temp_game_state_for_recompute = (
-        new_game_state[0], new_game_state[1], new_game_state[2], new_game_state[3], np.uint64(0)
+        typed_new_game_state[0], typed_new_game_state[1], typed_new_game_state[2], typed_new_game_state[3], np.uint64(0)
     )
-    recomputed_key = compute_initial_hash(new_piece_bbs, temp_game_state_for_recompute)
+    recomputed_key = compute_initial_hash(typed_new_piece_bbs, temp_game_state_for_recompute)
     assert updated_key == recomputed_key, f"Zobrist key mismatch after make_move for {uci_move} in FEN {fen}"
 
     # 4. Unmake the move
     restored_piece_bbs, restored_occupancy_bbs, restored_game_state = unmake_move(
-        new_piece_bbs, new_occupancy_bbs, new_game_state, move, unmake_info
+        typed_new_piece_bbs, typed_new_occupancy_bbs, typed_new_game_state, move, typed_unmake_info
     )
     
     # 5. Verify the key is restored

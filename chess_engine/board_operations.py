@@ -66,6 +66,10 @@ def make_move(piece_bbs: tuple, occupancy_bbs: tuple, game_state: tuple, move: n
     """
     new_piece_bbs = list(piece_bbs)
     side, current_castling_rights, current_ep_square, current_halfmove_clock, zobrist_key = game_state
+    
+    # ✅ 立即保存 - 在任何 XOR 操作之前
+    original_zobrist_key = zobrist_key
+    
     key = zobrist_key
 
     from_sq = get_from_square(move)
@@ -172,92 +176,103 @@ def make_move(piece_bbs: tuple, occupancy_bbs: tuple, game_state: tuple, move: n
         np.int8(captured_piece_type),
         np.uint8(current_castling_rights),
         np.int8(current_ep_square),
-        np.uint8(current_halfmove_clock)
+        np.uint8(current_halfmove_clock),
+        np.uint64(original_zobrist_key)
     )
 
     return final_piece_bbs, new_occupancy_bbs, new_game_state, unmake_info
 
-@numba.jit(numba.types.Tuple((piece_bbs_signature, occupancy_bbs_signature, game_state_signature))(piece_bbs_signature, occupancy_bbs_signature, game_state_signature, numba.uint16, unmake_info_signature), nopython=True)
+@numba.jit(numba.types.Tuple((piece_bbs_signature, occupancy_bbs_signature, game_state_signature))(
+    piece_bbs_signature, occupancy_bbs_signature, game_state_signature, numba.uint16, unmake_info_signature
+), nopython=True)
 def unmake_move(piece_bbs: tuple, occupancy_bbs: tuple, game_state: tuple, move: np.uint16, unmake_info: tuple):
     """
-    Reverts a move using the unmake_info tuple, returning the original state tuples.
+    Reverts a move incrementally using stored Zobrist key.
 
-    Args:
-        piece_bbs: A tuple of 12 bitboards representing the pieces.
-        occupancy_bbs: A tuple of 3 bitboards representing the occupancy of the board.
-        game_state: A tuple representing the current game state.
-        move: The move to unmake.
-        unmake_info: A tuple containing the information needed to unmake the move.
-
-    Returns:
-        A tuple containing the original piece_bbs, original_occupancy_bbs, and original_game_state.
+    Time Complexity: O(1) - Only bitboard restoration and direct key assignment
     """
     new_piece_bbs = list(piece_bbs)
-    side = np.uint8(1 - game_state[0])
+
+    # ========== 解析狀態 ==========
+    side = np.uint8(1 - game_state[0])  # game_state[0] 存儲對手顏色
+    captured_piece_type, old_castling_rights, old_ep_square, old_halfmove_clock, old_zobrist_key = unmake_info
 
     from_sq = get_from_square(move)
     to_sq = get_to_square(move)
     flag = get_special_move_flag(move)
 
-    move_bb = (np.uint64(1) << from_sq) | (np.uint64(1) << to_sq)
-
+    # ========== 找到移動的棋子類型 ==========
     moving_piece_type = find_piece_type_for_square(piece_bbs, to_sq, side)
+
+    # 升變時，目的地的是升變後的棋子，但移動方是兵
     if flag == SPECIAL_MOVE_FLAG_PROMOTION:
         moving_piece_type = PAWN
+
     moving_piece_bb_idx = side * 6 + moving_piece_type
 
-    (captured_piece_type, old_castling_rights, old_ep_square, old_halfmove_clock) = unmake_info
+    # ========== 步驟 1: 恢復基本移動 ==========
+    # 將棋子從目的地 XOR 回來源地
+    new_piece_bbs[moving_piece_bb_idx] ^= (np.uint64(1) << from_sq) | (np.uint64(1) << to_sq)
 
-    new_piece_bbs[moving_piece_bb_idx] ^= move_bb
-
+    # ========== 步驟 2: 恢復特殊移動 ==========
     if flag == SPECIAL_MOVE_FLAG_PROMOTION:
-        # For promotions, the moving piece is a pawn. `move_bb` incorrectly added a pawn
-        # back to the 'to_sq'. We need to remove it.
-        new_piece_bbs[moving_piece_bb_idx] &= ~(np.uint64(1) << to_sq)
-        promo_piece_type = get_promotion_piece(move) + 1 # PROMO_KNIGHT is 0, maps to piece type 1
+        # 移除升變後的棋子
+        promo_piece_type = get_promotion_piece(move) + 1
         promo_piece_bb_idx = side * 6 + promo_piece_type
         new_piece_bbs[promo_piece_bb_idx] &= ~(np.uint64(1) << to_sq)
 
     elif flag == SPECIAL_MOVE_FLAG_EN_PASSANT:
+        # 恢復被吃掉的對方兵
         opponent_color = 1 - side
         captured_pawn_bb_idx = opponent_color * 6 + PAWN
         captured_pawn_sq = to_sq + (8 if side == BLACK else -8)
         new_piece_bbs[captured_pawn_bb_idx] |= (np.uint64(1) << captured_pawn_sq)
 
     elif flag == SPECIAL_MOVE_FLAG_CASTLING:
+        # 恢復車的位置
         king_side_castle = to_sq > from_sq
-        rook_from_sq, rook_to_sq = ((7, 5) if king_side_castle else (0, 3)) if side == WHITE else ((63, 61) if king_side_castle else (56, 59))
+        if side == WHITE:
+            rook_from_sq = 7 if king_side_castle else 0
+            rook_to_sq = 5 if king_side_castle else 3
+        else:
+            rook_from_sq = 63 if king_side_castle else 56
+            rook_to_sq = 61 if king_side_castle else 59
+        
         rook_bb_idx = side * 6 + ROOK
-        rook_move_bb = (np.uint64(1) << rook_from_sq) | (np.uint64(1) << rook_to_sq)
-        new_piece_bbs[rook_bb_idx] ^= rook_move_bb
+        new_piece_bbs[rook_bb_idx] ^= (np.uint64(1) << rook_from_sq) | (np.uint64(1) << rook_to_sq)
 
+    # ========== 步驟 3: 恢復捕獲的棋子 ==========
     if captured_piece_type != -1 and flag != SPECIAL_MOVE_FLAG_EN_PASSANT:
         opponent_color = 1 - side
         captured_piece_bb_idx = opponent_color * 6 + captured_piece_type
         new_piece_bbs[captured_piece_bb_idx] |= (np.uint64(1) << to_sq)
 
+    # ========== 步驟 4: 重建佔用位元板 ==========
     final_piece_bbs = (
         new_piece_bbs[0], new_piece_bbs[1], new_piece_bbs[2], new_piece_bbs[3],
         new_piece_bbs[4], new_piece_bbs[5], new_piece_bbs[6], new_piece_bbs[7],
         new_piece_bbs[8], new_piece_bbs[9], new_piece_bbs[10], new_piece_bbs[11]
     )
-    white_occupancy = final_piece_bbs[0]|final_piece_bbs[1]|final_piece_bbs[2]|final_piece_bbs[3]|final_piece_bbs[4]|final_piece_bbs[5]
-    black_occupancy = final_piece_bbs[6]|final_piece_bbs[7]|final_piece_bbs[8]|final_piece_bbs[9]|final_piece_bbs[10]|final_piece_bbs[11]
+
+    white_occupancy = (final_piece_bbs[0] | final_piece_bbs[1] | final_piece_bbs[2] | 
+                     final_piece_bbs[3] | final_piece_bbs[4] | final_piece_bbs[5])
+    black_occupancy = (final_piece_bbs[6] | final_piece_bbs[7] | final_piece_bbs[8] | 
+                     final_piece_bbs[9] | final_piece_bbs[10] | final_piece_bbs[11])
 
     restored_occupancy_bbs = (white_occupancy, black_occupancy, white_occupancy | black_occupancy)
 
-    temp_game_state = (side, old_castling_rights, old_ep_square, old_halfmove_clock, np.uint64(0))
-    original_key = compute_initial_hash(final_piece_bbs, temp_game_state)
-
+    # ========== 步驟 5: 恢復遊戲狀態 ==========
+    # ✅ 直接使用存儲的舊鍵 - O(1) 無需計算！
     restored_game_state = (
         np.uint8(side),
         np.uint8(old_castling_rights),
         np.int8(old_ep_square),
         np.uint8(old_halfmove_clock),
-        np.uint64(original_key)
+        np.uint64(old_zobrist_key)  # 直接賦值，完成
     )
 
     return final_piece_bbs, restored_occupancy_bbs, restored_game_state
+
 
 @numba.jit(numba.types.Tuple((piece_bbs_signature, occupancy_bbs_signature, game_state_signature))(piece_bbs_signature, occupancy_bbs_signature, game_state_signature), nopython=True)
 def make_null_move(piece_bbs: tuple, occupancy_bbs: tuple, game_state: tuple):
