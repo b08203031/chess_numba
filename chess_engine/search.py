@@ -116,8 +116,11 @@ quiescence_search_return_type = nb.types.Tuple([
     nb.int32, nb.uint64
 ])
 
-@numba.njit(quiescence_search_return_type(piece_bbs_signature, occupancy_bbs_signature, game_state_signature, nb.int32, nb.int32, nb.int32), cache=True)
-def quiescence_search(piece_bbs, occupancy_bbs, game_state, alpha, beta, ply):
+@numba.njit(quiescence_search_return_type(
+    piece_bbs_signature, occupancy_bbs_signature, game_state_signature,
+    nb.int32, nb.int32, nb.int32, nb.types.List(nb.uint16)
+), cache=True)
+def quiescence_search(piece_bbs, occupancy_bbs, game_state, alpha, beta, ply, legal_moves):
     q_nodes = np.uint64(1)
 
     if ply >= MAX_QUIESCENCE_DEPTH:
@@ -127,12 +130,10 @@ def quiescence_search(piece_bbs, occupancy_bbs, game_state, alpha, beta, ply):
     if stand_pat >= beta:
         return beta, q_nodes
     alpha = max(alpha, stand_pat)
-
-    moves = generate_legal_moves(piece_bbs, occupancy_bbs, game_state)
     
     capture_moves = []
     opponent_pieces_bb = occupancy_bbs[1] if game_state[0] == 0 else occupancy_bbs[0]
-    for move in moves:
+    for move in legal_moves:
         to_sq = get_to_square(move)
         is_capture = (opponent_pieces_bb & BB_SQUARES[to_sq]) != 0
         is_en_passant = get_special_move_flag(move) == SPECIAL_MOVE_FLAG_EN_PASSANT
@@ -144,11 +145,17 @@ def quiescence_search(piece_bbs, occupancy_bbs, game_state, alpha, beta, ply):
         return stand_pat, q_nodes
     
     for move in capture_moves:
+        # SEE Pruning
+        if see(piece_bbs, occupancy_bbs, game_state, get_from_square(move), get_to_square(move)) < SEE_THRESHOLD:
+            continue
+
         new_piece_bbs, new_occupancy_bbs, new_game_state, _ = make_move(
             piece_bbs, occupancy_bbs, game_state, move
         )
+        # Quiescence search in child nodes still needs to generate its own moves
+        child_moves = generate_legal_moves(new_piece_bbs, new_occupancy_bbs, new_game_state)
         score, child_q_nodes = quiescence_search(
-            new_piece_bbs, new_occupancy_bbs, new_game_state, -beta, -alpha, ply + 1
+            new_piece_bbs, new_occupancy_bbs, new_game_state, -beta, -alpha, ply + 1, child_moves
         )
         q_nodes += child_q_nodes
         score = -score
@@ -252,7 +259,7 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                     null_move_cutoffs, futility_pruned, razoring_used, qs_delta_pruned, qs_see_pruned)
 
     if depth == 0:
-        eval_score, q_nodes = quiescence_search(piece_bbs, occupancy_bbs, game_state, alpha, beta, 0)
+        eval_score, q_nodes = quiescence_search(piece_bbs, occupancy_bbs, game_state, alpha, beta, 0, moves)
         return (eval_score, NO_MOVE, nodes_searched, q_nodes, cutoffs, tt_hits,
                 null_move_cutoffs, futility_pruned, razoring_used, qs_delta_pruned, qs_see_pruned)
 
