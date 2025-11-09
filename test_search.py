@@ -40,8 +40,8 @@ def run_search_test():
     Runs a search test from the initial position and prints statistics.
     """
     fen = "2kr2r1/1bp4n/1pq1p2p/p1P5/1P3B2/P6P/5RP1/RB3QK1 b - - 4 26"
-    depth = 10
-    time_limit = 20
+    depth = 15
+    time_limit = 30
     time_limit_ms = time_limit * 1000
 
     log_info("--- Starting Iterative Deepening Search Test ---")
@@ -61,9 +61,10 @@ def run_search_test():
 
     start_time = time.time()
     
-    # Unpack all 13 return values from the search function
+    # Unpack all 17 return values from the search function
     (best_move, best_eval, nodes_searched, quiescence_nodes, cutoffs, tt_hits,
-     last_completed_depth, total_nmc, total_fp, total_ru, total_rfp, total_qdp, total_qsp) = iterative_deepening_search(
+     last_completed_depth, total_nmc, total_fp, total_ru, total_rfp, total_lmp, total_pcp, total_qdp, total_qsp,
+     total_iid, total_se) = iterative_deepening_search(
         board_state_flat, depth, time_limit_ms, transposition_table, killer_moves
     )
     
@@ -93,6 +94,10 @@ def run_search_test():
     log_info(f"6. Futility Pruned:     {total_fp}")
     log_info(f"7. Razoring Pruned:     {total_ru}")
     log_info(f"8. RFP Pruned:          {total_rfp}")
+    log_info(f"9. LMP Pruned:          {total_lmp}")
+    log_info(f"10. ProbCut Pruned:     {total_pcp}")
+    log_info(f"11. IID Searches:       {total_iid}")
+    log_info(f"12. Singular Extensions:{total_se}")
     log_info("----------------------------------------")
 
 if __name__ == "__main__":
