@@ -61,9 +61,9 @@ def run_search_test():
 
     start_time = time.time()
     
-    # Unpack all 12 return values from the search function
+    # Unpack all 13 return values from the search function
     (best_move, best_eval, nodes_searched, quiescence_nodes, cutoffs, tt_hits,
-     last_completed_depth, total_nmc, total_fp, total_ru, total_qdp, total_qsp) = iterative_deepening_search(
+     last_completed_depth, total_nmc, total_fp, total_ru, total_rfp, total_qdp, total_qsp) = iterative_deepening_search(
         board_state_flat, depth, time_limit_ms, transposition_table, killer_moves
     )
     
@@ -84,10 +84,15 @@ def run_search_test():
     log_info(f"Final evaluation: {best_eval}")
     log_info(f"TT usage: {used_entries} / {total_entries} ({usage_percentage:.2f}%)")
     log_info("--- Statistics ---")
-    log_info(f"1. Nodes Searched:   {total_nodes}")
-    log_info(f"2. Quiescence Nodes: {quiescence_nodes} ({q_node_percentage:.2f}%)")
-    log_info(f"3. Cutoffs:          {cutoffs}")
-    log_info(f"4. NPS (Nodes/Sec):  {nps}")
+    log_info(f"1. Nodes Searched:      {total_nodes}")
+    log_info(f"2. Quiescence Nodes:    {quiescence_nodes} ({q_node_percentage:.2f}%)")
+    log_info(f"3. Cutoffs:             {cutoffs}")
+    log_info(f"4. NPS (Nodes/Sec):     {nps}")
+    log_info("--- Pruning Stats ---")
+    log_info(f"5. Null Move Cutoffs:   {total_nmc}")
+    log_info(f"6. Futility Pruned:     {total_fp}")
+    log_info(f"7. Razoring Pruned:     {total_ru}")
+    log_info(f"8. RFP Pruned:          {total_rfp}")
     log_info("----------------------------------------")
 
 if __name__ == "__main__":
