@@ -230,6 +230,18 @@ NO_MOVE = np.uint16(0)
 ASPIRATION_WINDOW_SIZE = 100 # centipawns
 
 # --- Pruning Techniques ---
+# Master switches for new pruning techniques
+ENABLE_LMP = True           # Late Move Pruning
+ENABLE_PROBCUT = True       # ProbCut
+ENABLE_DELTA_PRUNING = True # Delta Pruning in Quiescence Search
+
+# Master switches for existing pruning techniques
+ENABLE_NMP = True           # Null Move Pruning
+ENABLE_RAZORING = True      # Razoring
+ENABLE_FP = True            # Futility Pruning
+ENABLE_RFP = True           # Reverse Futility Pruning
+ENABLE_LMR = True           # Late Move Reductions
+
 NULL_MOVE_REDUCTION = 2
 MAX_QUIESCENCE_DEPTH = 5
 
@@ -247,6 +259,21 @@ RFP_MARGIN_D1 = 100
 LMR_MIN_DEPTH = 3           # Minimum depth to apply LMR
 LMR_MIN_QUIET_MOVE_INDEX = 4 # Minimum number of quiet moves before LMR
 LMR_REDUCTION = 2           # Depth reduction for LMR
+
+# Late Move Pruning (LMP) - Prune moves after a certain number of quiet moves have been searched
+LMP_MOVE_COUNT = np.array([
+ # depth: 0  1  2   3   4   5   6   7   8   9  10 ...
+          0, 6, 10, 14, 20, 25, 30, 35, 40, 45, 50, 55, 60, 65, 70, 75, 80
+] + [85] * (MAX_PLY - 17), dtype=np.int32)
+
+
+# ProbCut
+PROBCUT_R = 2
+PROBCUT_R_PRIME = 4
+PROBCUT_MARGIN = 150 # centipawns
+
+# Delta Pruning
+DELTA_PRUNING_MARGIN = 500
 
 # --- Static Exchange Evaluation (SEE) Threshold ---
 SEE_THRESHOLD = 0  # centipawns
