@@ -58,7 +58,7 @@ BISHOP_MASKS, ROOK_MASKS = (np.fromiter((mask_bishop_attacks(sq) for sq in range
 def bishop_attacks_on_the_fly(sq, block):
     attacks, tr, tf = EMPTY, sq // 8, sq % 8
     for r, f in zip(range(tr + 1, 8), range(tf + 1, 8)):
-        attacks |= BB_SQUARES[r*8+f];
+        attacks |= BB_SQUARES[r*8+f]
         if BB_SQUARES[r*8+f] & block: break
     for r, f in zip(range(tr - 1, -1, -1), range(tf + 1, 8)):
         attacks |= BB_SQUARES[r*8+f]
