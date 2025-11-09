@@ -231,7 +231,7 @@ ASPIRATION_WINDOW_SIZE = 100 # centipawns
 
 # --- Pruning Techniques ---
 NULL_MOVE_REDUCTION = 2
-MAX_QUIESCENCE_DEPTH = 6
+MAX_QUIESCENCE_DEPTH = 5
 
 # Razoring
 RAZORING_MARGIN = 250
@@ -250,6 +250,7 @@ LMR_REDUCTION = 2           # Depth reduction for LMR
 
 # --- Static Exchange Evaluation (SEE) Threshold ---
 SEE_THRESHOLD = 0  # centipawns
+ENABLE_SEE_IN_QUIESCENCE = True # Master switch to enable/disable SEE in quiescence search
 
 # =============================================================================
 # --- Bitboard Utilities Constants ---

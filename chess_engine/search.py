@@ -17,7 +17,7 @@ from chess_engine.move import (
 from chess_engine.constants import (
     BB_SQUARES, MG_MATERIAL_VALUES, INFINITY, MAX_QUIESCENCE_DEPTH, ASPIRATION_WINDOW_SIZE,
     NULL_MOVE_REDUCTION, MAX_PLY, LMR_MIN_DEPTH, LMR_MIN_QUIET_MOVE_INDEX, LMR_REDUCTION, SEE_THRESHOLD,
-    MATE_SCORE, MATE_IN_MAX_PLY, NO_MOVE,
+    ENABLE_SEE_IN_QUIESCENCE, MATE_SCORE, MATE_IN_MAX_PLY, NO_MOVE,
     RAZORING_MARGIN, FP_MARGIN_D1, FP_MARGIN_D2, RFP_MARGIN_D1
 )
 from chess_engine.bitboard_utils import find_piece_type_on_square
@@ -105,15 +105,24 @@ class MovePicker:
                         score = history_table[aggressor_type, to_square]
             self.scores[i] = score
         
-        if len(self.moves) > 1:
-            _quicksort_recursive(self.moves, self.scores, 0, len(self.moves) - 1)
-
     def next_move(self):
-        if self.index < len(self.moves):
-            move = self.moves[self.index]
-            self.index += 1
-            return move
-        return np.uint16(NO_MOVE)
+        if self.index >= len(self.moves):
+            return np.uint16(NO_MOVE)
+
+        best_score = -INFINITY
+        best_idx = -1
+        for i in range(self.index, len(self.moves)):
+            if self.scores[i] > best_score:
+                best_score = self.scores[i]
+                best_idx = i
+        
+        # Swap the best move with the current move
+        self.moves[self.index], self.moves[best_idx] = self.moves[best_idx], self.moves[self.index]
+        self.scores[self.index], self.scores[best_idx] = self.scores[best_idx], self.scores[self.index]
+        
+        move = self.moves[self.index]
+        self.index += 1
+        return move
 
 
 def format_score_for_uci(score):
@@ -143,9 +152,9 @@ quiescence_search_return_type = numba.types.Tuple([
 
 @numba.njit(quiescence_search_return_type(
     piece_bbs_signature, occupancy_bbs_signature, game_state_signature,
-    numba.int32, numba.int32, numba.int32, numba.types.List(numba.uint16)
+    numba.int32, numba.int32, numba.int32
 ), cache=True)
-def quiescence_search(piece_bbs, occupancy_bbs, game_state, alpha, beta, ply, legal_moves):
+def quiescence_search(piece_bbs, occupancy_bbs, game_state, alpha, beta, ply):
     q_nodes = np.uint64(1)
 
     if ply >= MAX_QUIESCENCE_DEPTH:
@@ -155,6 +164,8 @@ def quiescence_search(piece_bbs, occupancy_bbs, game_state, alpha, beta, ply, le
     if stand_pat >= beta:
         return beta, q_nodes
     alpha = max(alpha, stand_pat)
+    
+    legal_moves = generate_legal_moves(piece_bbs, occupancy_bbs, game_state)
     
     capture_moves = []
     opponent_pieces_bb = occupancy_bbs[1] if game_state[0] == 0 else occupancy_bbs[0]
@@ -170,17 +181,15 @@ def quiescence_search(piece_bbs, occupancy_bbs, game_state, alpha, beta, ply, le
         return stand_pat, q_nodes
     
     for move in capture_moves:
-        # SEE Pruning
-        if see(piece_bbs, occupancy_bbs, game_state, get_from_square(move), get_to_square(move)) < SEE_THRESHOLD:
-            continue
+        if ENABLE_SEE_IN_QUIESCENCE:
+            if see(piece_bbs, occupancy_bbs, game_state, get_from_square(move), get_to_square(move)) < SEE_THRESHOLD:
+                continue
 
         new_piece_bbs, new_occupancy_bbs, new_game_state, _ = make_move(
             piece_bbs, occupancy_bbs, game_state, move
         )
-        # Quiescence search in child nodes still needs to generate its own moves
-        child_moves = generate_legal_moves(new_piece_bbs, new_occupancy_bbs, new_game_state)
         score, child_q_nodes = quiescence_search(
-            new_piece_bbs, new_occupancy_bbs, new_game_state, -beta, -alpha, ply + 1, child_moves
+            new_piece_bbs, new_occupancy_bbs, new_game_state, -beta, -alpha, ply + 1
         )
         q_nodes += child_q_nodes
         score = -score
@@ -257,7 +266,7 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
     moves = generate_legal_moves(piece_bbs, occupancy_bbs, game_state)
 
     # --- Shallow Pruning Techniques (RFP, Razoring) ---
-    static_score = 0
+    static_score = -INFINITY  # Use a sentinel value
     if depth <= 2 and not is_currently_in_check:
         static_score = evaluate_position(piece_bbs, occupancy_bbs, game_state)
         
@@ -269,7 +278,7 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
         
         # Razoring
         if depth <= 2 and static_score + RAZORING_MARGIN < alpha:
-            razor_score, child_q_nodes = quiescence_search(piece_bbs, occupancy_bbs, game_state, alpha, alpha + 1, 0, moves)
+            razor_score, child_q_nodes = quiescence_search(piece_bbs, occupancy_bbs, game_state, alpha, alpha + 1, 0)
             quiescence_nodes += child_q_nodes
             if razor_score + RAZORING_MARGIN < alpha:
                 razoring_used += 1
@@ -318,11 +327,11 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
         for j in range(MAX_PLY):
             search_context.pv_table[ply, j] = np.uint16(NO_MOVE)
         
-        eval_score, q_nodes = quiescence_search(piece_bbs, occupancy_bbs, game_state, alpha, beta, 0, moves)
+        eval_score, q_nodes = quiescence_search(piece_bbs, occupancy_bbs, game_state, alpha, beta, 0)
         return (eval_score, np.uint16(NO_MOVE), nodes_searched, q_nodes, cutoffs, tt_hits,
                 null_move_cutoffs, futility_pruned, razoring_used, rfp_pruned, qs_delta_pruned, qs_see_pruned)
 
-    move_picker = MovePicker(piece_bbs, occupancy_bbs, game_state, moves, tt_move, search_context.killer_moves[ply], search_context.history_table)
+    move_picker = MovePicker(piece_bbs, occupancy_bbs, game_state, moves, tt_move, search_context.killer_moves[ply*2:ply*2+2], search_context.history_table)
     
     best_move = np.uint16(NO_MOVE)
     max_eval = -INFINITY
@@ -330,7 +339,7 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
     move_count = 0
 
     # Ensure static_score is computed if not already done for shallow depths
-    if static_score == 0 and depth <= 2 and not is_currently_in_check:
+    if static_score == -INFINITY and depth <= 2 and not is_currently_in_check:
         static_score = evaluate_position(piece_bbs, occupancy_bbs, game_state)
 
     while True:
@@ -406,19 +415,17 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
             # --- PV Tracking ---
             search_context.pv_table[ply, ply] = move
             
-            # Copy PV from child node only if the child node has a valid PV
-            child_has_pv = (ply + 1 < MAX_PLY and search_context.pv_table[ply + 1, ply + 1] != np.uint16(NO_MOVE))
-            
+            # Copy PV from child node
             i = ply + 1
-            if child_has_pv:
-                while i < MAX_PLY and search_context.pv_table[ply + 1, i] != np.uint16(NO_MOVE):
-                    search_context.pv_table[ply, i] = search_context.pv_table[ply + 1, i]
-                    i += 1
-            
-            # Clear the rest of the line to prevent stale data
-            while i < MAX_PLY:
-                search_context.pv_table[ply, i] = np.uint16(NO_MOVE)
+            j = ply + 1
+            while j < MAX_PLY and search_context.pv_table[ply + 1, j] != np.uint16(NO_MOVE):
+                search_context.pv_table[ply, i] = search_context.pv_table[ply + 1, j]
                 i += 1
+                j += 1
+            
+            # Mark the end of the PV
+            if i < MAX_PLY:
+                search_context.pv_table[ply, i] = np.uint16(NO_MOVE)
 
 
         alpha = max(alpha, evaluation)
@@ -438,9 +445,9 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                 # and prioritize recent history
                 # search_context.history_table //= 2
                 
-                if move != search_context.killer_moves[ply, 0]:
-                    search_context.killer_moves[ply, 1] = search_context.killer_moves[ply, 0]
-                    search_context.killer_moves[ply, 0] = move
+                if move != search_context.killer_moves[ply * 2]:
+                    search_context.killer_moves[ply * 2 + 1] = search_context.killer_moves[ply * 2]
+                    search_context.killer_moves[ply * 2] = move
             break
         
         if is_quiet_move:
@@ -471,7 +478,7 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
 @numba.njit(search_return_type(
     piece_bbs_signature, occupancy_bbs_signature, game_state_signature,
     numba.int32, numba.int32, numba.int32, numba.types.Array(numba_tt_entry_type, 1, 'C'),
-    numba.types.Array(numba.uint16, 2, 'C'), numba.types.Array(numba.uint16, 2, 'C'),
+    numba.types.Array(numba.uint16, 1, 'C'), numba.types.Array(numba.uint16, 2, 'C'),
     numba.types.Array(numba.int32, 2, 'C')
 ), cache=True)
 def _search_wrapper(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, transposition_table, killer_moves, pv_table, history_table):
@@ -493,6 +500,7 @@ def iterative_deepening_search(board_state, max_depth, max_time_ms, transpositio
 
     pv_table = np.zeros((MAX_PLY, MAX_PLY), dtype=np.uint16)
     history_table = np.zeros((12, 64), dtype=np.int32)
+    killer_moves = np.zeros(MAX_PLY * 2, dtype=np.uint16) # Changed to 1D array
     last_score = 0
     best_move_total = NO_MOVE
     total_nodes_searched, total_quiescence_nodes, total_cutoffs, total_tt_hits = np.uint64(0), np.uint64(0), np.uint64(0), np.uint64(0)
@@ -511,9 +519,16 @@ def iterative_deepening_search(board_state, max_depth, max_time_ms, transpositio
             piece_bbs, occupancy_bbs, game_state, current_depth, alpha, beta, transposition_table, killer_moves, pv_table, history_table
         )
 
-        if score <= alpha or score >= beta:
-            log_info(f"depth {current_depth} aspiration window failed, re-searching...")
-            alpha, beta = -INFINITY, INFINITY
+        if score <= alpha:
+            log_info(f"depth {current_depth} aspiration window failed low, re-searching...")
+            alpha, beta = -INFINITY, alpha + 1
+            pv_table.fill(0)
+            score, _, nodes, q_nodes, cutoffs, tt_hits, nmc, fp, ru, rfp, qdp, qsp = _search_wrapper(
+                piece_bbs, occupancy_bbs, game_state, current_depth, alpha, beta, transposition_table, killer_moves, pv_table, history_table
+            )
+        elif score >= beta:
+            log_info(f"depth {current_depth} aspiration window failed high, re-searching...")
+            alpha, beta = beta - 1, INFINITY
             pv_table.fill(0)
             score, _, nodes, q_nodes, cutoffs, tt_hits, nmc, fp, ru, rfp, qdp, qsp = _search_wrapper(
                 piece_bbs, occupancy_bbs, game_state, current_depth, alpha, beta, transposition_table, killer_moves, pv_table, history_table

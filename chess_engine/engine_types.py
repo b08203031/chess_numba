@@ -52,7 +52,7 @@ from chess_engine.transposition_table import numba_tt_entry_type
 # Define the specification for the SearchContext jitclass
 search_context_spec = [
     ('transposition_table', numba.types.Array(numba_tt_entry_type, 1, 'C')),
-    ('killer_moves', numba.uint16[:, :]),
+    ('killer_moves', numba.uint16[::1]),
     ('pv_table', numba.uint16[:, :]),
     ('history_table', numba.int32[:, :]),
 ]
