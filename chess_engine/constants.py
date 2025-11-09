@@ -232,6 +232,16 @@ ASPIRATION_WINDOW_SIZE = 100 # centipawns
 NULL_MOVE_REDUCTION = 2
 MAX_QUIESCENCE_DEPTH = 6
 
+# Razoring
+RAZORING_MARGIN = 250
+
+# Futility Pruning
+FP_MARGIN_D1 = 100
+FP_MARGIN_D2 = 250
+
+# Reverse Futility Pruning
+RFP_MARGIN_D1 = 100
+
 # Late Move Reductions (LMR)
 LMR_MIN_DEPTH = 3           # Minimum depth to apply LMR
 LMR_MIN_QUIET_MOVE_INDEX = 4 # Minimum number of quiet moves before LMR
