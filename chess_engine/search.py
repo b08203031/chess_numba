@@ -5,8 +5,11 @@ import numpy as np
 
 from chess_engine.evaluation import evaluate_position
 from chess_engine.move_generator import (
-    generate_legal_moves, is_square_attacked,
-    is_in_check, has_sufficient_material
+    generate_legal_moves,
+    is_square_attacked,
+    is_in_check,
+    has_sufficient_material,
+    generate_captures,
 )
 from chess_engine.zobrist import get_lsb_index
 from chess_engine.board_operations import make_move, make_null_move
@@ -170,22 +173,16 @@ def quiescence_search(piece_bbs, occupancy_bbs, game_state, alpha, beta, ply):
     if stand_pat >= beta:
         return beta, q_nodes, delta_pruned, see_pruned
     alpha = max(alpha, stand_pat)
-    
-    legal_moves = generate_legal_moves(piece_bbs, occupancy_bbs, game_state)
-    
-    capture_moves = []
-    opponent_pieces_bb = occupancy_bbs[1] if game_state[0] == 0 else occupancy_bbs[0]
-    for move in legal_moves:
-        to_sq = get_to_square(move)
-        is_capture = (opponent_pieces_bb & BB_SQUARES[to_sq]) != 0
-        is_en_passant = get_special_move_flag(move) == SPECIAL_MOVE_FLAG_EN_PASSANT
 
-        if is_capture or is_en_passant:
-            capture_moves.append(move)
+    # Generate only capture and promotion moves
+    capture_moves = generate_captures(piece_bbs, occupancy_bbs, game_state)
 
-    if not capture_moves:
+    if len(capture_moves) == 0:
         return stand_pat, q_nodes, delta_pruned, see_pruned
-    
+
+    # Move ordering for quiescence search (MVV-LVA) could be implemented here
+    # For now, we iterate through them as they are generated.
+
     for move in capture_moves:
         use_premade_board = False
 
