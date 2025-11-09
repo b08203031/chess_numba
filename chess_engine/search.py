@@ -215,6 +215,8 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
 
 
     if ply >= MAX_PLY:
+        for j in range(MAX_PLY):
+            search_context.pv_table[ply, j] = NO_MOVE
         return (evaluate_position(piece_bbs, occupancy_bbs, game_state), NO_MOVE, nodes_searched, quiescence_nodes, cutoffs, tt_hits,
                 null_move_cutoffs, futility_pruned, razoring_used, qs_delta_pruned, qs_see_pruned)
 
@@ -234,6 +236,8 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
             tt_score -= ply
 
         if tt_entry['flag'] == TT_FLAG_EXACT:
+            for j in range(MAX_PLY):
+                search_context.pv_table[ply, j] = NO_MOVE
             return (tt_score, tt_entry['best_move'], nodes_searched, quiescence_nodes, cutoffs, tt_hits,
                     null_move_cutoffs, futility_pruned, razoring_used, qs_delta_pruned, qs_see_pruned)
         elif tt_entry['flag'] == TT_FLAG_ALPHA:
@@ -242,6 +246,8 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
             alpha = max(alpha, tt_score)
 
         if alpha >= beta:
+            for j in range(MAX_PLY):
+                search_context.pv_table[ply, j] = NO_MOVE
             return (tt_score, tt_entry['best_move'], nodes_searched, quiescence_nodes, cutoffs, tt_hits,
                     null_move_cutoffs, futility_pruned, razoring_used, qs_delta_pruned, qs_see_pruned)
 
@@ -264,6 +270,8 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
 
         if null_move_score >= beta:
             null_move_cutoffs += 1
+            for j in range(MAX_PLY):
+                search_context.pv_table[ply, j] = NO_MOVE
             return (np.int32(beta), NO_MOVE, nodes_searched, quiescence_nodes, cutoffs, tt_hits,
                     null_move_cutoffs, futility_pruned, razoring_used, qs_delta_pruned, qs_see_pruned)
 
@@ -276,6 +284,8 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
             break
 
     if not has_legal_moves:
+        for j in range(MAX_PLY):
+            search_context.pv_table[ply, j] = NO_MOVE
         if is_currently_in_check:
             # Checkmate
             return (np.int32(-MATE_SCORE + ply), NO_MOVE, nodes_searched, quiescence_nodes, cutoffs, tt_hits,
@@ -286,6 +296,11 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                     null_move_cutoffs, futility_pruned, razoring_used, qs_delta_pruned, qs_see_pruned)
 
     if depth == 0:
+        # Clear the PV line for the current ply, as quiescence search does not update it.
+        # This prevents the parent node from copying stale PV data from this ply.
+        for j in range(MAX_PLY):
+            search_context.pv_table[ply, j] = NO_MOVE
+        
         eval_score, q_nodes = quiescence_search(piece_bbs, occupancy_bbs, game_state, alpha, beta, 0, moves)
         return (eval_score, NO_MOVE, nodes_searched, q_nodes, cutoffs, tt_hits,
                 null_move_cutoffs, futility_pruned, razoring_used, qs_delta_pruned, qs_see_pruned)
@@ -360,13 +375,18 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
 
             # --- PV Tracking ---
             search_context.pv_table[ply, ply] = move
-            # Copy PV from child node
+            
+            # Copy PV from child node only if the child node has a valid PV
+            child_has_pv = (ply + 1 < MAX_PLY and search_context.pv_table[ply + 1, ply + 1] != NO_MOVE)
+            
             i = ply + 1
-            while i < MAX_PLY and search_context.pv_table[ply + 1, i] != NO_MOVE:
-                search_context.pv_table[ply, i] = search_context.pv_table[ply + 1, i]
-                i += 1
-            # Clear the rest of the line
-            while i < MAX_PLY and search_context.pv_table[ply, i] != NO_MOVE:
+            if child_has_pv:
+                while i < MAX_PLY and search_context.pv_table[ply + 1, i] != NO_MOVE:
+                    search_context.pv_table[ply, i] = search_context.pv_table[ply + 1, i]
+                    i += 1
+            
+            # Clear the rest of the line to prevent stale data
+            while i < MAX_PLY:
                 search_context.pv_table[ply, i] = NO_MOVE
                 i += 1
 
