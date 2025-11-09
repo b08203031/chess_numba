@@ -234,6 +234,14 @@ ASPIRATION_WINDOW_SIZE = 100 # centipawns
 ENABLE_LMP = True           # Late Move Pruning
 ENABLE_PROBCUT = True       # ProbCut
 ENABLE_DELTA_PRUNING = True # Delta Pruning in Quiescence Search
+ENABLE_IID = False           # Internal Iterative Deepening
+ENABLE_SINGULAR_EXTENSIONS = True # Singular Extensions
+
+
+# IID and Singular Extension Parameters
+MIN_SINGULAR_DEPTH = 6
+SINGULAR_EXTENSION_MARGIN = 150 # centipawns
+
 
 # Master switches for existing pruning techniques
 ENABLE_NMP = True           # Null Move Pruning
@@ -263,8 +271,8 @@ LMR_REDUCTION = 2           # Depth reduction for LMR
 # Late Move Pruning (LMP) - Prune moves after a certain number of quiet moves have been searched
 LMP_MOVE_COUNT = np.array([
  # depth: 0  1  2   3   4   5   6   7   8   9  10 ...
-          0, 6, 10, 14, 20, 25, 30, 35, 40, 45, 50, 55, 60, 65, 70, 75, 80
-] + [85] * (MAX_PLY - 17), dtype=np.int32)
+          0, 6, 10, 14, 20, 25, 30, 35, 40, 50, 60, 70, 80, 90, 90, 90, 90
+] + [90] * (MAX_PLY - 17), dtype=np.int32)
 
 
 # ProbCut

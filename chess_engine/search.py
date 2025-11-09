@@ -21,7 +21,8 @@ from chess_engine.constants import (
     RAZORING_MARGIN, FP_MARGIN_D1, FP_MARGIN_D2, RFP_MARGIN_D1,
     ENABLE_DELTA_PRUNING, DELTA_PRUNING_MARGIN, LMP_MOVE_COUNT, ENABLE_LMP,
     ENABLE_PROBCUT, PROBCUT_R, PROBCUT_R_PRIME, PROBCUT_MARGIN,
-    ENABLE_NMP, ENABLE_RAZORING, ENABLE_FP, ENABLE_RFP, ENABLE_LMR
+    ENABLE_NMP, ENABLE_RAZORING, ENABLE_FP, ENABLE_RFP, ENABLE_LMR, ENABLE_IID,
+    ENABLE_SINGULAR_EXTENSIONS, MIN_SINGULAR_DEPTH, SINGULAR_EXTENSION_MARGIN
 )
 from chess_engine.bitboard_utils import find_piece_type_on_square
 from chess_engine.debug_utils import log_info
@@ -242,14 +243,14 @@ def quiescence_search(piece_bbs, occupancy_bbs, game_state, alpha, beta, ply):
 search_return_type = numba.types.Tuple([
     numba.int32, numba.uint16, numba.uint64, numba.uint64, numba.uint64, numba.uint64,
     numba.uint64, numba.uint64, numba.uint64, numba.uint64, numba.uint64, numba.uint64,
-    numba.uint64, numba.uint64
+    numba.uint64, numba.uint64, numba.uint64, numba.uint64
 ])
 
 @numba.njit(search_return_type(
     piece_bbs_signature, occupancy_bbs_signature, game_state_signature,
-    numba.int32, numba.int32, numba.int32, search_context_type, numba.int32
+    numba.int32, numba.int32, numba.int32, search_context_type, numba.int32, numba.uint16
 ), cache=True)
-def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_context, ply):
+def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_context, ply, excluded_move: np.uint16 = NO_MOVE):
     nodes_searched = np.uint64(1)
     quiescence_nodes = np.uint64(0)
     cutoffs = np.uint64(0)
@@ -262,12 +263,15 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
     probcut_pruned = np.uint64(0)
     qs_delta_pruned = np.uint64(0) # Re-purposing this for the new delta pruning
     qs_see_pruned = np.uint64(0)
+    iid_searches = np.uint64(0)
+    singular_extensions = np.uint64(0)
 
     if ply >= MAX_PLY:
         for j in range(MAX_PLY):
             search_context.pv_table[ply, j] = np.uint16(NO_MOVE)
         return (evaluate_position(piece_bbs, occupancy_bbs, game_state), np.uint16(NO_MOVE), nodes_searched, quiescence_nodes, cutoffs, tt_hits,
-                null_move_cutoffs, futility_pruned, razoring_used, rfp_pruned, lmp_pruned, probcut_pruned, qs_delta_pruned, qs_see_pruned)
+                null_move_cutoffs, futility_pruned, razoring_used, rfp_pruned, lmp_pruned, probcut_pruned, qs_delta_pruned, qs_see_pruned,
+                iid_searches, singular_extensions)
 
     original_alpha = alpha
     zobrist_key = game_state[4]
@@ -288,7 +292,8 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
             for j in range(MAX_PLY):
                 search_context.pv_table[ply, j] = np.uint16(NO_MOVE)
             return (tt_score, tt_entry['best_move'], nodes_searched, quiescence_nodes, cutoffs, tt_hits,
-                    null_move_cutoffs, futility_pruned, razoring_used, rfp_pruned, lmp_pruned, probcut_pruned, qs_delta_pruned, qs_see_pruned)
+                    null_move_cutoffs, futility_pruned, razoring_used, rfp_pruned, lmp_pruned, probcut_pruned, qs_delta_pruned, qs_see_pruned,
+                    iid_searches, singular_extensions)
         elif tt_entry['flag'] == TT_FLAG_ALPHA:
             beta = min(beta, tt_score)
         elif tt_entry['flag'] == TT_FLAG_BETA:
@@ -298,9 +303,46 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
             for j in range(MAX_PLY):
                 search_context.pv_table[ply, j] = np.uint16(NO_MOVE)
             return (tt_score, tt_entry['best_move'], nodes_searched, quiescence_nodes, cutoffs, tt_hits,
-                    null_move_cutoffs, futility_pruned, razoring_used, rfp_pruned, lmp_pruned, probcut_pruned, qs_delta_pruned, qs_see_pruned)
+                    null_move_cutoffs, futility_pruned, razoring_used, rfp_pruned, lmp_pruned, probcut_pruned, qs_delta_pruned, qs_see_pruned,
+                    iid_searches, singular_extensions)
 
         tt_move = tt_entry['best_move']
+
+    # --- Internal Iterative Deepening (IID) ---
+    if ENABLE_IID and depth >= 5 and tt_move == NO_MOVE:
+        iid_searches += 1
+        iid_depth = max(2, depth - 3)
+        # Note: This recursive call's return values are ignored. Its only purpose
+        # is to populate the TT with a good move to improve move ordering.
+        _search(
+            piece_bbs, occupancy_bbs, game_state, iid_depth, -INFINITY, INFINITY,
+            search_context, ply + 1, NO_MOVE
+        )
+        # Re-probe the TT to get the move found by IID
+        tt_entry = probe_tt(search_context.transposition_table, zobrist_key)
+        if tt_entry['flag'] != TT_FLAG_NONE:
+            tt_move = tt_entry['best_move']
+
+
+    # --- ProbCut ---
+    # --- Singular Extensions ---
+    extension = 0
+    if ENABLE_SINGULAR_EXTENSIONS and depth >= MIN_SINGULAR_DEPTH and tt_move != NO_MOVE and tt_entry['flag'] == TT_FLAG_EXACT:
+        # 1. Get the score of the best move from TT
+        tt_score = np.int32(tt_entry['score'])
+
+        # 2. Perform an exclusion search
+        exclusion_beta = tt_score - SINGULAR_EXTENSION_MARGIN
+        exclusion_score, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _ = _search(
+            piece_bbs, occupancy_bbs, game_state, depth - 3,
+            exclusion_beta - 1, exclusion_beta, search_context, ply + 1, tt_move
+        )
+
+        # 3. If the exclusion search fails low, it means the tt_move is singular
+        if exclusion_score < exclusion_beta:
+            extension = 1
+            singular_extensions += 1
+
 
     # --- ProbCut ---
     if ENABLE_PROBCUT and depth >= 6 and tt_entry['flag'] != TT_FLAG_NONE:
@@ -311,26 +353,28 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
             # Fail-high case
             if tt_score + PROBCUT_MARGIN >= beta:
                 # Use a zero-window search to verify the fail-high
-                probcut_score, _, _, _, _, _, _, _, _, _, _, _, _, _ = _search(
+                probcut_score, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _ = _search(
                     piece_bbs, occupancy_bbs, game_state, depth - PROBCUT_R_PRIME,
-                    beta - 1, beta, search_context, ply + 1  # This is effectively a zero-window search at the beta boundary
+                    beta - 1, beta, search_context, ply + 1, NO_MOVE  # This is effectively a zero-window search at the beta boundary
                 )
                 if probcut_score >= beta:
                     probcut_pruned += 1
-                    return np.int32(beta), np.uint16(NO_MOVE), nodes_searched, quiescence_nodes, cutoffs, tt_hits, \
-                           null_move_cutoffs, futility_pruned, razoring_used, rfp_pruned, lmp_pruned, probcut_pruned, qs_delta_pruned, qs_see_pruned
+                    return (np.int32(beta), np.uint16(NO_MOVE), nodes_searched, quiescence_nodes, cutoffs, tt_hits,
+                           null_move_cutoffs, futility_pruned, razoring_used, rfp_pruned, lmp_pruned, probcut_pruned, qs_delta_pruned, qs_see_pruned,
+                           iid_searches, singular_extensions)
 
             # Fail-low case
             elif tt_score - PROBCUT_MARGIN <= alpha:
                 # Use a full-window search to verify the fail-low
-                probcut_score, _, _, _, _, _, _, _, _, _, _, _, _, _ = _search(
+                probcut_score, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _ = _search(
                     piece_bbs, occupancy_bbs, game_state, depth - PROBCUT_R_PRIME,
-                    alpha, beta, search_context, ply + 1 # As per user request, use full window for fail-low
+                    alpha, beta, search_context, ply + 1, NO_MOVE # As per user request, use full window for fail-low
                 )
                 if probcut_score <= alpha:
                     probcut_pruned += 1
-                    return np.int32(alpha), np.uint16(NO_MOVE), nodes_searched, quiescence_nodes, cutoffs, tt_hits, \
-                           null_move_cutoffs, futility_pruned, razoring_used, rfp_pruned, lmp_pruned, probcut_pruned, qs_delta_pruned, qs_see_pruned
+                    return (np.int32(alpha), np.uint16(NO_MOVE), nodes_searched, quiescence_nodes, cutoffs, tt_hits,
+                           null_move_cutoffs, futility_pruned, razoring_used, rfp_pruned, lmp_pruned, probcut_pruned, qs_delta_pruned, qs_see_pruned,
+                           iid_searches, singular_extensions)
 
     is_currently_in_check = is_in_check(piece_bbs, occupancy_bbs, game_state)
     
@@ -346,7 +390,8 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
         if ENABLE_RFP and depth == 1 and static_score - RFP_MARGIN_D1 >= beta:
             rfp_pruned += 1
             return (np.int32(beta), np.uint16(NO_MOVE), nodes_searched, quiescence_nodes, cutoffs, tt_hits,
-                    null_move_cutoffs, futility_pruned, razoring_used, rfp_pruned, lmp_pruned, probcut_pruned, qs_delta_pruned, qs_see_pruned)
+                    null_move_cutoffs, futility_pruned, razoring_used, rfp_pruned, lmp_pruned, probcut_pruned, qs_delta_pruned, qs_see_pruned,
+                    iid_searches, singular_extensions)
         
         # Razoring
         if ENABLE_RAZORING and depth <= 2 and static_score + RAZORING_MARGIN < alpha:
@@ -357,17 +402,18 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
             if razor_score + RAZORING_MARGIN < alpha:
                 razoring_used += 1
                 return (np.int32(alpha), np.uint16(NO_MOVE), nodes_searched, quiescence_nodes, cutoffs, tt_hits,
-                        null_move_cutoffs, futility_pruned, razoring_used, rfp_pruned, lmp_pruned, probcut_pruned, qs_delta_pruned, qs_see_pruned)
+                        null_move_cutoffs, futility_pruned, razoring_used, rfp_pruned, lmp_pruned, probcut_pruned, qs_delta_pruned, qs_see_pruned,
+                        iid_searches, singular_extensions)
 
 
     # --- Null Move Pruning (NMP) ---
     if ENABLE_NMP and depth >= 3 and not is_currently_in_check and has_sufficient_material(piece_bbs, game_state[0]):
         null_move_piece_bbs, null_move_occupancy_bbs, null_move_game_state = make_null_move(piece_bbs, occupancy_bbs, game_state)
         
-        null_move_score, _, _, _, _, child_tt_hits, _, _, _, _, _, _, _, _ = _search(
+        null_move_score, _, _, _, _, child_tt_hits, _, _, _, _, _, _, _, _, _, _ = _search(
             null_move_piece_bbs, null_move_occupancy_bbs, null_move_game_state,
             depth - 1 - NULL_MOVE_REDUCTION,
-            -beta, -beta + 1, search_context, ply + 1
+            -beta, -beta + 1, search_context, ply + 1, NO_MOVE
         )
         null_move_score = -null_move_score
         tt_hits += child_tt_hits
@@ -377,7 +423,8 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
             for j in range(MAX_PLY):
                 search_context.pv_table[ply, j] = np.uint16(NO_MOVE)
             return (np.int32(beta), np.uint16(NO_MOVE), nodes_searched, quiescence_nodes, cutoffs, tt_hits,
-                    null_move_cutoffs, futility_pruned, razoring_used, rfp_pruned, lmp_pruned, probcut_pruned, qs_delta_pruned, qs_see_pruned)
+                    null_move_cutoffs, futility_pruned, razoring_used, rfp_pruned, lmp_pruned, probcut_pruned, qs_delta_pruned, qs_see_pruned,
+                    iid_searches, singular_extensions)
 
     has_legal_moves = False
     for m in moves:
@@ -391,11 +438,13 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
         if is_currently_in_check:
             # Checkmate
             return (np.int32(-MATE_SCORE + ply), np.uint16(NO_MOVE), nodes_searched, quiescence_nodes, cutoffs, tt_hits,
-                    null_move_cutoffs, futility_pruned, razoring_used, rfp_pruned, lmp_pruned, probcut_pruned, qs_delta_pruned, qs_see_pruned)
+                    null_move_cutoffs, futility_pruned, razoring_used, rfp_pruned, lmp_pruned, probcut_pruned, qs_delta_pruned, qs_see_pruned,
+                    iid_searches, singular_extensions)
         else:
             # Stalemate
             return (np.int32(0), np.uint16(NO_MOVE), nodes_searched, quiescence_nodes, cutoffs, tt_hits,
-                    null_move_cutoffs, futility_pruned, razoring_used, rfp_pruned, lmp_pruned, probcut_pruned, qs_delta_pruned, qs_see_pruned)
+                    null_move_cutoffs, futility_pruned, razoring_used, rfp_pruned, lmp_pruned, probcut_pruned, qs_delta_pruned, qs_see_pruned,
+                    iid_searches, singular_extensions)
 
     if depth == 0:
         for j in range(MAX_PLY):
@@ -405,7 +454,8 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
         qs_delta_pruned += child_delta_pruned
         qs_see_pruned += child_see_pruned
         return (eval_score, np.uint16(NO_MOVE), nodes_searched, q_nodes, cutoffs, tt_hits,
-                null_move_cutoffs, futility_pruned, razoring_used, rfp_pruned, lmp_pruned, probcut_pruned, qs_delta_pruned, qs_see_pruned)
+                null_move_cutoffs, futility_pruned, razoring_used, rfp_pruned, lmp_pruned, probcut_pruned, qs_delta_pruned, qs_see_pruned,
+                iid_searches, singular_extensions)
 
     move_picker = MovePicker(piece_bbs, occupancy_bbs, game_state, moves, tt_move, search_context.killer_moves[ply*2:ply*2+2], search_context.history_table)
     
@@ -422,6 +472,9 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
         move = move_picker.next_move()
         if move == np.uint16(NO_MOVE):
             break
+        
+        if move == excluded_move:
+            continue
         
         move_count += 1
         
@@ -452,20 +505,27 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                 continue # Skip this quiet move
         
         # --- Check Extensions ---
-        search_depth = depth - 1
+        current_extension = 0
         if is_giving_check_after_move:
-             search_depth += 1
+            current_extension = 1
+        
+        # --- Singular Extension ---
+        if move == tt_move:
+            current_extension = max(current_extension, extension)
+
+        search_depth = depth - 1 + current_extension
 
         evaluation = 0
 
         # --- Principal Variation Search (PVS) & Late Move Reductions (LMR) ---
         if move_count == 1:  # First move (PV node): Full window search
-            evaluation, _, child_nodes, child_q_nodes, child_cutoffs, child_tt_hits, child_nmc, child_fp, child_ru, child_rfp, child_lmp, child_pcp, child_qdp, child_qsp = _search(
-                new_piece_bbs, new_occupancy_bbs, new_game_state, search_depth, -beta, -alpha, search_context, ply + 1
+            evaluation, _, child_nodes, child_q_nodes, child_cutoffs, child_tt_hits, child_nmc, child_fp, child_ru, child_rfp, child_lmp, child_pcp, child_qdp, child_qsp, child_iid, child_se = _search(
+                new_piece_bbs, new_occupancy_bbs, new_game_state, search_depth, -beta, -alpha, search_context, ply + 1, NO_MOVE
             )
             nodes_searched += child_nodes; quiescence_nodes += child_q_nodes; cutoffs += child_cutoffs; tt_hits += child_tt_hits
             null_move_cutoffs += child_nmc; futility_pruned += child_fp; razoring_used += child_ru; rfp_pruned += child_rfp
             lmp_pruned += child_lmp; probcut_pruned += child_pcp; qs_delta_pruned += child_qdp; qs_see_pruned += child_qsp
+            iid_searches += child_iid; singular_extensions += child_se
             evaluation = -evaluation
         else:  # Subsequent moves (Non-PV nodes): Zero-window search
             lmr_reduction = 0
@@ -475,22 +535,24 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
             reduced_search_depth = search_depth - lmr_reduction
 
             # 1. Zero-window search with potential LMR
-            evaluation, _, child_nodes, child_q_nodes, child_cutoffs, child_tt_hits, child_nmc, child_fp, child_ru, child_rfp, child_lmp, child_pcp, child_qdp, child_qsp = _search(
-                new_piece_bbs, new_occupancy_bbs, new_game_state, reduced_search_depth, -alpha - 1, -alpha, search_context, ply + 1
+            evaluation, _, child_nodes, child_q_nodes, child_cutoffs, child_tt_hits, child_nmc, child_fp, child_ru, child_rfp, child_lmp, child_pcp, child_qdp, child_qsp, child_iid, child_se = _search(
+                new_piece_bbs, new_occupancy_bbs, new_game_state, reduced_search_depth, -alpha - 1, -alpha, search_context, ply + 1, NO_MOVE
             )
             nodes_searched += child_nodes; quiescence_nodes += child_q_nodes; cutoffs += child_cutoffs; tt_hits += child_tt_hits
             null_move_cutoffs += child_nmc; futility_pruned += child_fp; razoring_used += child_ru; rfp_pruned += child_rfp
             lmp_pruned += child_lmp; probcut_pruned += child_pcp; qs_delta_pruned += child_qdp; qs_see_pruned += child_qsp
+            iid_searches += child_iid; singular_extensions += child_se
             evaluation = -evaluation
 
             # 2. If it fails high, re-search with a full window
             if evaluation > alpha: # Corrected PVS re-search condition
-                evaluation, _, child_nodes, child_q_nodes, child_cutoffs, child_tt_hits, child_nmc, child_fp, child_ru, child_rfp, child_lmp, child_pcp, child_qdp, child_qsp = _search(
-                    new_piece_bbs, new_occupancy_bbs, new_game_state, search_depth, -beta, -alpha, search_context, ply + 1
+                evaluation, _, child_nodes, child_q_nodes, child_cutoffs, child_tt_hits, child_nmc, child_fp, child_ru, child_rfp, child_lmp, child_pcp, child_qdp, child_qsp, child_iid, child_se = _search(
+                    new_piece_bbs, new_occupancy_bbs, new_game_state, search_depth, -beta, -alpha, search_context, ply + 1, NO_MOVE
                 )
                 nodes_searched += child_nodes; quiescence_nodes += child_q_nodes; cutoffs += child_cutoffs; tt_hits += child_tt_hits
                 null_move_cutoffs += child_nmc; futility_pruned += child_fp; razoring_used += child_ru; rfp_pruned += child_rfp
                 lmp_pruned += child_lmp; probcut_pruned += child_pcp; qs_delta_pruned += child_qdp; qs_see_pruned += child_qsp
+                iid_searches += child_iid; singular_extensions += child_se
                 evaluation = -evaluation
 
         if evaluation > max_eval:
@@ -558,7 +620,8 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
     store_tt(search_context.transposition_table, zobrist_key, depth, tt_score, final_flag, best_move)
 
     return (max_eval, best_move, nodes_searched, quiescence_nodes, cutoffs, tt_hits,
-            null_move_cutoffs, futility_pruned, razoring_used, rfp_pruned, lmp_pruned, probcut_pruned, qs_delta_pruned, qs_see_pruned)
+            null_move_cutoffs, futility_pruned, razoring_used, rfp_pruned, lmp_pruned, probcut_pruned, qs_delta_pruned, qs_see_pruned,
+            iid_searches, singular_extensions)
 
 @numba.njit(search_return_type(
     piece_bbs_signature, occupancy_bbs_signature, game_state_signature,
@@ -569,7 +632,7 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
 def _search_wrapper(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, transposition_table, killer_moves, pv_table, history_table):
     search_context = SearchContext(transposition_table, killer_moves, pv_table, history_table)
     return _search(
-        piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_context, 0
+        piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_context, 0, NO_MOVE
     )
 
 def iterative_deepening_search(board_state, max_depth, max_time_ms, transposition_table, killer_moves):
@@ -590,6 +653,7 @@ def iterative_deepening_search(board_state, max_depth, max_time_ms, transpositio
     best_move_total = NO_MOVE
     total_nodes_searched, total_quiescence_nodes, total_cutoffs, total_tt_hits = np.uint64(0), np.uint64(0), np.uint64(0), np.uint64(0)
     total_nmc, total_fp, total_ru, total_rfp, total_lmp, total_pcp, total_qdp, total_qsp = np.uint64(0), np.uint64(0), np.uint64(0), np.uint64(0), np.uint64(0), np.uint64(0), np.uint64(0), np.uint64(0)
+    total_iid, total_se = np.uint64(0), np.uint64(0)
     last_completed_depth = 0
 
     for current_depth in range(1, max_depth + 1):
@@ -600,7 +664,7 @@ def iterative_deepening_search(board_state, max_depth, max_time_ms, transpositio
             alpha, beta = -INFINITY, INFINITY
 
         pv_table.fill(0)
-        score, _, nodes, q_nodes, cutoffs, tt_hits, nmc, fp, ru, rfp, lmp, pcp, qdp, qsp = _search_wrapper(
+        score, _, nodes, q_nodes, cutoffs, tt_hits, nmc, fp, ru, rfp, lmp, pcp, qdp, qsp, iid, se = _search_wrapper(
             piece_bbs, occupancy_bbs, game_state, current_depth, alpha, beta, transposition_table, killer_moves, pv_table, history_table
         )
 
@@ -608,20 +672,21 @@ def iterative_deepening_search(board_state, max_depth, max_time_ms, transpositio
             log_info(f"depth {current_depth} aspiration window failed low, re-searching...")
             alpha, beta = -INFINITY, alpha + 1
             pv_table.fill(0)
-            score, _, nodes, q_nodes, cutoffs, tt_hits, nmc, fp, ru, rfp, lmp, pcp, qdp, qsp = _search_wrapper(
+            score, _, nodes, q_nodes, cutoffs, tt_hits, nmc, fp, ru, rfp, lmp, pcp, qdp, qsp, iid, se = _search_wrapper(
                 piece_bbs, occupancy_bbs, game_state, current_depth, alpha, beta, transposition_table, killer_moves, pv_table, history_table
             )
         elif score >= beta:
             log_info(f"depth {current_depth} aspiration window failed high, re-searching...")
             alpha, beta = beta - 1, INFINITY
             pv_table.fill(0)
-            score, _, nodes, q_nodes, cutoffs, tt_hits, nmc, fp, ru, rfp, lmp, pcp, qdp, qsp = _search_wrapper(
+            score, _, nodes, q_nodes, cutoffs, tt_hits, nmc, fp, ru, rfp, lmp, pcp, qdp, qsp, iid, se = _search_wrapper(
                 piece_bbs, occupancy_bbs, game_state, current_depth, alpha, beta, transposition_table, killer_moves, pv_table, history_table
             )
 
         last_score = score
         total_nodes_searched += nodes; total_quiescence_nodes += q_nodes; total_cutoffs += cutoffs; total_tt_hits += tt_hits
         total_nmc += nmc; total_fp += fp; total_ru += ru; total_rfp += rfp; total_lmp += lmp; total_pcp += pcp; total_qdp += qdp; total_qsp += qsp
+        total_iid += iid; total_se += se
 
         tt_entry = probe_tt(transposition_table, game_state[4])
         if tt_entry['flag'] != TT_FLAG_NONE:
@@ -659,4 +724,5 @@ def iterative_deepening_search(board_state, max_depth, max_time_ms, transpositio
             break
             
     return (best_move_total, last_score, total_nodes_searched, total_quiescence_nodes, total_cutoffs, total_tt_hits,
-            last_completed_depth, total_nmc, total_fp, total_ru, total_rfp, total_lmp, total_pcp, total_qdp, total_qsp)
+            last_completed_depth, total_nmc, total_fp, total_ru, total_rfp, total_lmp, total_pcp, total_qdp, total_qsp,
+            total_iid, total_se)
