@@ -223,6 +223,7 @@ INFINITY = 32000
 MATE_SCORE = 30000
 MAX_PLY = 128
 MATE_IN_MAX_PLY = MATE_SCORE - MAX_PLY
+NO_MOVE = np.uint16(0)
 
 
 # --- Aspiration Windows ---

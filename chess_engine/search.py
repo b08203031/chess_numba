@@ -14,11 +14,10 @@ from chess_engine.move import (
     get_to_square, get_from_square, get_special_move_flag, 
     SPECIAL_MOVE_FLAG_EN_PASSANT, SPECIAL_MOVE_FLAG_PROMOTION
 )
-import numba as nb
 from chess_engine.constants import (
     BB_SQUARES, MG_MATERIAL_VALUES, INFINITY, MAX_QUIESCENCE_DEPTH, ASPIRATION_WINDOW_SIZE,
     NULL_MOVE_REDUCTION, MAX_PLY, LMR_MIN_DEPTH, LMR_MIN_QUIET_MOVE_INDEX, LMR_REDUCTION, SEE_THRESHOLD,
-    MATE_SCORE, MATE_IN_MAX_PLY,
+    MATE_SCORE, MATE_IN_MAX_PLY, NO_MOVE,
     RAZORING_MARGIN, FP_MARGIN_D1, FP_MARGIN_D2, RFP_MARGIN_D1
 )
 from chess_engine.bitboard_utils import find_piece_type_on_square
@@ -31,22 +30,20 @@ from chess_engine.transposition_table import (
     TT_FLAG_NONE, TT_FLAG_EXACT, TT_FLAG_ALPHA, TT_FLAG_BETA
 )
 
-NO_MOVE = 0 # Represents an invalid or null move
-
 from chess_engine.engine_types import (
     piece_bbs_signature, occupancy_bbs_signature, game_state_signature,
     SearchContext, search_context_type
 )
 
 move_picker_spec = [
-    ('moves', nb.uint16[::1]),
-    ('scores', nb.int32[::1]),
-    ('see_values', nb.int32[::1]),
-    ('index', nb.int32),
-    ('stage', nb.int32),
-    ('tt_move', nb.uint16),
-    ('killer_moves', nb.uint16[::1]),
-    ('history_table', nb.int32[:, :]),
+    ('moves', numba.uint16[::1]),
+    ('scores', numba.int32[::1]),
+    ('see_values', numba.int32[::1]),
+    ('index', numba.int32),
+    ('stage', numba.int32),
+    ('tt_move', numba.uint16),
+    ('killer_moves', numba.uint16[::1]),
+    ('history_table', numba.int32[:, :]),
 ]
 
 # MovePicker Stages
@@ -57,7 +54,7 @@ STAGE_QUIETS = 3
 STAGE_BAD_CAPTURES = 4
 STAGE_DONE = 5
 
-@nb.njit(cache=True)
+@numba.njit(cache=True)
 def _partition(moves, scores, low, high):
     pivot_score = scores[high]
     i = low - 1
@@ -70,7 +67,7 @@ def _partition(moves, scores, low, high):
     scores[i + 1], scores[high] = scores[high], scores[i + 1]
     return i + 1
 
-@nb.njit(cache=True)
+@numba.njit(cache=True)
 def _quicksort_recursive(moves, scores, low, high):
     if low < high:
         pi = _partition(moves, scores, low, high)
@@ -116,7 +113,7 @@ class MovePicker:
             move = self.moves[self.index]
             self.index += 1
             return move
-        return NO_MOVE
+        return np.uint16(NO_MOVE)
 
 
 def format_score_for_uci(score):
@@ -140,13 +137,13 @@ def format_score_for_uci(score):
         # It's a centipawn score
         return f"cp {score}"
 
-quiescence_search_return_type = nb.types.Tuple([
-    nb.int32, nb.uint64
+quiescence_search_return_type = numba.types.Tuple([
+    numba.int32, numba.uint64
 ])
 
 @numba.njit(quiescence_search_return_type(
     piece_bbs_signature, occupancy_bbs_signature, game_state_signature,
-    nb.int32, nb.int32, nb.int32, nb.types.List(nb.uint16)
+    numba.int32, numba.int32, numba.int32, numba.types.List(numba.uint16)
 ), cache=True)
 def quiescence_search(piece_bbs, occupancy_bbs, game_state, alpha, beta, ply, legal_moves):
     q_nodes = np.uint64(1)
@@ -194,14 +191,14 @@ def quiescence_search(piece_bbs, occupancy_bbs, game_state, alpha, beta, ply, le
 
     return alpha, q_nodes
 
-search_return_type = nb.types.Tuple([
-    nb.int32, nb.uint16, nb.uint64, nb.uint64, nb.uint64, nb.uint64,
-    nb.uint64, nb.uint64, nb.uint64, nb.uint64, nb.uint64, nb.uint64
+search_return_type = numba.types.Tuple([
+    numba.int32, numba.uint16, numba.uint64, numba.uint64, numba.uint64, numba.uint64,
+    numba.uint64, numba.uint64, numba.uint64, numba.uint64, numba.uint64, numba.uint64
 ])
 
 @numba.njit(search_return_type(
     piece_bbs_signature, occupancy_bbs_signature, game_state_signature,
-    nb.int32, nb.int32, nb.int32, search_context_type, nb.int32
+    numba.int32, numba.int32, numba.int32, search_context_type, numba.int32
 ), cache=True)
 def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_context, ply):
     nodes_searched = np.uint64(1)
@@ -217,14 +214,14 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
 
     if ply >= MAX_PLY:
         for j in range(MAX_PLY):
-            search_context.pv_table[ply, j] = NO_MOVE
-        return (evaluate_position(piece_bbs, occupancy_bbs, game_state), NO_MOVE, nodes_searched, quiescence_nodes, cutoffs, tt_hits,
+            search_context.pv_table[ply, j] = np.uint16(NO_MOVE)
+        return (evaluate_position(piece_bbs, occupancy_bbs, game_state), np.uint16(NO_MOVE), nodes_searched, quiescence_nodes, cutoffs, tt_hits,
                 null_move_cutoffs, futility_pruned, razoring_used, rfp_pruned, qs_delta_pruned, qs_see_pruned)
 
     original_alpha = alpha
     zobrist_key = game_state[4]
 
-    tt_move = NO_MOVE
+    tt_move = np.uint16(NO_MOVE)
     tt_entry = probe_tt(search_context.transposition_table, zobrist_key)
     if tt_entry['flag'] != TT_FLAG_NONE and tt_entry['depth'] >= depth:
         tt_hits += 1
@@ -238,7 +235,7 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
 
         if tt_entry['flag'] == TT_FLAG_EXACT:
             for j in range(MAX_PLY):
-                search_context.pv_table[ply, j] = NO_MOVE
+                search_context.pv_table[ply, j] = np.uint16(NO_MOVE)
             return (tt_score, tt_entry['best_move'], nodes_searched, quiescence_nodes, cutoffs, tt_hits,
                     null_move_cutoffs, futility_pruned, razoring_used, rfp_pruned, qs_delta_pruned, qs_see_pruned)
         elif tt_entry['flag'] == TT_FLAG_ALPHA:
@@ -248,7 +245,7 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
 
         if alpha >= beta:
             for j in range(MAX_PLY):
-                search_context.pv_table[ply, j] = NO_MOVE
+                search_context.pv_table[ply, j] = np.uint16(NO_MOVE)
             return (tt_score, tt_entry['best_move'], nodes_searched, quiescence_nodes, cutoffs, tt_hits,
                     null_move_cutoffs, futility_pruned, razoring_used, rfp_pruned, qs_delta_pruned, qs_see_pruned)
 
@@ -267,7 +264,7 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
         # Reverse Futility Pruning (RFP)
         if depth == 1 and static_score - RFP_MARGIN_D1 >= beta:
             rfp_pruned += 1
-            return (np.int32(beta), NO_MOVE, nodes_searched, quiescence_nodes, cutoffs, tt_hits,
+            return (np.int32(beta), np.uint16(NO_MOVE), nodes_searched, quiescence_nodes, cutoffs, tt_hits,
                     null_move_cutoffs, futility_pruned, razoring_used, rfp_pruned, qs_delta_pruned, qs_see_pruned)
         
         # Razoring
@@ -276,7 +273,7 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
             quiescence_nodes += child_q_nodes
             if razor_score + RAZORING_MARGIN < alpha:
                 razoring_used += 1
-                return (np.int32(alpha), NO_MOVE, nodes_searched, quiescence_nodes, cutoffs, tt_hits,
+                return (np.int32(alpha), np.uint16(NO_MOVE), nodes_searched, quiescence_nodes, cutoffs, tt_hits,
                         null_move_cutoffs, futility_pruned, razoring_used, rfp_pruned, qs_delta_pruned, qs_see_pruned)
 
 
@@ -295,8 +292,8 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
         if null_move_score >= beta:
             null_move_cutoffs += 1
             for j in range(MAX_PLY):
-                search_context.pv_table[ply, j] = NO_MOVE
-            return (np.int32(beta), NO_MOVE, nodes_searched, quiescence_nodes, cutoffs, tt_hits,
+                search_context.pv_table[ply, j] = np.uint16(NO_MOVE)
+            return (np.int32(beta), np.uint16(NO_MOVE), nodes_searched, quiescence_nodes, cutoffs, tt_hits,
                     null_move_cutoffs, futility_pruned, razoring_used, rfp_pruned, qs_delta_pruned, qs_see_pruned)
 
     has_legal_moves = False
@@ -307,27 +304,27 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
 
     if not has_legal_moves:
         for j in range(MAX_PLY):
-            search_context.pv_table[ply, j] = NO_MOVE
+            search_context.pv_table[ply, j] = np.uint16(NO_MOVE)
         if is_currently_in_check:
             # Checkmate
-            return (np.int32(-MATE_SCORE + ply), NO_MOVE, nodes_searched, quiescence_nodes, cutoffs, tt_hits,
+            return (np.int32(-MATE_SCORE + ply), np.uint16(NO_MOVE), nodes_searched, quiescence_nodes, cutoffs, tt_hits,
                     null_move_cutoffs, futility_pruned, razoring_used, rfp_pruned, qs_delta_pruned, qs_see_pruned)
         else:
             # Stalemate
-            return (np.int32(0), NO_MOVE, nodes_searched, quiescence_nodes, cutoffs, tt_hits,
+            return (np.int32(0), np.uint16(NO_MOVE), nodes_searched, quiescence_nodes, cutoffs, tt_hits,
                     null_move_cutoffs, futility_pruned, razoring_used, rfp_pruned, qs_delta_pruned, qs_see_pruned)
 
     if depth == 0:
         for j in range(MAX_PLY):
-            search_context.pv_table[ply, j] = NO_MOVE
+            search_context.pv_table[ply, j] = np.uint16(NO_MOVE)
         
         eval_score, q_nodes = quiescence_search(piece_bbs, occupancy_bbs, game_state, alpha, beta, 0, moves)
-        return (eval_score, NO_MOVE, nodes_searched, q_nodes, cutoffs, tt_hits,
+        return (eval_score, np.uint16(NO_MOVE), nodes_searched, q_nodes, cutoffs, tt_hits,
                 null_move_cutoffs, futility_pruned, razoring_used, rfp_pruned, qs_delta_pruned, qs_see_pruned)
 
     move_picker = MovePicker(piece_bbs, occupancy_bbs, game_state, moves, tt_move, search_context.killer_moves[ply], search_context.history_table)
     
-    best_move = NO_MOVE
+    best_move = np.uint16(NO_MOVE)
     max_eval = -INFINITY
     quiet_move_counter = 0
     move_count = 0
@@ -338,7 +335,7 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
 
     while True:
         move = move_picker.next_move()
-        if move == NO_MOVE:
+        if move == np.uint16(NO_MOVE):
             break
         
         move_count += 1
@@ -410,17 +407,17 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
             search_context.pv_table[ply, ply] = move
             
             # Copy PV from child node only if the child node has a valid PV
-            child_has_pv = (ply + 1 < MAX_PLY and search_context.pv_table[ply + 1, ply + 1] != NO_MOVE)
+            child_has_pv = (ply + 1 < MAX_PLY and search_context.pv_table[ply + 1, ply + 1] != np.uint16(NO_MOVE))
             
             i = ply + 1
             if child_has_pv:
-                while i < MAX_PLY and search_context.pv_table[ply + 1, i] != NO_MOVE:
+                while i < MAX_PLY and search_context.pv_table[ply + 1, i] != np.uint16(NO_MOVE):
                     search_context.pv_table[ply, i] = search_context.pv_table[ply + 1, i]
                     i += 1
             
             # Clear the rest of the line to prevent stale data
             while i < MAX_PLY:
-                search_context.pv_table[ply, i] = NO_MOVE
+                search_context.pv_table[ply, i] = np.uint16(NO_MOVE)
                 i += 1
 
 
@@ -456,7 +453,7 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
     else:
         final_flag = TT_FLAG_EXACT
     
-    if best_move == NO_MOVE and len(moves) > 0:
+    if best_move == np.uint16(NO_MOVE) and len(moves) > 0:
         best_move = move_picker.moves[0]
 
     # Adjust mate score before storing
@@ -473,9 +470,9 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
 
 @numba.njit(search_return_type(
     piece_bbs_signature, occupancy_bbs_signature, game_state_signature,
-    nb.int32, nb.int32, nb.int32, numba.types.Array(numba_tt_entry_type, 1, 'C'),
-    nb.types.Array(nb.uint16, 2, 'C'), nb.types.Array(nb.uint16, 2, 'C'),
-    nb.types.Array(nb.int32, 2, 'C')
+    numba.int32, numba.int32, numba.int32, numba.types.Array(numba_tt_entry_type, 1, 'C'),
+    numba.types.Array(numba.uint16, 2, 'C'), numba.types.Array(numba.uint16, 2, 'C'),
+    numba.types.Array(numba.int32, 2, 'C')
 ), cache=True)
 def _search_wrapper(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, transposition_table, killer_moves, pv_table, history_table):
     search_context = SearchContext(transposition_table, killer_moves, pv_table, history_table)

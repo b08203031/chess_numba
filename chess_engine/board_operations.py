@@ -1,7 +1,7 @@
 # chess_engine/board_operations.py
 
 import numpy as np
-import numba as numba
+import numba
 from chess_engine.move import (
     get_from_square, get_to_square, get_special_move_flag, get_promotion_piece,
     SPECIAL_MOVE_FLAG_PROMOTION, SPECIAL_MOVE_FLAG_EN_PASSANT, SPECIAL_MOVE_FLAG_CASTLING
