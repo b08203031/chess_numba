@@ -540,3 +540,194 @@ def has_sufficient_material(piece_bbs, side_to_move):
         return (piece_bbs[3] | piece_bbs[4]) != 0
     else: # BLACK
         return (piece_bbs[9] | piece_bbs[10]) != 0
+
+
+@numba.njit(nbt.uint16[:](piece_bbs_signature, occupancy_bbs_signature, game_state_signature), cache=True)
+def generate_captures(piece_bbs, occupancy_bbs, game_state):
+    """
+    Generates all fully legal capture and promotion moves for the current position.
+    This is used in quiescence search.
+    """
+    moves = np.zeros(128, dtype=np.uint16)
+    move_count = 0
+
+    side_to_move, _, en_passant_square, _, _ = game_state
+
+    (wp_bb, wn_bb, wb_bb, wr_bb, wq_bb, wk_bb,
+     bp_bb, bn_bb, bb_bb, br_bb, bq_bb, bk_bb) = piece_bbs
+
+    white_pieces_bb, black_pieces_bb, _ = occupancy_bbs
+    all_pieces_bb = white_pieces_bb | black_pieces_bb
+
+    opponent_pieces_bb = black_pieces_bb if side_to_move == WHITE else white_pieces_bb
+    own_pieces_bb = white_pieces_bb if side_to_move == WHITE else black_pieces_bb
+
+    if side_to_move == WHITE:
+        # --- Pawn Captures & Promotions ---
+        single_pushes = (wp_bb << 8) & ~all_pieces_bb
+        captures_west = ((wp_bb & NOT_A_FILE) << 7) & opponent_pieces_bb
+        captures_east = ((wp_bb & NOT_H_FILE) << 9) & opponent_pieces_bb
+
+        # Promotion via single push (quiet promotion)
+        promo_pushes = single_pushes & RANK_8
+        while promo_pushes:
+            to_sq = get_lsb_index(promo_pushes)
+            from_sq = to_sq - 8
+            for p_type in [PROMO_QUEEN, PROMO_ROOK, PROMO_BISHOP, PROMO_KNIGHT]:
+                moves[move_count] = encode_move(from_sq, to_sq, p_type, SPECIAL_MOVE_FLAG_PROMOTION)
+                move_count += 1
+            promo_pushes &= (promo_pushes - np.uint64(1))
+
+        # Capture Promotions
+        promo_caps_west = captures_west & RANK_8
+        while promo_caps_west:
+            to_sq = get_lsb_index(promo_caps_west)
+            from_sq = to_sq - 7
+            for p_type in [PROMO_QUEEN, PROMO_ROOK, PROMO_BISHOP, PROMO_KNIGHT]:
+                moves[move_count] = encode_move(from_sq, to_sq, p_type, SPECIAL_MOVE_FLAG_PROMOTION)
+                move_count += 1
+            promo_caps_west &= (promo_caps_west - np.uint64(1))
+
+        promo_caps_east = captures_east & RANK_8
+        while promo_caps_east:
+            to_sq = get_lsb_index(promo_caps_east)
+            from_sq = to_sq - 9
+            for p_type in [PROMO_QUEEN, PROMO_ROOK, PROMO_BISHOP, PROMO_KNIGHT]:
+                moves[move_count] = encode_move(from_sq, to_sq, p_type, SPECIAL_MOVE_FLAG_PROMOTION)
+                move_count += 1
+            promo_caps_east &= (promo_caps_east - np.uint64(1))
+
+        # Regular Captures (non-promotion)
+        caps_west = captures_west & ~RANK_8
+        while caps_west:
+            to_sq = get_lsb_index(caps_west)
+            from_sq = to_sq - 7
+            moves[move_count] = encode_move(from_sq, to_sq, 0, SPECIAL_MOVE_FLAG_NORMAL)
+            move_count += 1
+            caps_west &= (caps_west - np.uint64(1))
+
+        caps_east = captures_east & ~RANK_8
+        while caps_east:
+            to_sq = get_lsb_index(caps_east)
+            from_sq = to_sq - 9
+            moves[move_count] = encode_move(from_sq, to_sq, 0, SPECIAL_MOVE_FLAG_NORMAL)
+            move_count += 1
+            caps_east &= (caps_east - np.uint64(1))
+
+        # En Passant
+        if en_passant_square != -1:
+            ep_target_bb = BB_SQUARES[np.int8(en_passant_square)]
+            west_attackers = ((wp_bb & NOT_A_FILE) << 7) & ep_target_bb
+            if west_attackers:
+                from_sq = np.int8(en_passant_square - 7)
+                moves[move_count] = encode_move(from_sq, np.int8(en_passant_square), 0, SPECIAL_MOVE_FLAG_EN_PASSANT); move_count += 1
+            east_attackers = ((wp_bb & NOT_H_FILE) << 9) & ep_target_bb
+            if east_attackers:
+                from_sq = np.int8(en_passant_square - 9)
+                moves[move_count] = encode_move(from_sq, np.int8(en_passant_square), 0, SPECIAL_MOVE_FLAG_EN_PASSANT); move_count += 1
+
+    else: # BLACK
+        # --- Pawn Captures & Promotions ---
+        single_pushes = (bp_bb >> 8) & ~all_pieces_bb
+        captures_west = ((bp_bb & NOT_H_FILE) >> 7) & opponent_pieces_bb
+        captures_east = ((bp_bb & NOT_A_FILE) >> 9) & opponent_pieces_bb
+
+        # Promotion via single push (quiet promotion)
+        promo_pushes = single_pushes & RANK_1
+        while promo_pushes:
+            to_sq = get_lsb_index(promo_pushes)
+            from_sq = to_sq + 8
+            for p_type in [PROMO_QUEEN, PROMO_ROOK, PROMO_BISHOP, PROMO_KNIGHT]:
+                moves[move_count] = encode_move(from_sq, to_sq, p_type, SPECIAL_MOVE_FLAG_PROMOTION)
+                move_count += 1
+            promo_pushes &= (promo_pushes - np.uint64(1))
+
+        # Capture Promotions
+        promo_caps_west = captures_west & RANK_1
+        while promo_caps_west:
+            to_sq = get_lsb_index(promo_caps_west)
+            from_sq = to_sq + 7
+            for p_type in [PROMO_QUEEN, PROMO_ROOK, PROMO_BISHOP, PROMO_KNIGHT]:
+                moves[move_count] = encode_move(from_sq, to_sq, p_type, SPECIAL_MOVE_FLAG_PROMOTION)
+                move_count += 1
+            promo_caps_west &= (promo_caps_west - np.uint64(1))
+
+        promo_caps_east = captures_east & RANK_1
+        while promo_caps_east:
+            to_sq = get_lsb_index(promo_caps_east)
+            from_sq = to_sq + 9
+            for p_type in [PROMO_QUEEN, PROMO_ROOK, PROMO_BISHOP, PROMO_KNIGHT]:
+                moves[move_count] = encode_move(from_sq, to_sq, p_type, SPECIAL_MOVE_FLAG_PROMOTION)
+                move_count += 1
+            promo_caps_east &= (promo_caps_east - np.uint64(1))
+
+        # Regular Captures (non-promotion)
+        caps_west = captures_west & ~RANK_1
+        while caps_west:
+            to_sq = get_lsb_index(caps_west)
+            from_sq = to_sq + 7
+            moves[move_count] = encode_move(from_sq, to_sq, 0, SPECIAL_MOVE_FLAG_NORMAL)
+            move_count += 1
+            caps_west &= (caps_west - np.uint64(1))
+
+        caps_east = caps_east & ~RANK_1
+        while caps_east:
+            to_sq = get_lsb_index(caps_east)
+            from_sq = to_sq + 9
+            moves[move_count] = encode_move(from_sq, to_sq, 0, SPECIAL_MOVE_FLAG_NORMAL)
+            move_count += 1
+            caps_east &= (caps_east - np.uint64(1))
+
+        # En Passant
+        if en_passant_square != -1:
+            ep_target_bb = BB_SQUARES[np.int8(en_passant_square)]
+            west_attackers = ((bp_bb & NOT_H_FILE) >> 7) & ep_target_bb
+            if west_attackers:
+                from_sq = np.int8(en_passant_square + 7)
+                moves[move_count] = encode_move(from_sq, np.int8(en_passant_square), 0, SPECIAL_MOVE_FLAG_EN_PASSANT); move_count += 1
+            east_attackers = ((bp_bb & NOT_A_FILE) >> 9) & ep_target_bb
+            if east_attackers:
+                from_sq = np.int8(en_passant_square + 9)
+                moves[move_count] = encode_move(from_sq, np.int8(en_passant_square), 0, SPECIAL_MOVE_FLAG_EN_PASSANT); move_count += 1
+
+    # --- Leaper Captures (Knights, Bishops, Rooks, Queens, Kings) ---
+    leaper_bbs = (wn_bb, wb_bb, wr_bb, wq_bb, wk_bb) if side_to_move == WHITE else (bn_bb, bb_bb, br_bb, bq_bb, bk_bb)
+    for piece_type in range(5):
+        bb = leaper_bbs[piece_type]
+        while bb:
+            from_sq = get_lsb_index(bb)
+            if piece_type == 0: targets = KNIGHT_ATTACKS[from_sq]
+            elif piece_type == 1: targets = get_bishop_attacks(from_sq, all_pieces_bb)
+            elif piece_type == 2: targets = get_rook_attacks(from_sq, all_pieces_bb)
+            elif piece_type == 3: targets = get_queen_attacks(from_sq, all_pieces_bb)
+            else: targets = KING_ATTACKS[from_sq]
+
+            capture_targets = targets & opponent_pieces_bb
+
+            while capture_targets:
+                to_sq = get_lsb_index(capture_targets)
+                moves[move_count] = encode_move(from_sq, to_sq, 0, SPECIAL_MOVE_FLAG_NORMAL)
+                move_count += 1
+                capture_targets &= (capture_targets - np.uint64(1))
+            bb &= (bb - np.uint64(1))
+
+    # --- Filter for legality ---
+    legal_moves_final = np.zeros(128, dtype=np.uint16)
+    legal_move_count = 0
+
+    for i in range(move_count):
+        move = moves[i]
+
+        new_piece_bbs, new_occupancy_bbs, new_game_state, _ = make_move(
+            piece_bbs, occupancy_bbs, game_state, move
+        )
+
+        king_bb = new_piece_bbs[5] if side_to_move == WHITE else new_piece_bbs[11]
+
+        if king_bb != 0:
+            king_sq = get_lsb_index(king_bb)
+            if not is_square_attacked(new_piece_bbs, new_occupancy_bbs, new_game_state, king_sq, new_game_state[0]):
+                legal_moves_final[legal_move_count] = move
+                legal_move_count += 1
+
+    return legal_moves_final[:legal_move_count]
