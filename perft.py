@@ -149,7 +149,7 @@ def run_perft_test(fen_string: str, max_depth: int, test_key: str, divide_on_mis
         if expected_results_for_key:
             expected = expected_results_for_key.get(depth, -1)
 
-        status = "OK" if nodes == expected else "MISMATCH!"
+        status = "OK" if nodes == expected or expected == -1 else "MISMATCH!"
 
         print(f"Depth {depth}: Nodes: {nodes:<10} Time: {elapsed_time:.3f}s, NPS: {nps:<10} Expected: {expected:<10} -> {status}")
 

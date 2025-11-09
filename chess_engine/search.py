@@ -37,6 +37,86 @@ from chess_engine.engine_types import (
     SearchContext, search_context_type
 )
 
+move_picker_spec = [
+    ('moves', nb.uint16[::1]),
+    ('scores', nb.int32[::1]),
+    ('see_values', nb.int32[::1]),
+    ('index', nb.int32),
+    ('stage', nb.int32),
+    ('tt_move', nb.uint16),
+    ('killer_moves', nb.uint16[::1]),
+    ('history_table', nb.int32[:, :]),
+]
+
+# MovePicker Stages
+STAGE_TT = 0
+STAGE_GOOD_CAPTURES = 1
+STAGE_KILLERS = 2
+STAGE_QUIETS = 3
+STAGE_BAD_CAPTURES = 4
+STAGE_DONE = 5
+
+@nb.njit(cache=True)
+def _partition(moves, scores, low, high):
+    pivot_score = scores[high]
+    i = low - 1
+    for j in range(low, high):
+        if scores[j] >= pivot_score:
+            i += 1
+            moves[i], moves[j] = moves[j], moves[i]
+            scores[i], scores[j] = scores[j], scores[i]
+    moves[i + 1], moves[high] = moves[high], moves[i + 1]
+    scores[i + 1], scores[high] = scores[high], scores[i + 1]
+    return i + 1
+
+@nb.njit(cache=True)
+def _quicksort_recursive(moves, scores, low, high):
+    if low < high:
+        pi = _partition(moves, scores, low, high)
+        _quicksort_recursive(moves, scores, low, pi - 1)
+        _quicksort_recursive(moves, scores, pi + 1, high)
+
+@numba.experimental.jitclass(move_picker_spec)
+class MovePicker:
+    def __init__(self, piece_bbs, occupancy_bbs, game_state, moves, tt_move, killer_moves_at_ply, history_table):
+        self.moves = moves.copy()
+        self.scores = np.zeros(len(moves), dtype=np.int32)
+        self.index = 0
+
+        opponent_pieces_bb = occupancy_bbs[1] if game_state[0] == 0 else occupancy_bbs[0]
+        for i in range(len(moves)):
+            move = moves[i]
+            score = 0
+            if move == tt_move:
+                score = 100_000
+            else:
+                to_square = get_to_square(move)
+                is_capture = (opponent_pieces_bb & BB_SQUARES[to_square]) != 0
+                if is_capture:
+                    aggressor_type = find_piece_type_on_square(piece_bbs, get_from_square(move))
+                    victim_type = find_piece_type_on_square(piece_bbs, to_square)
+                    if victim_type != -1:
+                        score = 10_000 + (MG_MATERIAL_VALUES[victim_type % 6] - MG_MATERIAL_VALUES[aggressor_type % 6])
+                else:
+                    if move == killer_moves_at_ply[0]:
+                        score = 5_000
+                    elif move == killer_moves_at_ply[1]:
+                        score = 4_000
+                    else:
+                        aggressor_type = find_piece_type_on_square(piece_bbs, get_from_square(move))
+                        score = history_table[aggressor_type, to_square]
+            self.scores[i] = score
+        
+        if len(self.moves) > 1:
+            _quicksort_recursive(self.moves, self.scores, 0, len(self.moves) - 1)
+
+    def next_move(self):
+        if self.index < len(self.moves):
+            move = self.moves[self.index]
+            self.index += 1
+            return move
+        return NO_MOVE
+
 
 def format_score_for_uci(score):
     """
@@ -58,76 +138,6 @@ def format_score_for_uci(score):
     else:
         # It's a centipawn score
         return f"cp {score}"
-
-
-# chess_engine/search.py
-# ... (imports)
-
-@nb.njit(cache=True)
-def partition(moves, scores, low, high):
-    pivot_score = scores[high]
-    i = low - 1
-    for j in range(low, high):
-        if scores[j] >= pivot_score: # Sort descending
-            i += 1
-            moves[i], moves[j] = moves[j], moves[i]
-            scores[i], scores[j] = scores[j], scores[i]
-
-    moves[i + 1], moves[high] = moves[high], moves[i + 1]
-    scores[i + 1], scores[high] = scores[high], scores[i + 1]
-    return i + 1
-
-@nb.njit(cache=True)
-def quicksort_recursive(moves, scores, low, high):
-    if low < high:
-        pi = partition(moves, scores, low, high)
-        quicksort_recursive(moves, scores, low, pi - 1)
-        quicksort_recursive(moves, scores, pi + 1, high)
-
-@nb.njit(cache=True)
-def sort_moves(piece_bbs, occupancy_bbs, game_state, moves, tt_move, killer_moves_at_ply):
-    """
-    對棋步列表進行排序。
-    返回一個根據啟發式評分排序後的新列表。
-    """
-    move_scores = np.zeros(len(moves), dtype=np.int32)
-    opponent_pieces_bb = occupancy_bbs[1] if game_state[0] == 0 else occupancy_bbs[0]
-
-    for i in range(len(moves)):
-        move = moves[i]
-        score = 0
-
-        if move == tt_move:
-            score += 100_000
-            move_scores[i] = score
-            continue
-
-        to_square = get_to_square(move)
-        is_capture = (opponent_pieces_bb & BB_SQUARES[to_square]) != 0
-        is_en_passant = get_special_move_flag(move) == SPECIAL_MOVE_FLAG_EN_PASSANT
-
-        if is_capture:
-            aggressor_type = find_piece_type_on_square(piece_bbs, get_from_square(move))
-            victim_type = find_piece_type_on_square(piece_bbs, to_square)
-            if victim_type != -1: # Ensure a piece is actually on the square
-                score += 10_000 + (MG_MATERIAL_VALUES[victim_type % 6] - MG_MATERIAL_VALUES[aggressor_type % 6])
-        elif is_en_passant:
-            # En passant is always Pawn captures Pawn
-            aggressor_type = find_piece_type_on_square(piece_bbs, get_from_square(move))
-            score += 10_000 + (MG_MATERIAL_VALUES[0] - MG_MATERIAL_VALUES[aggressor_type % 6])
-        else:
-            if move == killer_moves_at_ply[0]:
-                score += 5_000
-            elif move == killer_moves_at_ply[1]:
-                score += 4_000
-        
-        move_scores[i] = score
-
-    # <<< FIX: Replace insertion sort with Quicksort >>>
-    if len(moves) > 1:
-        quicksort_recursive(moves, move_scores, 0, len(moves) - 1)
-
-    return moves
 
 quiescence_search_return_type = nb.types.Tuple([
     nb.int32, nb.uint64
@@ -280,20 +290,19 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
         return (eval_score, NO_MOVE, nodes_searched, q_nodes, cutoffs, tt_hits,
                 null_move_cutoffs, futility_pruned, razoring_used, qs_delta_pruned, qs_see_pruned)
 
-    sorted_moves = sort_moves(piece_bbs, occupancy_bbs, game_state, moves, tt_move, search_context.killer_moves[ply])
+    move_picker = MovePicker(piece_bbs, occupancy_bbs, game_state, moves, tt_move, search_context.killer_moves[ply], search_context.history_table)
     
     best_move = NO_MOVE
     max_eval = -INFINITY
     quiet_move_counter = 0
+    move_count = 0
 
-    for i, move in enumerate(sorted_moves):
-        # --- Static Exchange Evaluation (SEE) Pruning ---
-        opponent_pieces_bb = occupancy_bbs[1] if game_state[0] == 0 else occupancy_bbs[0]
-        is_capture = (opponent_pieces_bb & BB_SQUARES[get_to_square(move)]) != 0
+    while True:
+        move = move_picker.next_move()
+        if move == NO_MOVE:
+            break
         
-        if is_capture:
-            if see(piece_bbs, occupancy_bbs, game_state, get_from_square(move), get_to_square(move)) < SEE_THRESHOLD:
-                continue
+        move_count += 1
 
         new_piece_bbs, new_occupancy_bbs, new_game_state, _ = make_move(
             piece_bbs, occupancy_bbs, game_state, move
@@ -314,7 +323,7 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
         evaluation = 0
 
         # --- Principal Variation Search (PVS) & Late Move Reductions (LMR) ---
-        if i == 0:  # First move (PV node): Full window search
+        if move_count == 1:  # First move (PV node): Full window search
             evaluation, _, child_nodes, child_q_nodes, child_cutoffs, child_tt_hits, child_nmc, child_fp, child_ru, child_qdp, child_qsp = _search(
                 new_piece_bbs, new_occupancy_bbs, new_game_state, search_depth, -beta, -alpha, search_context, ply + 1
             )
@@ -366,6 +375,19 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
         if alpha >= beta:
             cutoffs += 1
             if is_quiet_move:
+                bonus = depth * depth
+                
+                from_square = get_from_square(move)
+                to_square = get_to_square(move)
+                
+                aggressor_type = find_piece_type_on_square(piece_bbs, from_square)
+                
+                search_context.history_table[aggressor_type, to_square] += bonus
+                
+                # Decay other moves to prevent unbounded growth
+                # and prioritize recent history
+                # search_context.history_table //= 2
+                
                 if move != search_context.killer_moves[ply, 0]:
                     search_context.killer_moves[ply, 1] = search_context.killer_moves[ply, 0]
                     search_context.killer_moves[ply, 0] = move
@@ -382,7 +404,7 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
         final_flag = TT_FLAG_EXACT
     
     if best_move == NO_MOVE and len(moves) > 0:
-        best_move = sorted_moves[0]
+        best_move = move_picker.moves[0]
 
     # Adjust mate score before storing
     tt_score = max_eval
@@ -399,10 +421,11 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
 @numba.njit(search_return_type(
     piece_bbs_signature, occupancy_bbs_signature, game_state_signature, 
     nb.int32, nb.int32, nb.int32, numba.types.Array(numba_tt_entry_type, 1, 'C'),
-    nb.types.Array(nb.uint16, 2, 'C'), nb.types.Array(nb.uint16, 2, 'C')
+    nb.types.Array(nb.uint16, 2, 'C'), nb.types.Array(nb.uint16, 2, 'C'),
+    nb.types.Array(nb.int32, 2, 'C')
 ), cache=True)
-def _search_wrapper(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, transposition_table, killer_moves, pv_table):
-    search_context = SearchContext(transposition_table, killer_moves, pv_table)
+def _search_wrapper(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, transposition_table, killer_moves, pv_table, history_table):
+    search_context = SearchContext(transposition_table, killer_moves, pv_table, history_table)
     return _search(
         piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_context, 0
     )
@@ -419,6 +442,7 @@ def iterative_deepening_search(board_state, max_depth, max_time_ms, transpositio
     game_state = (side_to_move, castling_rights, en_passant_square, halfmove_clock, np.uint64(zobrist_key))
     
     pv_table = np.zeros((MAX_PLY, MAX_PLY), dtype=np.uint16)
+    history_table = np.zeros((12, 64), dtype=np.int32)
     last_score = 0
     best_move_total = NO_MOVE
     total_nodes_searched, total_quiescence_nodes, total_cutoffs, total_tt_hits = np.uint64(0), np.uint64(0), np.uint64(0), np.uint64(0)
@@ -434,7 +458,7 @@ def iterative_deepening_search(board_state, max_depth, max_time_ms, transpositio
 
         pv_table.fill(0)
         score, _, nodes, q_nodes, cutoffs, tt_hits, nmc, fp, ru, qdp, qsp = _search_wrapper(
-            piece_bbs, occupancy_bbs, game_state, current_depth, alpha, beta, transposition_table, killer_moves, pv_table
+            piece_bbs, occupancy_bbs, game_state, current_depth, alpha, beta, transposition_table, killer_moves, pv_table, history_table
         )
 
         if score <= alpha or score >= beta:
@@ -442,7 +466,7 @@ def iterative_deepening_search(board_state, max_depth, max_time_ms, transpositio
             alpha, beta = -INFINITY, INFINITY
             pv_table.fill(0)
             score, _, nodes, q_nodes, cutoffs, tt_hits, nmc, fp, ru, qdp, qsp = _search_wrapper(
-                piece_bbs, occupancy_bbs, game_state, current_depth, alpha, beta, transposition_table, killer_moves, pv_table
+                piece_bbs, occupancy_bbs, game_state, current_depth, alpha, beta, transposition_table, killer_moves, pv_table, history_table
             )
 
         last_score = score

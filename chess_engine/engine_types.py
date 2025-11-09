@@ -54,14 +54,16 @@ search_context_spec = [
     ('transposition_table', numba.types.Array(numba_tt_entry_type, 1, 'C')),
     ('killer_moves', numba.uint16[:, :]),
     ('pv_table', numba.uint16[:, :]),
+    ('history_table', numba.int32[:, :]),
 ]
 
 @jitclass(search_context_spec)
 class SearchContext:
-    def __init__(self, transposition_table, killer_moves, pv_table):
+    def __init__(self, transposition_table, killer_moves, pv_table, history_table):
         self.transposition_table = transposition_table
         self.killer_moves = killer_moves
         self.pv_table = pv_table
+        self.history_table = history_table
 
 # Create the Numba type from the class
 search_context_type = SearchContext.class_type.instance_type
