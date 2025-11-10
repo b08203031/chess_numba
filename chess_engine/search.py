@@ -98,16 +98,17 @@ def quiescence_search(piece_bbs, occupancy_bbs, game_state, alpha, beta, ply):
     see_pruned = np.uint64(0)
 
     if ply >= MAX_QUIESCENCE_DEPTH:
-        return evaluate_position(piece_bbs, occupancy_bbs, game_state), q_nodes, delta_pruned, see_pruned
+        return (evaluate_position(piece_bbs, occupancy_bbs, game_state),
+                np.uint64(q_nodes), np.uint64(delta_pruned), np.uint64(see_pruned))
 
     stand_pat = evaluate_position(piece_bbs, occupancy_bbs, game_state)
     if stand_pat >= beta:
-        return beta, q_nodes, delta_pruned, see_pruned
+        return beta, np.uint64(q_nodes), np.uint64(delta_pruned), np.uint64(see_pruned)
     alpha = max(alpha, stand_pat)
 
     capture_moves = generate_captures(piece_bbs, occupancy_bbs, game_state)
     if len(capture_moves) == 0:
-        return stand_pat, q_nodes, delta_pruned, see_pruned
+        return stand_pat, np.uint64(q_nodes), np.uint64(delta_pruned), np.uint64(see_pruned)
 
     for move in capture_moves:
         # --- Delta Pruning ---
@@ -143,10 +144,10 @@ def quiescence_search(piece_bbs, occupancy_bbs, game_state, alpha, beta, ply):
         score = -score
 
         if score >= beta:
-            return beta, q_nodes, delta_pruned, see_pruned
+            return (np.int32(beta), np.uint64(q_nodes), np.uint64(delta_pruned), np.uint64(see_pruned))
         alpha = max(alpha, score)
 
-    return alpha, q_nodes, delta_pruned, see_pruned
+    return (np.int32(alpha), np.uint64(q_nodes), np.uint64(delta_pruned), np.uint64(see_pruned))
 
 search_return_type = numba.types.Tuple([
     numba.int32, numba.uint16, numba.uint64, numba.uint64, numba.uint64, numba.uint64,
@@ -178,9 +179,9 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
 
     if ply >= MAX_PLY:
         search_context.pv_table[ply, :].fill(NO_MOVE)
-        return (evaluate_position(piece_bbs, occupancy_bbs, game_state), NO_MOVE, nodes_searched, quiescence_nodes, cutoffs, tt_hits,
-                null_move_cutoffs, futility_pruned, razoring_used, rfp_pruned, lmp_pruned, probcut_pruned, qs_delta_pruned, qs_see_pruned,
-                iid_searches, singular_extensions)
+        return (np.int32(evaluate_position(piece_bbs, occupancy_bbs, game_state)), NO_MOVE, np.uint64(nodes_searched), np.uint64(quiescence_nodes), np.uint64(cutoffs), np.uint64(tt_hits),
+                np.uint64(null_move_cutoffs), np.uint64(futility_pruned), np.uint64(razoring_used), np.uint64(rfp_pruned), np.uint64(lmp_pruned), np.uint64(probcut_pruned), np.uint64(qs_delta_pruned), np.uint64(qs_see_pruned),
+                np.uint64(iid_searches), np.uint64(singular_extensions))
 
     original_alpha = alpha
     zobrist_key = game_state[4]
@@ -195,17 +196,17 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
 
         if tt_entry['flag'] == TT_FLAG_EXACT:
             search_context.pv_table[ply, :].fill(NO_MOVE)
-            return (tt_score, tt_entry['best_move'], nodes_searched, quiescence_nodes, cutoffs, tt_hits,
-                    null_move_cutoffs, futility_pruned, razoring_used, rfp_pruned, lmp_pruned, probcut_pruned, qs_delta_pruned, qs_see_pruned,
-                    iid_searches, singular_extensions)
+            return (np.int32(tt_score), tt_entry['best_move'], np.uint64(nodes_searched), np.uint64(quiescence_nodes), np.uint64(cutoffs), np.uint64(tt_hits),
+                    np.uint64(null_move_cutoffs), np.uint64(futility_pruned), np.uint64(razoring_used), np.uint64(rfp_pruned), np.uint64(lmp_pruned), np.uint64(probcut_pruned), np.uint64(qs_delta_pruned), np.uint64(qs_see_pruned),
+                    np.uint64(iid_searches), np.uint64(singular_extensions))
         elif tt_entry['flag'] == TT_FLAG_ALPHA: beta = min(beta, tt_score)
         elif tt_entry['flag'] == TT_FLAG_BETA: alpha = max(alpha, tt_score)
 
         if alpha >= beta:
             search_context.pv_table[ply, :].fill(NO_MOVE)
-            return (tt_score, tt_entry['best_move'], nodes_searched, quiescence_nodes, cutoffs, tt_hits,
-                    null_move_cutoffs, futility_pruned, razoring_used, rfp_pruned, lmp_pruned, probcut_pruned, qs_delta_pruned, qs_see_pruned,
-                    iid_searches, singular_extensions)
+            return (np.int32(tt_score), tt_entry['best_move'], np.uint64(nodes_searched), np.uint64(quiescence_nodes), np.uint64(cutoffs), np.uint64(tt_hits),
+                    np.uint64(null_move_cutoffs), np.uint64(futility_pruned), np.uint64(razoring_used), np.uint64(rfp_pruned), np.uint64(lmp_pruned), np.uint64(probcut_pruned), np.uint64(qs_delta_pruned), np.uint64(qs_see_pruned),
+                    np.uint64(iid_searches), np.uint64(singular_extensions))
         tt_move = tt_entry['best_move']
 
     if ENABLE_IID and depth >= 5 and tt_move == NO_MOVE:
@@ -225,15 +226,32 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
             singular_extensions += 1
 
     is_currently_in_check = is_in_check(piece_bbs, occupancy_bbs, game_state)
+
+    static_eval = -INFINITY
+    if not is_currently_in_check:
+        static_eval = evaluate_position(piece_bbs, occupancy_bbs, game_state)
     
+        # Razoring
+        if ENABLE_RAZORING and depth <= 2 and static_eval + RAZORING_MARGIN < alpha:
+            razoring_used += 1
+            # Go directly to quiescence search
+            score, q_nodes, child_delta_pruned, child_see_pruned = quiescence_search(
+                piece_bbs, occupancy_bbs, game_state, alpha, beta, 0)
+            qs_delta_pruned += child_delta_pruned
+            qs_see_pruned += child_see_pruned
+
+            return (np.int32(score), NO_MOVE, np.uint64(nodes_searched), np.uint64(q_nodes), np.uint64(cutoffs), np.uint64(tt_hits),
+                    np.uint64(null_move_cutoffs), np.uint64(futility_pruned), np.uint64(razoring_used), np.uint64(rfp_pruned), np.uint64(lmp_pruned), np.uint64(probcut_pruned), np.uint64(qs_delta_pruned), np.uint64(qs_see_pruned),
+                    np.uint64(iid_searches), np.uint64(singular_extensions))
+
     if depth == 0:
         search_context.pv_table[ply, :].fill(NO_MOVE)
         eval_score, q_nodes, child_delta_pruned, child_see_pruned = quiescence_search(piece_bbs, occupancy_bbs, game_state, alpha, beta, 0)
         qs_delta_pruned += child_delta_pruned
         qs_see_pruned += child_see_pruned
-        return (eval_score, NO_MOVE, nodes_searched, q_nodes, cutoffs, tt_hits,
-                null_move_cutoffs, futility_pruned, razoring_used, rfp_pruned, lmp_pruned, probcut_pruned, qs_delta_pruned, qs_see_pruned,
-                iid_searches, singular_extensions)
+        return (np.int32(eval_score), NO_MOVE, np.uint64(nodes_searched), np.uint64(q_nodes), np.uint64(cutoffs), np.uint64(tt_hits),
+                np.uint64(null_move_cutoffs), np.uint64(futility_pruned), np.uint64(razoring_used), np.uint64(rfp_pruned), np.uint64(lmp_pruned), np.uint64(probcut_pruned), np.uint64(qs_delta_pruned), np.uint64(qs_see_pruned),
+                np.uint64(iid_searches), np.uint64(singular_extensions))
 
     if ENABLE_NMP and depth >= 3 and not is_currently_in_check and has_sufficient_material(piece_bbs, game_state[0]):
         original_state_for_null = game_state.copy()
@@ -259,17 +277,17 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
         if null_move_score >= beta:
             null_move_cutoffs += 1 # Increment again for the actual cutoff
             search_context.pv_table[ply, :].fill(NO_MOVE)
-            return (np.int32(beta), NO_MOVE, nodes_searched, quiescence_nodes, cutoffs, tt_hits,
-                    null_move_cutoffs, futility_pruned, razoring_used, rfp_pruned, lmp_pruned, probcut_pruned, qs_delta_pruned, qs_see_pruned,
-                    iid_searches, singular_extensions)
+            return (np.int32(beta), NO_MOVE, np.uint64(nodes_searched), np.uint64(quiescence_nodes), np.uint64(cutoffs), np.uint64(tt_hits),
+                    np.uint64(null_move_cutoffs), np.uint64(futility_pruned), np.uint64(razoring_used), np.uint64(rfp_pruned), np.uint64(lmp_pruned), np.uint64(probcut_pruned), np.uint64(qs_delta_pruned), np.uint64(qs_see_pruned),
+                    np.uint64(iid_searches), np.uint64(singular_extensions))
 
     moves = generate_legal_moves(piece_bbs, occupancy_bbs, game_state)
     if len(moves) == 0:
         search_context.pv_table[ply, :].fill(NO_MOVE)
         if is_currently_in_check:
-            return (np.int32(-MATE_SCORE + ply), NO_MOVE, nodes_searched, quiescence_nodes, cutoffs, tt_hits, null_move_cutoffs, futility_pruned, razoring_used, rfp_pruned, lmp_pruned, probcut_pruned, qs_delta_pruned, qs_see_pruned, iid_searches, singular_extensions)
+            return (np.int32(-MATE_SCORE + ply), NO_MOVE, np.uint64(nodes_searched), np.uint64(quiescence_nodes), np.uint64(cutoffs), np.uint64(tt_hits), np.uint64(null_move_cutoffs), np.uint64(futility_pruned), np.uint64(razoring_used), np.uint64(rfp_pruned), np.uint64(lmp_pruned), np.uint64(probcut_pruned), np.uint64(qs_delta_pruned), np.uint64(qs_see_pruned), np.uint64(iid_searches), np.uint64(singular_extensions))
         else:
-            return (np.int32(0), NO_MOVE, nodes_searched, quiescence_nodes, cutoffs, tt_hits, null_move_cutoffs, futility_pruned, razoring_used, rfp_pruned, lmp_pruned, probcut_pruned, qs_delta_pruned, qs_see_pruned, iid_searches, singular_extensions)
+            return (np.int32(0), NO_MOVE, np.uint64(nodes_searched), np.uint64(quiescence_nodes), np.uint64(cutoffs), np.uint64(tt_hits), np.uint64(null_move_cutoffs), np.uint64(futility_pruned), np.uint64(razoring_used), np.uint64(rfp_pruned), np.uint64(lmp_pruned), np.uint64(probcut_pruned), np.uint64(qs_delta_pruned), np.uint64(qs_see_pruned), np.uint64(iid_searches), np.uint64(singular_extensions))
 
     scores = score_moves(piece_bbs, occupancy_bbs, game_state, moves, tt_move, search_context.killer_moves[ply*2:ply*2+2], search_context.history_table)
     best_move, max_eval = NO_MOVE, -INFINITY
@@ -292,6 +310,18 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
         opponent_pieces_bb = occupancy_bbs[1] if game_state[0] == 0 else occupancy_bbs[0]
         is_capture = (opponent_pieces_bb & BB_SQUARES[get_to_square(move)]) != 0
         is_quiet_move = not is_capture and not (get_special_move_flag(move) == SPECIAL_MOVE_FLAG_PROMOTION) and not is_giving_check_after_move
+
+        if ENABLE_FP and depth <= 2 and not is_currently_in_check and not is_giving_check_after_move:
+             if static_eval + (FP_MARGIN_D1 if depth == 1 else FP_MARGIN_D2) < alpha and is_quiet_move:
+                futility_pruned += 1
+                unmake_move(piece_bbs, occupancy_bbs, game_state, move, unmake_info)
+                continue
+
+        # Late Move Pruning (LMP)
+        if ENABLE_LMP and is_quiet_move and quiet_move_counter >= LMP_MOVE_COUNT[depth] and not is_giving_check_after_move:
+            lmp_pruned += 1
+            unmake_move(piece_bbs, occupancy_bbs, game_state, move, unmake_info)
+            continue
         
         current_extension = 1 if is_giving_check_after_move else 0
         if move == tt_move: current_extension = max(current_extension, extension)
@@ -339,6 +369,13 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                     search_context.killer_moves[ply * 2 + 1] = search_context.killer_moves[ply * 2]
                     search_context.killer_moves[ply * 2] = move
             break
+
+        # Reverse Futility Pruning (RFP)
+        if ENABLE_RFP and depth <= 2 and not is_currently_in_check and not is_giving_check_after_move:
+            if static_eval - RFP_MARGIN_D1 > alpha:
+                rfp_pruned += 1
+                break
+
         if is_quiet_move: quiet_move_counter += 1
 
     final_flag = TT_FLAG_ALPHA if max_eval <= original_alpha else (TT_FLAG_BETA if max_eval >= beta else TT_FLAG_EXACT)
@@ -349,9 +386,9 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
     elif tt_score < -MATE_IN_MAX_PLY: tt_score += ply
     store_tt(search_context.transposition_table, zobrist_key, depth, tt_score, final_flag, best_move)
 
-    return (max_eval, best_move, nodes_searched, quiescence_nodes, cutoffs, tt_hits,
-            null_move_cutoffs, futility_pruned, razoring_used, rfp_pruned, lmp_pruned, probcut_pruned, qs_delta_pruned, qs_see_pruned,
-            iid_searches, singular_extensions)
+    return (np.int32(max_eval), best_move, np.uint64(nodes_searched), np.uint64(quiescence_nodes), np.uint64(cutoffs), np.uint64(tt_hits),
+            np.uint64(null_move_cutoffs), np.uint64(futility_pruned), np.uint64(razoring_used), np.uint64(rfp_pruned), np.uint64(lmp_pruned), np.uint64(probcut_pruned), np.uint64(qs_delta_pruned), np.uint64(qs_see_pruned),
+            np.uint64(iid_searches), np.uint64(singular_extensions))
 
 def iterative_deepening_search(piece_bbs, occupancy_bbs, game_state, max_depth, max_time_ms, transposition_table):
     from .move import move_to_uci

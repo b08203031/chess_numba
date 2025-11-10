@@ -234,8 +234,8 @@ ASPIRATION_WINDOW_SIZE = 100 # centipawns
 ENABLE_LMP = True           # Late Move Pruning
 ENABLE_PROBCUT = True       # ProbCut
 ENABLE_DELTA_PRUNING = True # Delta Pruning in Quiescence Search
-ENABLE_IID = False           # Internal Iterative Deepening
-ENABLE_SINGULAR_EXTENSIONS = False # Singular Extensions
+ENABLE_IID = True           # Internal Iterative Deepening
+ENABLE_SINGULAR_EXTENSIONS = True # Singular Extensions
 
 
 # IID and Singular Extension Parameters
