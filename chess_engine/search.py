@@ -5,8 +5,11 @@ import numpy as np
 
 from chess_engine.evaluation import evaluate_position
 from chess_engine.move_generator import (
-    generate_legal_moves, is_square_attacked,
-    is_in_check, has_sufficient_material
+    generate_legal_moves,
+    is_square_attacked,
+    is_in_check,
+    has_sufficient_material,
+    generate_captures,
 )
 from chess_engine.zobrist import get_lsb_index
 from chess_engine.board_operations import make_move, make_null_move
@@ -39,24 +42,6 @@ from chess_engine.engine_types import (
     SearchContext, search_context_type
 )
 
-move_picker_spec = [
-    ('moves', numba.uint16[::1]),
-    ('scores', numba.int32[::1]),
-    ('see_values', numba.int32[::1]),
-    ('index', numba.int32),
-    ('stage', numba.int32),
-    ('tt_move', numba.uint16),
-    ('killer_moves', numba.uint16[::1]),
-    ('history_table', numba.int32[:, :]),
-]
-
-# MovePicker Stages
-STAGE_TT = 0
-STAGE_GOOD_CAPTURES = 1
-STAGE_KILLERS = 2
-STAGE_QUIETS = 3
-STAGE_BAD_CAPTURES = 4
-STAGE_DONE = 5
 
 @numba.njit(cache=True)
 def _partition(moves, scores, low, high):
@@ -78,55 +63,34 @@ def _quicksort_recursive(moves, scores, low, high):
         _quicksort_recursive(moves, scores, low, pi - 1)
         _quicksort_recursive(moves, scores, pi + 1, high)
 
-@numba.experimental.jitclass(move_picker_spec)
-class MovePicker:
-    def __init__(self, piece_bbs, occupancy_bbs, game_state, moves, tt_move, killer_moves_at_ply, history_table):
-        self.moves = moves.copy()
-        self.scores = np.zeros(len(moves), dtype=np.int32)
-        self.index = 0
-
-        opponent_pieces_bb = occupancy_bbs[1] if game_state[0] == 0 else occupancy_bbs[0]
-        for i in range(len(moves)):
-            move = moves[i]
-            score = 0
-            if move == tt_move:
-                score = 100_000
+@numba.njit(cache=True)
+def score_moves(piece_bbs, occupancy_bbs, game_state, moves, tt_move, killer_moves_at_ply, history_table):
+    scores = np.zeros(len(moves), dtype=np.int32)
+    opponent_pieces_bb = occupancy_bbs[1] if game_state[0] == 0 else occupancy_bbs[0]
+    for i in range(len(moves)):
+        move = moves[i]
+        score = 0
+        if move == tt_move:
+            score = 100_000
+        else:
+            to_square = get_to_square(move)
+            is_capture = (opponent_pieces_bb & BB_SQUARES[to_square]) != 0
+            if is_capture:
+                aggressor_type = find_piece_type_on_square(piece_bbs, get_from_square(move))
+                victim_type = find_piece_type_on_square(piece_bbs, to_square)
+                if victim_type != -1:
+                    score = 10_000 + (MG_MATERIAL_VALUES[victim_type % 6] - MG_MATERIAL_VALUES[aggressor_type % 6])
             else:
-                to_square = get_to_square(move)
-                is_capture = (opponent_pieces_bb & BB_SQUARES[to_square]) != 0
-                if is_capture:
-                    aggressor_type = find_piece_type_on_square(piece_bbs, get_from_square(move))
-                    victim_type = find_piece_type_on_square(piece_bbs, to_square)
-                    if victim_type != -1:
-                        score = 10_000 + (MG_MATERIAL_VALUES[victim_type % 6] - MG_MATERIAL_VALUES[aggressor_type % 6])
+                if move == killer_moves_at_ply[0]:
+                    score = 5_000
+                elif move == killer_moves_at_ply[1]:
+                    score = 4_000
                 else:
-                    if move == killer_moves_at_ply[0]:
-                        score = 5_000
-                    elif move == killer_moves_at_ply[1]:
-                        score = 4_000
-                    else:
-                        aggressor_type = find_piece_type_on_square(piece_bbs, get_from_square(move))
-                        score = history_table[aggressor_type, to_square]
-            self.scores[i] = score
-        
-    def next_move(self):
-        if self.index >= len(self.moves):
-            return np.uint16(NO_MOVE)
+                    aggressor_type = find_piece_type_on_square(piece_bbs, get_from_square(move))
+                    score = history_table[aggressor_type, to_square]
+        scores[i] = score
+    return scores
 
-        best_score = -INFINITY
-        best_idx = -1
-        for i in range(self.index, len(self.moves)):
-            if self.scores[i] > best_score:
-                best_score = self.scores[i]
-                best_idx = i
-        
-        # Swap the best move with the current move
-        self.moves[self.index], self.moves[best_idx] = self.moves[best_idx], self.moves[self.index]
-        self.scores[self.index], self.scores[best_idx] = self.scores[best_idx], self.scores[self.index]
-        
-        move = self.moves[self.index]
-        self.index += 1
-        return move
 
 
 def format_score_for_uci(score):
@@ -171,20 +135,14 @@ def quiescence_search(piece_bbs, occupancy_bbs, game_state, alpha, beta, ply):
         return beta, q_nodes, delta_pruned, see_pruned
     alpha = max(alpha, stand_pat)
     
-    legal_moves = generate_legal_moves(piece_bbs, occupancy_bbs, game_state)
-    
-    capture_moves = []
-    opponent_pieces_bb = occupancy_bbs[1] if game_state[0] == 0 else occupancy_bbs[0]
-    for move in legal_moves:
-        to_sq = get_to_square(move)
-        is_capture = (opponent_pieces_bb & BB_SQUARES[to_sq]) != 0
-        is_en_passant = get_special_move_flag(move) == SPECIAL_MOVE_FLAG_EN_PASSANT
+    # Generate only capture and promotion moves
+    capture_moves = generate_captures(piece_bbs, occupancy_bbs, game_state)
 
-        if is_capture or is_en_passant:
-            capture_moves.append(move)
-
-    if not capture_moves:
+    if len(capture_moves) == 0:
         return stand_pat, q_nodes, delta_pruned, see_pruned
+
+    # Move ordering for quiescence search (MVV-LVA) could be implemented here
+    # For now, we iterate through them as they are generated.
     
     for move in capture_moves:
         use_premade_board = False
@@ -457,8 +415,8 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                 null_move_cutoffs, futility_pruned, razoring_used, rfp_pruned, lmp_pruned, probcut_pruned, qs_delta_pruned, qs_see_pruned,
                 iid_searches, singular_extensions)
 
-    move_picker = MovePicker(piece_bbs, occupancy_bbs, game_state, moves, tt_move, search_context.killer_moves[ply*2:ply*2+2], search_context.history_table)
-    
+    scores = score_moves(piece_bbs, occupancy_bbs, game_state, moves, tt_move, search_context.killer_moves[ply*2:ply*2+2], search_context.history_table)
+
     best_move = np.uint16(NO_MOVE)
     max_eval = -INFINITY
     quiet_move_counter = 0
@@ -467,11 +425,21 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
     # Ensure static_score is computed if not already done for shallow depths
     if static_score == -INFINITY and depth <= 2 and not is_currently_in_check:
         static_score = evaluate_position(piece_bbs, occupancy_bbs, game_state)
-
-    while True:
-        move = move_picker.next_move()
+    
+    for i in range(len(moves)):
+        # --- In-place Selection Sort ---
+        best_idx = i
+        for j in range(i + 1, len(moves)):
+            if scores[j] > scores[best_idx]:
+                best_idx = j
+        
+        # Swap the best move to the current position
+        moves[i], moves[best_idx] = moves[best_idx], moves[i]
+        scores[i], scores[best_idx] = scores[best_idx], scores[i]
+        
+        move = moves[i]
         if move == np.uint16(NO_MOVE):
-            break
+            continue # Should not happen with real move lists, but as a safeguard.
         
         if move == excluded_move:
             continue
@@ -608,7 +576,7 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
         final_flag = TT_FLAG_EXACT
     
     if best_move == np.uint16(NO_MOVE) and len(moves) > 0:
-        best_move = move_picker.moves[0]
+        best_move = moves[0]
 
     # Adjust mate score before storing
     tt_score = max_eval

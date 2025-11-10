@@ -235,7 +235,7 @@ ENABLE_LMP = True           # Late Move Pruning
 ENABLE_PROBCUT = True       # ProbCut
 ENABLE_DELTA_PRUNING = True # Delta Pruning in Quiescence Search
 ENABLE_IID = False           # Internal Iterative Deepening
-ENABLE_SINGULAR_EXTENSIONS = True # Singular Extensions
+ENABLE_SINGULAR_EXTENSIONS = False # Singular Extensions
 
 
 # IID and Singular Extension Parameters
