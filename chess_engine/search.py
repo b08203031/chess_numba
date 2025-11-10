@@ -10,6 +10,11 @@ from chess_engine.move_generator import (
     is_in_check,
     has_sufficient_material,
     generate_captures,
+    generate_legal_moves,
+    is_square_attacked,
+    is_in_check,
+    has_sufficient_material,
+    generate_captures,
 )
 from chess_engine.zobrist import get_lsb_index
 from chess_engine.board_operations import make_move, make_null_move
@@ -134,12 +139,16 @@ def quiescence_search(piece_bbs, occupancy_bbs, game_state, alpha, beta, ply):
     if stand_pat >= beta:
         return beta, q_nodes, delta_pruned, see_pruned
     alpha = max(alpha, stand_pat)
-    
+
     # Generate only capture and promotion moves
     capture_moves = generate_captures(piece_bbs, occupancy_bbs, game_state)
 
     if len(capture_moves) == 0:
         return stand_pat, q_nodes, delta_pruned, see_pruned
+
+    # Move ordering for quiescence search (MVV-LVA) could be implemented here
+    # For now, we iterate through them as they are generated.
+
 
     # Move ordering for quiescence search (MVV-LVA) could be implemented here
     # For now, we iterate through them as they are generated.
