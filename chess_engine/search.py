@@ -398,8 +398,12 @@ def iterative_deepening_search(piece_bbs, occupancy_bbs, game_state, max_depth, 
         pv_moves = [move_to_uci(pv_table[0, i]) for i in range(MAX_PLY) if pv_table[0, i] != NO_MOVE]
         pv_string = " ".join(pv_moves)
 
-        # UCI Formatting (omitted for brevity)
-        print(f"info depth {current_depth} ... pv {pv_string}")
+        # --- Format Score for UCI ---
+        uci_score_string = format_score_for_uci(score)
+
+        # --- Print UCI Info String ---
+        nps = int(total_nodes_searched / (elapsed_time / 1000)) if elapsed_time > 0 else 0
+        print(f"info depth {current_depth} score {uci_score_string} nodes {total_nodes_searched} nps {nps} time {int(elapsed_time)} pv {pv_string}")
 
         last_completed_depth = current_depth
         if "mate" in "some_uci_score_string": break
@@ -409,7 +413,7 @@ def iterative_deepening_search(piece_bbs, occupancy_bbs, game_state, max_depth, 
             last_completed_depth, total_nmc, total_fp, total_ru, total_rfp, total_lmp, total_pcp, total_qdp, total_qsp,
             total_iid, total_se)
 
-def format_score_for_uci(score, ply):
+def format_score_for_uci(score):
     """Formats the internal score for UCI, adjusting for mate distance."""
     if abs(score) > MATE_IN_MAX_PLY:
         if score > 0:
