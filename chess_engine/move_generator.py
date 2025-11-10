@@ -6,8 +6,8 @@ from chess_engine.move import (
     encode_move, SPECIAL_MOVE_FLAG_NORMAL, SPECIAL_MOVE_FLAG_PROMOTION, SPECIAL_MOVE_FLAG_EN_PASSANT, SPECIAL_MOVE_FLAG_CASTLING,
     PROMO_QUEEN, PROMO_ROOK, PROMO_BISHOP, PROMO_KNIGHT
 )
-from chess_engine.board_operations import make_move
-from chess_engine.engine_types import board_state_flat_signature
+from chess_engine.board_operations import make_move, unmake_move
+# from chess_engine.engine_types import board_state_flat_signature # This is no longer needed
 from chess_engine.constants import BB_SQUARES
 import numba.types as nbt
 
@@ -232,16 +232,16 @@ def generate_legal_moves(piece_bbs, occupancy_bbs, game_state):
             caps &= (caps - np.uint64(1))
 
         # En Passant
-        if en_passant_square != -1:
-            ep_target_bb = BB_SQUARES[np.int8(en_passant_square)]
+        if en_passant_square != 64:
+            ep_target_bb = BB_SQUARES[np.uint8(en_passant_square)]
             west_attackers = ((wp_bb & NOT_A_FILE) << 7) & ep_target_bb
             if west_attackers:
-                from_sq = np.int8(en_passant_square - 7)
-                moves[move_count] = encode_move(from_sq, np.int8(en_passant_square), 0, SPECIAL_MOVE_FLAG_EN_PASSANT); move_count += 1
+                from_sq = np.uint8(en_passant_square - 7)
+                moves[move_count] = encode_move(from_sq, np.uint8(en_passant_square), 0, SPECIAL_MOVE_FLAG_EN_PASSANT); move_count += 1
             east_attackers = ((wp_bb & NOT_H_FILE) << 9) & ep_target_bb
             if east_attackers:
-                from_sq = np.int8(en_passant_square - 9)
-                moves[move_count] = encode_move(from_sq, np.int8(en_passant_square), 0, SPECIAL_MOVE_FLAG_EN_PASSANT); move_count += 1
+                from_sq = np.uint8(en_passant_square - 9)
+                moves[move_count] = encode_move(from_sq, np.uint8(en_passant_square), 0, SPECIAL_MOVE_FLAG_EN_PASSANT); move_count += 1
 
         # --- Castling ---
         if (castling_rights & WK) and not(all_pieces_bb & 0x60) and not is_square_attacked(piece_bbs, occupancy_bbs, game_state, 4, BLACK) and not is_square_attacked(piece_bbs, occupancy_bbs, game_state, 5, BLACK) and not is_square_attacked(piece_bbs, occupancy_bbs, game_state, 6, BLACK): moves[move_count]=encode_move(4,6,0,SPECIAL_MOVE_FLAG_CASTLING); move_count+=1
@@ -292,16 +292,16 @@ def generate_legal_moves(piece_bbs, occupancy_bbs, game_state):
             caps &= (caps - np.uint64(1))
 
         # En Passant
-        if en_passant_square != -1:
-            ep_target_bb = BB_SQUARES[np.int8(en_passant_square)]
+        if en_passant_square != 64:
+            ep_target_bb = BB_SQUARES[np.uint8(en_passant_square)]
             west_attackers = ((bp_bb & NOT_H_FILE) >> 7) & ep_target_bb
             if west_attackers:
-                from_sq = np.int8(en_passant_square + 7)
-                moves[move_count] = encode_move(from_sq, np.int8(en_passant_square), 0, SPECIAL_MOVE_FLAG_EN_PASSANT); move_count += 1
+                from_sq = np.uint8(en_passant_square + 7)
+                moves[move_count] = encode_move(from_sq, np.uint8(en_passant_square), 0, SPECIAL_MOVE_FLAG_EN_PASSANT); move_count += 1
             east_attackers = ((bp_bb & NOT_A_FILE) >> 9) & ep_target_bb
             if east_attackers:
-                from_sq = np.int8(en_passant_square + 9)
-                moves[move_count] = encode_move(from_sq, np.int8(en_passant_square), 0, SPECIAL_MOVE_FLAG_EN_PASSANT); move_count += 1
+                from_sq = np.uint8(en_passant_square + 9)
+                moves[move_count] = encode_move(from_sq, np.uint8(en_passant_square), 0, SPECIAL_MOVE_FLAG_EN_PASSANT); move_count += 1
 
         # --- Castling ---
         if (castling_rights & BK) and not(all_pieces_bb & 0x6000000000000000) and not is_square_attacked(piece_bbs, occupancy_bbs, game_state, 60, WHITE) and not is_square_attacked(piece_bbs, occupancy_bbs, game_state, 61, WHITE) and not is_square_attacked(piece_bbs, occupancy_bbs, game_state, 62, WHITE): moves[move_count]=encode_move(60,62,0,SPECIAL_MOVE_FLAG_CASTLING); move_count+=1
@@ -328,21 +328,28 @@ def generate_legal_moves(piece_bbs, occupancy_bbs, game_state):
     # --- Filter for legality ---
     legal_moves_final = np.zeros(256, dtype=np.uint16)
     legal_move_count = 0
-    
+
+    king_bb = piece_bbs[5] if side_to_move == WHITE else piece_bbs[11]
+    original_king_sq = get_lsb_index(king_bb) if king_bb else 0
+
     for i in range(move_count):
         move = moves[i]
-        
-        new_piece_bbs, new_occupancy_bbs, new_game_state, _ = make_move(
-            piece_bbs, occupancy_bbs, game_state, move
-        )
-        
-        king_bb = new_piece_bbs[5] if side_to_move == WHITE else new_piece_bbs[11]
-        
-        if king_bb != 0:
-            king_sq = get_lsb_index(king_bb)
-            if not is_square_attacked(new_piece_bbs, new_occupancy_bbs, new_game_state, king_sq, new_game_state[0]):
-                legal_moves_final[legal_move_count] = move
-                legal_move_count += 1
+
+        # Make the move on the board
+        unmake_info = make_move(piece_bbs, occupancy_bbs, game_state, move)
+
+        # After the move, the 'side_to_move' in game_state is the opponent.
+        # We need to check if the ORIGINAL side's king is attacked.
+        king_bb_after_move = piece_bbs[5] if side_to_move == WHITE else piece_bbs[11]
+        king_sq = get_lsb_index(king_bb_after_move) if king_bb_after_move else original_king_sq
+
+        # Check if the king is attacked by the new side to move (the opponent)
+        if not is_square_attacked(piece_bbs, occupancy_bbs, game_state, king_sq, game_state[0]):
+            legal_moves_final[legal_move_count] = move
+            legal_move_count += 1
+
+        # Unmake the move to restore the board state for the next iteration
+        unmake_move(piece_bbs, occupancy_bbs, game_state, move, unmake_info)
                 
     return legal_moves_final[:legal_move_count]
 
@@ -419,16 +426,16 @@ def generate_tactical_moves(piece_bbs, occupancy_bbs, game_state):
             caps_east &= (caps_east - np.uint64(1))
 
         # En Passant
-        if en_passant_square != -1:
-            ep_target_bb = BB_SQUARES[np.int8(en_passant_square)]
+        if en_passant_square != 64:
+            ep_target_bb = BB_SQUARES[np.uint8(en_passant_square)]
             west_attackers = ((wp_bb & NOT_A_FILE) << 7) & ep_target_bb
             if west_attackers:
-                from_sq = np.int8(en_passant_square - 7)
-                moves[move_count] = encode_move(from_sq, np.int8(en_passant_square), 0, SPECIAL_MOVE_FLAG_EN_PASSANT); move_count += 1
+                from_sq = np.uint8(en_passant_square - 7)
+                moves[move_count] = encode_move(from_sq, np.uint8(en_passant_square), 0, SPECIAL_MOVE_FLAG_EN_PASSANT); move_count += 1
             east_attackers = ((wp_bb & NOT_H_FILE) << 9) & ep_target_bb
             if east_attackers:
-                from_sq = np.int8(en_passant_square - 9)
-                moves[move_count] = encode_move(from_sq, np.int8(en_passant_square), 0, SPECIAL_MOVE_FLAG_EN_PASSANT); move_count += 1
+                from_sq = np.uint8(en_passant_square - 9)
+                moves[move_count] = encode_move(from_sq, np.uint8(en_passant_square), 0, SPECIAL_MOVE_FLAG_EN_PASSANT); move_count += 1
     
     else: # BLACK
         # --- Pawn Captures & Promotions ---
@@ -483,16 +490,16 @@ def generate_tactical_moves(piece_bbs, occupancy_bbs, game_state):
             caps_east &= (caps_east - np.uint64(1))
 
         # En Passant
-        if en_passant_square != -1:
-            ep_target_bb = BB_SQUARES[np.int8(en_passant_square)]
+        if en_passant_square != 64:
+            ep_target_bb = BB_SQUARES[np.uint8(en_passant_square)]
             west_attackers = ((bp_bb & NOT_H_FILE) >> 7) & ep_target_bb
             if west_attackers:
-                from_sq = np.int8(en_passant_square + 7)
-                moves[move_count] = encode_move(from_sq, np.int8(en_passant_square), 0, SPECIAL_MOVE_FLAG_EN_PASSANT); move_count += 1
+                from_sq = np.uint8(en_passant_square + 7)
+                moves[move_count] = encode_move(from_sq, np.uint8(en_passant_square), 0, SPECIAL_MOVE_FLAG_EN_PASSANT); move_count += 1
             east_attackers = ((bp_bb & NOT_A_FILE) >> 9) & ep_target_bb
             if east_attackers:
-                from_sq = np.int8(en_passant_square + 9)
-                moves[move_count] = encode_move(from_sq, np.int8(en_passant_square), 0, SPECIAL_MOVE_FLAG_EN_PASSANT); move_count += 1
+                from_sq = np.uint8(en_passant_square + 9)
+                moves[move_count] = encode_move(from_sq, np.uint8(en_passant_square), 0, SPECIAL_MOVE_FLAG_EN_PASSANT); move_count += 1
 
     # --- Leaper Captures (Knights, Bishops, Rooks, Queens, Kings) ---
     leaper_bbs = (wn_bb, wb_bb, wr_bb, wq_bb, wk_bb) if side_to_move == WHITE else (bn_bb, bb_bb, br_bb, bq_bb, bk_bb)
@@ -615,16 +622,16 @@ def generate_captures(piece_bbs, occupancy_bbs, game_state):
             caps_east &= (caps_east - np.uint64(1))
 
         # En Passant
-        if en_passant_square != -1:
-            ep_target_bb = BB_SQUARES[np.int8(en_passant_square)]
+        if en_passant_square != 64:
+            ep_target_bb = BB_SQUARES[np.uint8(en_passant_square)]
             west_attackers = ((wp_bb & NOT_A_FILE) << 7) & ep_target_bb
             if west_attackers:
-                from_sq = np.int8(en_passant_square - 7)
-                moves[move_count] = encode_move(from_sq, np.int8(en_passant_square), 0, SPECIAL_MOVE_FLAG_EN_PASSANT); move_count += 1
+                from_sq = np.uint8(en_passant_square - 7)
+                moves[move_count] = encode_move(from_sq, np.uint8(en_passant_square), 0, SPECIAL_MOVE_FLAG_EN_PASSANT); move_count += 1
             east_attackers = ((wp_bb & NOT_H_FILE) << 9) & ep_target_bb
             if east_attackers:
-                from_sq = np.int8(en_passant_square - 9)
-                moves[move_count] = encode_move(from_sq, np.int8(en_passant_square), 0, SPECIAL_MOVE_FLAG_EN_PASSANT); move_count += 1
+                from_sq = np.uint8(en_passant_square - 9)
+                moves[move_count] = encode_move(from_sq, np.uint8(en_passant_square), 0, SPECIAL_MOVE_FLAG_EN_PASSANT); move_count += 1
 
     else: # BLACK
         # --- Pawn Captures & Promotions ---
@@ -679,16 +686,16 @@ def generate_captures(piece_bbs, occupancy_bbs, game_state):
             caps_east &= (caps_east - np.uint64(1))
 
         # En Passant
-        if en_passant_square != -1:
-            ep_target_bb = BB_SQUARES[np.int8(en_passant_square)]
+        if en_passant_square != 64:
+            ep_target_bb = BB_SQUARES[np.uint8(en_passant_square)]
             west_attackers = ((bp_bb & NOT_H_FILE) >> 7) & ep_target_bb
             if west_attackers:
-                from_sq = np.int8(en_passant_square + 7)
-                moves[move_count] = encode_move(from_sq, np.int8(en_passant_square), 0, SPECIAL_MOVE_FLAG_EN_PASSANT); move_count += 1
+                from_sq = np.uint8(en_passant_square + 7)
+                moves[move_count] = encode_move(from_sq, np.uint8(en_passant_square), 0, SPECIAL_MOVE_FLAG_EN_PASSANT); move_count += 1
             east_attackers = ((bp_bb & NOT_A_FILE) >> 9) & ep_target_bb
             if east_attackers:
-                from_sq = np.int8(en_passant_square + 9)
-                moves[move_count] = encode_move(from_sq, np.int8(en_passant_square), 0, SPECIAL_MOVE_FLAG_EN_PASSANT); move_count += 1
+                from_sq = np.uint8(en_passant_square + 9)
+                moves[move_count] = encode_move(from_sq, np.uint8(en_passant_square), 0, SPECIAL_MOVE_FLAG_EN_PASSANT); move_count += 1
 
     # --- Leaper Captures (Knights, Bishops, Rooks, Queens, Kings) ---
     leaper_bbs = (wn_bb, wb_bb, wr_bb, wq_bb, wk_bb) if side_to_move == WHITE else (bn_bb, bb_bb, br_bb, bq_bb, bk_bb)
@@ -715,19 +722,21 @@ def generate_captures(piece_bbs, occupancy_bbs, game_state):
     legal_moves_final = np.zeros(128, dtype=np.uint16)
     legal_move_count = 0
 
+    king_bb = piece_bbs[5] if side_to_move == WHITE else piece_bbs[11]
+    original_king_sq = get_lsb_index(king_bb) if king_bb else 0
+
     for i in range(move_count):
         move = moves[i]
 
-        new_piece_bbs, new_occupancy_bbs, new_game_state, _ = make_move(
-            piece_bbs, occupancy_bbs, game_state, move
-        )
+        unmake_info = make_move(piece_bbs, occupancy_bbs, game_state, move)
 
-        king_bb = new_piece_bbs[5] if side_to_move == WHITE else new_piece_bbs[11]
+        king_bb_after_move = piece_bbs[5] if side_to_move == WHITE else piece_bbs[11]
+        king_sq = get_lsb_index(king_bb_after_move) if king_bb_after_move else original_king_sq
 
-        if king_bb != 0:
-            king_sq = get_lsb_index(king_bb)
-            if not is_square_attacked(new_piece_bbs, new_occupancy_bbs, new_game_state, king_sq, new_game_state[0]):
-                legal_moves_final[legal_move_count] = move
-                legal_move_count += 1
+        if not is_square_attacked(piece_bbs, occupancy_bbs, game_state, king_sq, game_state[0]):
+            legal_moves_final[legal_move_count] = move
+            legal_move_count += 1
+
+        unmake_move(piece_bbs, occupancy_bbs, game_state, move, unmake_info)
 
     return legal_moves_final[:legal_move_count]
