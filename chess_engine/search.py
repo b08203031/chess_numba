@@ -264,6 +264,33 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                     iid_searches, singular_extensions)
 
     moves = generate_legal_moves(piece_bbs, occupancy_bbs, game_state)
+
+    # --- Shallow Pruning Techniques (RFP, Razoring) ---
+    static_score = -INFINITY # Use a sentinel value
+    if depth <= 2 and not is_currently_in_check:
+        static_score = evaluate_position(piece_bbs, occupancy_bbs, game_state)
+
+        # Reverse Futility Pruning (RFP)
+        if ENABLE_RFP and depth == 1 and static_score - RFP_MARGIN_D1 >= beta:
+            rfp_pruned += 1
+            return (np.int32(beta), NO_MOVE, nodes_searched, quiescence_nodes, cutoffs, tt_hits,
+                    null_move_cutoffs, futility_pruned, razoring_used, rfp_pruned, lmp_pruned, probcut_pruned, qs_delta_pruned, qs_see_pruned,
+                    iid_searches, singular_extensions)
+
+        # Razoring
+        if ENABLE_RAZORING and static_score + RAZORING_MARGIN < alpha:
+            # For Razoring, we need to perform a quick quiescence search.
+            # This logic remains the same for now.
+            razor_score, child_q_nodes, child_delta_pruned, child_see_pruned = quiescence_search(piece_bbs, occupancy_bbs, game_state, alpha, alpha + 1, 0)
+            quiescence_nodes += child_q_nodes
+            qs_delta_pruned += child_delta_pruned
+            qs_see_pruned += child_see_pruned
+            if razor_score + RAZORING_MARGIN < alpha:
+                razoring_used += 1
+                return (np.int32(alpha), NO_MOVE, nodes_searched, quiescence_nodes, cutoffs, tt_hits,
+                        null_move_cutoffs, futility_pruned, razoring_used, rfp_pruned, lmp_pruned, probcut_pruned, qs_delta_pruned, qs_see_pruned,
+                        iid_searches, singular_extensions)
+
     if len(moves) == 0:
         search_context.pv_table[ply, :].fill(NO_MOVE)
         if is_currently_in_check:
@@ -293,6 +320,24 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
         is_capture = (opponent_pieces_bb & BB_SQUARES[get_to_square(move)]) != 0
         is_quiet_move = not is_capture and not (get_special_move_flag(move) == SPECIAL_MOVE_FLAG_PROMOTION) and not is_giving_check_after_move
         
+        # --- Futility Pruning (F-Pruning) ---
+        if ENABLE_FP and is_quiet_move and not is_currently_in_check:
+            # Ensure static_score is computed if not already done for shallow depths
+            # This reuses the static_score calculated in the shallow pruning section
+            if static_score == -INFINITY:
+                static_score = evaluate_position(piece_bbs, occupancy_bbs, game_state)
+
+            margin = 0
+            if depth == 1: margin = FP_MARGIN_D1
+            elif depth == 2: margin = FP_MARGIN_D2
+
+            if margin > 0 and static_score + margin < alpha:
+                futility_pruned += 1
+                # IMPORTANT: We MUST unmake the move before we continue the loop,
+                # because make_move was called at the top of the loop.
+                unmake_move(piece_bbs, occupancy_bbs, game_state, move, unmake_info)
+                continue # Skip this quiet move
+
         current_extension = 1 if is_giving_check_after_move else 0
         if move == tt_move: current_extension = max(current_extension, extension)
         search_depth = depth - 1 + current_extension
@@ -407,7 +452,7 @@ def iterative_deepening_search(piece_bbs, occupancy_bbs, game_state, max_depth, 
         print(f"info depth {current_depth} score {uci_score_string} nodes {total_nodes_searched} nps {nps} time {int(elapsed_time)} pv {pv_string}")
 
         last_completed_depth = current_depth
-        if "mate" in "some_uci_score_string": break
+        if "mate" in uci_score_string: break
         if elapsed_time > max_time_ms: break
             
     return (best_move_total, last_score, nodes_searched, quiescence_nodes, total_cutoffs, total_tt_hits,
