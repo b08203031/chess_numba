@@ -30,14 +30,10 @@ clear_numba_cache()
 from chess_engine.fen_parser import parse_fen
 from chess_engine.search import iterative_deepening_search
 from chess_engine.move import move_to_uci
-from chess_engine.core import SQUARE_TO_ALGEBRAIC
-
-# Maximum search depth (Ply) for arrays like killer moves
-MAX_PLY = 64
 
 def run_search_test():
     """
-    Runs a search test from the initial position and prints statistics.
+    Runs a search test from a given position and prints statistics.
     """
     fen = "2kr2r1/1bp4n/1pq1p2p/p1P5/1P3B2/P6P/5RP1/RB3QK1 b - - 4 26"
     depth = 10
@@ -51,21 +47,17 @@ def run_search_test():
     log_info("----------------------------------------")
 
     piece_bbs, occupancy_bbs, game_state = parse_fen(fen)
-    board_state_flat = piece_bbs + occupancy_bbs + game_state
-    
-    # Initialize Killer Moves table
-    killer_moves = np.zeros((MAX_PLY, 2), dtype=np.uint16)
     
     # Clear TT before each search
     clear_transposition_table(transposition_table)
 
     start_time = time.time()
     
-    # Unpack all 17 return values from the search function
+    # Pass the NumPy arrays directly to the search function
     (best_move, best_eval, nodes_searched, quiescence_nodes, cutoffs, tt_hits,
      last_completed_depth, total_nmc, total_fp, total_ru, total_rfp, total_lmp, total_pcp, total_qdp, total_qsp,
      total_iid, total_se) = iterative_deepening_search(
-        board_state_flat, depth, time_limit_ms, transposition_table, killer_moves
+        piece_bbs, occupancy_bbs, game_state, depth, time_limit_ms, transposition_table
     )
     
     end_time = time.time()

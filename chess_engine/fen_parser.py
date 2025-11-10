@@ -21,18 +21,18 @@ SQUARE_MAP = {
 
 def parse_fen(fen_string: str):
     """
-    Parses a FEN string and returns the board state in the engine's tuple format.
+    Parses a FEN string and returns the board state in the engine's NumPy array format.
 
     Args:
         fen_string: The FEN string representing the board position.
 
     Returns:
-        A tuple containing (piece_bbs, occupancy_bbs, game_state).
+        A tuple containing (piece_bbs, occupancy_bbs, game_state) as NumPy arrays.
     """
     parts = fen_string.split()
 
     # --- 1. Parse Piece Placements ---
-    piece_bbs = [np.uint64(0)] * 12
+    piece_bbs = np.zeros(12, dtype=np.uint64)
     fen_board = parts[0]
     rank, file = 7, 0
     for char in fen_board:
@@ -47,54 +47,60 @@ def parse_fen(fen_string: str):
             piece_bbs[piece_type_index] |= (np.uint64(1) << square_index)
             file += 1
 
-    final_piece_bbs = tuple(piece_bbs)
-
     # --- 2. Parse Side to Move ---
-    side_to_move = np.uint8(WHITE if parts[1] == 'w' else BLACK)
+    side_to_move = np.uint64(WHITE if parts[1] == 'w' else BLACK)
 
     # --- 3. Parse Castling Rights ---
-    castling_rights = np.uint8(0)
+    castling_rights = np.uint64(0)
     if len(parts) > 2 and parts[2] != '-':
         for char in parts[2]:
-            castling_rights |= CASTLING_MAP.get(char, 0)
+            castling_rights |= np.uint64(CASTLING_MAP.get(char, 0))
 
-    # --- 4. Parse En Passant Square ---
-    en_passant_square = np.int8(-1)
+    # --- 4. Parse En Passant Square (using 64 as sentinel for 'no EP square') ---
+    en_passant_square = np.uint64(64)
     if len(parts) > 3 and parts[3] != '-':
-        en_passant_square = np.int8(SQUARE_MAP.get(parts[3], -1))
+        en_passant_square = np.uint64(SQUARE_MAP.get(parts[3], 64))
 
-    # --- 5. Parse Halfmove and Fullmove Clock (with defaults) ---
-    halfmove_clock = np.uint8(0)
+    # --- 5. Parse Halfmove Clock ---
+    halfmove_clock = np.uint64(0)
     if len(parts) > 4:
         try:
-            halfmove_clock = np.uint8(int(parts[4]))
+            halfmove_clock = np.uint64(int(parts[4]))
         except (ValueError, IndexError):
-            pass # Keep default
+            pass  # Keep default
 
-    # fullmove_number is not used by the engine state, but is part of the FEN spec
+    # --- 6. Assemble Final State Arrays ---
+    white_occupancy = piece_bbs[0] | piece_bbs[1] | piece_bbs[2] | \
+                      piece_bbs[3] | piece_bbs[4] | piece_bbs[5]
+    black_occupancy = piece_bbs[6] | piece_bbs[7] | piece_bbs[8] | \
+                      piece_bbs[9] | piece_bbs[10] | piece_bbs[11]
 
-    # --- 6. Assemble Final State Tuples ---
-    white_occupancy = final_piece_bbs[0] | final_piece_bbs[1] | final_piece_bbs[2] | \
-                      final_piece_bbs[3] | final_piece_bbs[4] | final_piece_bbs[5]
-    black_occupancy = final_piece_bbs[6] | final_piece_bbs[7] | final_piece_bbs[8] | \
-                      final_piece_bbs[9] | final_piece_bbs[10] | final_piece_bbs[11]
+    occupancy_bbs = np.array([
+        white_occupancy,
+        black_occupancy,
+        white_occupancy | black_occupancy
+    ], dtype=np.uint64)
 
-    occupancy_bbs = (white_occupancy, black_occupancy, white_occupancy | black_occupancy)
+    # Create a temporary game_state array to compute the initial hash
+    temp_game_state_arr = np.array([
+        side_to_move, castling_rights, en_passant_square, halfmove_clock, np.uint64(0)
+    ], dtype=np.uint64)
 
-    # Create a temporary game_state without the hash to compute the initial hash
-    temp_game_state = (side_to_move, castling_rights, en_passant_square, halfmove_clock, np.uint64(0))
-    zobrist_key = compute_initial_hash(final_piece_bbs, temp_game_state)
+    # Pass NumPy arrays directly to the JIT'd function
+    zobrist_key = compute_initial_hash(piece_bbs, temp_game_state_arr)
 
-    game_state = (side_to_move, castling_rights, en_passant_square, halfmove_clock, zobrist_key)
+    game_state = np.array([
+        side_to_move,
+        castling_rights,
+        en_passant_square,
+        halfmove_clock,
+        zobrist_key
+    ], dtype=np.uint64)
 
-    # Add sanity checks (defensive programming)
-    all_pieces_bb = occupancy_bbs[2]
-    white_occupancy = occupancy_bbs[0]
-    black_occupancy = occupancy_bbs[1]
-
-    assert all_pieces_bb == (white_occupancy | black_occupancy), \
-        "FEN Parser Error: all_pieces_bb calculation is incorrect."
-    assert np.count_nonzero(white_occupancy & black_occupancy) == 0, \
+    # --- Sanity Checks ---
+    assert (occupancy_bbs[0] | occupancy_bbs[1]) == occupancy_bbs[2], \
+        "FEN Parser Error: Occupancy calculation is incorrect."
+    assert np.count_nonzero(occupancy_bbs[0] & occupancy_bbs[1]) == 0, \
         "FEN Parser Error: White and black pieces overlap on the same square."
 
-    return final_piece_bbs, occupancy_bbs, game_state
+    return piece_bbs, occupancy_bbs, game_state

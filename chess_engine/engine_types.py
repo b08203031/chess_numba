@@ -4,40 +4,34 @@ import numpy as np
 
 # --- Numba Type Signatures for the Refactored Board State ---
 
-piece_bbs_signature = numba.types.UniTuple(numba.uint64, 12)
+# The board state is now represented by 1D NumPy arrays of uint64
+# This allows for MUTABLE (in-place) modifications within Numba functions.
+piece_bbs_signature = numba.uint64[::1]
 """
-Numba type signature for the piece bitboards.
-"""
-
-occupancy_bbs_signature = numba.types.UniTuple(numba.uint64, 3)
-"""
-Numba type signature for the occupancy bitboards.
+Numba type signature for the piece bitboards (as a NumPy array).
 """
 
-game_state_signature = numba.types.Tuple([
-    numba.uint8,   # side_to_move
-    numba.uint8,   # castling_rights
-    numba.int8,    # en_passant_square
-    numba.uint8,   # halfmove_clock
-    numba.uint64   # zobrist_key
-])
+occupancy_bbs_signature = numba.uint64[::1]
 """
-Numba type signature for the core game state.
+Numba type signature for the occupancy bitboards (as a NumPy array).
 """
 
-board_state_flat_signature = numba.types.Tuple(
-    list(piece_bbs_signature.types) +
-    list(occupancy_bbs_signature.types) +
-    [numba.uint8, numba.int8, numba.uint8]
-)
+game_state_signature = numba.uint64[::1]
 """
-Numba type signature for the flattened board state.
+Numba type signature for the core game state (as a NumPy array).
+All elements are uint64 for type simplicity in Numba.
+- Index 0: side_to_move
+- Index 1: castling_rights
+- Index 2: en_passant_square (64 for none)
+- Index 3: halfmove_clock
+- Index 4: zobrist_key
 """
 
+# The unmake_info tuple remains unchanged, as it's a simple data carrier.
 unmake_info_signature = numba.types.Tuple([
     numba.int8,    # captured_piece_type
     numba.uint8,   # old_castling_rights
-    numba.int8,    # old_en_passant_square
+    numba.uint8,   # old_en_passant_square (64 for none)
     numba.uint8,   # old_halfmove_clock
     numba.uint64   # old_zobrist_key
 ])
