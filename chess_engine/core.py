@@ -2,9 +2,9 @@
 import numba
 import numpy as np
 
-from .board_operations import make_move
-from .move_generator import generate_legal_moves, is_square_attacked
-from .engine_types import piece_bbs_signature, occupancy_bbs_signature, game_state_signature
+from .board_operations import make_move, make_move_v2, unmake_move_v2
+from .move_generator import generate_legal_moves, is_square_attacked, generate_legal_moves_v2
+from .engine_types import piece_bbs_signature, occupancy_bbs_signature, game_state_signature, undo_info_signature
 import numba.types as nbt
 from .zobrist import get_lsb_index
 
@@ -103,6 +103,61 @@ def _jit_perft_divide(piece_bbs, occupancy_bbs, game_state, depth: int):
             piece_bbs, occupancy_bbs, game_state, move
         )
         nodes = perft(new_piece_bbs, new_occupancy_bbs, new_game_state, depth - 1)
+        results[i, 0] = move
+        results[i, 1] = nodes
+
+    return results
+
+
+@numba.jit(nbt.uint64(
+    numba.types.Array(numba.uint64, 1, 'C'),
+    numba.types.Array(numba.uint64, 1, 'C'),
+    numba.types.Array(numba.int32, 1, 'C'),
+    numba.types.Array(numba.uint64, 1, 'C'),
+    nbt.intc
+), nopython=True)
+def perft_v2(piece_bbs_array, occupancy_bbs_array, game_state_array, zobrist_key_holder, depth: int):
+    """
+    Core recursive Perft function using the "make-unmake" approach.
+    """
+    if depth == 0:
+        return np.uint64(1)
+
+    nodes = np.uint64(0)
+    moves = generate_legal_moves_v2(piece_bbs_array, occupancy_bbs_array, game_state_array, zobrist_key_holder)
+
+    if depth == 1:
+        return np.uint64(len(moves))
+
+    for i in range(len(moves)):
+        move = moves[i]
+        undo_info = make_move_v2(piece_bbs_array, occupancy_bbs_array, game_state_array, zobrist_key_holder, move)
+        nodes += perft_v2(piece_bbs_array, occupancy_bbs_array, game_state_array, zobrist_key_holder, depth - 1)
+        unmake_move_v2(piece_bbs_array, occupancy_bbs_array, game_state_array, zobrist_key_holder, move, undo_info)
+    return nodes
+
+@numba.jit(nbt.types.Array(nbt.uint64, 2, "C")(
+    numba.types.Array(numba.uint64, 1, 'C'),
+    numba.types.Array(numba.uint64, 1, 'C'),
+    numba.types.Array(numba.int32, 1, 'C'),
+    numba.types.Array(numba.uint64, 1, 'C'),
+    nbt.intc
+), nopython=True)
+def _jit_perft_divide_v2(piece_bbs_array, occupancy_bbs_array, game_state_array, zobrist_key_holder, depth: int):
+    """
+    JIT-compiled core logic for perft_divide using the "make-unmake" approach.
+    """
+    if depth == 0:
+        return np.zeros((0, 2), dtype=np.uint64)
+
+    moves = generate_legal_moves_v2(piece_bbs_array, occupancy_bbs_array, game_state_array, zobrist_key_holder)
+
+    results = np.zeros((len(moves), 2), dtype=np.uint64)
+    for i in range(len(moves)):
+        move = moves[i]
+        undo_info = make_move_v2(piece_bbs_array, occupancy_bbs_array, game_state_array, zobrist_key_holder, move)
+        nodes = perft_v2(piece_bbs_array, occupancy_bbs_array, game_state_array, zobrist_key_holder, depth - 1)
+        unmake_move_v2(piece_bbs_array, occupancy_bbs_array, game_state_array, zobrist_key_holder, move, undo_info)
         results[i, 0] = move
         results[i, 1] = nodes
 

@@ -34,15 +34,23 @@ board_state_flat_signature = numba.types.Tuple(
 Numba type signature for the flattened board state.
 """
 
-unmake_info_signature = numba.types.Tuple([
+# A tuple holding the captured piece type and its square
+captured_piece_info_signature = numba.types.Tuple([
     numba.int8,    # captured_piece_type
-    numba.uint8,   # old_castling_rights
-    numba.int8,    # old_en_passant_square
-    numba.uint8,   # old_halfmove_clock
-    numba.uint64   # old_zobrist_key
+    numba.int8     # captured_square
+])
+
+
+undo_info_signature = numba.types.Tuple([
+    captured_piece_info_signature,  # captured_piece_info (type, square)
+    numba.uint8,                    # old_castling_rights
+    numba.int8,                     # old_ep_square
+    numba.int32,                    # old_halfmove_clock
+    numba.uint64                    # old_zobrist_key
 ])
 """
-Numba type signature for the unmake_info tuple.
+Numba type signature for the undo_info tuple returned by make_move.
+This contains all information needed to unmake a move.
 """
 
 # --- Search Context ---
