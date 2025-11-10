@@ -40,7 +40,7 @@ def find_piece_type_for_square(piece_bbs: np.ndarray, square: int, color: int) -
             return i
     return -1
 
-@numba.jit(unmake_info_signature(piece_bbs_signature, occupancy_bbs_signature, game_state_signature, numba.uint16), nopython=True)
+@numba.jit(unmake_info_signature(piece_bbs_signature, occupancy_bbs_signature, game_state_signature, numba.uint16), nopython=True, cache=True, boundscheck=False, fastmath=True)
 def make_move(piece_bbs: np.ndarray, occupancy_bbs: np.ndarray, game_state: np.ndarray, move: np.uint16):
     """
     Applies a move by MUTATING the board state arrays in-place.
@@ -159,7 +159,7 @@ def make_move(piece_bbs: np.ndarray, occupancy_bbs: np.ndarray, game_state: np.n
 
 @numba.jit(numba.void(
     piece_bbs_signature, occupancy_bbs_signature, game_state_signature, numba.uint16, unmake_info_signature
-), nopython=True)
+), nopython=True, cache=True, boundscheck=False, fastmath=True)
 def unmake_move(piece_bbs: np.ndarray, occupancy_bbs: np.ndarray, game_state: np.ndarray, move: np.uint16, unmake_info: tuple):
     """
     Reverts a move by MUTATING the board state arrays in-place.
@@ -241,7 +241,7 @@ def unmake_move(piece_bbs: np.ndarray, occupancy_bbs: np.ndarray, game_state: np
     game_state[3] = old_halfmove_clock
     game_state[4] = old_zobrist_key
 
-@numba.jit(numba.void(game_state_signature), nopython=True)
+@numba.jit(numba.void(game_state_signature), nopython=True, cache=True, boundscheck=False, fastmath=True)
 def make_null_move(game_state: np.ndarray):
     """
     Performs a null move in-place: flips side to move, clears EP, increments clock.

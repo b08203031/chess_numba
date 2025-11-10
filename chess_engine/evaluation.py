@@ -16,7 +16,7 @@ from chess_engine.engine_types import piece_bbs_signature, occupancy_bbs_signatu
 from chess_engine.bitboard_utils import count_bits, KING_ATTACK_ZONES, FILE_MASKS
 
 
-@numba.njit(numba.types.UniTuple(numba.int32, 2)(piece_bbs_signature), cache=True)
+@numba.njit(numba.types.UniTuple(numba.int32, 2)(piece_bbs_signature), cache=True, boundscheck=False, fastmath=True)
 def evaluate_king_safety(piece_bbs):
     """
     評估雙方的國王安全，並分別返回中局（MG）和殘局（EG）的分數差異。
@@ -147,7 +147,7 @@ def evaluate_king_safety(piece_bbs):
     return mg_safety_score, eg_safety_score
 
 
-@numba.njit(numba.int32(piece_bbs_signature, occupancy_bbs_signature, game_state_signature), cache=True)
+@numba.njit(numba.int32(piece_bbs_signature, occupancy_bbs_signature, game_state_signature), cache=True, boundscheck=False, fastmath=True)
 def evaluate_position(piece_bbs, occupancy_bbs, game_state):
     """
     使用 Tapered Evaluation (加權評估) 模型評估目前局面，並從當前執棋方的角度返回分數。
