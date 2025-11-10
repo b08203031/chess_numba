@@ -313,10 +313,16 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
         if move == excluded_move: continue
         move_count += 1
         
-        unmake_info = make_move(piece_bbs, occupancy_bbs, game_state, move)
-        
-        is_giving_check_after_move = is_in_check(piece_bbs, occupancy_bbs, game_state)
+        # 1. First, get the information we need from the CURRENT board state
+        #    BEFORE we modify it.
         opponent_pieces_bb = occupancy_bbs[1] if game_state[0] == 0 else occupancy_bbs[0]
+
+        # 2. Now, make the move and change the board state in-place.
+        unmake_info = make_move(piece_bbs, occupancy_bbs, game_state, move)
+
+        # 3. Finally, calculate is_capture and is_quiet_move using the information
+        #    we saved from the original state.
+        is_giving_check_after_move = is_in_check(piece_bbs, occupancy_bbs, game_state)
         is_capture = (opponent_pieces_bb & BB_SQUARES[get_to_square(move)]) != 0
         is_quiet_move = not is_capture and not (get_special_move_flag(move) == SPECIAL_MOVE_FLAG_PROMOTION) and not is_giving_check_after_move
         
