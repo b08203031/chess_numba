@@ -363,7 +363,7 @@ def iterative_deepening_search(piece_bbs, occupancy_bbs, game_state, max_depth, 
     search_context = SearchContext(transposition_table, killer_moves, pv_table, history_table)
 
     last_score, best_move_total = 0, NO_MOVE
-    total_nodes_searched, total_quiescence_nodes, total_cutoffs, total_tt_hits = np.uint64(0), np.uint64(0), np.uint64(0), np.uint64(0)
+    nodes_searched, quiescence_nodes, total_nodes_searched, total_cutoffs, total_tt_hits = np.uint64(0), np.uint64(0), np.uint64(0), np.uint64(0), np.uint64(0)
     total_nmc, total_fp, total_ru, total_rfp, total_lmp, total_pcp, total_qdp, total_qsp = np.uint64(0), np.uint64(0), np.uint64(0), np.uint64(0), np.uint64(0), np.uint64(0), np.uint64(0), np.uint64(0)
     total_iid, total_se = np.uint64(0), np.uint64(0)
     last_completed_depth = 0
@@ -387,7 +387,7 @@ def iterative_deepening_search(piece_bbs, occupancy_bbs, game_state, max_depth, 
                 p_bbs_copy, o_bbs_copy, g_state_copy, current_depth, alpha, beta, search_context, 0, NO_MOVE)
 
         last_score = score
-        total_nodes_searched += nodes; total_quiescence_nodes += q_nodes; total_cutoffs += cutoffs; total_tt_hits += tt_hits
+        nodes_searched += nodes; quiescence_nodes += q_nodes; total_cutoffs += cutoffs; total_tt_hits += tt_hits
         total_nmc += nmc; total_fp += fp; total_ru += ru; total_rfp += rfp; total_lmp += lmp; total_pcp += pcp; total_qdp += qdp; total_qsp += qsp
         total_iid += iid; total_se += se
 
@@ -402,6 +402,7 @@ def iterative_deepening_search(piece_bbs, occupancy_bbs, game_state, max_depth, 
         uci_score_string = format_score_for_uci(score)
 
         # --- Print UCI Info String ---
+        total_nodes_searched = nodes_searched + quiescence_nodes
         nps = int(total_nodes_searched / (elapsed_time / 1000)) if elapsed_time > 0 else 0
         print(f"info depth {current_depth} score {uci_score_string} nodes {total_nodes_searched} nps {nps} time {int(elapsed_time)} pv {pv_string}")
 
@@ -409,7 +410,7 @@ def iterative_deepening_search(piece_bbs, occupancy_bbs, game_state, max_depth, 
         if "mate" in "some_uci_score_string": break
         if elapsed_time > max_time_ms: break
             
-    return (best_move_total, last_score, total_nodes_searched, total_quiescence_nodes, total_cutoffs, total_tt_hits,
+    return (best_move_total, last_score, nodes_searched, quiescence_nodes, total_cutoffs, total_tt_hits,
             last_completed_depth, total_nmc, total_fp, total_ru, total_rfp, total_lmp, total_pcp, total_qdp, total_qsp,
             total_iid, total_se)
 
