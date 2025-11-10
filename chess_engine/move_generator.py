@@ -37,7 +37,7 @@ BISHOP_MAGIC_NUMBERS = np.array([0x40040844404084,0x2004208a004208,0x10190041080
 from chess_engine.zobrist import get_lsb_index
 from chess_engine.bitboard_utils import count_bits
 
-@numba.njit(numba.uint64(numba.uint8), cache=True)
+@numba.njit(numba.uint64(numba.uint8), cache=True, boundscheck=False, fastmath=True)
 def mask_bishop_attacks(sq):
     attacks, tr, tf = EMPTY, sq // 8, sq % 8
     for r, f in zip(range(tr + 1, 7), range(tf + 1, 7)): attacks |= BB_SQUARES[r * 8 + f]
@@ -45,7 +45,7 @@ def mask_bishop_attacks(sq):
     for r, f in zip(range(tr + 1, 7), range(tf - 1, 0, -1)): attacks |= BB_SQUARES[r * 8 + f]
     for r, f in zip(range(tr - 1, 0, -1), range(tf - 1, 0, -1)): attacks |= BB_SQUARES[r * 8 + f]
     return attacks
-@numba.njit(numba.uint64(numba.uint8), cache=True)
+@numba.njit(numba.uint64(numba.uint8), cache=True, boundscheck=False, fastmath=True)
 def mask_rook_attacks(sq):
     attacks, tr, tf = EMPTY, sq // 8, sq % 8
     for r in range(tr + 1, 7): attacks |= BB_SQUARES[r * 8 + tf]
@@ -54,7 +54,7 @@ def mask_rook_attacks(sq):
     for f in range(tf - 1, 0, -1): attacks |= BB_SQUARES[tr * 8 + f]
     return attacks
 BISHOP_MASKS, ROOK_MASKS = (np.fromiter((mask_bishop_attacks(sq) for sq in range(64)), dtype=np.uint64), np.fromiter((mask_rook_attacks(sq) for sq in range(64)), dtype=np.uint64))
-@numba.njit(numba.uint64(numba.uint8, numba.uint64), cache=True)
+@numba.njit(numba.uint64(numba.uint8, numba.uint64), cache=True, boundscheck=False, fastmath=True)
 def bishop_attacks_on_the_fly(sq, block):
     attacks, tr, tf = EMPTY, sq // 8, sq % 8
     for r, f in zip(range(tr + 1, 8), range(tf + 1, 8)):
@@ -70,7 +70,7 @@ def bishop_attacks_on_the_fly(sq, block):
         attacks |= BB_SQUARES[r*8+f]
         if BB_SQUARES[r*8+f] & block: break
     return attacks
-@numba.njit(numba.uint64(numba.uint8, numba.uint64), cache=True)
+@numba.njit(numba.uint64(numba.uint8, numba.uint64), cache=True, boundscheck=False, fastmath=True)
 def rook_attacks_on_the_fly(sq, block):
     attacks, tr, tf = EMPTY, sq // 8, sq % 8
     for r in range(tr + 1, 8):
@@ -86,7 +86,7 @@ def rook_attacks_on_the_fly(sq, block):
         attacks |= BB_SQUARES[tr*8+f]
         if BB_SQUARES[tr*8+f] & block: break
     return attacks
-@numba.njit(numba.uint64(numba.int32, numba.uint8, numba.uint64), cache=True)
+@numba.njit(numba.uint64(numba.int32, numba.uint8, numba.uint64), cache=True, boundscheck=False, fastmath=True)
 def set_occupancy(index, bits_in_mask, attack_mask):
     occupancy = EMPTY
     for count in range(bits_in_mask):
@@ -114,13 +114,13 @@ def init_sliders_attacks():
 BISHOP_ATTACKS = np.empty((64, 512), dtype=np.uint64)
 ROOK_ATTACKS = np.empty((64, 4096), dtype=np.uint64)
 
-@numba.njit(numba.uint64(numba.uint8, numba.uint64), cache=True)
+@numba.njit(numba.uint64(numba.uint8, numba.uint64), cache=True, boundscheck=False, fastmath=True)
 def get_bishop_attacks(sq, occ):
     return bishop_attacks_on_the_fly(sq, occ)
-@numba.njit(numba.uint64(numba.uint8, numba.uint64), cache=True)
+@numba.njit(numba.uint64(numba.uint8, numba.uint64), cache=True, boundscheck=False, fastmath=True)
 def get_rook_attacks(sq, occ):
     return rook_attacks_on_the_fly(sq, occ)
-@numba.njit(numba.uint64(numba.uint8, numba.uint64), cache=True)
+@numba.njit(numba.uint64(numba.uint8, numba.uint64), cache=True, boundscheck=False, fastmath=True)
 def get_queen_attacks(sq, occ): return get_rook_attacks(sq, occ) | get_bishop_attacks(sq, occ)
 
 KNIGHT_ATTACKS, KING_ATTACKS = (np.empty(64, dtype=np.uint64), np.empty(64, dtype=np.uint64))
@@ -134,7 +134,7 @@ _precompute_leaper_attacks()
 from chess_engine.engine_types import piece_bbs_signature, occupancy_bbs_signature, game_state_signature
 
 
-@numba.njit(numba.boolean(piece_bbs_signature, occupancy_bbs_signature, game_state_signature, numba.uint8, numba.uint8), cache=True)
+@numba.njit(numba.boolean(piece_bbs_signature, occupancy_bbs_signature, game_state_signature, numba.uint8, numba.uint8), cache=True, boundscheck=False, fastmath=True)
 def is_square_attacked(piece_bbs, occupancy_bbs, game_state, sq, attacker_side):
     """
     Checks if a given square is attacked by the specified side.
@@ -160,7 +160,7 @@ def is_square_attacked(piece_bbs, occupancy_bbs, game_state, sq, attacker_side):
         
     return False
 
-@numba.njit(numba.uint16[:](piece_bbs_signature, occupancy_bbs_signature, game_state_signature), cache=True)
+@numba.njit(numba.uint16[:](piece_bbs_signature, occupancy_bbs_signature, game_state_signature), cache=True, boundscheck=False, fastmath=True)
 def generate_legal_moves(piece_bbs, occupancy_bbs, game_state):
     """
     Generates all fully legal moves for the current position.
@@ -354,7 +354,7 @@ def generate_legal_moves(piece_bbs, occupancy_bbs, game_state):
     return legal_moves_final[:legal_move_count]
 
 
-@numba.njit(nbt.uint16[:](piece_bbs_signature, occupancy_bbs_signature, game_state_signature), cache=True)
+@numba.njit(nbt.uint16[:](piece_bbs_signature, occupancy_bbs_signature, game_state_signature), cache=True, boundscheck=False, fastmath=True)
 def generate_tactical_moves(piece_bbs, occupancy_bbs, game_state):
     """
     Generates pseudo-legal tactical moves (all captures and promotions).
@@ -525,7 +525,7 @@ def generate_tactical_moves(piece_bbs, occupancy_bbs, game_state):
             
     return moves[:move_count]
 
-@numba.njit(numba.boolean(piece_bbs_signature, occupancy_bbs_signature, game_state_signature), cache=True)
+@numba.njit(numba.boolean(piece_bbs_signature, occupancy_bbs_signature, game_state_signature), cache=True, boundscheck=False, fastmath=True)
 def is_in_check(piece_bbs, occupancy_bbs, game_state):
     """
     Checks if the current side to move is in check.
@@ -537,7 +537,7 @@ def is_in_check(piece_bbs, occupancy_bbs, game_state):
     king_sq = get_lsb_index(king_bb)
     return is_square_attacked(piece_bbs, occupancy_bbs, game_state, king_sq, 1 - side_to_move)
 
-@numba.njit(numba.boolean(piece_bbs_signature, numba.uint8), cache=True)
+@numba.njit(numba.boolean(piece_bbs_signature, numba.uint8), cache=True, boundscheck=False, fastmath=True)
 def has_sufficient_material(piece_bbs, side_to_move):
     """
     Checks if the side to move has major pieces (Rook or Queen).
@@ -549,7 +549,7 @@ def has_sufficient_material(piece_bbs, side_to_move):
         return (piece_bbs[9] | piece_bbs[10]) != 0
 
 
-@numba.njit(nbt.uint16[:](piece_bbs_signature, occupancy_bbs_signature, game_state_signature), cache=True)
+@numba.njit(nbt.uint16[:](piece_bbs_signature, occupancy_bbs_signature, game_state_signature), cache=True, boundscheck=False, fastmath=True)
 def generate_captures(piece_bbs, occupancy_bbs, game_state):
     """
     Generates all fully legal capture and promotion moves for the current position.

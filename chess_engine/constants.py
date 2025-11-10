@@ -234,8 +234,8 @@ ASPIRATION_WINDOW_SIZE = 100 # centipawns
 ENABLE_LMP = True           # Late Move Pruning
 ENABLE_PROBCUT = True       # ProbCut
 ENABLE_DELTA_PRUNING = True # Delta Pruning in Quiescence Search
-ENABLE_IID = False           # Internal Iterative Deepening
-ENABLE_SINGULAR_EXTENSIONS = False # Singular Extensions
+ENABLE_IID = True           # Internal Iterative Deepening
+ENABLE_SINGULAR_EXTENSIONS = True # Singular Extensions
 
 
 # IID and Singular Extension Parameters
@@ -285,7 +285,7 @@ DELTA_PRUNING_MARGIN = 500
 
 # --- Static Exchange Evaluation (SEE) Threshold ---
 SEE_THRESHOLD = 0  # centipawns
-ENABLE_SEE_IN_QUIESCENCE = True # Master switch to enable/disable SEE in quiescence search
+ENABLE_SEE_IN_QUIESCENCE = False # Master switch to enable/disable SEE in quiescence search
 
 # =============================================================================
 # --- Bitboard Utilities Constants ---
