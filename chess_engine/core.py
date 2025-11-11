@@ -2,7 +2,7 @@
 import numba
 import numpy as np
 
-from .board_operations import make_move
+from .board_operations import make_move, unmake_move
 from .move_generator import generate_legal_moves, is_square_attacked
 from .engine_types import piece_bbs_signature, occupancy_bbs_signature, game_state_signature
 import numba.types as nbt
@@ -49,16 +49,7 @@ A dictionary that maps square indices to algebraic notation.
 @numba.jit(nbt.uint64(piece_bbs_signature, occupancy_bbs_signature, game_state_signature, nbt.intc), nopython=True)
 def perft(piece_bbs, occupancy_bbs, game_state, depth: int):
     """
-    Core recursive Perft function.
-
-    Args:
-        piece_bbs: A tuple of 12 bitboards representing the pieces.
-        occupancy_bbs: A tuple of 3 bitboards representing the occupancy of the board.
-        game_state: A tuple representing the current game state.
-        depth: The depth to run the test to.
-
-    Returns:
-        The number of legal moves to a given depth.
+    Core recursive Perft function, refactored for Make-Unmake.
     """
     if depth == 0:
         return np.uint64(1)
@@ -71,25 +62,15 @@ def perft(piece_bbs, occupancy_bbs, game_state, depth: int):
 
     for i in range(len(moves)):
         move = moves[i]
-        new_piece_bbs, new_occupancy_bbs, new_game_state, _ = make_move(
-            piece_bbs, occupancy_bbs, game_state, move
-        )
-        nodes += perft(new_piece_bbs, new_occupancy_bbs, new_game_state, depth - 1)
+        unmake_info = make_move(piece_bbs, occupancy_bbs, game_state, move)
+        nodes += perft(piece_bbs, occupancy_bbs, game_state, depth - 1)
+        unmake_move(piece_bbs, occupancy_bbs, game_state, move, unmake_info)
     return nodes
 
 @numba.jit(nbt.types.Array(nbt.uint64, 2, "C")(piece_bbs_signature, occupancy_bbs_signature, game_state_signature, nbt.intc), nopython=True)
 def _jit_perft_divide(piece_bbs, occupancy_bbs, game_state, depth: int):
     """
-    JIT-compiled core logic for perft_divide.
-
-    Args:
-        piece_bbs: A tuple of 12 bitboards representing the pieces.
-        occupancy_bbs: A tuple of 3 bitboards representing the occupancy of the board.
-        game_state: A tuple representing the current game state.
-        depth: The depth to run the test to.
-
-    Returns:
-        An array of moves and their corresponding node counts.
+    JIT-compiled core logic for perft_divide, refactored for Make-Unmake.
     """
     if depth == 0:
         return np.zeros((0, 2), dtype=np.uint64)
@@ -99,10 +80,10 @@ def _jit_perft_divide(piece_bbs, occupancy_bbs, game_state, depth: int):
     results = np.zeros((len(moves), 2), dtype=np.uint64)
     for i in range(len(moves)):
         move = moves[i]
-        new_piece_bbs, new_occupancy_bbs, new_game_state, _ = make_move(
-            piece_bbs, occupancy_bbs, game_state, move
-        )
-        nodes = perft(new_piece_bbs, new_occupancy_bbs, new_game_state, depth - 1)
+        unmake_info = make_move(piece_bbs, occupancy_bbs, game_state, move)
+        nodes = perft(piece_bbs, occupancy_bbs, game_state, depth - 1)
+        unmake_move(piece_bbs, occupancy_bbs, game_state, move, unmake_info)
+
         results[i, 0] = move
         results[i, 1] = nodes
 

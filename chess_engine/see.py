@@ -5,7 +5,14 @@ import numpy as np
 from chess_engine.engine_types import (
     piece_bbs_signature,
     occupancy_bbs_signature,
-    game_state_signature,
+    WHITE,
+    BLACK,
+    PAWN,
+    KNIGHT,
+    BISHOP,
+    ROOK,
+    QUEEN,
+    KING,
 )
 from chess_engine.constants import BB_SQUARES, MG_MATERIAL_VALUES
 from chess_engine.move_generator import (
@@ -14,209 +21,166 @@ from chess_engine.move_generator import (
     get_queen_attacks,
     KNIGHT_ATTACKS,
     KING_ATTACKS,
-    NOT_A_FILE,
-    NOT_H_FILE,
+    PAWN_ATTACKS,
 )
 from chess_engine.zobrist import get_lsb_index
 from chess_engine.bitboard_utils import find_piece_type_on_square
 
 
-WHITE, BLACK = 0, 1
-PAWN, KNIGHT, BISHOP, ROOK, QUEEN, KING = 0, 1, 2, 3, 4, 5
-
-
 @numba.njit(
-    numba.types.Tuple((numba.int8, numba.int8))(
+    numba.types.Tuple((numba.uint64, numba.uint64))(
+        numba.uint8,
         piece_bbs_signature,
-        occupancy_bbs_signature,
-        numba.uint8,
-        numba.uint8,
+        numba.uint64,
     ),
     cache=True,
 )
-def get_least_valuable_attacker(
-    piece_bbs, occupancy_bbs, target_sq, attacking_side
-):
+def _get_attackers_to_square(square, piece_bbs, occupancy):
     """
-    Finds the least valuable attacker of a given square for a given side.
-    Iterates through piece types from least to most valuable (P, N, B, R, Q, K).
-    The first attacker found is guaranteed to be the least valuable.
-    For sliding pieces, this function considers X-ray attacks.
-    Returns:
-        A tuple (from_square, piece_type index 0-11), or (-1, -1) if no attacker is found.
+    Gets a bitboard of all attackers to a given square.
+    This function is designed to be used by SEE and operates on a dynamic occupancy.
     """
-    all_pieces_bb = occupancy_bbs[0] | occupancy_bbs[1]
-    
-    # For sliding piece attacks, we need to see "through" the piece on the
-    # target square. We create an occupancy board where the target square is empty.
-    xray_occupancy = all_pieces_bb & ~BB_SQUARES[target_sq]
+    # Note: Pawn attacks don't depend on occupancy
+    white_attackers = PAWN_ATTACKS[BLACK][square] & piece_bbs[PAWN]
+    black_attackers = PAWN_ATTACKS[WHITE][square] & piece_bbs[PAWN + 6]
 
-    # --- 1. Check for Pawns ---
-    if attacking_side == WHITE:
-        pawn_bb = piece_bbs[PAWN]
-        pawn_attackers = (((BB_SQUARES[target_sq] & NOT_A_FILE) >> 9) |
-                          ((BB_SQUARES[target_sq] & NOT_H_FILE) >> 7))
-        attacker = pawn_attackers & pawn_bb
-        if attacker:
-            return get_lsb_index(attacker), PAWN
-    else:  # BLACK
-        pawn_bb = piece_bbs[PAWN + 6]
-        pawn_attackers = (((BB_SQUARES[target_sq] & NOT_H_FILE) << 9) |
-                          ((BB_SQUARES[target_sq] & NOT_A_FILE) << 7))
-        attacker = pawn_attackers & pawn_bb
-        if attacker:
-            return get_lsb_index(attacker), PAWN + 6
+    # Knights
+    knight_attack_bb = KNIGHT_ATTACKS[square]
+    white_attackers |= knight_attack_bb & piece_bbs[KNIGHT]
+    black_attackers |= knight_attack_bb & piece_bbs[KNIGHT + 6]
 
-    # --- 2. Check for Knights ---
-    knight_idx = KNIGHT + (6 if attacking_side == BLACK else 0)
-    knight_bb = piece_bbs[knight_idx]
-    knight_attackers = KNIGHT_ATTACKS[target_sq] & knight_bb
-    if knight_attackers:
-        return get_lsb_index(knight_attackers), knight_idx
+    # Bishops and Queens (Diagonals)
+    bishop_queen_bb = piece_bbs[BISHOP] | piece_bbs[QUEEN]
+    black_bishop_queen_bb = piece_bbs[BISHOP + 6] | piece_bbs[QUEEN + 6]
+    bishop_attacks_bb = get_bishop_attacks(square, occupancy)
+    white_attackers |= bishop_attacks_bb & bishop_queen_bb
+    black_attackers |= bishop_attacks_bb & black_bishop_queen_bb
 
-    # --- 3. Check for Bishops ---
-    bishop_idx = BISHOP + (6 if attacking_side == BLACK else 0)
-    bishop_bb = piece_bbs[bishop_idx]
-    bishop_attackers = get_bishop_attacks(target_sq, xray_occupancy) & bishop_bb
-    if bishop_attackers:
-        return get_lsb_index(bishop_attackers), bishop_idx
+    # Rooks and Queens (Files/Ranks)
+    rook_queen_bb = piece_bbs[ROOK] | piece_bbs[QUEEN]
+    black_rook_queen_bb = piece_bbs[ROOK + 6] | piece_bbs[QUEEN + 6]
+    rook_attacks_bb = get_rook_attacks(square, occupancy)
+    white_attackers |= rook_attacks_bb & rook_queen_bb
+    black_attackers |= rook_attacks_bb & black_rook_queen_bb
 
-    # --- 4. Check for Rooks ---
-    rook_idx = ROOK + (6 if attacking_side == BLACK else 0)
-    rook_bb = piece_bbs[rook_idx]
-    rook_attackers = get_rook_attacks(target_sq, xray_occupancy) & rook_bb
-    if rook_attackers:
-        return get_lsb_index(rook_attackers), rook_idx
+    # Kings
+    king_attack_bb = KING_ATTACKS[square]
+    white_attackers |= king_attack_bb & piece_bbs[KING]
+    black_attackers |= king_attack_bb & piece_bbs[KING + 6]
 
-    # --- 5. Check for Queens ---
-    queen_idx = QUEEN + (6 if attacking_side == BLACK else 0)
-    queen_bb = piece_bbs[queen_idx]
-    queen_attackers = get_queen_attacks(target_sq, xray_occupancy) & queen_bb
-    if queen_attackers:
-        return get_lsb_index(queen_attackers), queen_idx
-
-    # --- 6. Check for King ---
-    king_idx = KING + (6 if attacking_side == BLACK else 0)
-    king_bb = piece_bbs[king_idx]
-    king_attackers = KING_ATTACKS[target_sq] & king_bb
-    if king_attackers:
-        return get_lsb_index(king_attackers), king_idx
-
-    return -1, -1 # No attacker found
+    return white_attackers, black_attackers
 
 
 @numba.njit(
     numba.int32(
         piece_bbs_signature,
         occupancy_bbs_signature,
-        game_state_signature,
+        numba.uint8,
         numba.uint8,
         numba.uint8,
     ),
     cache=True,
 )
-def see(piece_bbs, occupancy_bbs, game_state, from_sq, to_sq):
+def see(piece_bbs, occupancy_bbs, side_to_move, from_sq, to_sq):
     """
     Static Exchange Evaluation (SEE).
-    Calculates the score of a sequence of captures on a single square.
-    Uses an iterative approach to avoid recursion overhead in Numba.
+    A lightweight, bitboard-based implementation that avoids board state copying
+    and expensive make_move calls. It simulates captures on a temporary occupancy
+    bitboard and dynamically discovers X-ray attacks.
     """
     gain = np.zeros(32, dtype=np.int32)
     depth = 0
-    side_to_move = game_state[0]
 
-    # --- Initial move ---
-    attacker_piece_type = find_piece_type_on_square(piece_bbs, from_sq)
+    # Initial victim piece type and value
     victim_piece_type = find_piece_type_on_square(piece_bbs, to_sq)
-
-    # If victim is somehow not found (e.g., en passant), assume it's a pawn
+    # Handle en-passant, where the victim is on a different square
     if victim_piece_type == -1:
-         victim_piece_type = PAWN + (6 if side_to_move == WHITE else 0)
-
-    # The first gain is the value of the piece being captured
+        victim_piece_type = PAWN + (6 if side_to_move == WHITE else 0)
     gain[depth] = MG_MATERIAL_VALUES[victim_piece_type % 6]
 
-    # --- Simulate the capture for the rest of the sequence ---
-    temp_piece_bbs = piece_bbs
-    temp_occupancy_bbs = occupancy_bbs
-    
-    # Update piece bitboards
-    from_bb = BB_SQUARES[from_sq]
-    to_bb = BB_SQUARES[to_sq]
-    
-    temp_piece_bbs_list = list(temp_piece_bbs)
-    temp_piece_bbs_list[attacker_piece_type] ^= (from_bb | to_bb)
-    temp_piece_bbs_list[victim_piece_type] ^= to_bb
-    temp_piece_bbs = (
-        temp_piece_bbs_list[0], temp_piece_bbs_list[1], temp_piece_bbs_list[2],
-        temp_piece_bbs_list[3], temp_piece_bbs_list[4], temp_piece_bbs_list[5],
-        temp_piece_bbs_list[6], temp_piece_bbs_list[7], temp_piece_bbs_list[8],
-        temp_piece_bbs_list[9], temp_piece_bbs_list[10], temp_piece_bbs_list[11]
-    )
-    
-    # Update occupancy bitboards
-    temp_occupancy_bbs_list = list(temp_occupancy_bbs)
-    attacker_color = 0 if attacker_piece_type < 6 else 1
-    victim_color = 0 if victim_piece_type < 6 else 1
-    temp_occupancy_bbs_list[attacker_color] ^= (from_bb | to_bb)
-    temp_occupancy_bbs_list[victim_color] ^= to_bb
-    temp_occupancy_bbs_list[2] = temp_occupancy_bbs_list[0] | temp_occupancy_bbs_list[1]
-    temp_occupancy_bbs = (
-        temp_occupancy_bbs_list[0],
-        temp_occupancy_bbs_list[1],
-        temp_occupancy_bbs_list[2]
-    )
+    # --- Lightweight Simulation Setup ---
+    current_side = side_to_move
+    occupancy = occupancy_bbs[2]
+    from_sq_bb = BB_SQUARES[from_sq]
 
-    side_to_move = 1 - side_to_move
+    # Get all initial attackers to the target square
+    white_attackers, black_attackers = _get_attackers_to_square(
+        to_sq, piece_bbs, occupancy
+    )
+    all_attackers = white_attackers | black_attackers
 
-    # --- Iteratively find attackers ---
+    # Remove the initial attacker from the occupancy and attacker sets
+    occupancy ^= from_sq_bb
+    all_attackers &= ~from_sq_bb
+
     while True:
         depth += 1
-        
-        aggressor_sq, aggressor_type = get_least_valuable_attacker(
-            temp_piece_bbs, temp_occupancy_bbs, to_sq, side_to_move
-        )
+        # Safety break for very long capture sequences
+        if depth >= 32:
+            break
+            
+        current_side = 1 - current_side  # Switch sides
 
-        if aggressor_sq == -1:
+        attackers_for_side = black_attackers if current_side == BLACK else white_attackers
+        attackers_for_side &= all_attackers
+
+        if not attackers_for_side:
             break
 
-        # The next gain is the current victim's value minus the previous gain
-        victim_piece_type = find_piece_type_on_square(temp_piece_bbs, to_sq)
-        gain[depth] = MG_MATERIAL_VALUES[victim_piece_type % 6] - gain[depth - 1]
-        
-        # Simulate this next capture
-        from_bb = BB_SQUARES[aggressor_sq]
-        to_bb = BB_SQUARES[to_sq]
+        # --- Find the least valuable attacker ---
+        aggressor_sq = -1
+        aggressor_piece_type = -1
 
-        temp_piece_bbs_list = list(temp_piece_bbs)
+        # Find the piece type with the lowest value among the attackers
+        for piece_type in range(PAWN, KING + 1):
+            pt_idx = piece_type + (6 if current_side == BLACK else 0)
+            piece_attackers = piece_bbs[pt_idx] & attackers_for_side
+            if piece_attackers:
+                aggressor_sq = get_lsb_index(piece_attackers)
+                aggressor_piece_type = piece_type
+                break
         
-        temp_piece_bbs_list[aggressor_type] ^= (from_bb | to_bb)
-        temp_piece_bbs_list[victim_piece_type] ^= to_bb
-        temp_piece_bbs = (
-            temp_piece_bbs_list[0], temp_piece_bbs_list[1], temp_piece_bbs_list[2],
-            temp_piece_bbs_list[3], temp_piece_bbs_list[4], temp_piece_bbs_list[5],
-            temp_piece_bbs_list[6], temp_piece_bbs_list[7], temp_piece_bbs_list[8],
-            temp_piece_bbs_list[9], temp_piece_bbs_list[10], temp_piece_bbs_list[11]
-        )
+        if aggressor_sq == -1:
+            break
+            
+        aggressor_sq_bb = BB_SQUARES[aggressor_sq]
 
-        # Update occupancy bitboards
-        temp_occupancy_bbs_list = list(temp_occupancy_bbs)
-        aggressor_color = 0 if aggressor_type < 6 else 1
-        victim_color = 0 if victim_piece_type < 6 else 1
-        temp_occupancy_bbs_list[aggressor_color] ^= (from_bb | to_bb)
-        temp_occupancy_bbs_list[victim_color] ^= to_bb
-        temp_occupancy_bbs_list[2] = temp_occupancy_bbs_list[0] | temp_occupancy_bbs_list[1]
-        temp_occupancy_bbs = (
-            temp_occupancy_bbs_list[0],
-            temp_occupancy_bbs_list[1],
-            temp_occupancy_bbs_list[2]
-        )
-        
-        side_to_move = 1 - side_to_move
+        # --- Update Gain Array ---
+        gain[depth] = MG_MATERIAL_VALUES[aggressor_piece_type] - gain[depth - 1]
 
-    # --- Calculate SEE score from the gain array (minimax) ---
+        # --- Update Simulation State ---
+        occupancy ^= aggressor_sq_bb
+        all_attackers &= ~aggressor_sq_bb
+
+        # --- Handle X-Ray Attacks ---
+        # If the removed piece was a slider, we need to check if its removal
+        # revealed a new attack from another slider behind it.
+        if aggressor_piece_type == BISHOP or aggressor_piece_type == QUEEN:
+            bishop_attacks_bb = get_bishop_attacks(to_sq, occupancy)
+            new_w_bishops = bishop_attacks_bb & (piece_bbs[BISHOP] | piece_bbs[QUEEN])
+            new_b_bishops = bishop_attacks_bb & (piece_bbs[BISHOP + 6] | piece_bbs[QUEEN + 6])
+            
+            revealed_attackers = (new_w_bishops | new_b_bishops) & ~all_attackers
+            if revealed_attackers:
+                all_attackers |= revealed_attackers
+                white_attackers |= new_w_bishops
+                black_attackers |= new_b_bishops
+
+        if aggressor_piece_type == ROOK or aggressor_piece_type == QUEEN:
+            rook_attacks_bb = get_rook_attacks(to_sq, occupancy)
+            new_w_rooks = rook_attacks_bb & (piece_bbs[ROOK] | piece_bbs[QUEEN])
+            new_b_rooks = rook_attacks_bb & (piece_bbs[ROOK + 6] | piece_bbs[QUEEN + 6])
+            
+            revealed_attackers = (new_w_rooks | new_b_rooks) & ~all_attackers
+            if revealed_attackers:
+                all_attackers |= revealed_attackers
+                white_attackers |= new_w_rooks
+                black_attackers |= new_b_rooks
+
+
+    # --- Minimax Calculation ---
     while depth > 1:
         depth -= 1
         gain[depth - 1] = -max(-gain[depth - 1], gain[depth])
-        
+
     return gain[0]
