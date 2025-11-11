@@ -47,19 +47,14 @@ def get_lsb_index(bitboard: np.uint64) -> int:
     return DE_BRUIJN_INDEX[index]
 
 @numba.jit(numba.uint64(piece_bbs_signature, game_state_signature), nopython=True)
-def compute_initial_hash(piece_bbs: tuple, game_state: tuple) -> np.uint64:
+def compute_initial_hash(piece_bbs: np.ndarray, game_state: np.ndarray) -> np.uint64:
     """
     Computes the Zobrist hash from scratch.
-
-    Args:
-        piece_bbs: A tuple of 12 bitboards representing the pieces.
-        game_state: A tuple representing the current game state.
-
-    Returns:
-        The Zobrist hash of the position.
     """
     zobrist_key = np.uint64(0)
-    side_to_move, castling_rights, en_passant_square, _, _ = game_state
+    side_to_move = game_state[0]
+    castling_rights = game_state[1]
+    en_passant_square = game_state[2]
 
     for piece_type in range(12):
         bb = piece_bbs[piece_type]
@@ -70,7 +65,7 @@ def compute_initial_hash(piece_bbs: tuple, game_state: tuple) -> np.uint64:
 
     zobrist_key ^= CASTLING_RIGHTS_KEYS[castling_rights]
 
-    if en_passant_square != -1:
+    if en_passant_square != 64:
         ep_file = en_passant_square % 8
         zobrist_key ^= EN_PASSANT_FILE_KEYS[ep_file]
 

@@ -6,8 +6,8 @@ from chess_engine.move import (
     encode_move, SPECIAL_MOVE_FLAG_NORMAL, SPECIAL_MOVE_FLAG_PROMOTION, SPECIAL_MOVE_FLAG_EN_PASSANT, SPECIAL_MOVE_FLAG_CASTLING,
     PROMO_QUEEN, PROMO_ROOK, PROMO_BISHOP, PROMO_KNIGHT
 )
-from chess_engine.board_operations import make_move
-from chess_engine.engine_types import board_state_flat_signature
+from chess_engine.board_operations import make_move, unmake_move
+# from chess_engine.engine_types import board_state_flat_signature # This is no longer needed
 from chess_engine.constants import BB_SQUARES
 import numba.types as nbt
 
@@ -37,7 +37,7 @@ BISHOP_MAGIC_NUMBERS = np.array([0x40040844404084,0x2004208a004208,0x10190041080
 from chess_engine.zobrist import get_lsb_index
 from chess_engine.bitboard_utils import count_bits
 
-@numba.njit(numba.uint64(numba.uint8), cache=True)
+@numba.njit(numba.uint64(numba.uint8), cache=True, boundscheck=False, fastmath=True)
 def mask_bishop_attacks(sq):
     attacks, tr, tf = EMPTY, sq // 8, sq % 8
     for r, f in zip(range(tr + 1, 7), range(tf + 1, 7)): attacks |= BB_SQUARES[r * 8 + f]
@@ -45,7 +45,7 @@ def mask_bishop_attacks(sq):
     for r, f in zip(range(tr + 1, 7), range(tf - 1, 0, -1)): attacks |= BB_SQUARES[r * 8 + f]
     for r, f in zip(range(tr - 1, 0, -1), range(tf - 1, 0, -1)): attacks |= BB_SQUARES[r * 8 + f]
     return attacks
-@numba.njit(numba.uint64(numba.uint8), cache=True)
+@numba.njit(numba.uint64(numba.uint8), cache=True, boundscheck=False, fastmath=True)
 def mask_rook_attacks(sq):
     attacks, tr, tf = EMPTY, sq // 8, sq % 8
     for r in range(tr + 1, 7): attacks |= BB_SQUARES[r * 8 + tf]
@@ -54,7 +54,7 @@ def mask_rook_attacks(sq):
     for f in range(tf - 1, 0, -1): attacks |= BB_SQUARES[tr * 8 + f]
     return attacks
 BISHOP_MASKS, ROOK_MASKS = (np.fromiter((mask_bishop_attacks(sq) for sq in range(64)), dtype=np.uint64), np.fromiter((mask_rook_attacks(sq) for sq in range(64)), dtype=np.uint64))
-@numba.njit(numba.uint64(numba.uint8, numba.uint64), cache=True)
+@numba.njit(numba.uint64(numba.uint8, numba.uint64), cache=True, boundscheck=False, fastmath=True)
 def bishop_attacks_on_the_fly(sq, block):
     attacks, tr, tf = EMPTY, sq // 8, sq % 8
     for r, f in zip(range(tr + 1, 8), range(tf + 1, 8)):
@@ -70,7 +70,7 @@ def bishop_attacks_on_the_fly(sq, block):
         attacks |= BB_SQUARES[r*8+f]
         if BB_SQUARES[r*8+f] & block: break
     return attacks
-@numba.njit(numba.uint64(numba.uint8, numba.uint64), cache=True)
+@numba.njit(numba.uint64(numba.uint8, numba.uint64), cache=True, boundscheck=False, fastmath=True)
 def rook_attacks_on_the_fly(sq, block):
     attacks, tr, tf = EMPTY, sq // 8, sq % 8
     for r in range(tr + 1, 8):
@@ -86,7 +86,7 @@ def rook_attacks_on_the_fly(sq, block):
         attacks |= BB_SQUARES[tr*8+f]
         if BB_SQUARES[tr*8+f] & block: break
     return attacks
-@numba.njit(numba.uint64(numba.int32, numba.uint8, numba.uint64), cache=True)
+@numba.njit(numba.uint64(numba.int32, numba.uint8, numba.uint64), cache=True, boundscheck=False, fastmath=True)
 def set_occupancy(index, bits_in_mask, attack_mask):
     occupancy = EMPTY
     for count in range(bits_in_mask):
@@ -114,13 +114,13 @@ def init_sliders_attacks():
 BISHOP_ATTACKS = np.empty((64, 512), dtype=np.uint64)
 ROOK_ATTACKS = np.empty((64, 4096), dtype=np.uint64)
 
-@numba.njit(numba.uint64(numba.uint8, numba.uint64), cache=True)
+@numba.njit(numba.uint64(numba.uint8, numba.uint64), cache=True, boundscheck=False, fastmath=True)
 def get_bishop_attacks(sq, occ):
     return bishop_attacks_on_the_fly(sq, occ)
-@numba.njit(numba.uint64(numba.uint8, numba.uint64), cache=True)
+@numba.njit(numba.uint64(numba.uint8, numba.uint64), cache=True, boundscheck=False, fastmath=True)
 def get_rook_attacks(sq, occ):
     return rook_attacks_on_the_fly(sq, occ)
-@numba.njit(numba.uint64(numba.uint8, numba.uint64), cache=True)
+@numba.njit(numba.uint64(numba.uint8, numba.uint64), cache=True, boundscheck=False, fastmath=True)
 def get_queen_attacks(sq, occ): return get_rook_attacks(sq, occ) | get_bishop_attacks(sq, occ)
 
 KNIGHT_ATTACKS, KING_ATTACKS = (np.empty(64, dtype=np.uint64), np.empty(64, dtype=np.uint64))
@@ -131,10 +131,21 @@ def _precompute_leaper_attacks():
         KING_ATTACKS[sq] = (((bb << 1)|(bb << 9)|(bb >> 7)) & NOT_A_FILE)|(((bb >> 1)|(bb >> 9)|(bb << 7)) & NOT_H_FILE)|(bb << 8)|(bb >> 8)
 _precompute_leaper_attacks()
 
+PAWN_ATTACKS = np.zeros((2, 64), dtype=np.uint64)
+def _precompute_pawn_attacks():
+    for sq in range(64):
+        bb_sq = BB_SQUARES[sq]
+        # White pawn attackers for square sq
+        PAWN_ATTACKS[WHITE, sq] = ((bb_sq & NOT_A_FILE) >> 9) | ((bb_sq & NOT_H_FILE) >> 7)
+        # Black pawn attackers for square sq
+        PAWN_ATTACKS[BLACK, sq] = ((bb_sq & NOT_H_FILE) << 9) | ((bb_sq & NOT_A_FILE) << 7)
+_precompute_pawn_attacks()
+
+
 from chess_engine.engine_types import piece_bbs_signature, occupancy_bbs_signature, game_state_signature
 
 
-@numba.njit(numba.boolean(piece_bbs_signature, occupancy_bbs_signature, game_state_signature, numba.uint8, numba.uint8), cache=True)
+@numba.njit(numba.boolean(piece_bbs_signature, occupancy_bbs_signature, game_state_signature, numba.uint8, numba.uint8), cache=True, boundscheck=False, fastmath=True)
 def is_square_attacked(piece_bbs, occupancy_bbs, game_state, sq, attacker_side):
     """
     Checks if a given square is attacked by the specified side.
@@ -144,15 +155,13 @@ def is_square_attacked(piece_bbs, occupancy_bbs, game_state, sq, attacker_side):
      bp_bb, bn_bb, bb_bb, br_bb, bq_bb, bk_bb) = piece_bbs
 
     if attacker_side == WHITE:
-        pawn_attacks = (((BB_SQUARES[sq] & NOT_A_FILE) >> 9) | ((BB_SQUARES[sq] & NOT_H_FILE) >> 7))
-        if pawn_attacks & wp_bb: return True
+        if PAWN_ATTACKS[WHITE, sq] & wp_bb: return True
         if KING_ATTACKS[sq] & wk_bb: return True
         if KNIGHT_ATTACKS[sq] & wn_bb: return True
         if get_bishop_attacks(sq, all_pieces_bb) & (wb_bb | wq_bb): return True
         if get_rook_attacks(sq, all_pieces_bb) & (wr_bb | wq_bb): return True
     else: # Attacker is BLACK
-        pawn_attacks = (((BB_SQUARES[sq] & NOT_H_FILE) << 9) | ((BB_SQUARES[sq] & NOT_A_FILE) << 7))
-        if pawn_attacks & bp_bb: return True
+        if PAWN_ATTACKS[BLACK, sq] & bp_bb: return True
         if KING_ATTACKS[sq] & bk_bb: return True
         if KNIGHT_ATTACKS[sq] & bn_bb: return True
         if get_bishop_attacks(sq, all_pieces_bb) & (bb_bb | bq_bb): return True
@@ -160,7 +169,7 @@ def is_square_attacked(piece_bbs, occupancy_bbs, game_state, sq, attacker_side):
         
     return False
 
-@numba.njit(numba.uint16[:](piece_bbs_signature, occupancy_bbs_signature, game_state_signature), cache=True)
+@numba.njit(numba.uint16[:](piece_bbs_signature, occupancy_bbs_signature, game_state_signature), cache=True, boundscheck=False, fastmath=True)
 def generate_legal_moves(piece_bbs, occupancy_bbs, game_state):
     """
     Generates all fully legal moves for the current position.
@@ -232,16 +241,16 @@ def generate_legal_moves(piece_bbs, occupancy_bbs, game_state):
             caps &= (caps - np.uint64(1))
 
         # En Passant
-        if en_passant_square != -1:
-            ep_target_bb = BB_SQUARES[np.int8(en_passant_square)]
+        if en_passant_square != 64:
+            ep_target_bb = BB_SQUARES[np.uint8(en_passant_square)]
             west_attackers = ((wp_bb & NOT_A_FILE) << 7) & ep_target_bb
             if west_attackers:
-                from_sq = np.int8(en_passant_square - 7)
-                moves[move_count] = encode_move(from_sq, np.int8(en_passant_square), 0, SPECIAL_MOVE_FLAG_EN_PASSANT); move_count += 1
+                from_sq = np.uint8(en_passant_square - 7)
+                moves[move_count] = encode_move(from_sq, np.uint8(en_passant_square), 0, SPECIAL_MOVE_FLAG_EN_PASSANT); move_count += 1
             east_attackers = ((wp_bb & NOT_H_FILE) << 9) & ep_target_bb
             if east_attackers:
-                from_sq = np.int8(en_passant_square - 9)
-                moves[move_count] = encode_move(from_sq, np.int8(en_passant_square), 0, SPECIAL_MOVE_FLAG_EN_PASSANT); move_count += 1
+                from_sq = np.uint8(en_passant_square - 9)
+                moves[move_count] = encode_move(from_sq, np.uint8(en_passant_square), 0, SPECIAL_MOVE_FLAG_EN_PASSANT); move_count += 1
 
         # --- Castling ---
         if (castling_rights & WK) and not(all_pieces_bb & 0x60) and not is_square_attacked(piece_bbs, occupancy_bbs, game_state, 4, BLACK) and not is_square_attacked(piece_bbs, occupancy_bbs, game_state, 5, BLACK) and not is_square_attacked(piece_bbs, occupancy_bbs, game_state, 6, BLACK): moves[move_count]=encode_move(4,6,0,SPECIAL_MOVE_FLAG_CASTLING); move_count+=1
@@ -292,16 +301,16 @@ def generate_legal_moves(piece_bbs, occupancy_bbs, game_state):
             caps &= (caps - np.uint64(1))
 
         # En Passant
-        if en_passant_square != -1:
-            ep_target_bb = BB_SQUARES[np.int8(en_passant_square)]
+        if en_passant_square != 64:
+            ep_target_bb = BB_SQUARES[np.uint8(en_passant_square)]
             west_attackers = ((bp_bb & NOT_H_FILE) >> 7) & ep_target_bb
             if west_attackers:
-                from_sq = np.int8(en_passant_square + 7)
-                moves[move_count] = encode_move(from_sq, np.int8(en_passant_square), 0, SPECIAL_MOVE_FLAG_EN_PASSANT); move_count += 1
+                from_sq = np.uint8(en_passant_square + 7)
+                moves[move_count] = encode_move(from_sq, np.uint8(en_passant_square), 0, SPECIAL_MOVE_FLAG_EN_PASSANT); move_count += 1
             east_attackers = ((bp_bb & NOT_A_FILE) >> 9) & ep_target_bb
             if east_attackers:
-                from_sq = np.int8(en_passant_square + 9)
-                moves[move_count] = encode_move(from_sq, np.int8(en_passant_square), 0, SPECIAL_MOVE_FLAG_EN_PASSANT); move_count += 1
+                from_sq = np.uint8(en_passant_square + 9)
+                moves[move_count] = encode_move(from_sq, np.uint8(en_passant_square), 0, SPECIAL_MOVE_FLAG_EN_PASSANT); move_count += 1
 
         # --- Castling ---
         if (castling_rights & BK) and not(all_pieces_bb & 0x6000000000000000) and not is_square_attacked(piece_bbs, occupancy_bbs, game_state, 60, WHITE) and not is_square_attacked(piece_bbs, occupancy_bbs, game_state, 61, WHITE) and not is_square_attacked(piece_bbs, occupancy_bbs, game_state, 62, WHITE): moves[move_count]=encode_move(60,62,0,SPECIAL_MOVE_FLAG_CASTLING); move_count+=1
@@ -328,26 +337,33 @@ def generate_legal_moves(piece_bbs, occupancy_bbs, game_state):
     # --- Filter for legality ---
     legal_moves_final = np.zeros(256, dtype=np.uint16)
     legal_move_count = 0
-    
+
+    king_bb = piece_bbs[5] if side_to_move == WHITE else piece_bbs[11]
+    original_king_sq = get_lsb_index(king_bb) if king_bb else 0
+
     for i in range(move_count):
         move = moves[i]
-        
-        new_piece_bbs, new_occupancy_bbs, new_game_state, _ = make_move(
-            piece_bbs, occupancy_bbs, game_state, move
-        )
-        
-        king_bb = new_piece_bbs[5] if side_to_move == WHITE else new_piece_bbs[11]
-        
-        if king_bb != 0:
-            king_sq = get_lsb_index(king_bb)
-            if not is_square_attacked(new_piece_bbs, new_occupancy_bbs, new_game_state, king_sq, new_game_state[0]):
-                legal_moves_final[legal_move_count] = move
-                legal_move_count += 1
+
+        # Make the move on the board
+        unmake_info = make_move(piece_bbs, occupancy_bbs, game_state, move)
+
+        # After the move, the 'side_to_move' in game_state is the opponent.
+        # We need to check if the ORIGINAL side's king is attacked.
+        king_bb_after_move = piece_bbs[5] if side_to_move == WHITE else piece_bbs[11]
+        king_sq = get_lsb_index(king_bb_after_move) if king_bb_after_move else original_king_sq
+
+        # Check if the king is attacked by the new side to move (the opponent)
+        if not is_square_attacked(piece_bbs, occupancy_bbs, game_state, king_sq, game_state[0]):
+            legal_moves_final[legal_move_count] = move
+            legal_move_count += 1
+
+        # Unmake the move to restore the board state for the next iteration
+        unmake_move(piece_bbs, occupancy_bbs, game_state, move, unmake_info)
                 
     return legal_moves_final[:legal_move_count]
 
 
-@numba.njit(nbt.uint16[:](piece_bbs_signature, occupancy_bbs_signature, game_state_signature), cache=True)
+@numba.njit(nbt.uint16[:](piece_bbs_signature, occupancy_bbs_signature, game_state_signature), cache=True, boundscheck=False, fastmath=True)
 def generate_tactical_moves(piece_bbs, occupancy_bbs, game_state):
     """
     Generates pseudo-legal tactical moves (all captures and promotions).
@@ -419,16 +435,16 @@ def generate_tactical_moves(piece_bbs, occupancy_bbs, game_state):
             caps_east &= (caps_east - np.uint64(1))
 
         # En Passant
-        if en_passant_square != -1:
-            ep_target_bb = BB_SQUARES[np.int8(en_passant_square)]
+        if en_passant_square != 64:
+            ep_target_bb = BB_SQUARES[np.uint8(en_passant_square)]
             west_attackers = ((wp_bb & NOT_A_FILE) << 7) & ep_target_bb
             if west_attackers:
-                from_sq = np.int8(en_passant_square - 7)
-                moves[move_count] = encode_move(from_sq, np.int8(en_passant_square), 0, SPECIAL_MOVE_FLAG_EN_PASSANT); move_count += 1
+                from_sq = np.uint8(en_passant_square - 7)
+                moves[move_count] = encode_move(from_sq, np.uint8(en_passant_square), 0, SPECIAL_MOVE_FLAG_EN_PASSANT); move_count += 1
             east_attackers = ((wp_bb & NOT_H_FILE) << 9) & ep_target_bb
             if east_attackers:
-                from_sq = np.int8(en_passant_square - 9)
-                moves[move_count] = encode_move(from_sq, np.int8(en_passant_square), 0, SPECIAL_MOVE_FLAG_EN_PASSANT); move_count += 1
+                from_sq = np.uint8(en_passant_square - 9)
+                moves[move_count] = encode_move(from_sq, np.uint8(en_passant_square), 0, SPECIAL_MOVE_FLAG_EN_PASSANT); move_count += 1
     
     else: # BLACK
         # --- Pawn Captures & Promotions ---
@@ -483,16 +499,16 @@ def generate_tactical_moves(piece_bbs, occupancy_bbs, game_state):
             caps_east &= (caps_east - np.uint64(1))
 
         # En Passant
-        if en_passant_square != -1:
-            ep_target_bb = BB_SQUARES[np.int8(en_passant_square)]
+        if en_passant_square != 64:
+            ep_target_bb = BB_SQUARES[np.uint8(en_passant_square)]
             west_attackers = ((bp_bb & NOT_H_FILE) >> 7) & ep_target_bb
             if west_attackers:
-                from_sq = np.int8(en_passant_square + 7)
-                moves[move_count] = encode_move(from_sq, np.int8(en_passant_square), 0, SPECIAL_MOVE_FLAG_EN_PASSANT); move_count += 1
+                from_sq = np.uint8(en_passant_square + 7)
+                moves[move_count] = encode_move(from_sq, np.uint8(en_passant_square), 0, SPECIAL_MOVE_FLAG_EN_PASSANT); move_count += 1
             east_attackers = ((bp_bb & NOT_A_FILE) >> 9) & ep_target_bb
             if east_attackers:
-                from_sq = np.int8(en_passant_square + 9)
-                moves[move_count] = encode_move(from_sq, np.int8(en_passant_square), 0, SPECIAL_MOVE_FLAG_EN_PASSANT); move_count += 1
+                from_sq = np.uint8(en_passant_square + 9)
+                moves[move_count] = encode_move(from_sq, np.uint8(en_passant_square), 0, SPECIAL_MOVE_FLAG_EN_PASSANT); move_count += 1
 
     # --- Leaper Captures (Knights, Bishops, Rooks, Queens, Kings) ---
     leaper_bbs = (wn_bb, wb_bb, wr_bb, wq_bb, wk_bb) if side_to_move == WHITE else (bn_bb, bb_bb, br_bb, bq_bb, bk_bb)
@@ -518,7 +534,7 @@ def generate_tactical_moves(piece_bbs, occupancy_bbs, game_state):
             
     return moves[:move_count]
 
-@numba.njit(numba.boolean(piece_bbs_signature, occupancy_bbs_signature, game_state_signature), cache=True)
+@numba.njit(numba.boolean(piece_bbs_signature, occupancy_bbs_signature, game_state_signature), cache=True, boundscheck=False, fastmath=True)
 def is_in_check(piece_bbs, occupancy_bbs, game_state):
     """
     Checks if the current side to move is in check.
@@ -530,7 +546,7 @@ def is_in_check(piece_bbs, occupancy_bbs, game_state):
     king_sq = get_lsb_index(king_bb)
     return is_square_attacked(piece_bbs, occupancy_bbs, game_state, king_sq, 1 - side_to_move)
 
-@numba.njit(numba.boolean(piece_bbs_signature, numba.uint8), cache=True)
+@numba.njit(numba.boolean(piece_bbs_signature, numba.uint8), cache=True, boundscheck=False, fastmath=True)
 def has_sufficient_material(piece_bbs, side_to_move):
     """
     Checks if the side to move has major pieces (Rook or Queen).
@@ -542,7 +558,7 @@ def has_sufficient_material(piece_bbs, side_to_move):
         return (piece_bbs[9] | piece_bbs[10]) != 0
 
 
-@numba.njit(nbt.uint16[:](piece_bbs_signature, occupancy_bbs_signature, game_state_signature), cache=True)
+@numba.njit(nbt.uint16[:](piece_bbs_signature, occupancy_bbs_signature, game_state_signature), cache=True, boundscheck=False, fastmath=True)
 def generate_captures(piece_bbs, occupancy_bbs, game_state):
     """
     Generates all fully legal capture and promotion moves for the current position.
@@ -615,16 +631,16 @@ def generate_captures(piece_bbs, occupancy_bbs, game_state):
             caps_east &= (caps_east - np.uint64(1))
 
         # En Passant
-        if en_passant_square != -1:
-            ep_target_bb = BB_SQUARES[np.int8(en_passant_square)]
+        if en_passant_square != 64:
+            ep_target_bb = BB_SQUARES[np.uint8(en_passant_square)]
             west_attackers = ((wp_bb & NOT_A_FILE) << 7) & ep_target_bb
             if west_attackers:
-                from_sq = np.int8(en_passant_square - 7)
-                moves[move_count] = encode_move(from_sq, np.int8(en_passant_square), 0, SPECIAL_MOVE_FLAG_EN_PASSANT); move_count += 1
+                from_sq = np.uint8(en_passant_square - 7)
+                moves[move_count] = encode_move(from_sq, np.uint8(en_passant_square), 0, SPECIAL_MOVE_FLAG_EN_PASSANT); move_count += 1
             east_attackers = ((wp_bb & NOT_H_FILE) << 9) & ep_target_bb
             if east_attackers:
-                from_sq = np.int8(en_passant_square - 9)
-                moves[move_count] = encode_move(from_sq, np.int8(en_passant_square), 0, SPECIAL_MOVE_FLAG_EN_PASSANT); move_count += 1
+                from_sq = np.uint8(en_passant_square - 9)
+                moves[move_count] = encode_move(from_sq, np.uint8(en_passant_square), 0, SPECIAL_MOVE_FLAG_EN_PASSANT); move_count += 1
 
     else: # BLACK
         # --- Pawn Captures & Promotions ---
@@ -679,16 +695,16 @@ def generate_captures(piece_bbs, occupancy_bbs, game_state):
             caps_east &= (caps_east - np.uint64(1))
 
         # En Passant
-        if en_passant_square != -1:
-            ep_target_bb = BB_SQUARES[np.int8(en_passant_square)]
+        if en_passant_square != 64:
+            ep_target_bb = BB_SQUARES[np.uint8(en_passant_square)]
             west_attackers = ((bp_bb & NOT_H_FILE) >> 7) & ep_target_bb
             if west_attackers:
-                from_sq = np.int8(en_passant_square + 7)
-                moves[move_count] = encode_move(from_sq, np.int8(en_passant_square), 0, SPECIAL_MOVE_FLAG_EN_PASSANT); move_count += 1
+                from_sq = np.uint8(en_passant_square + 7)
+                moves[move_count] = encode_move(from_sq, np.uint8(en_passant_square), 0, SPECIAL_MOVE_FLAG_EN_PASSANT); move_count += 1
             east_attackers = ((bp_bb & NOT_A_FILE) >> 9) & ep_target_bb
             if east_attackers:
-                from_sq = np.int8(en_passant_square + 9)
-                moves[move_count] = encode_move(from_sq, np.int8(en_passant_square), 0, SPECIAL_MOVE_FLAG_EN_PASSANT); move_count += 1
+                from_sq = np.uint8(en_passant_square + 9)
+                moves[move_count] = encode_move(from_sq, np.uint8(en_passant_square), 0, SPECIAL_MOVE_FLAG_EN_PASSANT); move_count += 1
 
     # --- Leaper Captures (Knights, Bishops, Rooks, Queens, Kings) ---
     leaper_bbs = (wn_bb, wb_bb, wr_bb, wq_bb, wk_bb) if side_to_move == WHITE else (bn_bb, bb_bb, br_bb, bq_bb, bk_bb)
@@ -715,19 +731,21 @@ def generate_captures(piece_bbs, occupancy_bbs, game_state):
     legal_moves_final = np.zeros(128, dtype=np.uint16)
     legal_move_count = 0
 
+    king_bb = piece_bbs[5] if side_to_move == WHITE else piece_bbs[11]
+    original_king_sq = get_lsb_index(king_bb) if king_bb else 0
+
     for i in range(move_count):
         move = moves[i]
 
-        new_piece_bbs, new_occupancy_bbs, new_game_state, _ = make_move(
-            piece_bbs, occupancy_bbs, game_state, move
-        )
+        unmake_info = make_move(piece_bbs, occupancy_bbs, game_state, move)
 
-        king_bb = new_piece_bbs[5] if side_to_move == WHITE else new_piece_bbs[11]
+        king_bb_after_move = piece_bbs[5] if side_to_move == WHITE else piece_bbs[11]
+        king_sq = get_lsb_index(king_bb_after_move) if king_bb_after_move else original_king_sq
 
-        if king_bb != 0:
-            king_sq = get_lsb_index(king_bb)
-            if not is_square_attacked(new_piece_bbs, new_occupancy_bbs, new_game_state, king_sq, new_game_state[0]):
-                legal_moves_final[legal_move_count] = move
-                legal_move_count += 1
+        if not is_square_attacked(piece_bbs, occupancy_bbs, game_state, king_sq, game_state[0]):
+            legal_moves_final[legal_move_count] = move
+            legal_move_count += 1
+
+        unmake_move(piece_bbs, occupancy_bbs, game_state, move, unmake_info)
 
     return legal_moves_final[:legal_move_count]
