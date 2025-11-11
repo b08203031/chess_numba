@@ -16,7 +16,15 @@ from chess_engine.constants import (
 from chess_engine.zobrist import get_lsb_index
 from chess_engine.engine_types import piece_bbs_signature, occupancy_bbs_signature, game_state_signature
 from chess_engine.bitboard_utils import count_bits, KING_ATTACK_ZONES, FILE_MASKS
-
+from chess_engine.move_generator import (
+    get_bishop_attacks, get_rook_attacks, get_queen_attacks, KNIGHT_ATTACKS
+)
+from chess_engine.constants import (
+    MOBILITY_BASE_MOVES, MOBILITY_WEIGHT_MG, MOBILITY_WEIGHT_EG,
+    MANHATTAN_DISTANCE, MAX_MANHATTAN_DISTANCE,
+    QUEEN_TROPISM_WEIGHT, ROOK_TROPISM_WEIGHT, BISHOP_TROPISM_WEIGHT, KNIGHT_TROPISM_WEIGHT,
+    KING_ANTI_MOBILITY_BASE_MOVES, KING_ANTI_MOBILITY_WEIGHT, INITIATIVE_BONUS
+)
 # --- Pre-computed Masks for Pawn Structure Evaluation ---
 
 # Masks for adjacent files (e.g., for file B, it's file A and C)
@@ -187,8 +195,77 @@ def evaluate_piece_coordination(piece_bbs):
     return mg_score, eg_score
 
 
-@numba.njit(numba.types.UniTuple(numba.int32, 2)(piece_bbs_signature), cache=True, boundscheck=False, fastmath=True)
-def evaluate_king_safety(piece_bbs):
+@numba.njit(numba.types.UniTuple(numba.int32, 2)(piece_bbs_signature, occupancy_bbs_signature), cache=True, boundscheck=False, fastmath=True)
+def evaluate_mobility(piece_bbs, occupancy_bbs):
+    """
+    Evaluates piece mobility for both sides.
+    Returns a tuple of (mg_score, eg_score) from White's perspective.
+    """
+    mg_score = np.int32(0)
+    eg_score = np.int32(0)
+
+    white_pieces_bb, black_pieces_bb, _ = occupancy_bbs
+    all_pieces_bb = white_pieces_bb | black_pieces_bb
+
+    # Piece types to evaluate: KNIGHT, BISHOP, ROOK, QUEEN
+    white_piece_indices = (1, 2, 3, 4)
+    black_piece_indices = (7, 8, 9, 10)
+
+    # --- White Mobility ---
+    for i in range(len(white_piece_indices)):
+        piece_idx = white_piece_indices[i]
+        bb = piece_bbs[piece_idx]
+        while bb:
+            sq = get_lsb_index(bb)
+            if piece_idx == 1: # Knight
+                attacks = KNIGHT_ATTACKS[sq]
+            elif piece_idx == 2: # Bishop
+                attacks = get_bishop_attacks(sq, all_pieces_bb)
+            elif piece_idx == 3: # Rook
+                attacks = get_rook_attacks(sq, all_pieces_bb)
+            else: # Queen
+                attacks = get_queen_attacks(sq, all_pieces_bb)
+
+            moves = count_bits(attacks & ~white_pieces_bb)
+
+            # The piece type index for constants is 0-5
+            const_idx = piece_idx
+            bonus = (moves - MOBILITY_BASE_MOVES[const_idx])
+            mg_score += bonus * MOBILITY_WEIGHT_MG[const_idx]
+            eg_score += bonus * MOBILITY_WEIGHT_EG[const_idx]
+
+            bb &= bb - np.uint64(1)
+
+    # --- Black Mobility ---
+    for i in range(len(black_piece_indices)):
+        piece_idx = black_piece_indices[i]
+        bb = piece_bbs[piece_idx]
+        while bb:
+            sq = get_lsb_index(bb)
+            if piece_idx == 7: # Knight
+                attacks = KNIGHT_ATTACKS[sq]
+            elif piece_idx == 8: # Bishop
+                attacks = get_bishop_attacks(sq, all_pieces_bb)
+            elif piece_idx == 9: # Rook
+                attacks = get_rook_attacks(sq, all_pieces_bb)
+            else: # Queen
+                attacks = get_queen_attacks(sq, all_pieces_bb)
+
+            moves = count_bits(attacks & ~black_pieces_bb)
+
+            # The piece type index for constants is 0-5
+            const_idx = piece_idx - 6
+            bonus = (moves - MOBILITY_BASE_MOVES[const_idx])
+            mg_score -= bonus * MOBILITY_WEIGHT_MG[const_idx]
+            eg_score -= bonus * MOBILITY_WEIGHT_EG[const_idx]
+
+            bb &= bb - np.uint64(1)
+
+    return mg_score, eg_score
+
+
+@numba.njit(numba.types.UniTuple(numba.int32, 2)(piece_bbs_signature, occupancy_bbs_signature), cache=True, boundscheck=False, fastmath=True)
+def evaluate_king_safety(piece_bbs, occupancy_bbs):
     """
     A hybrid evaluation of king safety, combining the performant parts of the original
     implementation with the logically correct parts of the new implementation.
@@ -198,6 +275,9 @@ def evaluate_king_safety(piece_bbs):
     
     (wp_bb, wn_bb, wb_bb, wr_bb, wq_bb, wk_bb,
     bp_bb, bn_bb, bb_bb, br_bb, bq_bb, bk_bb) = piece_bbs
+
+    white_pieces_bb, black_pieces_bb, _ = occupancy_bbs
+    all_pieces_bb = white_pieces_bb | black_pieces_bb
 
     # --- 1. Pawn Shield Evaluation (Restored from original version for performance) ---
     W_KS_SHIELD_PERFECT = BB_SQUARES[13] | BB_SQUARES[14] | BB_SQUARES[15]
@@ -296,56 +376,80 @@ def evaluate_king_safety(piece_bbs):
     mg_safety_score += count_bits(wp_bb & black_king_zone) * ATTACKER_WEIGHTS[4][0]
     eg_safety_score += count_bits(wp_bb & black_king_zone) * ATTACKER_WEIGHTS[4][1]
 
+    # --- 4. NEW: King Tropism (Attacker Distance to King) ---
+    # White pieces attacking Black King
+    white_attackers = (wn_bb, wb_bb, wr_bb, wq_bb)
+    tropism_weights = (KNIGHT_TROPISM_WEIGHT, BISHOP_TROPISM_WEIGHT, ROOK_TROPISM_WEIGHT, QUEEN_TROPISM_WEIGHT)
+    for i in range(len(white_attackers)):
+        bb = white_attackers[i]
+        weight = tropism_weights[i]
+        while bb:
+            sq = get_lsb_index(bb)
+            dist = MANHATTAN_DISTANCE[sq, black_king_sq]
+            bonus = (MAX_MANHATTAN_DISTANCE - dist)
+            mg_safety_score += bonus * weight[0]
+            eg_safety_score += bonus * weight[1]
+            bb &= bb - np.uint64(1)
+
+    # Black pieces attacking White King
+    black_attackers = (bn_bb, bb_bb, br_bb, bq_bb)
+    for i in range(len(black_attackers)):
+        bb = black_attackers[i]
+        weight = tropism_weights[i]
+        while bb:
+            sq = get_lsb_index(bb)
+            dist = MANHATTAN_DISTANCE[sq, white_king_sq]
+            bonus = (MAX_MANHATTAN_DISTANCE - dist)
+            mg_safety_score -= bonus * weight[0]
+            eg_safety_score -= bonus * weight[1]
+            bb &= bb - np.uint64(1)
+
+    # --- 5. NEW: King Anti-Mobility Penalty ---
+    # White King
+    w_king_moves = count_bits(get_queen_attacks(white_king_sq, all_pieces_bb) & ~white_pieces_bb)
+    penalty = (w_king_moves - KING_ANTI_MOBILITY_BASE_MOVES)
+    mg_safety_score -= penalty * KING_ANTI_MOBILITY_WEIGHT[0]
+    eg_safety_score -= penalty * KING_ANTI_MOBILITY_WEIGHT[1]
+
+    # Black King
+    b_king_moves = count_bits(get_queen_attacks(black_king_sq, all_pieces_bb) & ~black_pieces_bb)
+    penalty = (b_king_moves - KING_ANTI_MOBILITY_BASE_MOVES)
+    mg_safety_score += penalty * KING_ANTI_MOBILITY_WEIGHT[0]
+    eg_safety_score += penalty * KING_ANTI_MOBILITY_WEIGHT[1]
+
     return mg_safety_score, eg_safety_score
 
 
-@numba.njit(numba.int32(piece_bbs_signature, occupancy_bbs_signature, game_state_signature), cache=True, boundscheck=False, fastmath=True)
-def evaluate_position(piece_bbs, occupancy_bbs, game_state):
+@numba.njit(numba.int32(piece_bbs_signature, occupancy_bbs_signature, game_state_signature, numba.boolean), cache=True, boundscheck=False, fastmath=True)
+def evaluate_position(piece_bbs, occupancy_bbs, game_state, lazy=False):
     """
     使用 Tapered Evaluation (加權評估) 模型評估目前局面，並從當前執棋方的角度返回分數。
-    評估包含：
-    1. 物質價值 (Material value) - MG 和 EG
-    2. 棋子位置表 (Piece-square tables) - MG 和 EG
-    3. 國王安全 (King Safety) - MG 和 EG
-    4. 根據遊戲階段 (Game Phase) 進行加權插值。
-    
-    返回:
-        np.int32: 以百分之一兵為單位的分數。正分表示當前執棋方有優勢。
+    新增了 lazy 參數以支援懶惰評估。
     """
     side_to_move = game_state[0]
 
     # --- 1. 計算遊戲階段 (Game Phase) ---
-    # Game Phase 用於決定中局和殘局評估的權重。
-    # 它的初始值為 MAX_PHASE，並隨著棋子（不含兵和王）的兌換而減少。
     phase = np.int32(0)
-    # 棋子類型索引 1-4 分別為 馬、象、車、后
-    # 白棋
     phase += count_bits(piece_bbs[1]) * PHASE_WEIGHTS[1]
     phase += count_bits(piece_bbs[2]) * PHASE_WEIGHTS[2]
     phase += count_bits(piece_bbs[3]) * PHASE_WEIGHTS[3]
     phase += count_bits(piece_bbs[4]) * PHASE_WEIGHTS[4]
-    # 黑棋
     phase += count_bits(piece_bbs[7]) * PHASE_WEIGHTS[1]
     phase += count_bits(piece_bbs[8]) * PHASE_WEIGHTS[2]
     phase += count_bits(piece_bbs[9]) * PHASE_WEIGHTS[3]
     phase += count_bits(piece_bbs[10]) * PHASE_WEIGHTS[4]
-
-    # 確保 phase 不會超過最大值（例如，在一些特殊開局或升變後）
     phase = min(phase, MAX_PHASE)
 
     # --- 2. 計算中局和殘局的基礎分數（物質 + 位置） ---
     mg_score = np.int32(0)
     eg_score = np.int32(0)
 
-    # --- 2a. 批次計算物質分數 (Optimized) ---
     for piece_type in range(6):
         mg_score += count_bits(piece_bbs[piece_type]) * MG_MATERIAL_VALUES[piece_type]
         eg_score += count_bits(piece_bbs[piece_type]) * EG_MATERIAL_VALUES[piece_type]
         mg_score -= count_bits(piece_bbs[piece_type + 6]) * MG_MATERIAL_VALUES[piece_type]
         eg_score -= count_bits(piece_bbs[piece_type + 6]) * EG_MATERIAL_VALUES[piece_type]
 
-    # --- 2b. 計算棋子位置分數 (PST) ---
-    # 遍歷白棋
     for piece_type in range(6):
         bb = piece_bbs[piece_type]
         while bb:
@@ -353,9 +457,6 @@ def evaluate_position(piece_bbs, occupancy_bbs, game_state):
             mg_score += PST_MG[piece_type][sq]
             eg_score += PST_EG[piece_type][sq]
             bb &= bb - np.uint64(1)
-
-    # 遍歷黑棋
-    for piece_type in range(6):
         bb = piece_bbs[piece_type + 6]
         while bb:
             sq = get_lsb_index(bb)
@@ -363,30 +464,39 @@ def evaluate_position(piece_bbs, occupancy_bbs, game_state):
             eg_score -= PST_EG[piece_type][sq ^ 56]
             bb &= bb - np.uint64(1)
 
-    # --- 3. 加入國王安全分數 ---
-    # 調用 evaluate_king_safety 獲取 MG 和 EG 的國王安全分差
-    mg_king_safety, eg_king_safety = evaluate_king_safety(piece_bbs)
+    # --- 3. 懶惰評估檢查點 ---
+    if lazy:
+        final_score = (mg_score * phase + eg_score * (MAX_PHASE - phase)) // MAX_PHASE
+        return np.int32(final_score) if side_to_move == 0 else np.int32(-final_score)
+
+    # --- 完整評估（非懶惰模式） ---
+    mg_king_safety, eg_king_safety = evaluate_king_safety(piece_bbs, occupancy_bbs)
     mg_score += mg_king_safety
     eg_score += eg_king_safety
 
-    # --- 4. 加入兵形結構分數 ---
+    mg_mobility, eg_mobility = evaluate_mobility(piece_bbs, occupancy_bbs)
+    mg_score += mg_mobility
+    eg_score += eg_mobility
+
     mg_pawn_structure, eg_pawn_structure = evaluate_pawn_structure(piece_bbs)
     mg_score += mg_pawn_structure
     eg_score += eg_pawn_structure
 
-    # --- 5. 加入棋子協同性分數 ---
     mg_coord, eg_coord = evaluate_piece_coordination(piece_bbs)
     mg_score += mg_coord
     eg_score += eg_coord
 
-    # --- 6. 根據遊戲階段進行插值計算 ---
-    # 這個公式混合了 MG 和 EG 的分數。
-    # 隨著遊戲進行 (phase 減少)，EG 分數的影響力會越來越大。
+    # --- 最終計算 ---
     final_score = (mg_score * phase + eg_score * (MAX_PHASE - phase)) // MAX_PHASE
 
-    # --- 5. 從當前執棋方的角度返回最終分數 ---
-    if side_to_move == 0:  # 白方回合
+    # --- 主動權獎勵 ---
+    if phase > (MAX_PHASE * 0.4): # INITIATIVE_PHASE_THRESHOLD_RATIO is a float
+        if side_to_move == 0: # White
+            final_score += INITIATIVE_BONUS[0]
+        else: # Black
+            final_score -= INITIATIVE_BONUS[0]
+
+    if side_to_move == 0:
         return np.int32(final_score)
-    else:  # 黑方回合
+    else:
         return np.int32(-final_score)
-    # return np.int32(0)
