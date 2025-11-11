@@ -10,12 +10,40 @@ from chess_engine.constants import (
     PAWN_SHIELD_BONUS, SEMI_OPEN_FILE_PENALTY, ATTACKER_WEIGHTS, UNCASTLED_SHIELD_DIVISOR,
     PASSED_PAWN_BONUS, ISOLATED_PAWN_PENALTY, DOUBLED_PAWN_PENALTY,
     BISHOP_PAIR_BONUS, ROOK_ON_SEMI_OPEN_FILE_BONUS, ROOK_ON_OPEN_FILE_BONUS,
-    BB_SQUARES
+    BB_SQUARES,
+    KING_TROPISM_MAX_DISTANCE, QUEEN_TROPISM_WEIGHT, ROOK_TROPISM_WEIGHT,
+    BISHOP_TROPISM_WEIGHT, KNIGHT_TROPISM_WEIGHT,
+    KNIGHT_MOBILITY_BASE_MOVES, KNIGHT_MOBILITY_WEIGHT,
+    BISHOP_MOBILITY_BASE_MOVES, BISHOP_MOBILITY_WEIGHT,
+    ROOK_MOBILITY_BASE_MOVES, ROOK_MOBILITY_WEIGHT,
+    QUEEN_MOBILITY_BASE_MOVES, QUEEN_MOBILITY_WEIGHT,
+    KING_MOBILITY_BASE_MOVES, KING_MOBILITY_PENALTY_WEIGHT,
+    INITIATIVE_BONUS, INITIATIVE_PHASE_THRESHOLD
 )
 
 from chess_engine.zobrist import get_lsb_index
 from chess_engine.engine_types import piece_bbs_signature, occupancy_bbs_signature, game_state_signature
 from chess_engine.bitboard_utils import count_bits, KING_ATTACK_ZONES, FILE_MASKS
+from chess_engine.move_generator import (
+    get_bishop_attacks, get_rook_attacks, get_queen_attacks, KNIGHT_ATTACKS
+)
+
+# --- Pre-computed Manhattan Distance Table ---
+def _create_manhattan_distance_table():
+    """
+    Pre-computes a 64x64 lookup table for the Manhattan distance between any two squares.
+    Distance = abs(rank1 - rank2) + abs(file1 - file2).
+    """
+    table = np.zeros((64, 64), dtype=np.int32)
+    for sq1 in range(64):
+        rank1, file1 = sq1 // 8, sq1 % 8
+        for sq2 in range(64):
+            rank2, file2 = sq2 // 8, sq2 % 8
+            table[sq1, sq2] = abs(rank1 - rank2) + abs(file1 - file2)
+    return table
+
+MANHATTAN_DISTANCE = _create_manhattan_distance_table()
+
 
 # --- Pre-computed Masks for Pawn Structure Evaluation ---
 
@@ -187,8 +215,8 @@ def evaluate_piece_coordination(piece_bbs):
     return mg_score, eg_score
 
 
-@numba.njit(numba.types.UniTuple(numba.int32, 2)(piece_bbs_signature), cache=True, boundscheck=False, fastmath=True)
-def evaluate_king_safety(piece_bbs):
+@numba.njit(numba.types.UniTuple(numba.int32, 2)(piece_bbs_signature, occupancy_bbs_signature), cache=True, boundscheck=False, fastmath=True)
+def evaluate_king_safety(piece_bbs, occupancy_bbs):
     """
     A hybrid evaluation of king safety, combining the performant parts of the original
     implementation with the logically correct parts of the new implementation.
@@ -296,18 +324,194 @@ def evaluate_king_safety(piece_bbs):
     mg_safety_score += count_bits(wp_bb & black_king_zone) * ATTACKER_WEIGHTS[4][0]
     eg_safety_score += count_bits(wp_bb & black_king_zone) * ATTACKER_WEIGHTS[4][1]
 
+    # --- 4. King Tropism (Attacker Proximity to Enemy King) ---
+    # This bonus encourages pieces to move towards the enemy king.
+
+    # White pieces attacking Black king
+    temp_bb = wq_bb
+    while temp_bb:
+        sq = get_lsb_index(temp_bb)
+        dist = MANHATTAN_DISTANCE[sq, black_king_sq]
+        mg_safety_score += QUEEN_TROPISM_WEIGHT[0] * (KING_TROPISM_MAX_DISTANCE - dist)
+        eg_safety_score += QUEEN_TROPISM_WEIGHT[1] * (KING_TROPISM_MAX_DISTANCE - dist)
+        temp_bb &= temp_bb - np.uint64(1)
+
+    temp_bb = wr_bb
+    while temp_bb:
+        sq = get_lsb_index(temp_bb)
+        dist = MANHATTAN_DISTANCE[sq, black_king_sq]
+        mg_safety_score += ROOK_TROPISM_WEIGHT[0] * (KING_TROPISM_MAX_DISTANCE - dist)
+        eg_safety_score += ROOK_TROPISM_WEIGHT[1] * (KING_TROPISM_MAX_DISTANCE - dist)
+        temp_bb &= temp_bb - np.uint64(1)
+
+    temp_bb = wb_bb
+    while temp_bb:
+        sq = get_lsb_index(temp_bb)
+        dist = MANHATTAN_DISTANCE[sq, black_king_sq]
+        mg_safety_score += BISHOP_TROPISM_WEIGHT[0] * (KING_TROPISM_MAX_DISTANCE - dist)
+        eg_safety_score += BISHOP_TROPISM_WEIGHT[1] * (KING_TROPISM_MAX_DISTANCE - dist)
+        temp_bb &= temp_bb - np.uint64(1)
+
+    temp_bb = wn_bb
+    while temp_bb:
+        sq = get_lsb_index(temp_bb)
+        dist = MANHATTAN_DISTANCE[sq, black_king_sq]
+        mg_safety_score += KNIGHT_TROPISM_WEIGHT[0] * (KING_TROPISM_MAX_DISTANCE - dist)
+        eg_safety_score += KNIGHT_TROPISM_WEIGHT[1] * (KING_TROPISM_MAX_DISTANCE - dist)
+        temp_bb &= temp_bb - np.uint64(1)
+
+    # Black pieces attacking White king
+    temp_bb = bq_bb
+    while temp_bb:
+        sq = get_lsb_index(temp_bb)
+        dist = MANHATTAN_DISTANCE[sq, white_king_sq]
+        mg_safety_score -= QUEEN_TROPISM_WEIGHT[0] * (KING_TROPISM_MAX_DISTANCE - dist)
+        eg_safety_score -= QUEEN_TROPISM_WEIGHT[1] * (KING_TROPISM_MAX_DISTANCE - dist)
+        temp_bb &= temp_bb - np.uint64(1)
+
+    temp_bb = br_bb
+    while temp_bb:
+        sq = get_lsb_index(temp_bb)
+        dist = MANHATTAN_DISTANCE[sq, white_king_sq]
+        mg_safety_score -= ROOK_TROPISM_WEIGHT[0] * (KING_TROPISM_MAX_DISTANCE - dist)
+        eg_safety_score -= ROOK_TROPISM_WEIGHT[1] * (KING_TROPISM_MAX_DISTANCE - dist)
+        temp_bb &= temp_bb - np.uint64(1)
+
+    temp_bb = bb_bb
+    while temp_bb:
+        sq = get_lsb_index(temp_bb)
+        dist = MANHATTAN_DISTANCE[sq, white_king_sq]
+        mg_safety_score -= BISHOP_TROPISM_WEIGHT[0] * (KING_TROPISM_MAX_DISTANCE - dist)
+        eg_safety_score -= BISHOP_TROPISM_WEIGHT[1] * (KING_TROPISM_MAX_DISTANCE - dist)
+        temp_bb &= temp_bb - np.uint64(1)
+
+    temp_bb = bn_bb
+    while temp_bb:
+        sq = get_lsb_index(temp_bb)
+        dist = MANHATTAN_DISTANCE[sq, white_king_sq]
+        mg_safety_score -= KNIGHT_TROPISM_WEIGHT[0] * (KING_TROPISM_MAX_DISTANCE - dist)
+        eg_safety_score -= KNIGHT_TROPISM_WEIGHT[1] * (KING_TROPISM_MAX_DISTANCE - dist)
+        temp_bb &= temp_bb - np.uint64(1)
+
+    # --- 5. King "Anti-Mobility" Penalty ---
+    # This penalizes an exposed king in the middlegame.
+    all_pieces_occupancy = occupancy_bbs[2]
+
+    # White King
+    white_king_moves = count_bits(get_queen_attacks(white_king_sq, all_pieces_occupancy))
+    mg_safety_score -= (white_king_moves - KING_MOBILITY_BASE_MOVES) * KING_MOBILITY_PENALTY_WEIGHT[0]
+    # No EG penalty for king mobility, as an active king is usually good in the endgame.
+
+    # Black King
+    black_king_moves = count_bits(get_queen_attacks(black_king_sq, all_pieces_occupancy))
+    mg_safety_score += (black_king_moves - KING_MOBILITY_BASE_MOVES) * KING_MOBILITY_PENALTY_WEIGHT[0]
+
+
     return mg_safety_score, eg_safety_score
 
 
-@numba.njit(numba.int32(piece_bbs_signature, occupancy_bbs_signature, game_state_signature), cache=True, boundscheck=False, fastmath=True)
-def evaluate_position(piece_bbs, occupancy_bbs, game_state):
+@numba.njit(numba.types.UniTuple(numba.int32, 2)(piece_bbs_signature, occupancy_bbs_signature), cache=True, boundscheck=False, fastmath=True)
+def evaluate_mobility(piece_bbs, occupancy_bbs):
+    """
+    Evaluates piece mobility for both sides.
+    Returns a tuple of (mg_score, eg_score) from White's perspective.
+    """
+    mg_score = np.int32(0)
+    eg_score = np.int32(0)
+
+    white_occupancy = occupancy_bbs[0]
+    black_occupancy = occupancy_bbs[1]
+    all_pieces_occupancy = occupancy_bbs[2]
+
+    # --- White Mobility ---
+    # Knights
+    temp_bb = piece_bbs[1]
+    while temp_bb:
+        sq = get_lsb_index(temp_bb)
+        moves = count_bits(KNIGHT_ATTACKS[sq] & ~white_occupancy)
+        mg_score += (moves - KNIGHT_MOBILITY_BASE_MOVES) * KNIGHT_MOBILITY_WEIGHT[0]
+        eg_score += (moves - KNIGHT_MOBILITY_BASE_MOVES) * KNIGHT_MOBILITY_WEIGHT[1]
+        temp_bb &= temp_bb - np.uint64(1)
+
+    # Bishops
+    temp_bb = piece_bbs[2]
+    while temp_bb:
+        sq = get_lsb_index(temp_bb)
+        moves = count_bits(get_bishop_attacks(sq, all_pieces_occupancy) & ~white_occupancy)
+        mg_score += (moves - BISHOP_MOBILITY_BASE_MOVES) * BISHOP_MOBILITY_WEIGHT[0]
+        eg_score += (moves - BISHOP_MOBILITY_BASE_MOVES) * BISHOP_MOBILITY_WEIGHT[1]
+        temp_bb &= temp_bb - np.uint64(1)
+
+    # Rooks
+    temp_bb = piece_bbs[3]
+    while temp_bb:
+        sq = get_lsb_index(temp_bb)
+        moves = count_bits(get_rook_attacks(sq, all_pieces_occupancy) & ~white_occupancy)
+        mg_score += (moves - ROOK_MOBILITY_BASE_MOVES) * ROOK_MOBILITY_WEIGHT[0]
+        eg_score += (moves - ROOK_MOBILITY_BASE_MOVES) * ROOK_MOBILITY_WEIGHT[1]
+        temp_bb &= temp_bb - np.uint64(1)
+
+    # Queens
+    temp_bb = piece_bbs[4]
+    while temp_bb:
+        sq = get_lsb_index(temp_bb)
+        moves = count_bits(get_queen_attacks(sq, all_pieces_occupancy) & ~white_occupancy)
+        mg_score += (moves - QUEEN_MOBILITY_BASE_MOVES) * QUEEN_MOBILITY_WEIGHT[0]
+        eg_score += (moves - QUEEN_MOBILITY_BASE_MOVES) * QUEEN_MOBILITY_WEIGHT[1]
+        temp_bb &= temp_bb - np.uint64(1)
+
+
+    # --- Black Mobility ---
+    # Knights
+    temp_bb = piece_bbs[7]
+    while temp_bb:
+        sq = get_lsb_index(temp_bb)
+        moves = count_bits(KNIGHT_ATTACKS[sq] & ~black_occupancy)
+        mg_score -= (moves - KNIGHT_MOBILITY_BASE_MOVES) * KNIGHT_MOBILITY_WEIGHT[0]
+        eg_score -= (moves - KNIGHT_MOBILITY_BASE_MOVES) * KNIGHT_MOBILITY_WEIGHT[1]
+        temp_bb &= temp_bb - np.uint64(1)
+
+    # Bishops
+    temp_bb = piece_bbs[8]
+    while temp_bb:
+        sq = get_lsb_index(temp_bb)
+        moves = count_bits(get_bishop_attacks(sq, all_pieces_occupancy) & ~black_occupancy)
+        mg_score -= (moves - BISHOP_MOBILITY_BASE_MOVES) * BISHOP_MOBILITY_WEIGHT[0]
+        eg_score -= (moves - BISHOP_MOBILITY_BASE_MOVES) * BISHOP_MOBILITY_WEIGHT[1]
+        temp_bb &= temp_bb - np.uint64(1)
+
+    # Rooks
+    temp_bb = piece_bbs[9]
+    while temp_bb:
+        sq = get_lsb_index(temp_bb)
+        moves = count_bits(get_rook_attacks(sq, all_pieces_occupancy) & ~black_occupancy)
+        mg_score -= (moves - ROOK_MOBILITY_BASE_MOVES) * ROOK_MOBILITY_WEIGHT[0]
+        eg_score -= (moves - ROOK_MOBILITY_BASE_MOVES) * ROOK_MOBILITY_WEIGHT[1]
+        temp_bb &= temp_bb - np.uint64(1)
+
+    # Queens
+    temp_bb = piece_bbs[10]
+    while temp_bb:
+        sq = get_lsb_index(temp_bb)
+        moves = count_bits(get_queen_attacks(sq, all_pieces_occupancy) & ~black_occupancy)
+        mg_score -= (moves - QUEEN_MOBILITY_BASE_MOVES) * QUEEN_MOBILITY_WEIGHT[0]
+        eg_score -= (moves - QUEEN_MOBILITY_BASE_MOVES) * QUEEN_MOBILITY_WEIGHT[1]
+        temp_bb &= temp_bb - np.uint64(1)
+
+    return mg_score, eg_score
+
+
+@numba.njit(numba.int32(piece_bbs_signature, occupancy_bbs_signature, game_state_signature, numba.boolean), cache=True, boundscheck=False, fastmath=True)
+def evaluate_position(piece_bbs, occupancy_bbs, game_state, lazy: bool = False):
     """
     使用 Tapered Evaluation (加權評估) 模型評估目前局面，並從當前執棋方的角度返回分數。
     評估包含：
     1. 物質價值 (Material value) - MG 和 EG
     2. 棋子位置表 (Piece-square tables) - MG 和 EG
-    3. 國王安全 (King Safety) - MG 和 EG
-    4. 根據遊戲階段 (Game Phase) 進行加權插值。
+    3. (可選) 複雜評估：國王安全、兵形、協同性、機動性等。
+
+    參數:
+        lazy (bool): 如果為 True，只執行快速的物質和位置評估。
     
     返回:
         np.int32: 以百分之一兵為單位的分數。正分表示當前執棋方有優勢。
@@ -315,37 +519,27 @@ def evaluate_position(piece_bbs, occupancy_bbs, game_state):
     side_to_move = game_state[0]
 
     # --- 1. 計算遊戲階段 (Game Phase) ---
-    # Game Phase 用於決定中局和殘局評估的權重。
-    # 它的初始值為 MAX_PHASE，並隨著棋子（不含兵和王）的兌換而減少。
     phase = np.int32(0)
-    # 棋子類型索引 1-4 分別為 馬、象、車、后
-    # 白棋
     phase += count_bits(piece_bbs[1]) * PHASE_WEIGHTS[1]
     phase += count_bits(piece_bbs[2]) * PHASE_WEIGHTS[2]
     phase += count_bits(piece_bbs[3]) * PHASE_WEIGHTS[3]
     phase += count_bits(piece_bbs[4]) * PHASE_WEIGHTS[4]
-    # 黑棋
     phase += count_bits(piece_bbs[7]) * PHASE_WEIGHTS[1]
     phase += count_bits(piece_bbs[8]) * PHASE_WEIGHTS[2]
     phase += count_bits(piece_bbs[9]) * PHASE_WEIGHTS[3]
     phase += count_bits(piece_bbs[10]) * PHASE_WEIGHTS[4]
-
-    # 確保 phase 不會超過最大值（例如，在一些特殊開局或升變後）
     phase = min(phase, MAX_PHASE)
 
     # --- 2. 計算中局和殘局的基礎分數（物質 + 位置） ---
     mg_score = np.int32(0)
     eg_score = np.int32(0)
 
-    # --- 2a. 批次計算物質分數 (Optimized) ---
     for piece_type in range(6):
         mg_score += count_bits(piece_bbs[piece_type]) * MG_MATERIAL_VALUES[piece_type]
         eg_score += count_bits(piece_bbs[piece_type]) * EG_MATERIAL_VALUES[piece_type]
         mg_score -= count_bits(piece_bbs[piece_type + 6]) * MG_MATERIAL_VALUES[piece_type]
         eg_score -= count_bits(piece_bbs[piece_type + 6]) * EG_MATERIAL_VALUES[piece_type]
 
-    # --- 2b. 計算棋子位置分數 (PST) ---
-    # 遍歷白棋
     for piece_type in range(6):
         bb = piece_bbs[piece_type]
         while bb:
@@ -354,7 +548,6 @@ def evaluate_position(piece_bbs, occupancy_bbs, game_state):
             eg_score += PST_EG[piece_type][sq]
             bb &= bb - np.uint64(1)
 
-    # 遍歷黑棋
     for piece_type in range(6):
         bb = piece_bbs[piece_type + 6]
         while bb:
@@ -363,9 +556,14 @@ def evaluate_position(piece_bbs, occupancy_bbs, game_state):
             eg_score -= PST_EG[piece_type][sq ^ 56]
             bb &= bb - np.uint64(1)
 
-    # --- 3. 加入國王安全分數 ---
+    # --- Lazy Evaluation Checkpoint ---
+    if lazy:
+        final_score = (mg_score * phase + eg_score * (MAX_PHASE - phase)) // MAX_PHASE
+        return np.int32(final_score) if side_to_move == 0 else np.int32(-final_score)
+
+    # --- 3. (Full Evaluation) 加入國王安全分數 ---
     # 調用 evaluate_king_safety 獲取 MG 和 EG 的國王安全分差
-    mg_king_safety, eg_king_safety = evaluate_king_safety(piece_bbs)
+    mg_king_safety, eg_king_safety = evaluate_king_safety(piece_bbs, occupancy_bbs)
     mg_score += mg_king_safety
     eg_score += eg_king_safety
 
@@ -379,14 +577,22 @@ def evaluate_position(piece_bbs, occupancy_bbs, game_state):
     mg_score += mg_coord
     eg_score += eg_coord
 
-    # --- 6. 根據遊戲階段進行插值計算 ---
+    # --- 6. 加入棋子機動性分數 ---
+    mg_mobility, eg_mobility = evaluate_mobility(piece_bbs, occupancy_bbs)
+    mg_score += mg_mobility
+    eg_score += eg_mobility
+
+    # --- 7. 根據遊戲階段進行插值計算 ---
     # 這個公式混合了 MG 和 EG 的分數。
     # 隨著遊戲進行 (phase 減少)，EG 分數的影響力會越來越大。
     final_score = (mg_score * phase + eg_score * (MAX_PHASE - phase)) // MAX_PHASE
 
-    # --- 5. 從當前執棋方的角度返回最終分數 ---
+    # --- 8. (Optional) Initiative Bonus ---
+    if phase > INITIATIVE_PHASE_THRESHOLD:
+        final_score += INITIATIVE_BONUS
+
+    # --- 9. 從當前執棋方的角度返回最終分數 ---
     if side_to_move == 0:  # 白方回合
         return np.int32(final_score)
     else:  # 黑方回合
         return np.int32(-final_score)
-    # return np.int32(0)
