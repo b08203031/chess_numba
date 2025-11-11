@@ -184,6 +184,40 @@ PST_EG = np.array([
 
 
 # =============================================================================
+# --- Other Evaluation Constants ---
+# =============================================================================
+
+# --- Initiative Bonus ---
+# A small bonus awarded to the side to move, acknowledging the advantage of having the turn.
+# This bonus is tapered and disappears in the endgame.
+INITIATIVE_BONUS = 10 # centipawns
+INITIATIVE_PHASE_THRESHOLD = MAX_PHASE * 0.4 # Apply only when phase is above 40% of max
+
+
+# =============================================================================
+# --- Mobility Constants ---
+# =============================================================================
+# Bonus for piece mobility, calculated as: (move_count - base_moves) * weight.
+# This rewards active pieces and penalizes pieces that are blocked or restricted.
+
+# --- Knight Mobility ---
+KNIGHT_MOBILITY_BASE_MOVES = 4
+KNIGHT_MOBILITY_WEIGHT = np.array([4, 2], dtype=np.int32) # MG, EG
+
+# --- Bishop Mobility ---
+BISHOP_MOBILITY_BASE_MOVES = 5
+BISHOP_MOBILITY_WEIGHT = np.array([4, 2], dtype=np.int32) # MG, EG
+
+# --- Rook Mobility ---
+ROOK_MOBILITY_BASE_MOVES = 6
+ROOK_MOBILITY_WEIGHT = np.array([3, 1], dtype=np.int32) # MG, EG
+
+# --- Queen Mobility ---
+QUEEN_MOBILITY_BASE_MOVES = 8
+QUEEN_MOBILITY_WEIGHT = np.array([2, 1], dtype=np.int32) # MG, EG
+
+
+# =============================================================================
 # --- Piece Coordination Constants ---
 # =============================================================================
 
@@ -259,6 +293,26 @@ ATTACKER_WEIGHTS = np.array([
     [ 3, 1],  # Knight
     [ 2, 1]   # Pawn
 ], dtype=np.int32)
+
+
+# --- King Tropism ---
+# Bonus for pieces that are close to the enemy king.
+# The bonus is calculated as: weight * (max_distance - manhattan_distance).
+# This encourages the engine to move pieces towards the opponent's king.
+# Based on the example from black_numba, max_distance is around 14.
+KING_TROPISM_MAX_DISTANCE = 14
+QUEEN_TROPISM_WEIGHT = np.array([5, 2], dtype=np.int32) # MG, EG
+ROOK_TROPISM_WEIGHT = np.array([3, 1], dtype=np.int32) # MG, EG
+BISHOP_TROPISM_WEIGHT = np.array([2, 1], dtype=np.int32) # MG, EG
+KNIGHT_TROPISM_WEIGHT = np.array([2, 1], dtype=np.int32) # MG, EG
+
+
+# --- King "Anti-Mobility" Penalty ---
+# This penalizes the king for being too exposed in the middlegame.
+# It's calculated based on the number of squares the king can move to,
+# similar to a queen's mobility.
+KING_MOBILITY_BASE_MOVES = 5
+KING_MOBILITY_PENALTY_WEIGHT = np.array([2, 0], dtype=np.int32) # MG only penalty
 
 
 # =============================================================================

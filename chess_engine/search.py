@@ -98,9 +98,9 @@ def quiescence_search(piece_bbs, occupancy_bbs, game_state, alpha, beta, ply):
     see_pruned = np.uint64(0)
 
     if ply >= MAX_QUIESCENCE_DEPTH:
-        return evaluate_position(piece_bbs, occupancy_bbs, game_state), q_nodes, delta_pruned, see_pruned
+        return evaluate_position(piece_bbs, occupancy_bbs, game_state, lazy=False), q_nodes, delta_pruned, see_pruned
 
-    stand_pat = evaluate_position(piece_bbs, occupancy_bbs, game_state)
+    stand_pat = evaluate_position(piece_bbs, occupancy_bbs, game_state, lazy=False)
     if stand_pat >= beta:
         return beta, q_nodes, delta_pruned, see_pruned
     alpha = max(alpha, stand_pat)
@@ -179,7 +179,7 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
 
     if ply >= MAX_PLY:
         search_context.pv_table[ply, :].fill(NO_MOVE)
-        return (evaluate_position(piece_bbs, occupancy_bbs, game_state), NO_MOVE, nodes_searched, quiescence_nodes, cutoffs, tt_hits,
+        return (evaluate_position(piece_bbs, occupancy_bbs, game_state, lazy=False), NO_MOVE, nodes_searched, quiescence_nodes, cutoffs, tt_hits,
                 null_move_cutoffs, futility_pruned, razoring_used, rfp_pruned, lmp_pruned, probcut_pruned, qs_delta_pruned, qs_see_pruned,
                 iid_searches, singular_extensions)
 
@@ -303,7 +303,7 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
     # --- Shallow Pruning Techniques (RFP, Razoring) ---
     static_score = -INFINITY # Use a sentinel value
     if depth <= 2 and not is_currently_in_check:
-        static_score = evaluate_position(piece_bbs, occupancy_bbs, game_state)
+        static_score = evaluate_position(piece_bbs, occupancy_bbs, game_state, lazy=True)
 
         # Reverse Futility Pruning (RFP)
         if ENABLE_RFP and depth == 1 and static_score - RFP_MARGIN_D1 >= beta:
@@ -376,7 +376,7 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
             # Ensure static_score is computed if not already done for shallow depths
             # This reuses the static_score calculated in the shallow pruning section
             if static_score == -INFINITY:
-                static_score = evaluate_position(piece_bbs, occupancy_bbs, game_state)
+                static_score = evaluate_position(piece_bbs, occupancy_bbs, game_state, lazy=False)
 
             margin = 0
             if depth == 1: margin = FP_MARGIN_D1
@@ -501,7 +501,7 @@ def iterative_deepening_search(piece_bbs, occupancy_bbs, game_state, max_depth, 
 
         last_completed_depth = current_depth
         if "mate" in uci_score_string: break
-        if elapsed_time > max_time_ms: break
+        if max_time_ms > 0 and elapsed_time > max_time_ms: break
             
     return (best_move_total, last_score, nodes_searched, quiescence_nodes, total_cutoffs, total_tt_hits,
             last_completed_depth, total_nmc, total_fp, total_ru, total_rfp, total_lmp, total_pcp, total_qdp, total_qsp,
