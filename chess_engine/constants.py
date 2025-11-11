@@ -359,6 +359,54 @@ DE_BRUIJN_INDEX = np.array([
 
 
 # =============================================================================
+# --- Dynamic Evaluation Constants ---
+# =============================================================================
+
+# --- Manhattan Distance Pre-computation ---
+def _precompute_manhattan_distance():
+    """Pre-computes the Manhattan distance between all squares on the board."""
+    dist = np.zeros((64, 64), dtype=np.int32)
+    for r1 in range(8):
+        for f1 in range(8):
+            for r2 in range(8):
+                for f2 in range(8):
+                    sq1 = r1 * 8 + f1
+                    sq2 = r2 * 8 + f2
+                    dist[sq1, sq2] = abs(r1 - r2) + abs(f1 - f2)
+    return dist
+
+MANHATTAN_DISTANCE = _precompute_manhattan_distance()
+MAX_MANHATTAN_DISTANCE = 14 # Max distance from corner to corner
+
+# --- Piece Mobility ---
+# Bonus/Penalty = (moves - base_moves) * weight
+# Indexing: PAWN, KNIGHT, BISHOP, ROOK, QUEEN, KING
+MOBILITY_BASE_MOVES = np.array([0, 4, 5, 6, 8, 0], dtype=np.int32)
+MOBILITY_WEIGHT_MG = np.array([0, 4, 4, 3, 2, 0], dtype=np.int32)
+MOBILITY_WEIGHT_EG = np.array([0, 4, 4, 3, 2, 0], dtype=np.int32) # Same as MG for now
+
+# --- King Tropism ---
+# Bonus = weight * (MAX_MANHATTAN_DISTANCE - dist)
+# This is a middlegame-only bonus for pieces approaching the enemy king.
+QUEEN_TROPISM_WEIGHT  = np.array([5, 0], dtype=np.int32) # MG, EG
+ROOK_TROPISM_WEIGHT   = np.array([3, 0], dtype=np.int32) # MG, EG
+BISHOP_TROPISM_WEIGHT = np.array([2, 0], dtype=np.int32) # MG, EG
+KNIGHT_TROPISM_WEIGHT = np.array([3, 0], dtype=np.int32) # MG, EG
+
+# --- King Anti-Mobility ---
+# Penalty for the king being too exposed in the middlegame.
+# Penalty = (king_moves - base_moves) * weight
+KING_ANTI_MOBILITY_BASE_MOVES = 5
+KING_ANTI_MOBILITY_WEIGHT = np.array([2, 0], dtype=np.int32) # MG, EG
+
+# --- Initiative Bonus ---
+# Small bonus for the side to move in the opening/middlegame.
+INITIATIVE_BONUS = np.array([10, 0], dtype=np.int32) # MG, EG
+# Bonus is applied only when the game phase is above this threshold
+INITIATIVE_PHASE_THRESHOLD_RATIO = 0.4
+
+
+# =============================================================================
 # --- Transposition Table Constants ---
 # =============================================================================
 
