@@ -127,7 +127,8 @@ def quiescence_search(piece_bbs, occupancy_bbs, game_state, alpha, beta, ply):
                     continue
 
         if ENABLE_SEE_IN_QUIESCENCE:
-            if see(piece_bbs, occupancy_bbs, game_state, get_from_square(move), get_to_square(move)) < SEE_THRESHOLD:
+            side_to_move = game_state[0]
+            if see(piece_bbs, occupancy_bbs, side_to_move, get_from_square(move), get_to_square(move)) < SEE_THRESHOLD:
                 see_pruned += 1
                 continue
 
