@@ -764,7 +764,7 @@ def run_puzzle_test():
     Runs a search test for each puzzle and prints statistics.
     """
     depth = 20  # Set a high depth, will be stopped by time
-    time_limit_ms = 9500
+    time_limit_ms = 950
 
     total_tests = len(puzzles)
     passed_tests = 0
