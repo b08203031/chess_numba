@@ -190,130 +190,111 @@ def evaluate_piece_coordination(piece_bbs):
 @numba.njit(numba.types.UniTuple(numba.int32, 2)(piece_bbs_signature), cache=True, boundscheck=False, fastmath=True)
 def evaluate_king_safety(piece_bbs):
     """
-    評估雙方的國王安全，並分別返回中局（MG）和殘局（EG）的分數差異。
-    分數是從白方的角度計算的（正分對白方有利，負分對黑方有利）。
+    A hybrid evaluation of king safety, combining the performant parts of the original
+    implementation with the logically correct parts of the new implementation.
     """
     mg_safety_score = np.int32(0)
     eg_safety_score = np.int32(0)
+    
+    (wp_bb, wn_bb, wb_bb, wr_bb, wq_bb, wk_bb,
+    bp_bb, bn_bb, bb_bb, br_bb, bq_bb, bk_bb) = piece_bbs
 
-    # --- 1. 兵盾評估 (Pawn Shield Evaluation) ---
-    # 預先定義好國王在不同位置時，其前方兵盾的位元板遮罩。
-    # "完美"兵盾指兵在初始位置，"推進"兵盾指兵向前一格。
-    W_KS_SHIELD_PERFECT = BB_SQUARES[13] | BB_SQUARES[14] | BB_SQUARES[15]  # f2, g2, h2
-    W_KS_SHIELD_ADVANCED = BB_SQUARES[21] | BB_SQUARES[22] | BB_SQUARES[23] # f3, g3, h3
-    W_QS_SHIELD_PERFECT = BB_SQUARES[8] | BB_SQUARES[9] | BB_SQUARES[10]    # a2, b2, c2
-    W_QS_SHIELD_ADVANCED = BB_SQUARES[16] | BB_SQUARES[17] | BB_SQUARES[18]  # a3, b3, c3
+    # --- 1. Pawn Shield Evaluation (Restored from original version for performance) ---
+    W_KS_SHIELD_PERFECT = BB_SQUARES[13] | BB_SQUARES[14] | BB_SQUARES[15]
+    W_KS_SHIELD_ADVANCED = BB_SQUARES[21] | BB_SQUARES[22] | BB_SQUARES[23]
+    W_QS_SHIELD_PERFECT = BB_SQUARES[8] | BB_SQUARES[9] | BB_SQUARES[10]
+    W_QS_SHIELD_ADVANCED = BB_SQUARES[16] | BB_SQUARES[17] | BB_SQUARES[18]
+    
+    B_KS_SHIELD_PERFECT = BB_SQUARES[53] | BB_SQUARES[54] | BB_SQUARES[55]
+    B_KS_SHIELD_ADVANCED = BB_SQUARES[45] | BB_SQUARES[46] | BB_SQUARES[47]
+    B_QS_SHIELD_PERFECT = BB_SQUARES[48] | BB_SQUARES[49] | BB_SQUARES[50]
+    B_QS_SHIELD_ADVANCED = BB_SQUARES[40] | BB_SQUARES[41] | BB_SQUARES[42]
 
-    B_KS_SHIELD_PERFECT = BB_SQUARES[53] | BB_SQUARES[54] | BB_SQUARES[55]  # f7, g7, h7
-    B_KS_SHIELD_ADVANCED = BB_SQUARES[45] | BB_SQUARES[46] | BB_SQUARES[47] # f6, g6, h6
-    B_QS_SHIELD_PERFECT = BB_SQUARES[48] | BB_SQUARES[49] | BB_SQUARES[50]  # a7, b7, c7
-    B_QS_SHIELD_ADVANCED = BB_SQUARES[40] | BB_SQUARES[41] | BB_SQUARES[42]  # a6, b6, c6
+    white_king_sq = get_lsb_index(wk_bb)
+    black_king_sq = get_lsb_index(bk_bb)
 
-    # 獲取雙方國王和兵的位置
-    white_king_sq = get_lsb_index(piece_bbs[5])
-    black_king_sq = get_lsb_index(piece_bbs[11])
-    white_pawns = piece_bbs[0]
-    black_pawns = piece_bbs[6]
-
-    # --- 白方兵盾評估 ---
-    if white_king_sq == 6:  # 王翼易位後的國王在 g1
-        perfect = count_bits(white_pawns & W_KS_SHIELD_PERFECT)
-        advanced = count_bits(white_pawns & W_KS_SHIELD_ADVANCED)
+    # White Pawn Shield
+    if white_king_sq == 6:  # g1
+        perfect = count_bits(wp_bb & W_KS_SHIELD_PERFECT)
+        advanced = count_bits(wp_bb & W_KS_SHIELD_ADVANCED)
         mg_safety_score += perfect * PAWN_SHIELD_BONUS[0][0] + advanced * PAWN_SHIELD_BONUS[1][0]
         eg_safety_score += perfect * PAWN_SHIELD_BONUS[0][1] + advanced * PAWN_SHIELD_BONUS[1][1]
-    elif white_king_sq == 2:  # 后翼易位後的國王在 c1
-        perfect = count_bits(white_pawns & W_QS_SHIELD_PERFECT)
-        advanced = count_bits(white_pawns & W_QS_SHIELD_ADVANCED)
+    elif white_king_sq == 2:  # c1
+        perfect = count_bits(wp_bb & W_QS_SHIELD_PERFECT)
+        advanced = count_bits(wp_bb & W_QS_SHIELD_ADVANCED)
         mg_safety_score += perfect * PAWN_SHIELD_BONUS[0][0] + advanced * PAWN_SHIELD_BONUS[1][0]
         eg_safety_score += perfect * PAWN_SHIELD_BONUS[0][1] + advanced * PAWN_SHIELD_BONUS[1][1]
-    elif white_king_sq == 4:  # 國王未易位，在 e1
-        W_CENTER_SHIELD_PERFECT = BB_SQUARES[11] | BB_SQUARES[12] | BB_SQUARES[13] # d2, e2, f2
-        W_CENTER_SHIELD_ADVANCED = BB_SQUARES[19] | BB_SQUARES[20] | BB_SQUARES[21] # d3, e3, f3
-        perfect = count_bits(white_pawns & W_CENTER_SHIELD_PERFECT)
-        advanced = count_bits(white_pawns & W_CENTER_SHIELD_ADVANCED)
-        # 未易位時的兵盾獎勵減半
+    elif white_king_sq == 4:  # e1 (uncastled)
+        W_CENTER_SHIELD_PERFECT = BB_SQUARES[11] | BB_SQUARES[12] | BB_SQUARES[13]
+        W_CENTER_SHIELD_ADVANCED = BB_SQUARES[19] | BB_SQUARES[20] | BB_SQUARES[21]
+        perfect = count_bits(wp_bb & W_CENTER_SHIELD_PERFECT)
+        advanced = count_bits(wp_bb & W_CENTER_SHIELD_ADVANCED)
         mg_safety_score += (perfect * PAWN_SHIELD_BONUS[0][0] + advanced * PAWN_SHIELD_BONUS[1][0]) // UNCASTLED_SHIELD_DIVISOR
         eg_safety_score += (perfect * PAWN_SHIELD_BONUS[0][1] + advanced * PAWN_SHIELD_BONUS[1][1]) // UNCASTLED_SHIELD_DIVISOR
 
-    # --- 黑方兵盾評估 ---
-    if black_king_sq == 62:  # 王翼易位後的國王在 g8
-        perfect = count_bits(black_pawns & B_KS_SHIELD_PERFECT)
-        advanced = count_bits(black_pawns & B_KS_SHIELD_ADVANCED)
+    # Black Pawn Shield
+    if black_king_sq == 62:  # g8
+        perfect = count_bits(bp_bb & B_KS_SHIELD_PERFECT)
+        advanced = count_bits(bp_bb & B_KS_SHIELD_ADVANCED)
         mg_safety_score -= perfect * PAWN_SHIELD_BONUS[0][0] + advanced * PAWN_SHIELD_BONUS[1][0]
         eg_safety_score -= perfect * PAWN_SHIELD_BONUS[0][1] + advanced * PAWN_SHIELD_BONUS[1][1]
-    elif black_king_sq == 58:  # 后翼易位後的國王在 c8
-        perfect = count_bits(black_pawns & B_QS_SHIELD_PERFECT)
-        advanced = count_bits(black_pawns & B_QS_SHIELD_ADVANCED)
+    elif black_king_sq == 58:  # c8
+        perfect = count_bits(bp_bb & B_QS_SHIELD_PERFECT)
+        advanced = count_bits(bp_bb & B_QS_SHIELD_ADVANCED)
         mg_safety_score -= perfect * PAWN_SHIELD_BONUS[0][0] + advanced * PAWN_SHIELD_BONUS[1][0]
         eg_safety_score -= perfect * PAWN_SHIELD_BONUS[0][1] + advanced * PAWN_SHIELD_BONUS[1][1]
-    elif black_king_sq == 60:  # 國王未易位，在 e8
-        B_CENTER_SHIELD_PERFECT = BB_SQUARES[51] | BB_SQUARES[52] | BB_SQUARES[53] # d7, e7, f7
-        B_CENTER_SHIELD_ADVANCED = BB_SQUARES[43] | BB_SQUARES[44] | BB_SQUARES[45] # d6, e6, f6
-        perfect = count_bits(black_pawns & B_CENTER_SHIELD_PERFECT)
-        advanced = count_bits(black_pawns & B_CENTER_SHIELD_ADVANCED)
-        # 未易位時的兵盾獎勵減半
+    elif black_king_sq == 60:  # e8 (uncastled)
+        B_CENTER_SHIELD_PERFECT = BB_SQUARES[51] | BB_SQUARES[52] | BB_SQUARES[53]
+        B_CENTER_SHIELD_ADVANCED = BB_SQUARES[43] | BB_SQUARES[44] | BB_SQUARES[45]
+        perfect = count_bits(bp_bb & B_CENTER_SHIELD_PERFECT)
+        advanced = count_bits(bp_bb & B_CENTER_SHIELD_ADVANCED)
         mg_safety_score -= (perfect * PAWN_SHIELD_BONUS[0][0] + advanced * PAWN_SHIELD_BONUS[1][0]) // UNCASTLED_SHIELD_DIVISOR
         eg_safety_score -= (perfect * PAWN_SHIELD_BONUS[0][1] + advanced * PAWN_SHIELD_BONUS[1][1]) // UNCASTLED_SHIELD_DIVISOR
 
-    # --- 2. 半開放線路懲罰 (Semi-Open Files Penalty) ---
-    # 懲罰指向國王及其相鄰線路的、沒有我方兵防守的線路。
-    
-    # --- 白方國王 ---
+    # --- 2. Semi-Open Files Penalty (Restored from original version for performance) ---
     white_king_file = white_king_sq % 8
-    # 遍歷國王所在以及左右相鄰的線路
     for f in range(max(0, white_king_file - 1), min(7, white_king_file + 1) + 1):
         file_mask = FILE_MASKS[f]
-        # 如果該線路上沒有白兵
-        if not (white_pawns & file_mask):
-            # 計算該線路上有多少黑方的車和后
-            attackers = count_bits(piece_bbs[9] & file_mask) + count_bits(piece_bbs[10] & file_mask)
-            # 根據攻擊者數量施加懲罰
+        if not (wp_bb & file_mask):
+            attackers = count_bits(br_bb & file_mask) + count_bits(bq_bb & file_mask)
             mg_safety_score += attackers * SEMI_OPEN_FILE_PENALTY[0]
             eg_safety_score += attackers * SEMI_OPEN_FILE_PENALTY[1]
             
-    # --- 黑方國王 ---
     black_king_file = black_king_sq % 8
-    # 遍歷國王所在以及左右相鄰的線路
     for f in range(max(0, black_king_file - 1), min(7, black_king_file + 1) + 1):
         file_mask = FILE_MASKS[f]
-        # 如果該線路上沒有黑兵
-        if not (black_pawns & file_mask):
-            # 計算該線路上有多少白方的車和后
-            attackers = count_bits(piece_bbs[3] & file_mask) + count_bits(piece_bbs[4] & file_mask)
-            # 根據攻擊者數量施加懲罰（從白方角度，所以是減去懲罰值，相當於加分）
+        if not (bp_bb & file_mask):
+            attackers = count_bits(wr_bb & file_mask) + count_bits(wq_bb & file_mask)
             mg_safety_score -= attackers * SEMI_OPEN_FILE_PENALTY[0]
             eg_safety_score -= attackers * SEMI_OPEN_FILE_PENALTY[1]
 
-    # --- 3. 攻擊者鄰近度懲罰 (Attacker Proximity Penalty) ---
-    # 懲罰位於國王 5x5 區域內的對方棋子。
-    
-    # --- 白方國王區域內的黑棋 ---
+    # --- 3. Attacker Proximity Penalty (Corrected and complete version) ---
     white_king_zone = KING_ATTACK_ZONES[white_king_sq]
-    # 根據棋子類型和數量，乘以對應的威脅權重並累加懲罰。
-    mg_safety_score -= count_bits(piece_bbs[10] & white_king_zone) * ATTACKER_WEIGHTS[0][0] # 黑后
-    eg_safety_score -= count_bits(piece_bbs[10] & white_king_zone) * ATTACKER_WEIGHTS[0][1]
-    mg_safety_score -= count_bits(piece_bbs[9] & white_king_zone) * ATTACKER_WEIGHTS[1][0]  # 黑車
-    eg_safety_score -= count_bits(piece_bbs[9] & white_king_zone) * ATTACKER_WEIGHTS[1][1]
-    mg_safety_score -= count_bits(piece_bbs[8] & white_king_zone) * ATTACKER_WEIGHTS[2][0]  # 黑象
-    eg_safety_score -= count_bits(piece_bbs[8] & white_king_zone) * ATTACKER_WEIGHTS[2][1]
-    mg_safety_score -= count_bits(piece_bbs[7] & white_king_zone) * ATTACKER_WEIGHTS[3][0]  # 黑馬
-    eg_safety_score -= count_bits(piece_bbs[7] & white_king_zone) * ATTACKER_WEIGHTS[3][1]
-    mg_safety_score -= count_bits(piece_bbs[6] & white_king_zone) * ATTACKER_WEIGHTS[4][0]  # 黑兵
-    eg_safety_score -= count_bits(piece_bbs[6] & white_king_zone) * ATTACKER_WEIGHTS[4][1]
-
-    # --- 黑方國王區域內的白棋 ---
     black_king_zone = KING_ATTACK_ZONES[black_king_sq]
-    # 邏輯同上，但分數是正的（對白方有利）
-    mg_safety_score += count_bits(piece_bbs[4] & black_king_zone) * ATTACKER_WEIGHTS[0][0] # 白后
-    eg_safety_score += count_bits(piece_bbs[4] & black_king_zone) * ATTACKER_WEIGHTS[0][1]
-    mg_safety_score += count_bits(piece_bbs[3] & black_king_zone) * ATTACKER_WEIGHTS[1][0]  # 白車
-    eg_safety_score += count_bits(piece_bbs[3] & black_king_zone) * ATTACKER_WEIGHTS[1][1]
-    mg_safety_score += count_bits(piece_bbs[2] & black_king_zone) * ATTACKER_WEIGHTS[2][0]  # 白象
-    eg_safety_score += count_bits(piece_bbs[2] & black_king_zone) * ATTACKER_WEIGHTS[2][1]
-    mg_safety_score += count_bits(piece_bbs[1] & black_king_zone) * ATTACKER_WEIGHTS[3][0]  # 白馬
-    eg_safety_score += count_bits(piece_bbs[1] & black_king_zone) * ATTACKER_WEIGHTS[3][1]
-    mg_safety_score += count_bits(piece_bbs[0] & black_king_zone) * ATTACKER_WEIGHTS[4][0]  # 白兵
-    eg_safety_score += count_bits(piece_bbs[0] & black_king_zone) * ATTACKER_WEIGHTS[4][1]
+
+    # Attackers near White King
+    mg_safety_score -= count_bits(bq_bb & white_king_zone) * ATTACKER_WEIGHTS[0][0]
+    eg_safety_score -= count_bits(bq_bb & white_king_zone) * ATTACKER_WEIGHTS[0][1]
+    mg_safety_score -= count_bits(br_bb & white_king_zone) * ATTACKER_WEIGHTS[1][0]
+    eg_safety_score -= count_bits(br_bb & white_king_zone) * ATTACKER_WEIGHTS[1][1]
+    mg_safety_score -= count_bits(bb_bb & white_king_zone) * ATTACKER_WEIGHTS[2][0]
+    eg_safety_score -= count_bits(bb_bb & white_king_zone) * ATTACKER_WEIGHTS[2][1]
+    mg_safety_score -= count_bits(bn_bb & white_king_zone) * ATTACKER_WEIGHTS[3][0]
+    eg_safety_score -= count_bits(bn_bb & white_king_zone) * ATTACKER_WEIGHTS[3][1]
+    mg_safety_score -= count_bits(bp_bb & white_king_zone) * ATTACKER_WEIGHTS[4][0]
+    eg_safety_score -= count_bits(bp_bb & white_king_zone) * ATTACKER_WEIGHTS[4][1]
+
+    # Attackers near Black King
+    mg_safety_score += count_bits(wq_bb & black_king_zone) * ATTACKER_WEIGHTS[0][0]
+    eg_safety_score += count_bits(wq_bb & black_king_zone) * ATTACKER_WEIGHTS[0][1]
+    mg_safety_score += count_bits(wr_bb & black_king_zone) * ATTACKER_WEIGHTS[1][0]
+    eg_safety_score += count_bits(wr_bb & black_king_zone) * ATTACKER_WEIGHTS[1][1]
+    mg_safety_score += count_bits(wb_bb & black_king_zone) * ATTACKER_WEIGHTS[2][0]
+    eg_safety_score += count_bits(wb_bb & black_king_zone) * ATTACKER_WEIGHTS[2][1]
+    mg_safety_score += count_bits(wn_bb & black_king_zone) * ATTACKER_WEIGHTS[3][0]
+    eg_safety_score += count_bits(wn_bb & black_king_zone) * ATTACKER_WEIGHTS[3][1]
+    mg_safety_score += count_bits(wp_bb & black_king_zone) * ATTACKER_WEIGHTS[4][0]
+    eg_safety_score += count_bits(wp_bb & black_king_zone) * ATTACKER_WEIGHTS[4][1]
 
     return mg_safety_score, eg_safety_score
 

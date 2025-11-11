@@ -362,4 +362,4 @@ DE_BRUIJN_INDEX = np.array([
 # --- Transposition Table Constants ---
 # =============================================================================
 
-TT_SIZE_MB = 64
+TT_SIZE_MB = 256
