@@ -2,6 +2,13 @@
 import numba
 import numpy as np
 
+# --- Color Constants ---
+WHITE, BLACK = 0, 1
+
+# --- Piece Type Constants ---
+PAWN, KNIGHT, BISHOP, ROOK, QUEEN, KING = 0, 1, 2, 3, 4, 5
+
+
 # --- Numba Type Signatures for the Refactored Board State ---
 
 # The board state is now represented by 1D NumPy arrays of uint64

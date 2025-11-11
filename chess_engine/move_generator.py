@@ -131,6 +131,17 @@ def _precompute_leaper_attacks():
         KING_ATTACKS[sq] = (((bb << 1)|(bb << 9)|(bb >> 7)) & NOT_A_FILE)|(((bb >> 1)|(bb >> 9)|(bb << 7)) & NOT_H_FILE)|(bb << 8)|(bb >> 8)
 _precompute_leaper_attacks()
 
+PAWN_ATTACKS = np.zeros((2, 64), dtype=np.uint64)
+def _precompute_pawn_attacks():
+    for sq in range(64):
+        bb_sq = BB_SQUARES[sq]
+        # White pawn attackers for square sq
+        PAWN_ATTACKS[WHITE, sq] = ((bb_sq & NOT_A_FILE) >> 9) | ((bb_sq & NOT_H_FILE) >> 7)
+        # Black pawn attackers for square sq
+        PAWN_ATTACKS[BLACK, sq] = ((bb_sq & NOT_H_FILE) << 9) | ((bb_sq & NOT_A_FILE) << 7)
+_precompute_pawn_attacks()
+
+
 from chess_engine.engine_types import piece_bbs_signature, occupancy_bbs_signature, game_state_signature
 
 
@@ -144,15 +155,13 @@ def is_square_attacked(piece_bbs, occupancy_bbs, game_state, sq, attacker_side):
      bp_bb, bn_bb, bb_bb, br_bb, bq_bb, bk_bb) = piece_bbs
 
     if attacker_side == WHITE:
-        pawn_attacks = (((BB_SQUARES[sq] & NOT_A_FILE) >> 9) | ((BB_SQUARES[sq] & NOT_H_FILE) >> 7))
-        if pawn_attacks & wp_bb: return True
+        if PAWN_ATTACKS[WHITE, sq] & wp_bb: return True
         if KING_ATTACKS[sq] & wk_bb: return True
         if KNIGHT_ATTACKS[sq] & wn_bb: return True
         if get_bishop_attacks(sq, all_pieces_bb) & (wb_bb | wq_bb): return True
         if get_rook_attacks(sq, all_pieces_bb) & (wr_bb | wq_bb): return True
     else: # Attacker is BLACK
-        pawn_attacks = (((BB_SQUARES[sq] & NOT_H_FILE) << 9) | ((BB_SQUARES[sq] & NOT_A_FILE) << 7))
-        if pawn_attacks & bp_bb: return True
+        if PAWN_ATTACKS[BLACK, sq] & bp_bb: return True
         if KING_ATTACKS[sq] & bk_bb: return True
         if KNIGHT_ATTACKS[sq] & bn_bb: return True
         if get_bishop_attacks(sq, all_pieces_bb) & (bb_bb | bq_bb): return True

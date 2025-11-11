@@ -184,6 +184,49 @@ PST_EG = np.array([
 
 
 # =============================================================================
+# --- Piece Coordination Constants ---
+# =============================================================================
+
+# --- Bishop Pair ---
+# Bonus for having both bishops. This bonus is generally stronger in open positions.
+BISHOP_PAIR_BONUS = np.array([35, 50], dtype=np.int32) # MG, EG
+
+# --- Rook on Open/Semi-Open File ---
+# Bonus for a rook on a file with no friendly pawns (semi-open)
+# or no pawns at all (open).
+ROOK_ON_SEMI_OPEN_FILE_BONUS = np.array([15, 10], dtype=np.int32) # MG, EG
+ROOK_ON_OPEN_FILE_BONUS = np.array([25, 15], dtype=np.int32) # MG, EG
+
+
+# =============================================================================
+# --- Pawn Structure Constants ---
+# =============================================================================
+
+# --- Passed Pawns ---
+# Bonus for having a passed pawn, scaled by its rank. (Values increased significantly)
+# Index corresponds to the pawn's rank (1-8, though rank 1 and 8 are not used for pawns).
+PASSED_PAWN_BONUS = np.array([
+    # MG, EG
+    [  0,   0], # Rank 1
+    [ 10,  20], # Rank 2
+    [ 20,  40], # Rank 3
+    [ 35,  70], # Rank 4
+    [ 50, 100], # Rank 5
+    [ 80, 180], # Rank 6
+    [150, 300], # Rank 7
+    [  0,   0]  # Rank 8
+], dtype=np.int32)
+
+# --- Isolated Pawns ---
+# Penalty for each isolated pawn on a file.
+ISOLATED_PAWN_PENALTY = np.array([-10, -15], dtype=np.int32) # MG, EG
+
+# --- Doubled Pawns ---
+# Penalty for each doubled pawn on a file.
+DOUBLED_PAWN_PENALTY = np.array([-15, -20], dtype=np.int32) # MG, EG
+
+
+# =============================================================================
 # --- King Safety Constants ---
 # =============================================================================
 # These values are added to the middlegame score. Endgame scores are all 0.
@@ -196,6 +239,9 @@ PAWN_SHIELD_BONUS = np.array([
     [ 25, 10],  # MG, EG for perfect shield
     [ 12,  5]   # MG, EG for advanced shield
 ], dtype=np.int32)
+
+# Divisor for the pawn shield bonus when the king is uncastled.
+UNCASTLED_SHIELD_DIVISOR = 2
 
 
 # --- Semi-Open Files near King ---
@@ -285,7 +331,7 @@ DELTA_PRUNING_MARGIN = 500
 
 # --- Static Exchange Evaluation (SEE) Threshold ---
 SEE_THRESHOLD = 0  # centipawns
-ENABLE_SEE_IN_QUIESCENCE = False # Master switch to enable/disable SEE in quiescence search
+ENABLE_SEE_IN_QUIESCENCE = True # Master switch to enable/disable SEE in quiescence search
 
 # =============================================================================
 # --- Bitboard Utilities Constants ---
