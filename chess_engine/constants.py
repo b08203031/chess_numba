@@ -223,7 +223,7 @@ QUEEN_MOBILITY_WEIGHT = np.array([2, 1], dtype=np.int32) # MG, EG
 
 # --- Bishop Pair ---
 # Bonus for having both bishops. This bonus is generally stronger in open positions.
-BISHOP_PAIR_BONUS = np.array([35, 50], dtype=np.int32) # MG, EG
+BISHOP_PAIR_BONUS = np.array([10, 20], dtype=np.int32) # MG, EG
 
 # --- Rook on Open/Semi-Open File ---
 # Bonus for a rook on a file with no friendly pawns (semi-open)
@@ -282,6 +282,7 @@ PAWN_STORM_PENALTY = -5 # Penalty for each enemy pawn near the king
 SCALING_WEIGHTS = np.array([0, 4, 4, 6, 10], dtype=np.int32) # N, B, R, Q - for scaling factor
 MAX_SCALING_MATERIAL = (2*4 + 2*4 + 2*6 + 1*10) # Sum of all weights for one side
 
+EG_SAFETY_SCALE = 0.5 # Scale down endgame king safety impact
 
 # =============================================================================
 # --- Search Constants ---
