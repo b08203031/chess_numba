@@ -227,37 +227,40 @@ DOUBLED_PAWN_PENALTY = np.array([-15, -20], dtype=np.int32) # MG, EG
 
 
 # =============================================================================
-# --- King Safety Constants ---
+# --- King Safety Constants (New Implementation) ---
 # =============================================================================
-# These values are added to the middlegame score. Endgame scores are all 0.
 
 # --- Pawn Shield ---
-# Bonus for having pawns in front of the king.
-# Index 0: Pawn on its starting rank (e.g., g2 for white king on g1)
-# Index 1: Pawn pushed one square (e.g., g3 for white king on g1)
-PAWN_SHIELD_BONUS = np.array([
-    [ 25, 10],  # MG, EG for perfect shield
-    [ 12,  5]   # MG, EG for advanced shield
+# Scores for pawns in front of the king, applied to each of the 3 files.
+# Index 0: Pawn at start, 1: advanced one, 2: advanced two+, 3: missing
+PAWN_SHIELD_SCORE = np.array([10, 5, -10, -20], dtype=np.int32)
+
+# --- Open Files Near King ---
+SEMI_OPEN_FILE_PENALTY = -10
+OPEN_FILE_PENALTY = -20
+
+# --- Attacking King Zone ---
+# Attack units for each piece type
+ATTACK_UNITS = np.array([
+    0, # Pawn
+    2, # Knight
+    2, # Bishop
+    3, # Rook
+    5, # Queen
 ], dtype=np.int32)
 
-# Divisor for the pawn shield bonus when the king is uncastled.
-UNCASTLED_SHIELD_DIVISOR = 2
-
-
-# --- Semi-Open Files near King ---
-# Penalty for semi-open files in the king's zone (king's file and adjacent files).
-SEMI_OPEN_FILE_PENALTY = np.array([-15, -5], dtype=np.int32) # MG, EG
-
-
-# --- Attacker Proximity ---
-# Penalty based on which enemy pieces are in the king's 5x5 zone.
-# Weights are for: Queen, Rook, Bishop, Knight, Pawn
-ATTACKER_WEIGHTS = np.array([
-    [10, 4],  # Queen
-    [ 5, 2],  # Rook
-    [ 3, 1],  # Bishop
-    [ 3, 1],  # Knight
-    [ 2, 1]   # Pawn
+# Stockfish Safety Table, indexed by total attack units
+SAFETY_TABLE = np.array([
+    0,  0,   1,   2,   3,   5,   7,   9,  12,  15,
+  18,  22,  26,  30,  35,  39,  44,  50,  56,  62,
+  68,  75,  82,  85,  89,  97, 105, 113, 122, 131,
+ 140, 150, 169, 180, 191, 202, 213, 225, 237, 248,
+ 260, 272, 283, 295, 307, 319, 330, 342, 354, 366,
+ 377, 389, 401, 412, 424, 436, 448, 459, 471, 483,
+ 494, 500, 500, 500, 500, 500, 500, 500, 500, 500,
+ 500, 500, 500, 500, 500, 500, 500, 500, 500, 500,
+ 500, 500, 500, 500, 500, 500, 500, 500, 500, 500,
+ 500, 500, 500, 500, 500, 500, 500, 500, 500, 500
 ], dtype=np.int32)
 
 
@@ -362,9 +365,9 @@ DE_BRUIJN_INDEX = np.array([
 # --- Dynamic Evaluation Constants ---
 # =============================================================================
 
-# --- Manhattan Distance Pre-computation ---
-def _precompute_manhattan_distance():
-    """Pre-computes the Manhattan distance between all squares on the board."""
+# --- Chebyshev Distance Pre-computation ---
+def _precompute_chebyshev_distance():
+    """Pre-computes the Chebyshev distance between all squares on the board."""
     dist = np.zeros((64, 64), dtype=np.int32)
     for r1 in range(8):
         for f1 in range(8):
@@ -372,11 +375,11 @@ def _precompute_manhattan_distance():
                 for f2 in range(8):
                     sq1 = r1 * 8 + f1
                     sq2 = r2 * 8 + f2
-                    dist[sq1, sq2] = abs(r1 - r2) + abs(f1 - f2)
+                    dist[sq1, sq2] = max(abs(r1 - r2), abs(f1 - f2))
     return dist
 
-MANHATTAN_DISTANCE = _precompute_manhattan_distance()
-MAX_MANHATTAN_DISTANCE = 14 # Max distance from corner to corner
+CHEBYSHEV_DISTANCE = _precompute_chebyshev_distance()
+MAX_CHEBYSHEV_DISTANCE = 7 # Max distance from corner to corner
 
 # --- Piece Mobility ---
 # Bonus/Penalty = (moves - base_moves) * weight

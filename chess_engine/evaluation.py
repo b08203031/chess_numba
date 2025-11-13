@@ -7,7 +7,8 @@ from chess_engine.constants import (
     MG_MATERIAL_VALUES, EG_MATERIAL_VALUES,
     PST_MG, PST_EG,
     PHASE_WEIGHTS, MAX_PHASE,
-    PAWN_SHIELD_BONUS, SEMI_OPEN_FILE_PENALTY, ATTACKER_WEIGHTS, UNCASTLED_SHIELD_DIVISOR,
+    PAWN_SHIELD_SCORE, SEMI_OPEN_FILE_PENALTY, OPEN_FILE_PENALTY,
+    ATTACK_UNITS, SAFETY_TABLE,
     PASSED_PAWN_BONUS, ISOLATED_PAWN_PENALTY, DOUBLED_PAWN_PENALTY,
     BISHOP_PAIR_BONUS, ROOK_ON_SEMI_OPEN_FILE_BONUS, ROOK_ON_OPEN_FILE_BONUS,
     BB_SQUARES
@@ -15,13 +16,13 @@ from chess_engine.constants import (
 
 from chess_engine.zobrist import get_lsb_index
 from chess_engine.engine_types import piece_bbs_signature, occupancy_bbs_signature, game_state_signature
-from chess_engine.bitboard_utils import count_bits, KING_ATTACK_ZONES, FILE_MASKS
+from chess_engine.bitboard_utils import count_bits, WHITE_KING_ZONES, BLACK_KING_ZONES, FILE_MASKS
 from chess_engine.move_generator import (
     get_bishop_attacks, get_rook_attacks, get_queen_attacks, KNIGHT_ATTACKS
 )
 from chess_engine.constants import (
     MOBILITY_BASE_MOVES, MOBILITY_WEIGHT_MG, MOBILITY_WEIGHT_EG,
-    MANHATTAN_DISTANCE, MAX_MANHATTAN_DISTANCE,
+    CHEBYSHEV_DISTANCE, MAX_CHEBYSHEV_DISTANCE,
     QUEEN_TROPISM_WEIGHT, ROOK_TROPISM_WEIGHT, BISHOP_TROPISM_WEIGHT, KNIGHT_TROPISM_WEIGHT,
     KING_ANTI_MOBILITY_BASE_MOVES, KING_ANTI_MOBILITY_WEIGHT, INITIATIVE_BONUS
 )
@@ -264,160 +265,178 @@ def evaluate_mobility(piece_bbs, occupancy_bbs):
     return mg_score, eg_score
 
 
+@numba.njit(numba.int32(numba.uint8, numba.uint64, numba.uint64, numba.boolean), cache=True, boundscheck=False, fastmath=True)
+def _evaluate_pawn_shield(king_sq, friendly_pawns, enemy_pawns, is_white):
+    """Helper function to evaluate the pawn shield for a single king."""
+    safety = np.int32(0)
+    king_file = king_sq % 8
+    
+    start_file = max(0, king_file - 1)
+    end_file = min(7, king_file + 1)
+
+    for f in range(start_file, end_file + 1):
+        file_mask = FILE_MASKS[f]
+
+        # 1. Score pawn presence and position
+        pawns_on_file = friendly_pawns & file_mask
+        if not pawns_on_file:
+            safety += PAWN_SHIELD_SCORE[3] # Missing pawn
+        else:
+            pawn_sq = get_lsb_index(pawns_on_file)
+            pawn_rank = pawn_sq // 8
+            start_rank = 1 if is_white else 6
+
+            if pawn_rank == start_rank:
+                safety += PAWN_SHIELD_SCORE[0]
+            elif pawn_rank == start_rank + (1 if is_white else -1):
+                safety += PAWN_SHIELD_SCORE[1]
+            else:
+                safety += PAWN_SHIELD_SCORE[2]
+
+        enemy_pawns_on_file = (enemy_pawns & file_mask) != 0
+        friendly_pawns_on_file = (friendly_pawns & file_mask) != 0
+
+        if not friendly_pawns_on_file:
+            if not enemy_pawns_on_file:
+                safety += OPEN_FILE_PENALTY
+            else:
+                safety += SEMI_OPEN_FILE_PENALTY
+        elif not enemy_pawns_on_file:
+            # This is a semi-open file for the current player
+            pass
+    return safety
+
 @numba.njit(numba.types.UniTuple(numba.int32, 2)(piece_bbs_signature, occupancy_bbs_signature), cache=True, boundscheck=False, fastmath=True)
 def evaluate_king_safety(piece_bbs, occupancy_bbs):
     """
-    A hybrid evaluation of king safety, combining the performant parts of the original
-    implementation with the logically correct parts of the new implementation.
+    Evaluates king safety for both white and black.
+    The final score is white_safety - black_safety.
     """
-    mg_safety_score = np.int32(0)
-    eg_safety_score = np.int32(0)
-    
-    (wp_bb, wn_bb, wb_bb, wr_bb, wq_bb, wk_bb,
-    bp_bb, bn_bb, bb_bb, br_bb, bq_bb, bk_bb) = piece_bbs
+    mg_score = np.int32(0)
+    eg_score = np.int32(0)
 
-    white_pieces_bb, black_pieces_bb, _ = occupancy_bbs
-    all_pieces_bb = white_pieces_bb | black_pieces_bb
+    wp_bb, bp_bb = piece_bbs[0], piece_bbs[6]
+    wk_sq, bk_sq = get_lsb_index(piece_bbs[5]), get_lsb_index(piece_bbs[11])
 
-    # --- 1. Pawn Shield Evaluation (Restored from original version for performance) ---
-    W_KS_SHIELD_PERFECT = BB_SQUARES[13] | BB_SQUARES[14] | BB_SQUARES[15]
-    W_KS_SHIELD_ADVANCED = BB_SQUARES[21] | BB_SQUARES[22] | BB_SQUARES[23]
-    W_QS_SHIELD_PERFECT = BB_SQUARES[8] | BB_SQUARES[9] | BB_SQUARES[10]
-    W_QS_SHIELD_ADVANCED = BB_SQUARES[16] | BB_SQUARES[17] | BB_SQUARES[18]
-    
-    B_KS_SHIELD_PERFECT = BB_SQUARES[53] | BB_SQUARES[54] | BB_SQUARES[55]
-    B_KS_SHIELD_ADVANCED = BB_SQUARES[45] | BB_SQUARES[46] | BB_SQUARES[47]
-    B_QS_SHIELD_PERFECT = BB_SQUARES[48] | BB_SQUARES[49] | BB_SQUARES[50]
-    B_QS_SHIELD_ADVANCED = BB_SQUARES[40] | BB_SQUARES[41] | BB_SQUARES[42]
+    white_safety = _evaluate_pawn_shield(wk_sq, wp_bb, bp_bb, True)
+    black_safety = _evaluate_pawn_shield(bk_sq, bp_bb, wp_bb, False)
 
-    white_king_sq = get_lsb_index(wk_bb)
-    black_king_sq = get_lsb_index(bk_bb)
+    # --- Attacking King Zone Evaluation ---
+    all_pieces_bb = occupancy_bbs[2]
 
-    # White Pawn Shield
-    if white_king_sq == 6:  # g1
-        perfect = count_bits(wp_bb & W_KS_SHIELD_PERFECT)
-        advanced = count_bits(wp_bb & W_KS_SHIELD_ADVANCED)
-        mg_safety_score += perfect * PAWN_SHIELD_BONUS[0][0] + advanced * PAWN_SHIELD_BONUS[1][0]
-        eg_safety_score += perfect * PAWN_SHIELD_BONUS[0][1] + advanced * PAWN_SHIELD_BONUS[1][1]
-    elif white_king_sq == 2:  # c1
-        perfect = count_bits(wp_bb & W_QS_SHIELD_PERFECT)
-        advanced = count_bits(wp_bb & W_QS_SHIELD_ADVANCED)
-        mg_safety_score += perfect * PAWN_SHIELD_BONUS[0][0] + advanced * PAWN_SHIELD_BONUS[1][0]
-        eg_safety_score += perfect * PAWN_SHIELD_BONUS[0][1] + advanced * PAWN_SHIELD_BONUS[1][1]
-    elif white_king_sq == 4:  # e1 (uncastled)
-        W_CENTER_SHIELD_PERFECT = BB_SQUARES[11] | BB_SQUARES[12] | BB_SQUARES[13]
-        W_CENTER_SHIELD_ADVANCED = BB_SQUARES[19] | BB_SQUARES[20] | BB_SQUARES[21]
-        perfect = count_bits(wp_bb & W_CENTER_SHIELD_PERFECT)
-        advanced = count_bits(wp_bb & W_CENTER_SHIELD_ADVANCED)
-        mg_safety_score += (perfect * PAWN_SHIELD_BONUS[0][0] + advanced * PAWN_SHIELD_BONUS[1][0]) // UNCASTLED_SHIELD_DIVISOR
-        eg_safety_score += (perfect * PAWN_SHIELD_BONUS[0][1] + advanced * PAWN_SHIELD_BONUS[1][1]) // UNCASTLED_SHIELD_DIVISOR
+    # White King
+    white_attack_units = 0
+    white_attacker_count = 0
+    white_king_zone = WHITE_KING_ZONES[wk_sq]
+    # Black pieces attacking white king zone
+    # Knight
+    bb = piece_bbs[7]
+    while bb:
+        sq = get_lsb_index(bb)
+        if KNIGHT_ATTACKS[sq] & white_king_zone:
+            white_attack_units += ATTACK_UNITS[1]
+            white_attacker_count += 1
+        bb &= bb - np.uint64(1)
+    # Bishop
+    bb = piece_bbs[8]
+    while bb:
+        sq = get_lsb_index(bb)
+        if get_bishop_attacks(sq, all_pieces_bb) & white_king_zone:
+            white_attack_units += ATTACK_UNITS[2]
+            white_attacker_count += 1
+        bb &= bb - np.uint64(1)
+    # Rook
+    bb = piece_bbs[9]
+    while bb:
+        sq = get_lsb_index(bb)
+        if get_rook_attacks(sq, all_pieces_bb) & white_king_zone:
+            white_attack_units += ATTACK_UNITS[3]
+            white_attacker_count += 1
+        bb &= bb - np.uint64(1)
+    # Queen
+    bb = piece_bbs[10]
+    while bb:
+        sq = get_lsb_index(bb)
+        if get_queen_attacks(sq, all_pieces_bb) & white_king_zone:
+            white_attack_units += ATTACK_UNITS[4]
+            white_attacker_count += 1
+        bb &= bb - np.uint64(1)
 
-    # Black Pawn Shield
-    if black_king_sq == 62:  # g8
-        perfect = count_bits(bp_bb & B_KS_SHIELD_PERFECT)
-        advanced = count_bits(bp_bb & B_KS_SHIELD_ADVANCED)
-        mg_safety_score -= perfect * PAWN_SHIELD_BONUS[0][0] + advanced * PAWN_SHIELD_BONUS[1][0]
-        eg_safety_score -= perfect * PAWN_SHIELD_BONUS[0][1] + advanced * PAWN_SHIELD_BONUS[1][1]
-    elif black_king_sq == 58:  # c8
-        perfect = count_bits(bp_bb & B_QS_SHIELD_PERFECT)
-        advanced = count_bits(bp_bb & B_QS_SHIELD_ADVANCED)
-        mg_safety_score -= perfect * PAWN_SHIELD_BONUS[0][0] + advanced * PAWN_SHIELD_BONUS[1][0]
-        eg_safety_score -= perfect * PAWN_SHIELD_BONUS[0][1] + advanced * PAWN_SHIELD_BONUS[1][1]
-    elif black_king_sq == 60:  # e8 (uncastled)
-        B_CENTER_SHIELD_PERFECT = BB_SQUARES[51] | BB_SQUARES[52] | BB_SQUARES[53]
-        B_CENTER_SHIELD_ADVANCED = BB_SQUARES[43] | BB_SQUARES[44] | BB_SQUARES[45]
-        perfect = count_bits(bp_bb & B_CENTER_SHIELD_PERFECT)
-        advanced = count_bits(bp_bb & B_CENTER_SHIELD_ADVANCED)
-        mg_safety_score -= (perfect * PAWN_SHIELD_BONUS[0][0] + advanced * PAWN_SHIELD_BONUS[1][0]) // UNCASTLED_SHIELD_DIVISOR
-        eg_safety_score -= (perfect * PAWN_SHIELD_BONUS[0][1] + advanced * PAWN_SHIELD_BONUS[1][1]) // UNCASTLED_SHIELD_DIVISOR
+    if white_attacker_count >= 2:
+         white_safety -= SAFETY_TABLE[min(white_attack_units, 99)]
 
-    # --- 2. Semi-Open Files Penalty (Restored from original version for performance) ---
-    white_king_file = white_king_sq % 8
-    for f in range(max(0, white_king_file - 1), min(7, white_king_file + 1) + 1):
-        file_mask = FILE_MASKS[f]
-        if not (wp_bb & file_mask):
-            attackers = count_bits(br_bb & file_mask) + count_bits(bq_bb & file_mask)
-            mg_safety_score += attackers * SEMI_OPEN_FILE_PENALTY[0]
-            eg_safety_score += attackers * SEMI_OPEN_FILE_PENALTY[1]
-            
-    black_king_file = black_king_sq % 8
-    for f in range(max(0, black_king_file - 1), min(7, black_king_file + 1) + 1):
-        file_mask = FILE_MASKS[f]
-        if not (bp_bb & file_mask):
-            attackers = count_bits(wr_bb & file_mask) + count_bits(wq_bb & file_mask)
-            mg_safety_score -= attackers * SEMI_OPEN_FILE_PENALTY[0]
-            eg_safety_score -= attackers * SEMI_OPEN_FILE_PENALTY[1]
+    # Black King
+    black_attack_units = 0
+    black_attacker_count = 0
+    black_king_zone = BLACK_KING_ZONES[bk_sq]
+    # White pieces attacking black king zone
+    # Knight
+    bb = piece_bbs[1]
+    while bb:
+        sq = get_lsb_index(bb)
+        if KNIGHT_ATTACKS[sq] & black_king_zone:
+            black_attack_units += ATTACK_UNITS[1]
+            black_attacker_count += 1
+        bb &= bb - np.uint64(1)
+    # Bishop
+    bb = piece_bbs[2]
+    while bb:
+        sq = get_lsb_index(bb)
+        if get_bishop_attacks(sq, all_pieces_bb) & black_king_zone:
+            black_attack_units += ATTACK_UNITS[2]
+            black_attacker_count += 1
+        bb &= bb - np.uint64(1)
+    # Rook
+    bb = piece_bbs[3]
+    while bb:
+        sq = get_lsb_index(bb)
+        if get_rook_attacks(sq, all_pieces_bb) & black_king_zone:
+            black_attack_units += ATTACK_UNITS[3]
+            black_attacker_count += 1
+        bb &= bb - np.uint64(1)
+    # Queen
+    bb = piece_bbs[4]
+    while bb:
+        sq = get_lsb_index(bb)
+        if get_queen_attacks(sq, all_pieces_bb) & black_king_zone:
+            black_attack_units += ATTACK_UNITS[4]
+            black_attacker_count += 1
+        bb &= bb - np.uint64(1)
 
-    # --- 3. Attacker Proximity Penalty (Corrected and complete version) ---
-    white_king_zone = KING_ATTACK_ZONES[white_king_sq]
-    black_king_zone = KING_ATTACK_ZONES[black_king_sq]
+    if black_attacker_count >= 2:
+        black_safety -= SAFETY_TABLE[min(black_attack_units, 99)]
 
-    # Attackers near White King
-    mg_safety_score -= count_bits(bq_bb & white_king_zone) * ATTACKER_WEIGHTS[0][0]
-    eg_safety_score -= count_bits(bq_bb & white_king_zone) * ATTACKER_WEIGHTS[0][1]
-    mg_safety_score -= count_bits(br_bb & white_king_zone) * ATTACKER_WEIGHTS[1][0]
-    eg_safety_score -= count_bits(br_bb & white_king_zone) * ATTACKER_WEIGHTS[1][1]
-    mg_safety_score -= count_bits(bb_bb & white_king_zone) * ATTACKER_WEIGHTS[2][0]
-    eg_safety_score -= count_bits(bb_bb & white_king_zone) * ATTACKER_WEIGHTS[2][1]
-    mg_safety_score -= count_bits(bn_bb & white_king_zone) * ATTACKER_WEIGHTS[3][0]
-    eg_safety_score -= count_bits(bn_bb & white_king_zone) * ATTACKER_WEIGHTS[3][1]
-    mg_safety_score -= count_bits(bp_bb & white_king_zone) * ATTACKER_WEIGHTS[4][0]
-    eg_safety_score -= count_bits(bp_bb & white_king_zone) * ATTACKER_WEIGHTS[4][1]
-
-    # Attackers near Black King
-    mg_safety_score += count_bits(wq_bb & black_king_zone) * ATTACKER_WEIGHTS[0][0]
-    eg_safety_score += count_bits(wq_bb & black_king_zone) * ATTACKER_WEIGHTS[0][1]
-    mg_safety_score += count_bits(wr_bb & black_king_zone) * ATTACKER_WEIGHTS[1][0]
-    eg_safety_score += count_bits(wr_bb & black_king_zone) * ATTACKER_WEIGHTS[1][1]
-    mg_safety_score += count_bits(wb_bb & black_king_zone) * ATTACKER_WEIGHTS[2][0]
-    eg_safety_score += count_bits(wb_bb & black_king_zone) * ATTACKER_WEIGHTS[2][1]
-    mg_safety_score += count_bits(wn_bb & black_king_zone) * ATTACKER_WEIGHTS[3][0]
-    eg_safety_score += count_bits(wn_bb & black_king_zone) * ATTACKER_WEIGHTS[3][1]
-    mg_safety_score += count_bits(wp_bb & black_king_zone) * ATTACKER_WEIGHTS[4][0]
-    eg_safety_score += count_bits(wp_bb & black_king_zone) * ATTACKER_WEIGHTS[4][1]
-
-    # --- 4. NEW: King Tropism (Attacker Distance to King) ---
+    # --- King Tropism Evaluation ---
     # White pieces attacking Black King
-    white_attackers = (wn_bb, wb_bb, wr_bb, wq_bb)
+    white_attackers = (piece_bbs[1], piece_bbs[2], piece_bbs[3], piece_bbs[4])
     tropism_weights = (KNIGHT_TROPISM_WEIGHT, BISHOP_TROPISM_WEIGHT, ROOK_TROPISM_WEIGHT, QUEEN_TROPISM_WEIGHT)
     for i in range(len(white_attackers)):
         bb = white_attackers[i]
         weight = tropism_weights[i]
         while bb:
             sq = get_lsb_index(bb)
-            dist = MANHATTAN_DISTANCE[sq, black_king_sq]
-            bonus = (MAX_MANHATTAN_DISTANCE - dist)
-            mg_safety_score += bonus * weight[0]
-            eg_safety_score += bonus * weight[1]
+            dist = CHEBYSHEV_DISTANCE[sq, bk_sq]
+            penalty = weight[0] * (MAX_CHEBYSHEV_DISTANCE - dist)
+            black_safety -= penalty # Lower score is worse for black
             bb &= bb - np.uint64(1)
 
     # Black pieces attacking White King
-    black_attackers = (bn_bb, bb_bb, br_bb, bq_bb)
+    black_attackers = (piece_bbs[7], piece_bbs[8], piece_bbs[9], piece_bbs[10])
     for i in range(len(black_attackers)):
         bb = black_attackers[i]
         weight = tropism_weights[i]
         while bb:
             sq = get_lsb_index(bb)
-            dist = MANHATTAN_DISTANCE[sq, white_king_sq]
-            bonus = (MAX_MANHATTAN_DISTANCE - dist)
-            mg_safety_score -= bonus * weight[0]
-            eg_safety_score -= bonus * weight[1]
+            dist = CHEBYSHEV_DISTANCE[sq, wk_sq]
+            penalty = weight[0] * (MAX_CHEBYSHEV_DISTANCE - dist)
+            white_safety -= penalty # Lower score is worse for white
             bb &= bb - np.uint64(1)
 
-    # --- 5. NEW: King Anti-Mobility Penalty ---
-    # White King
-    w_king_moves = count_bits(get_queen_attacks(white_king_sq, all_pieces_bb) & ~white_pieces_bb)
-    penalty = (w_king_moves - KING_ANTI_MOBILITY_BASE_MOVES)
-    mg_safety_score -= penalty * KING_ANTI_MOBILITY_WEIGHT[0]
-    eg_safety_score -= penalty * KING_ANTI_MOBILITY_WEIGHT[1]
+    # The final score is a differential.
+    # We only apply it to the middlegame score for now.
+    mg_score = white_safety - black_safety
 
-    # Black King
-    b_king_moves = count_bits(get_queen_attacks(black_king_sq, all_pieces_bb) & ~black_pieces_bb)
-    penalty = (b_king_moves - KING_ANTI_MOBILITY_BASE_MOVES)
-    mg_safety_score += penalty * KING_ANTI_MOBILITY_WEIGHT[0]
-    eg_safety_score += penalty * KING_ANTI_MOBILITY_WEIGHT[1]
-
-    return mg_safety_score, eg_safety_score
+    return mg_score, eg_score
 
 
 @numba.njit(numba.int32(piece_bbs_signature, occupancy_bbs_signature, game_state_signature, numba.boolean), cache=True, boundscheck=False, fastmath=True)
