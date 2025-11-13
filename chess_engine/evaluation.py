@@ -3,22 +3,7 @@
 import numba
 import numpy as np
 
-from chess_engine.constants import (
-    MG_MATERIAL_VALUES, EG_MATERIAL_VALUES,
-    PST_MG, PST_EG,
-    PHASE_WEIGHTS, MAX_PHASE,
-    KING_SAFETY_ATTACK_UNITS, KING_SAFETY_TABLE,
-    KING_TROPISM_MAX_DISTANCE, KING_TROPISM_WEIGHTS,
-    PAWN_STORM_PENALTY, SCALING_WEIGHTS, MAX_SCALING_MATERIAL,
-    PASSED_PAWN_BONUS, ISOLATED_PAWN_PENALTY, DOUBLED_PAWN_PENALTY,
-    BISHOP_PAIR_BONUS, ROOK_ON_SEMI_OPEN_FILE_BONUS, ROOK_ON_OPEN_FILE_BONUS,
-    KNIGHT_MOBILITY_BASE_MOVES, KNIGHT_MOBILITY_WEIGHT,
-    BISHOP_MOBILITY_BASE_MOVES, BISHOP_MOBILITY_WEIGHT,
-    ROOK_MOBILITY_BASE_MOVES, ROOK_MOBILITY_WEIGHT,
-    QUEEN_MOBILITY_BASE_MOVES, QUEEN_MOBILITY_WEIGHT,
-    INITIATIVE_BONUS, INITIATIVE_PHASE_THRESHOLD,
-    BB_SQUARES
-)
+from chess_engine.constants import *
 
 from chess_engine.zobrist import get_lsb_index
 from chess_engine.engine_types import piece_bbs_signature, occupancy_bbs_signature, game_state_signature
@@ -394,7 +379,7 @@ def evaluate_king_safety(piece_bbs, occupancy_bbs):
     # In the endgame, king safety is much less of a concern, and an active king is
     # often an advantage. The King's PST already encourages centralization.
     # Therefore, we set the endgame king safety score to 0.
-    eg_safety_score = np.int32(0)
+    eg_safety_score = mg_safety_score * EG_SAFETY_SCALE
 
     return mg_safety_score, eg_safety_score
 
