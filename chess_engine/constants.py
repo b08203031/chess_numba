@@ -261,58 +261,26 @@ DOUBLED_PAWN_PENALTY = np.array([-15, -20], dtype=np.int32) # MG, EG
 
 
 # =============================================================================
-# --- King Safety Constants ---
+# --- King Safety Constants (NEW - based on Chessprogramming Wiki) ---
 # =============================================================================
-# These values are added to the middlegame score. Endgame scores are all 0.
 
-# --- Pawn Shield ---
-# Bonus for having pawns in front of the king.
-# Index 0: Pawn on its starting rank (e.g., g2 for white king on g1)
-# Index 1: Pawn pushed one square (e.g., g3 for white king on g1)
-PAWN_SHIELD_BONUS = np.array([
-    [ 25, 10],  # MG, EG for perfect shield
-    [ 12,  5]   # MG, EG for advanced shield
-], dtype=np.int32)
+# --- Phase 2: Attacking the King Zone ---
+KING_SAFETY_ATTACK_UNITS = np.array([2, 2, 3, 5], dtype=np.int32) # N, B, R, Q
+KING_SAFETY_TABLE = np.array([
+    0, 0, 1, 2, 4, 6, 9, 12, 16, 20, 25, 30, 36, 42, 49, 56,
+    64, 72, 81, 90, 100, 110, 120, 130, 140, 150, 160, 170, 180, 190, 200,
+    210, 220, 230, 240, 250, 260, 270, 280, 290, 300, 310, 320, 330, 340,
+    350, 360, 370, 380, 390, 400
+] + [400] * 50, dtype=np.int32)
 
-# Divisor for the pawn shield bonus when the king is uncastled.
-UNCASTLED_SHIELD_DIVISOR = 2
+# --- Phase 3: King Tropism ---
+KING_TROPISM_MAX_DISTANCE = 14 # Max Manhattan distance
+KING_TROPISM_WEIGHTS = np.array([1, 2, 2, 3, 5], dtype=np.int32) # P, N, B, R, Q
 
-
-# --- Semi-Open Files near King ---
-# Penalty for semi-open files in the king's zone (king's file and adjacent files).
-SEMI_OPEN_FILE_PENALTY = np.array([-15, -5], dtype=np.int32) # MG, EG
-
-
-# --- Attacker Proximity ---
-# Penalty based on which enemy pieces are in the king's 5x5 zone.
-# Weights are for: Queen, Rook, Bishop, Knight, Pawn
-ATTACKER_WEIGHTS = np.array([
-    [10, 4],  # Queen
-    [ 5, 2],  # Rook
-    [ 3, 1],  # Bishop
-    [ 3, 1],  # Knight
-    [ 2, 1]   # Pawn
-], dtype=np.int32)
-
-
-# --- King Tropism ---
-# Bonus for pieces that are close to the enemy king.
-# The bonus is calculated as: weight * (max_distance - manhattan_distance).
-# This encourages the engine to move pieces towards the opponent's king.
-# Based on the example from black_numba, max_distance is around 14.
-KING_TROPISM_MAX_DISTANCE = 14
-QUEEN_TROPISM_WEIGHT = np.array([5, 2], dtype=np.int32) # MG, EG
-ROOK_TROPISM_WEIGHT = np.array([3, 1], dtype=np.int32) # MG, EG
-BISHOP_TROPISM_WEIGHT = np.array([2, 1], dtype=np.int32) # MG, EG
-KNIGHT_TROPISM_WEIGHT = np.array([2, 1], dtype=np.int32) # MG, EG
-
-
-# --- King "Anti-Mobility" Penalty ---
-# This penalizes the king for being too exposed in the middlegame.
-# It's calculated based on the number of squares the king can move to,
-# similar to a queen's mobility.
-KING_MOBILITY_BASE_MOVES = 5
-KING_MOBILITY_PENALTY_WEIGHT = np.array([2, 0], dtype=np.int32) # MG only penalty
+# --- Phase 4: Advanced & Dynamic ---
+PAWN_STORM_PENALTY = -5 # Penalty for each enemy pawn near the king
+SCALING_WEIGHTS = np.array([0, 4, 4, 6, 10], dtype=np.int32) # N, B, R, Q - for scaling factor
+MAX_SCALING_MATERIAL = (2*4 + 2*4 + 2*6 + 1*10) # Sum of all weights for one side
 
 
 # =============================================================================
