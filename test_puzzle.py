@@ -782,7 +782,7 @@ def run_puzzle_test():
         print(f"--- Running Test: {puzzle['name']} ---")
 
         piece_bbs, occupancy_bbs, game_state = parse_fen(puzzle["fen"])
-        board_state_flat = piece_bbs + occupancy_bbs + game_state
+        board_state_flat = np.concatenate((piece_bbs, occupancy_bbs, game_state))
 
         killer_moves = np.zeros((MAX_PLY, 2), dtype=np.uint16)
         clear_transposition_table(transposition_table)
@@ -793,7 +793,7 @@ def run_puzzle_test():
         (best_move, best_eval, nodes_searched, quiescence_nodes, cutoffs, tt_hits,
         last_completed_depth, total_nmc, total_fp, total_ru, total_rfp, total_lmp, total_pcp, total_qdp, total_qsp,
         total_iid, total_se) = iterative_deepening_search(
-            board_state_flat, depth, time_limit_ms, transposition_table, killer_moves
+            piece_bbs, occupancy_bbs, game_state, depth, time_limit_ms, transposition_table
         )
 
         end_time = time.time()
