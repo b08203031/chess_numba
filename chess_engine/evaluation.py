@@ -28,9 +28,9 @@ from chess_engine.move_generator import (
 )
 
 # --- Pre-computed Manhattan Distance Table ---
-def _create_Chebyshev_distance_table():
+def _create_manhattan_distance_table():
     """
-    Pre-computes a 64x64 lookup table for the chebyshev distance between any two squares.
+    Pre-computes a 64x64 lookup table for the manhattan distance between any two squares.
     Distance = max(abs(rank1 - rank2), abs(file1 - file2)).
     """
     table = np.zeros((64, 64), dtype=np.int32)
@@ -38,10 +38,10 @@ def _create_Chebyshev_distance_table():
         rank1, file1 = sq1 // 8, sq1 % 8
         for sq2 in range(64):
             rank2, file2 = sq2 // 8, sq2 % 8
-            table[sq1, sq2] = max(abs(rank1 - rank2), abs(file1 - file2))
+            table[sq1, sq2] = abs(rank1 - rank2) + abs(file1 - file2)
     return table
 
-CHEBYSHEV_DISTANCE = _create_Chebyshev_distance_table()
+MANHATTAN_DISTANCE = _create_manhattan_distance_table()
 
 
 # --- Pre-computed Masks for Pawn Structure Evaluation ---
@@ -326,7 +326,7 @@ def _evaluate_king_tropism(king_sq, color, piece_bbs):
         temp_bb = piece_bbs[piece_type]
         while temp_bb:
             sq = get_lsb_index(temp_bb)
-            distance = CHEBYSHEV_DISTANCE[sq, king_sq]
+            distance = MANHATTAN_DISTANCE[sq, king_sq]
             penalty += weight * (KING_TROPISM_MAX_DISTANCE - distance)
             temp_bb &= temp_bb - np.uint64(1)
 
