@@ -1,0 +1,3550 @@
+New game started. Caches and stats cleared.
+--- Running Test: Lichess Puzzle 000mr ---
+info depth 1 score cp 10728 nodes 11 nps 11 time 962 pv g4g3
+--- Search Statistics ---
+Total Time: 1.13s
+Nodes Searched: 11 (9 NPS)
+- Quiescence Nodes: 0 (0.0%)
+Transposition Table Hits: 11.0 (100.0%)
+Beta Cutoffs: 0.0
+Null Move Cutoffs: 0.0
+Futility Pruned: 0.0
+Razoring Used: 0.0
+QS Delta Pruned: 0.0
+QS SEE Pruned: 0.0
+-------------------------
+
+FEN: 5r1k/5rp1/p7/1b2B2p/1P1P1Pq1/2R3Q1/P3p1P1/2R3K1 b - - 1 41
+Best move found: g4g3
+Score: 10728
+rating: 1478
+theme: crushing middlegame short
+
+Test FAILED: The engine suggested g4g3, but the correct move is f7f4.
+1 tests completed.
+----------------------------------------
+New game started. Caches and stats cleared.
+--- Running Test: Lichess Puzzle 002LW ---
+info depth 1 score cp -320 nodes 49 nps 101191 time 0 pv g5g6
+info depth 2 score cp -142 nodes 184 nps 76267 time 2 pv f5f6 g7f6
+info depth 3 score cp -382 nodes 1369 nps 172582 time 7 pv g5g6 f7g6 f5g6
+info depth 4 score cp -481 nodes 2558 nps 175986 time 14 pv g1h1 d3f1 h1h2 e5f3 h5f3
+info depth 5 score cp -581 nodes 12082 nps 176625 time 68 pv f3g2 b7e4 e5f3 g1f2 f3g5 g3e2
+info depth 6 score cp -499 nodes 37279 nps 184629 time 201 pv g1h1 e5f3 f1f2 f3e5 h1g2 b7e4 g3e4
+info depth 7 score cp -399 nodes 43696 nps 167490 time 260 pv c1c7 b7a6 c7f7 e5f7 f1d1 d3d1 g1g2 f7g5
+info depth 8 score cp -499 nodes 43697 nps 100270 time 435 pv
+info depth 9 score cp -599 nodes 43698 nps 50707 time 861 pv
+info depth 10 score cp -699 nodes 43699 nps 14693 time 2973 pv
+--- Search Statistics ---
+Total Time: 2.97s
+Nodes Searched: 43699 (14693 NPS)
+- Quiescence Nodes: 23047 (52.7%)
+Transposition Table Hits: 19360.0 (44.3%)
+Beta Cutoffs: 5515.0
+Null Move Cutoffs: 194.0
+Futility Pruned: 26731.0
+Razoring Used: 103.0
+QS Delta Pruned: 6067.0
+QS SEE Pruned: 4485.0
+-------------------------
+
+FEN: 3r1rk1/1b3pp1/3p4/p3nPPQ/4P3/3q1BN1/8/2R2RK1 w - - 2 29
+Best move found: c1c7
+Score: -699
+rating: 2489
+theme: advantage middlegame short
+
+Test FAILED: The engine suggested c1c7, but the correct move is f5f6.
+2 tests completed.
+----------------------------------------
+New game started. Caches and stats cleared.
+--- Running Test: Lichess Puzzle 002rd ---
+info depth 1 score cp 261 nodes 38 nps 93755 time 0 pv d4c5
+info depth 2 score cp 161 nodes 257 nps 190785 time 1 pv e2f4 c5d4
+info depth 3 score cp 101 nodes 554 nps 219979 time 2 pv e2f4 c5d4 f4g6 f7g6
+info depth 4 score cp 201 nodes 663 nps 136301 time 4 pv e2f4 c5d4 e3d4
+info depth 5 score cp 70 nodes 4140 nps 151834 time 27 pv f2f4 a7a6 e2c1 c5d4 f4g4
+info depth 6 score cp 169 nodes 6313 nps 186498 time 33 pv d4c5 b6c5 e3c5 a7c5 e2f4 g6f6
+info depth 7 score cp 248 nodes 11136 nps 218523 time 50 pv d4c5 b6c5 e3c5 g4g3 h2g3 a7c5 e2f4
+info depth 8 score cp 346 nodes 17806 nps 197281 time 90 pv d4c5 d5d4 c5b6 d4e3 h5g6 f7g6 b6a7 e3f2 g1f2
+info depth 9 score cp 246 nodes 17807 nps 110002 time 161 pv
+info depth 10 score cp 346 nodes 17808 nps 61218 time 290 pv
+info depth 11 score cp 246 nodes 20873 nps 26552 time 786 pv d4c5 g4g3 h2g3 c5d4 e2d4 g6g3
+info depth 12 score cp 231 nodes 236566 nps 77744 time 3042 pv d4c5 b6c5 e3c5 g4g3 e2f4 g3f2 f4g6
+--- Search Statistics ---
+Total Time: 3.04s
+Nodes Searched: 236566 (77740 NPS)
+- Quiescence Nodes: 107920 (45.6%)
+Transposition Table Hits: 74170.0 (31.4%)
+Beta Cutoffs: 25453.0
+Null Move Cutoffs: 7481.0
+Futility Pruned: 239367.0
+Razoring Used: 807.0
+QS Delta Pruned: 31434.0
+QS SEE Pruned: 27113.0
+-------------------------
+
+FEN: r6k/q1p2p1p/1b2bPr1/p1ppP2Q/3P2p1/4B3/PP2NRPP/3R2K1 w - - 2 26
+Best move found: d4c5
+Score: 231
+rating: 1776
+theme: crushing kingsideAttack long middlegame pin
+
+Test FAILED: The engine suggested d4c5, but the correct move is e2f4.
+3 tests completed.
+----------------------------------------
+New game started. Caches and stats cleared.
+--- Running Test: Lichess Puzzle 004d8 ---
+info depth 1 score cp 91 nodes 17 nps 52351 time 0 pv f3g4
+info depth 2 score cp 55 nodes 91 nps 163181 time 0 pv f3g4 b5b4
+info depth 3 score cp 106 nodes 278 nps 266153 time 1 pv f3g4 b5b4 a2a4
+info depth 4 score cp 75 nodes 956 nps 377353 time 2 pv f3g4 f7g7 a6b6 g7g4
+info depth 5 score cp 125 nodes 2220 nps 382270 time 5 pv f3g4 b5b4 a2a3 f7g7 a3b4
+info depth 6 score cp 186 nodes 5878 nps 344134 time 17 pv f3g4 f7f6 b2b4 f6h6 a6a7 e7f6 a2a4
+info depth 7 score cp 150 nodes 9051 nps 334175 time 27 pv f3g4 f7g7 a6a7 e7f6 a7g7 f6g7 c2c4 b5b4
+info depth 8 score cp 137 nodes 24605 nps 316990 time 77 pv f3g4 f7f8 a6a7 e7f6 a7d7 f8g8 d7d6 f6g5 d6b6
+info depth 9 score cp 125 nodes 37040 nps 286347 time 129 pv f3g4 f7f8 a6a7 e7f6 a2a3 f8g8 c2c4 b5c4 d3c3 g8g4 c3c4
+info depth 10 score cp 125 nodes 52806 nps 287490 time 183 pv f3g4 f7f8 a6a7 e7f6 a7d7 f6g5 d7d6 f4f3 d6b6 f3f2 g6b6 e5e4
+info depth 11 score cp 125 nodes 87758 nps 262036 time 334 pv f3g4 f7f8 a6a7 e7f6 a7d7 f6g5 d7g7 g5f6 g7d7
+info depth 12 score cp 125 nodes 123122 nps 219973 time 559 pv f3g4 f7f8 a6a7 e7f6 a7d7 f6g5 d7g7 g5f6 g7d7
+info depth 13 score cp 124 nodes 228420 nps 142204 time 1606 pv f3g4 f7f8 a6a7 e7f6 a7d7 f4f3 d7d6 f6g5 d6b6 g5g4 b6b5 f3f2 a2a4 g4f5
+--- Search Statistics ---
+Total Time: 1.61s
+Nodes Searched: 228420 (142190 NPS)
+- Quiescence Nodes: 86359 (37.8%)
+Transposition Table Hits: 105519.0 (46.2%)
+Beta Cutoffs: 34361.0
+Null Move Cutoffs: 5722.0
+Futility Pruned: 70996.0
+Razoring Used: 4265.0
+QS Delta Pruned: 2570.0
+QS SEE Pruned: 1163.0
+-------------------------
+
+FEN: 8/4kr2/R2p4/1p1Pp3/5pp1/3K1P2/PPP5/8 w - - 0 40
+Best move found: f3g4
+Score: 124
+rating: 1730
+theme: crushing endgame long rookEndgame
+
+Test FAILED: The engine suggested f3g4, but the correct move is a6a7.
+4 tests completed.
+----------------------------------------
+New game started. Caches and stats cleared.
+--- Running Test: Lichess Puzzle 005f3 ---
+info depth 1 score cp -111 nodes 26 nps 73042 time 0 pv c3c7
+info depth 2 score cp 682 nodes 41 nps 53588 time 0 pv c3c7
+info depth 3 score cp 583 nodes 203 nps 78749 time 2 pv c3c7 g1g6 g8f8 b2b4
+info depth 4 score cp -196 nodes 2611 nps 190802 time 13 pv d3d4 h5h2 g3g2 h2g2 g8f7
+info depth 5 score cp -88 nodes 3206 nps 114484 time 28 pv g3g5 h5g5 g1g5 c7c5 g5c5
+info depth 6 score cp -188 nodes 3207 nps 70564 time 45 pv
+info depth 7 score cp -88 nodes 3208 nps 53065 time 60 pv
+info depth 8 score cp 12 nodes 3209 nps 11469 time 279 pv
+info depth 9 score cp -86 nodes 16563 nps 43505 time 380 pv g3g6 f7g6 g1g6 g8f7 c3g7 f7e8 g7g8 e8d7 g8e6
+info depth 10 score cp 14 nodes 16564 nps 42274 time 391 pv
+info depth 11 score cp 114 nodes 16565 nps 20946 time 790 pv
+info depth 12 score cp 213 nodes 114989 nps 38408 time 2993 pv g3g6 f7g6 g1g6 g8f8 c3g7 f8e8
+--- Search Statistics ---
+Total Time: 2.99s
+Nodes Searched: 114989 (38406 NPS)
+- Quiescence Nodes: 44602 (38.8%)
+Transposition Table Hits: 44184.0 (38.4%)
+Beta Cutoffs: 15360.0
+Null Move Cutoffs: 6307.0
+Futility Pruned: 95937.0
+Razoring Used: 1712.0
+QS Delta Pruned: 9040.0
+QS SEE Pruned: 3357.0
+-------------------------
+
+FEN: r5k1/2p1pp2/pp4p1/1q5r/5P2/2QP2R1/PP6/1K4R1 w - - 1 33
+Best move found: g3g6
+Score: 213
+rating: 1986
+theme: crushing endgame sacrifice veryLong
+
+Test PASSED: The engine found the correct move (g3g6).
+5 tests completed.
+----------------------------------------
+New game started. Caches and stats cleared.
+--- Running Test: Lichess Puzzle 005qG ---
+info depth 1 score cp -17 nodes 38 nps 103563 time 0 pv b3b4
+info depth 2 score cp -16 nodes 175 nps 222357 time 0 pv g3g4 d5e3
+info depth 3 score cp 20 nodes 371 nps 239656 time 1 pv g3g4 d5e3 h2h4
+info depth 4 score cp 4 nodes 1063 nps 309664 time 3 pv g3g4 d5e3 h2h4 f6f5
+info depth 5 score cp 15328 nodes 1165 nps 205016 time 5 pv d3d2 f4g3 b3b4
+info depth 6 score cp 15328 nodes 1442 nps 217952 time 6 pv g3f4 f6f5 f4e5
+info depth 7 score cp 15328 nodes 1685 nps 237735 time 7 pv g3f4 e5f4 d3d2
+info depth 8 score cp 15328 nodes 1907 nps 253014 time 7 pv g3f4 e5f4 d3d2
+info depth 9 score cp 2 nodes 36167 nps 227235 time 159 pv d3c2 h6h5 c2d2 f6f5 c4d5 h2h4 b6b5 a3a4
+info depth 10 score cp 0 nodes 49036 nps 183163 time 267 pv c4d5 d6d5 g3f4 e5f4 a3a4 f6f5 h2h4 h6h5 b3b4 d5e5
+info depth 11 score cp -27 nodes 56885 nps 176191 time 322 pv c4d5 d6d5 g3g4 b6b5 b3b4 d5c6 d3d2 h6h5 g4h5 f6f5
+info depth 12 score cp 60 nodes 175904 nps 169709 time 1036 pv c4d5 d6d5 g3g4 d5c5 h2h4 c5d5
+--- Search Statistics ---
+Total Time: 1.04s
+Nodes Searched: 175904 (169687 NPS)
+- Quiescence Nodes: 47990 (27.3%)
+Transposition Table Hits: 94035.0 (53.5%)
+Beta Cutoffs: 36374.0
+Null Move Cutoffs: 1.0
+Futility Pruned: 39154.0
+Razoring Used: 6355.0
+QS Delta Pruned: 2066.0
+QS SEE Pruned: 601.0
+-------------------------
+
+FEN: 8/8/1p1k1p1p/3np3/2B2p2/PP1K1PP1/7P/8 w - - 0 37
+Best move found: c4d5
+Score: 60
+rating: 2244
+theme: crushing defensiveMove endgame long
+
+Test PASSED: The engine found the correct move (c4d5).
+6 tests completed.
+----------------------------------------
+New game started. Caches and stats cleared.
+--- Running Test: Lichess Puzzle 005wy ---
+info depth 1 score cp -116 nodes 40 nps 92030 time 0 pv d3e3
+info depth 2 score cp -96 nodes 247 nps 213915 time 1 pv d3e3 c3c4
+info depth 3 score cp -75 nodes 516 nps 229605 time 2 pv d3e3 h7g7 g6f4
+info depth 4 score cp -81 nodes 1097 nps 236538 time 4 pv d3e3 h7g7 b7b5 f4f5
+info depth 5 score cp -66 nodes 2392 nps 231292 time 10 pv d3e3 h7g7 g6f4 c1b1 a7a5
+info depth 6 score cp -86 nodes 5219 nps 188478 time 27 pv d3e3 h7g7 a7a5 a2a4 e3f4 d1f1
+info depth 7 score cp -114 nodes 12975 nps 177373 time 73 pv d3e3 h7g7 g6f4 g7f6 e7f8 c3c4 a7a5 a2a4
+info depth 8 score cp -151 nodes 29239 nps 170529 time 171 pv d3e3 h7g7 g6f4 g7f6 e7d6 h1h7 c6e5 c1b1 f4e2
+info depth 9 score cp -51 nodes 29240 nps 42824 time 682 pv
+info depth 10 score mate 3 nodes 223838 nps 157357 time 1422 pv c6b4 c3b4 b8c8 d2c4 c8c4
+--- Search Statistics ---
+Total Time: 1.42s
+Nodes Searched: 223838 (157337 NPS)
+- Quiescence Nodes: 99545 (44.5%)
+Transposition Table Hits: 100705.0 (45.0%)
+Beta Cutoffs: 26437.0
+Null Move Cutoffs: 5075.0
+Futility Pruned: 127661.0
+Razoring Used: 3072.0
+QS Delta Pruned: 24222.0
+QS SEE Pruned: 5532.0
+-------------------------
+
+FEN: 1r6/pp2kppQ/2n1p1n1/3p2P1/5P2/2PqP3/PP1N4/2KR3R b - - 4 27
+Best move found: c6b4
+Score: 29995
+rating: 1842
+theme: long mate mateIn3 middlegame queensideAttack sacrifice
+
+Test PASSED: The engine found the correct move (c6b4).
+7 tests completed.
+----------------------------------------
+New game started. Caches and stats cleared.
+--- Running Test: Lichess Puzzle 005yO ---
+info depth 1 score cp -229 nodes 28 nps 75137 time 0 pv c3d4
+info depth 2 score cp -221 nodes 229 nps 168183 time 1 pv b2a3 f8f7 c3d4
+info depth 3 score cp -436 nodes 894 nps 155984 time 5 pv b2a3 f8f7 c3d4 c7c2
+info depth 4 score cp -436 nodes 1516 nps 174700 time 8 pv c3d4 c7c2 b2a3 f8f7 h7c2
+info depth 5 score cp -441 nodes 3977 nps 213940 time 18 pv c3d4 c7c2 b2a3 f8f7 h7c2 e5f3 g2f3
+info depth 6 score cp -341 nodes 3978 nps 57466 time 69 pv
+info depth 7 score cp -440 nodes 15336 nps 133369 time 114 pv b2a3 f8f7 c3d4 c7c2 d4e5 c2h7
+info depth 8 score cp -540 nodes 15337 nps 65393 time 234 pv
+info depth 9 score cp -441 nodes 111231 nps 117992 time 942 pv b2a3 f8f7 e1e5 d4d3 e5e6 d3c2 e6g6 c7c3 a3c1 c8e8
+info depth 10 score cp -341 nodes 111232 nps 86686 time 1283 pv
+--- Search Statistics ---
+Total Time: 1.28s
+Nodes Searched: 111232 (86680 NPS)
+- Quiescence Nodes: 49636 (44.6%)
+Transposition Table Hits: 53371.0 (48.0%)
+Beta Cutoffs: 17913.0
+Null Move Cutoffs: 2329.0
+Futility Pruned: 99275.0
+Razoring Used: 632.0
+QS Delta Pruned: 15084.0
+QS SEE Pruned: 7840.0
+-------------------------
+
+FEN: r1r2k2/ppq3bQ/4p2p/4n3/3p4/2P5/PBB2PPP/4R1K1 w - - 3 25
+Best move found: b2a3
+Score: -341
+rating: 2793
+theme: advantage exposedKing middlegame quietMove veryLong
+
+Test PASSED: The engine found the correct move (b2a3).
+8 tests completed.
+----------------------------------------
+New game started. Caches and stats cleared.
+--- Running Test: Lichess Puzzle 0068D ---
+info depth 1 score cp -85 nodes 21 nps 58837 time 0 pv c7d6
+info depth 2 score cp -120 nodes 70 nps 114464 time 0 pv c7d6 c3c4
+info depth 3 score cp -85 nodes 381 nps 247756 time 1 pv c7d6 b2b4 b7b5
+info depth 4 score cp -130 nodes 794 nps 263450 time 3 pv d7d6 b2b3 a7a5 a2a4
+info depth 5 score cp -140 nodes 2578 nps 297819 time 8 pv d7d6 e2e4 f6g6 b2b4 b7b5
+info depth 6 score cp -158 nodes 6484 nps 299708 time 21 pv c7d6 e2e7 d7c8 a2a4 a7a6 b2b4 b7b5
+info depth 7 score cp -165 nodes 14620 nps 285514 time 51 pv c7d6 a2a4 f6f2 g1f2 a7a6 b2b4
+info depth 8 score cp -163 nodes 21538 nps 285977 time 75 pv c7d6 a2a4 a7a6 e2e7 d7c8 b2b4 b7b5 e1e4 f6g6
+info depth 9 score cp -191 nodes 54777 nps 230269 time 237 pv d7d6 a2a4 a7a5 e2e5 h8a8 c3c4 f6f2 g1f2 f6g6
+info depth 10 score cp -192 nodes 86652 nps 220616 time 392 pv d7d6 a2a4 a7a6 b2b4 b7b5
+info depth 11 score cp -196 nodes 287579 nps 175537 time 1638 pv f6h6 e2e7 d7d6 e7c7 e1f1 f6f2 f1f2 f8f2 g1f2
+--- Search Statistics ---
+Total Time: 1.64s
+Nodes Searched: 287579 (175517 NPS)
+- Quiescence Nodes: 128911 (44.8%)
+Transposition Table Hits: 133714.0 (46.5%)
+Beta Cutoffs: 38837.0
+Null Move Cutoffs: 5240.0
+Futility Pruned: 128728.0
+Razoring Used: 4388.0
+QS Delta Pruned: 9564.0
+QS SEE Pruned: 7118.0
+-------------------------
+
+FEN: 7r/pppk4/2pN1r2/8/3P2p1/2P5/PP2RPP1/4R1K1 b - - 0 26
+Best move found: f6h6
+Score: -196
+rating: 1901
+theme: crushing endgame veryLong
+
+Test PASSED: The engine found the correct move (f6h6).
+9 tests completed.
+----------------------------------------
+New game started. Caches and stats cleared.
+--- Running Test: Lichess Puzzle 006eO ---
+info depth 1 score cp -40 nodes 13 nps 42170 time 0 pv f3e3
+info depth 2 score cp -40 nodes 34 nps 75174 time 0 pv f3e3 f5e6
+info depth 3 score cp 0 nodes 102 nps 157634 time 0 pv f3e3 f5e6 b3b4
+info depth 4 score cp 0 nodes 257 nps 237117 time 1 pv f3e3 f5e6 b3b4 e6f5
+info depth 5 score cp 0 nodes 506 nps 305721 time 1 pv f3e3 f5g4 b3b4 g4f5 e3d3
+info depth 6 score cp 0 nodes 957 nps 371593 time 2 pv f3e3 f5g4 b3b4 g4f5 e3d3 f5f4
+info depth 7 score cp 0 nodes 1377 nps 396237 time 3 pv f3e3 f5e6 b3b4 e6f5 e3f3 f5e6 f3e3
+info depth 8 score cp 0 nodes 2023 nps 400712 time 5 pv f3e3 f5e6 b3b4 e6f5 e3f3 f5e6 f3e3 e6f5
+info depth 9 score cp 0 nodes 4143 nps 418622 time 9 pv f3e3 f5e6 e3d3 e6f5 d3d2 f5e6 d2d3 e6f5 d3e3
+info depth 10 score cp 0 nodes 5582 nps 327815 time 17 pv f3e3 f5e6 e3d3 e6f5 d3e3
+info depth 11 score cp -1 nodes 6371 nps 218709 time 29 pv f3e3 f5g4 b3b4 g4g5
+info depth 12 score cp -1 nodes 14289 nps 193900 time 73 pv f3e3 f5g4 b3b4 g4g5 e3d2 g5f5 d2e3
+info depth 13 score cp -20 nodes 21007 nps 176462 time 119 pv f3e3 f5g4 b3b4 g4g5 e3d2 g5f5 d2e3 f5g4 e3e2 g4f4 e2d3 f4f3 d3d2
+info depth 14 score cp -20 nodes 26998 nps 170555 time 158 pv f3e3 f5g4 b3b4 g4g5 e3d2 g5f5 d2e3 f5g4 e3e2 g4f4 e2d3 f4g4 d3e3
+info depth 15 score cp -20 nodes 55616 nps 81894 time 679 pv f3e3 f5g4 b3b4 g4g5 e3d2 g5f5 d2e3 f5g4 e3d3 g4f4 d3e2
+info depth 16 score cp -20 nodes 100891 nps 79302 time 1272 pv f3e3 f5g4 b3b4 g4g5 e3d2 g5f5 d2e3 f5g4 e3d3 g4f4
+--- Search Statistics ---
+Total Time: 1.27s
+Nodes Searched: 100891 (79293 NPS)
+- Quiescence Nodes: 23133 (22.9%)
+Transposition Table Hits: 48380.0 (48.0%)
+Beta Cutoffs: 22404.0
+Null Move Cutoffs: 145.0
+Futility Pruned: 18480.0
+Razoring Used: 5116.0
+QS Delta Pruned: 780.0
+QS SEE Pruned: 0.0
+-------------------------
+
+FEN: 8/8/2p5/1p1p1k2/3P4/1PP1pK2/8/8 w - - 4 65
+Best move found: f3e3
+Score: -20
+rating: 2186
+theme: defensiveMove endgame equality oneMove pawnEndgame
+
+Test FAILED: The engine suggested f3e3, but the correct move is b3b4.
+10 tests completed.
+----------------------------------------
+New game started. Caches and stats cleared.
+--- Running Test: Lichess Puzzle 006of ---
+info depth 1 score cp -379 nodes 134 nps 185920 time 0 pv c7c6
+info depth 2 score cp -231 nodes 485 nps 203342 time 2 pv h6h5 c3e2
+info depth 3 score cp -75 nodes 1042 nps 168737 time 6 pv f4d3 g1f1 d3e1
+info depth 4 score cp -65 nodes 2632 nps 208412 time 12 pv f4d3 f7g6 b6f2 g1f1 f2e1
+info depth 5 score cp -65 nodes 6507 nps 208052 time 31 pv f4d3 f7g6 b6f2 g1f1 f2e1 a1e1
+info depth 6 score cp 35 nodes 6508 nps 80272 time 81 pv
+info depth 7 score cp 135 nodes 6509 nps 19652 time 331 pv
+info depth 8 score cp 235 nodes 6510 nps 5707 time 1140 pv
+--- Search Statistics ---
+Total Time: 1.14s
+Nodes Searched: 6510 (5707 NPS)
+- Quiescence Nodes: 4105 (63.1%)
+Transposition Table Hits: 2067.0 (31.8%)
+Beta Cutoffs: 680.0
+Null Move Cutoffs: 23.0
+Futility Pruned: 5501.0
+Razoring Used: 17.0
+QS Delta Pruned: 714.0
+QS SEE Pruned: 1096.0
+-------------------------
+
+FEN: r2qr2k/1pp2Qp1/1b4np/pP2P3/P4n2/B1N2N1P/5PP1/R3R1K1 b - - 0 20
+Best move found: d8d3
+Score: 235
+rating: 2500
+theme: advantage kingsideAttack long middlegame
+
+Test PASSED: The engine found the correct move (d8d3).
+11 tests completed.
+----------------------------------------
+New game started. Caches and stats cleared.
+--- Running Test: Lichess Puzzle 0078T ---
+info depth 1 score cp -24 nodes 25 nps 61899 time 0 pv b2b4
+info depth 2 score cp -54 nodes 78 nps 109673 time 0 pv b2b4 b8a7 b7c6
+info depth 3 score cp -78 nodes 827 nps 177762 time 4 pv a4d1 h8h7 a2a4
+info depth 4 score cp -68 nodes 2369 nps 198194 time 11 pv a4b3 a8a7 f7b7 b8b7 b3e6
+info depth 5 score cp -168 nodes 2442 nps 84297 time 28 pv
+info depth 6 score cp -268 nodes 2443 nps 64532 time 37 pv
+info depth 7 score cp -168 nodes 2444 nps 64075 time 38 pv
+info depth 8 score cp -267 nodes 16876 nps 152283 time 110 pv f7b7 b8b7 f1f7 b7b8 f6h6
+info depth 9 score cp -167 nodes 16877 nps 113620 time 148 pv
+info depth 10 score cp -67 nodes 16878 nps 81893 time 206 pv
+info depth 11 score cp -285 nodes 3362558 nps 91652 time 36688 pv h1g1 e3e2 f1f4 b7g2 h4g3 g2b7 f4h6 h8h6 a4b3 h5h4 a2a4
+--- Search Statistics ---
+Total Time: 36.69s
+Nodes Searched: 3362558 (91651 NPS)
+- Quiescence Nodes: 1832329 (54.5%)
+Transposition Table Hits: 1152984.0 (34.3%)
+Beta Cutoffs: 402475.0
+Null Move Cutoffs: 32323.0
+Futility Pruned: 1215468.0
+Razoring Used: 21735.0
+QS Delta Pruned: 223571.0
+QS SEE Pruned: 643030.0
+-------------------------
+
+FEN: rk5r/1b3R2/pp2p2q/4P2p/B6B/4p2P/PP4P1/5Q1K w - - 0 28
+Best move found: h1g1
+Score: -285
+rating: 2286
+theme: attraction crushing defensiveMove exposedKing long middlegame queensideAttack sacrifice
+
+Test FAILED: The engine suggested h1g1, but the correct move is f7b7.
+12 tests completed.
+----------------------------------------
+New game started. Caches and stats cleared.
+--- Running Test: Lichess Puzzle 007eS ---
+info depth 1 score cp -164 nodes 24 nps 65196 time 0 pv a7a5
+info depth 2 score mate -1000 nodes 25 nps 44187 time 0 pv
+--- Search Statistics ---
+Total Time: 0.00s
+Nodes Searched: 25 (39930 NPS)
+- Quiescence Nodes: 11 (44.0%)
+Transposition Table Hits: 1.0 (4.0%)
+Beta Cutoffs: 0.0
+Null Move Cutoffs: 0.0
+Futility Pruned: 0.0
+Razoring Used: 0.0
+QS Delta Pruned: 0.0
+QS SEE Pruned: 0.0
+-------------------------
+
+FEN: 6k1/p4p2/1p5p/4r3/P3B3/1P2KP2/2P3PP/8 b - - 1 29
+Best move found: h6h5
+Score: 32000
+rating: 1230
+theme: advantage endgame short
+
+Test FAILED: The engine suggested h6h5, but the correct move is f7f5.
+13 tests completed.
+----------------------------------------
+New game started. Caches and stats cleared.
+--- Running Test: Lichess Puzzle 009De ---
+info depth 1 score cp -598 nodes 64 nps 140615 time 0 pv e7f7
+info depth 2 score cp -597 nodes 237 nps 184459 time 1 pv a8a5 c3a4
+info depth 3 score cp -545 nodes 731 nps 232574 time 3 pv c8h3 c3a4 a8a4
+info depth 4 score cp -421 nodes 2189 nps 166715 time 13 pv c8h3 f7f8q h8f8 f2e2 a8b8
+info depth 5 score cp -455 nodes 5817 nps 70130 time 82 pv e7f7 c3a4 h8h3 d3e2 f4e3 f2e1 f7g8
+info depth 6 score cp -441 nodes 14359 nps 116590 time 123 pv e7f7 f2e2 c7c6 f1f3 h8h3 c3a4
+info depth 7 score cp -366 nodes 43688 nps 121596 time 359 pv h8h3 f7f8q e7f8 b2b4 c5b4 a3b4 f8f7 c3a4
+info depth 8 score cp -266 nodes 43689 nps 43979 time 993 pv
+--- Search Statistics ---
+Total Time: 0.99s
+Nodes Searched: 43689 (43975 NPS)
+- Quiescence Nodes: 25648 (58.7%)
+Transposition Table Hits: 12996.0 (29.7%)
+Beta Cutoffs: 5033.0
+Null Move Cutoffs: 242.0
+Futility Pruned: 23118.0
+Razoring Used: 72.0
+QS Delta Pruned: 3142.0
+QS SEE Pruned: 8125.0
+-------------------------
+
+FEN: r1q4r/2p1kP2/3p4/2pPp3/p1P1Pb2/P1NB3P/1P3K2/R2Q1R2 b - - 0 23
+Best move found: c8h3
+Score: -266
+rating: 2000
+theme: advantage exposedKing middlegame veryLong
+
+Test PASSED: The engine found the correct move (c8h3).
+14 tests completed.
+----------------------------------------
+New game started. Caches and stats cleared.
+--- Running Test: Lichess Puzzle 00AHY ---
+info depth 1 score cp 172 nodes 19 nps 49745 time 0 pv a4a3
+info depth 2 score cp 143 nodes 88 nps 131398 time 0 pv a4a3 d7e5
+info depth 3 score cp 75 nodes 274 nps 231701 time 1 pv e6f4 g3g7 f4h5
+info depth 4 score cp -25 nodes 300 nps 100414 time 2 pv
+info depth 5 score cp -92 nodes 1055 nps 175274 time 6 pv e6d4 g3g7 f5e6 d7c5 d4f3 g1f2
+info depth 6 score cp -192 nodes 1056 nps 90968 time 11 pv
+info depth 7 score cp -92 nodes 1057 nps 89004 time 11 pv
+info depth 8 score cp -18040 nodes 17019 nps 220349 time 77 pv h8h7 e7e6 f5e6 g3g7 f3f5
+info depth 9 score cp -91 nodes 79210 nps 192539 time 411 pv e6d8 e7e8 h8h7 d7f6 g7f6 g3g7
+info depth 10 score cp -191 nodes 79211 nps 178641 time 443 pv
+info depth 11 score cp -91 nodes 79212 nps 178302 time 444 pv
+info depth 12 score cp -191 nodes 79213 nps 108617 time 729 pv
+info depth 13 score cp -291 nodes 79214 nps 5853 time 13532 pv
+--- Search Statistics ---
+Total Time: 13.53s
+Nodes Searched: 79214 (5853 NPS)
+- Quiescence Nodes: 32104 (40.5%)
+Transposition Table Hits: 41106.0 (51.9%)
+Beta Cutoffs: 11729.0
+Null Move Cutoffs: 2023.0
+Futility Pruned: 32275.0
+Razoring Used: 697.0
+QS Delta Pruned: 5121.0
+QS SEE Pruned: 2551.0
+-------------------------
+
+FEN: r6k/3NR1p1/4n2p/5b1P/p7/6R1/8/6K1 b - - 0 43
+Best move found: e6d8
+Score: -291
+rating: 1371
+theme: advantage endgame long
+
+Test FAILED: The engine suggested e6d8, but the correct move is a4a3.
+15 tests completed.
+----------------------------------------
+New game started. Caches and stats cleared.
+--- Running Test: Original Puzzle ---
+info depth 1 score cp 74 nodes 46 nps 105373 time 0 pv d2a5
+info depth 2 score cp 174 nodes 83 nps 86879 time 0 pv d2a5
+info depth 3 score cp 265 nodes 352 nps 172053 time 2 pv d2a5 f8a3 a5c7
+info depth 4 score cp 365 nodes 695 nps 159850 time 4 pv d2a5 f8a3 a5c7
+info depth 5 score cp 226 nodes 2600 nps 141489 time 18 pv f4f6 g7f6 d2b4 a5b4 b3d5
+info depth 6 score cp 256 nodes 4924 nps 149379 time 32 pv d2a5 d5d1 e3e1 c7e6 b3e6 f7e6 e1d1
+info depth 7 score cp 257 nodes 13433 nps 181263 time 74 pv d2e1 f6d8 e1c3 d8f6 c3f6 d5d1 b3d1 g7f6
+info depth 8 score cp 157 nodes 35000 nps 120330 time 290 pv f4c7 d5d2 d5d1 b3d1 a3a5 f4f6 g7f6
+info depth 9 score cp 257 nodes 35001 nps 95550 time 366 pv
+info depth 10 score cp 257 nodes 89040 nps 117377 time 758 pv f4c7 f6d8 c7c2 d5g5 d2a5 d8a5 g1f1
+info depth 11 score cp 257 nodes 224042 nps 140532 time 1594 pv f4c7 f6d8 c7c2 d5g5 e3h3 g5g6 d2a5 d8a5 b3f7 g8f7
+--- Search Statistics ---
+Total Time: 1.59s
+Nodes Searched: 224042 (140515 NPS)
+- Quiescence Nodes: 94850 (42.3%)
+Transposition Table Hits: 90167.0 (40.2%)
+Beta Cutoffs: 32232.0
+Null Move Cutoffs: 5795.0
+Futility Pruned: 212596.0
+Razoring Used: 1757.0
+QS Delta Pruned: 20374.0
+QS SEE Pruned: 14392.0
+-------------------------
+
+FEN: 5qk1/2n2ppp/5b2/pp1r4/5Q2/PB2R3/3B1PPP/6K1 w - - 0 1
+Best move found: f4c7
+Score: 257
+rating: 1500
+theme: Original Puzzle
+
+Test PASSED: The engine found the correct move (f4c7).
+16 tests completed.
+----------------------------------------
+New game started. Caches and stats cleared.
+--- Running Test: New Puzzle - Queen Sacrifice ---
+info depth 1 score cp -26 nodes 41 nps 103531 time 0 pv c7a5
+info depth 2 score cp 15608 nodes 72 nps 96791 time 0 pv b3f7 f8f7 c7f7
+info depth 3 score cp 15608 nodes 145 nps 137347 time 1 pv b3f7 f8f7 c7f7
+info depth 4 score cp 15608 nodes 217 nps 167371 time 1 pv b3f7 f8f7 c7f7
+info depth 5 score cp 15608 nodes 457 nps 210405 time 2 pv b3f7 f8f7 c7f7
+info depth 6 score cp 15608 nodes 606 nps 231068 time 2 pv b3f7 f8f7 c7f7
+info depth 7 score mate 2 nodes 1360 nps 222033 time 6 pv c7f7 f8f7
+--- Search Statistics ---
+Total Time: 0.01s
+Nodes Searched: 1360 (219175 NPS)
+- Quiescence Nodes: 367 (27.0%)
+Transposition Table Hits: 533.0 (39.2%)
+Beta Cutoffs: 107.0
+Null Move Cutoffs: 81.0
+Futility Pruned: 1441.0
+Razoring Used: 0.0
+QS Delta Pruned: 152.0
+QS SEE Pruned: 161.0
+-------------------------
+
+FEN: 5qk1/2Q2ppp/5b2/pp6/8/PB2R3/3r1PPP/6K1 w - - 0 1
+Best move found: c7f7
+Score: 29997
+rating: 1600
+theme: queen sacrifice
+
+Test PASSED: The engine found the correct move (c7f7).
+17 tests completed.
+----------------------------------------
+New game started. Caches and stats cleared.
+--- Running Test: Lichess Puzzle 8 ---
+info depth 1 score cp 32 nodes 48 nps 115572 time 0 pv e6e7
+info depth 2 score cp 132 nodes 86 nps 79856 time 1 pv e6e7
+info depth 3 score cp -226 nodes 672 nps 151830 time 4 pv h6f6 b2f6 e6f6 g3h2
+info depth 4 score mate 2 nodes 2608 nps 236989 time 11 pv e6e7 g3h2 h6h7
+--- Search Statistics ---
+Total Time: 0.01s
+Nodes Searched: 2608 (235140 NPS)
+- Quiescence Nodes: 1818 (69.7%)
+Transposition Table Hits: 562.0 (21.5%)
+Beta Cutoffs: 133.0
+Null Move Cutoffs: 5.0
+Futility Pruned: 622.0
+Razoring Used: 0.0
+QS Delta Pruned: 152.0
+QS SEE Pruned: 345.0
+-------------------------
+
+FEN: r6k/pp2r2p/4Rp1Q/3p4/8/1N1P2b1/PqP3PP/7K w - - 0 25
+Best move found: e6e7
+Score: 29997
+rating: 1736
+theme: crushing hangingPiece long middlegame
+
+Test PASSED: The engine found the correct move (e6e7).
+18 tests completed.
+----------------------------------------
+New game started. Caches and stats cleared.
+--- Running Test: Lichess Puzzle 0000D ---
+info depth 1 score cp 8 nodes 23 nps 51587 time 0 pv b6d6
+info depth 2 score cp 8 nodes 82 nps 104761 time 0 pv b6d6 d1d6
+info depth 3 score cp -68 nodes 306 nps 169209 time 1 pv f6d8 h2h4 f7f5
+info depth 4 score cp -168 nodes 313 nps 122578 time 2 pv b6f2 g1f2
+info depth 5 score cp 980 nodes 1613 nps 209969 time 7 pv f8d8 d1e1 b6d6 a2a4 h7h5
+info depth 6 score cp 0 nodes 5734 nps 240515 time 23 pv f8d8 d6d3 d8d3 d1d3 h7h5 a2b3
+info depth 7 score cp -13 nodes 13312 nps 193020 time 68 pv f6d8 d6d5 d8f6 h2h4 a6a5 a2a4 f8e8
+info depth 8 score cp -113 nodes 13313 nps 114266 time 116 pv
+info depth 9 score cp -13 nodes 13314 nps 85656 time 155 pv
+info depth 10 score cp -111 nodes 57626 nps 104721 time 550 pv a6a5 d6f8 g8f8 g1f1
+info depth 11 score cp -11 nodes 57627 nps 76750 time 750 pv
+info depth 12 score cp 89 nodes 57628 nps 46016 time 1252 pv
+--- Search Statistics ---
+Total Time: 1.25s
+Nodes Searched: 57628 (46013 NPS)
+- Quiescence Nodes: 22163 (38.5%)
+Transposition Table Hits: 27568.0 (47.8%)
+Beta Cutoffs: 9133.0
+Null Move Cutoffs: 1966.0
+Futility Pruned: 23618.0
+Razoring Used: 1435.0
+QS Delta Pruned: 1592.0
+QS SEE Pruned: 3071.0
+-------------------------
+
+FEN: 5rk1/1p3ppp/pq1Q1b2/8/8/1P3N2/P4PPP/3R2K1 b - - 3 27
+Best move found: f8d8
+Score: 89
+rating: 1513
+theme: advantage endgame short
+
+Test PASSED: The engine found the correct move (f8d8).
+19 tests completed.
+----------------------------------------
+New game started. Caches and stats cleared.
+--- Running Test: Lichess Puzzle 000Vc ---
+info depth 1 score cp -70 nodes 15 nps 48026 time 0 pv g6h5
+info depth 2 score cp -80 nodes 46 nps 88059 time 0 pv g6h5 c5d4
+info depth 3 score cp -40 nodes 114 nps 161810 time 0 pv g6h5 c5d4 h5h4
+info depth 4 score cp -30 nodes 242 nps 236767 time 1 pv g6h5 c5d4 h5h4 d4d3
+info depth 5 score cp -10 nodes 447 nps 279661 time 1 pv g6h5 c5d4 h5h4 f4f5 e6f5 d4d5
+info depth 6 score cp 60 nodes 917 nps 352795 time 2 pv g6h5 c5b4 h5h4 b4c5 h4h3 c5d4
+info depth 7 score cp -10 nodes 1357 nps 384962 time 3 pv g6h5 c5d4 h5h4 d4c5 e6f5 c5d5 f5f4
+info depth 8 score cp 90 nodes 1358 nps 281820 time 4 pv
+info depth 9 score cp 90 nodes 3618 nps 359392 time 10 pv g6h5 c5d4 h5h4 d4e3 e6f5 e3d4 h4h3 d4d5 f5f4
+info depth 10 score cp 90 nodes 4635 nps 320415 time 14 pv g6h5 c5d4 h5h4 d4e3 e6f5 e3d4 f5e6
+info depth 11 score cp 168 nodes 8168 nps 274959 time 29 pv g6h5 c5d4 h5h4 d4e3 e6f5 e3f2 f5f4 e5e6 h4h3 e6e7 h3h2
+info depth 12 score cp 69 nodes 15294 nps 203171 time 75 pv g6h5 c5d4 h5h4 d4e3 d5d4 e3d4 h4h3 d4d3 h3h2 d3e4 e6e7 e4f3 h2h1q
+info depth 13 score cp 162 nodes 21887 nps 134587 time 162 pv g6h5 c5d4 h5h4 d4e3 d5d4 e3e4 h4h3 f4f5 e6f7 e4f3 d4d3 f3e3 h3h2 e5e6 f7f6 e3d4
+info depth 14 score cp 167 nodes 36608 nps 112909 time 324 pv g6h5 c5c6 d5d4 c6b5
+info depth 15 score cp 258 nodes 67377 nps 47320 time 1423 pv g6h5 c5d4 h5h4 f4f5 e6f5 d4d5
+--- Search Statistics ---
+Total Time: 1.42s
+Nodes Searched: 67377 (47316 NPS)
+- Quiescence Nodes: 15498 (23.0%)
+Transposition Table Hits: 34660.0 (51.4%)
+Beta Cutoffs: 13417.0
+Null Move Cutoffs: 30.0
+Futility Pruned: 11029.0
+Razoring Used: 2368.0
+QS Delta Pruned: 650.0
+QS SEE Pruned: 10.0
+-------------------------
+
+FEN: 8/8/4k1p1/2KpP2P/5P2/8/8/8 b - - 0 53
+Best move found: g6h5
+Score: 258
+rating: 1495
+theme: crushing endgame long pawnEndgame
+
+Test PASSED: The engine found the correct move (g6h5).
+20 tests completed.
+----------------------------------------
+New game started. Caches and stats cleared.
+--- Running Test: Lichess Puzzle 000Zo ---
+info depth 1 score cp -693 nodes 21 nps 58447 time 0 pv h5h4
+info depth 2 score cp -587 nodes 63 nps 77128 time 0 pv e8e2 d4f4
+info depth 3 score cp -587 nodes 213 nps 159362 time 1 pv e8e2 d4f4 e2b2
+info depth 4 score mate 2 nodes 271 nps 91005 time 2 pv e8e1 g1f2 e1f1
+--- Search Statistics ---
+Total Time: 0.00s
+Nodes Searched: 271 (88621 NPS)
+- Quiescence Nodes: 96 (35.4%)
+Transposition Table Hits: 144.0 (53.1%)
+Beta Cutoffs: 21.0
+Null Move Cutoffs: 1.0
+Futility Pruned: 48.0
+Razoring Used: 1.0
+QS Delta Pruned: 2.0
+QS SEE Pruned: 7.0
+-------------------------
+
+FEN: 4r3/1k6/pp3P2/1b5p/3R1p2/P1R2P2/1P4PP/6K1 b - - 0 35
+Best move found: e8e1
+Score: 29997
+rating: 1652
+theme: endgame mate mateIn2 short
+
+Test PASSED: The engine found the correct move (e8e1).
+21 tests completed.
+----------------------------------------
+New game started. Caches and stats cleared.
+--- Running Test: Lichess Puzzle 000rO ---
+info depth 1 score cp 15 nodes 66 nps 149715 time 0 pv e5d4
+info depth 2 score cp 10744 nodes 128 nps 135951 time 0 pv e5a1 c7d8
+info depth 3 score cp 15608 nodes 199 nps 145971 time 1 pv e5a1 a5b4 d2d1q
+info depth 4 score cp 20472 nodes 313 nps 151543 time 2 pv e5c7 a5b4 c7d8 b5f1 d2d1q
+info depth 5 score cp 20472 nodes 644 nps 214887 time 2 pv e5c7 a5b4 c7d8 b5f1 d2d1q
+info depth 6 score cp 20472 nodes 908 nps 163754 time 5 pv e5c7 d2d1q
+info depth 7 score cp 25336 nodes 909 nps 92377 time 9 pv
+info depth 8 score cp 25336 nodes 2162 nps 169351 time 12 pv e5c7 a5b4 c7d8 b5f1 d8h4 b4c3 d2d1q
+info depth 9 score cp 25336 nodes 6296 nps 192758 time 32 pv e5c7 a5b4 c7d8 b5f1 e3f2 b4c3 f2f1
+info depth 10 score cp 25336 nodes 18529 nps 115891 time 159 pv e5c7 a5b4 c7f4 d8d2 e3f3 b5a4 f4d2
+info depth 11 score cp 25236 nodes 18531 nps 43054 time 430 pv e5c7 e5c7 e5c7 a5b4 c7d8
+info depth 12 score cp 25136 nodes 18533 nps 17322 time 1069 pv e5c7 e5c7 e5c7 a5b4 c7f4 d8d3 e3f2
+--- Search Statistics ---
+Total Time: 1.07s
+Nodes Searched: 18533 (17320 NPS)
+- Quiescence Nodes: 4384 (23.7%)
+Transposition Table Hits: 8279.0 (44.7%)
+Beta Cutoffs: 4173.0
+Null Move Cutoffs: 735.0
+Futility Pruned: 12145.0
+Razoring Used: 419.0
+QS Delta Pruned: 7271.0
+QS SEE Pruned: 16.0
+-------------------------
+
+FEN: 3R4/8/8/KB2b3/1p6/1P2k3/3p4/8 b - - 0 58
+Best move found: e5c7
+Score: 25136
+rating: 1039
+theme: crushing endgame fork short
+
+Test PASSED: The engine found the correct move (e5c7).
+22 tests completed.
+----------------------------------------
+New game started. Caches and stats cleared.
+--- Running Test: Lichess Puzzle 000tp ---
+info depth 1 score cp 103 nodes 17 nps 48341 time 0 pv h5h4
+info depth 2 score cp 203 nodes 31 nps 39436 time 0 pv f6d7
+info depth 3 score cp 612 nodes 216 nps 129055 time 1 pv f6d7 f3d2 c4c1 f2f1
+info depth 4 score cp 639 nodes 475 nps 175625 time 2 pv f6d7 f3d2 c4c1 f2f1 c1f1 b6g1
+info depth 5 score cp -257 nodes 3751 nps 211232 time 17 pv f6d7 f3g1
+info depth 6 score cp -256 nodes 7653 nps 222152 time 34 pv c4d3 f3e5 f6d7 f2f7 g7h8 e5d7 d3a3
+info depth 7 score cp -156 nodes 7654 nps 210012 time 36 pv
+info depth 8 score cp 74 nodes 128962 nps 208747 time 617 pv c4c1 h1h2 f6d7 b6b4 c1b2 f2b2 g7h6 h2g1
+info depth 9 score cp 67 nodes 240205 nps 180018 time 1334 pv c4f4 h1g1 e8e6 b6c5 f4f3 g2f3 f6e4 f3e4 d5e4
+--- Search Statistics ---
+Total Time: 1.33s
+Nodes Searched: 240205 (179999 NPS)
+- Quiescence Nodes: 107312 (44.7%)
+Transposition Table Hits: 111110.0 (46.3%)
+Beta Cutoffs: 34122.0
+Null Move Cutoffs: 3587.0
+Futility Pruned: 124902.0
+Razoring Used: 5257.0
+QS Delta Pruned: 10014.0
+QS SEE Pruned: 9340.0
+-------------------------
+
+FEN: 4r3/5pk1/1Q3np1/3p3p/2q5/P4N1P/1P3RP1/7K b - - 0 34
+Best move found: c4f4
+Score: 67
+rating: 2051
+theme: crushing endgame short trappedPiece
+
+Test FAILED: The engine suggested c4f4, but the correct move is f6e4.
+23 tests completed.
+----------------------------------------
+New game started. Caches and stats cleared.
+--- Running Test: Lichess Puzzle 0018S ---
+info depth 1 score cp -376 nodes 65 nps 98635 time 0 pv b5d6 d8d6
+info depth 2 score cp -364 nodes 457 nps 211520 time 2 pv b5d6 c8b8 d4d5
+info depth 3 score cp -319 nodes 1058 nps 251691 time 4 pv b5d6 d8d6 d4h8 c8b7 h8h6
+info depth 4 score cp -318 nodes 2064 nps 235201 time 8 pv b5d6 d8d6 d4h8 c8b7 f2f4 g5f4
+info depth 5 score cp -319 nodes 7360 nps 194875 time 37 pv b5d6 d8d6 d4h8 c8b7 h8h6 c2b3 h6g5
+info depth 6 score cp -271 nodes 12007 nps 190232 time 63 pv b5d6 d8d6 d4h8 d6d8 h8h6 c2d3 f1e1 d3b3
+info depth 7 score cp -283 nodes 17830 nps 197643 time 90 pv b5d6 d8d6 d4h8 c8c7 h8h6 c2b3 h6g5 b3d3 h2h4
+info depth 8 score cp -259 nodes 33957 nps 196550 time 172 pv b5d6 d8d6 d4h8 c8c7 h8h6 c2b3 h6g5 b3d3 f1c1 c7b8 g2g4
+info depth 9 score cp -242 nodes 76718 nps 169989 time 451 pv b5d6 d8d6 d4h8 d6d8 h8h6 c2f2
+info depth 10 score cp -195 nodes 176318 nps 123277 time 1430 pv b5d6 c8b8 d6f7 c2f2
+--- Search Statistics ---
+Total Time: 1.43s
+Nodes Searched: 176318 (123266 NPS)
+- Quiescence Nodes: 84253 (47.8%)
+Transposition Table Hits: 74776.0 (42.4%)
+Beta Cutoffs: 23360.0
+Null Move Cutoffs: 3935.0
+Futility Pruned: 87176.0
+Razoring Used: 3481.0
+QS Delta Pruned: 10572.0
+QS SEE Pruned: 6802.0
+-------------------------
+
+FEN: 2kr3r/p4p2/1p2p2p/1N1p2p1/3Q4/1P1P4/2q2PPP/5RK1 w - - 0 21
+Best move found: b5d6
+Score: -195
+rating: 2652
+theme: advantage endgame pin short
+
+Test FAILED: The engine suggested b5d6, but the correct move is d4a1.
+24 tests completed.
+----------------------------------------
+New game started. Caches and stats cleared.
+--- Running Test: Lichess Puzzle 001Wz ---
+info depth 1 score cp 82 nodes 15 nps 45923 time 0 pv f3e5
+info depth 2 score mate 2 nodes 45 nps 71847 time 0 pv d1d8 e5e8 d8e8
+--- Search Statistics ---
+Total Time: 0.00s
+Nodes Searched: 45 (64793 NPS)
+- Quiescence Nodes: 16 (35.6%)
+Transposition Table Hits: 14.0 (31.1%)
+Beta Cutoffs: 1.0
+Null Move Cutoffs: 0.0
+Futility Pruned: 0.0
+Razoring Used: 0.0
+QS Delta Pruned: 1.0
+QS SEE Pruned: 0.0
+-------------------------
+
+FEN: 6k1/5ppp/r1p5/p1n1rP2/8/2P2N1P/2P3P1/3R2K1 w - - 0 22
+Best move found: d1d8
+Score: 29997
+rating: 1128
+theme: backRankMate endgame mate mateIn2 short
+
+Test PASSED: The engine found the correct move (d1d8).
+25 tests completed.
+----------------------------------------
+New game started. Caches and stats cleared.
+--- Running Test: Lichess Puzzle 001XA ---
+info depth 1 score cp -194 nodes 284 nps 266722 time 1 pv g3g4
+info depth 2 score cp -55 nodes 656 nps 170559 time 3 pv e4f6 e7f6 b1b7
+info depth 3 score cp 322 nodes 1001 nps 194771 time 5 pv b1b7 c7b7 e4f6 e7f6
+info depth 4 score cp 281 nodes 1855 nps 198754 time 9 pv e4f6 e7f6 b1b7 f6c3 b7c7
+info depth 5 score cp 0 nodes 4580 nps 138377 time 33 pv c3a5 d3f2 c4d3 g2e4
+info depth 6 score cp -64 nodes 14194 nps 157100 time 90 pv a3a4 b7d5 e4f6 e7f6 g2d5 f6c3 c2c3
+info depth 7 score cp -41 nodes 38111 nps 150334 time 253 pv e4f6 g7f6 g2b7 c7b7 c2d3 e7b4 d3e2 f6f5
+info depth 8 score cp -103 nodes 91643 nps 159451 time 574 pv f1d1 d3c5 e4f6 g7f6 c2h7
+info depth 9 score cp -49 nodes 169142 nps 133335 time 1268 pv f1d1 b7c6 c3d4 e7a3 d4a7 d3e5 a7d4 c6d5 f2f4
+--- Search Statistics ---
+Total Time: 1.27s
+Nodes Searched: 169142 (133320 NPS)
+- Quiescence Nodes: 106592 (63.0%)
+Transposition Table Hits: 50789.0 (30.0%)
+Beta Cutoffs: 15844.0
+Null Move Cutoffs: 1329.0
+Futility Pruned: 138064.0
+Razoring Used: 152.0
+QS Delta Pruned: 19241.0
+QS SEE Pruned: 24490.0
+-------------------------
+
+FEN: 2r2rk1/pbq1bppp/8/8/2p1N3/P1Bn2P1/2Q2PBP/1R3RK1 w - - 4 24
+Best move found: f1d1
+Score: -49
+rating: 1789
+theme: crushing discoveredAttack long master middlegame sacrifice
+
+Test FAILED: The engine suggested f1d1, but the correct move is b1b7.
+26 tests completed.
+----------------------------------------
+New game started. Caches and stats cleared.
+--- Running Test: Lichess Puzzle 001h8 ---
+info depth 1 score cp -322 nodes 25 nps 65700 time 0 pv c1b1
+info depth 2 score cp 22 nodes 65 nps 63817 time 1 pv c1e1 h7h5
+info depth 3 score cp 6 nodes 197 nps 108635 time 1 pv h4h7 c7h7 c1c8 g8g7 c8c7 g7f8
+info depth 4 score cp 6 nodes 391 nps 128837 time 3 pv h4h7 c7h7 c1c8 g8g7 c8c7 g7f8 h3h7
+info depth 5 score cp -310 nodes 1773 nps 177626 time 9 pv c1e1 e2f3 e1e3 f3e4 e3e1
+info depth 6 score cp -267 nodes 6351 nps 200850 time 31 pv c1e1 e2c4 h3c3 g8f8 g1h2 f8g8
+info depth 7 score cp -341 nodes 19329 nps 196397 time 98 pv c1c7 c8c7 f2e3 e2g4 h3g3 g4f3 h4h7 g8h7
+info depth 8 score cp -439 nodes 39643 nps 182740 time 216 pv c1c7 c8c7 f2e3 d5f3 h3f3
+info depth 9 score cp -341 nodes 42591 nps 182530 time 233 pv c1c7 d5g2 g1g2 e2f1
+info depth 10 score cp -372 nodes 58343 nps 176113 time 331 pv c1c7 c8c7 g1h2 e2g4 h3d3 c7c2 h2g1 g4e2 d3h3 c2c1 g1h2
+info depth 11 score cp -272 nodes 99284 nps 105003 time 945 pv h4h7 c7h7 c1c8 g8g7 c8d8 g8g7 h3h7 g7h7 g1h2
+info depth 12 score cp 85 nodes 300591 nps 110372 time 2723 pv h4h7 c7h7 c1c8 g8g7 c8c7 g7g8 h3h7 e2d1 h7g7 g8f8 c7f7
+--- Search Statistics ---
+Total Time: 2.72s
+Nodes Searched: 300591 (110366 NPS)
+- Quiescence Nodes: 116491 (38.8%)
+Transposition Table Hits: 142974.0 (47.6%)
+Beta Cutoffs: 40955.0
+Null Move Cutoffs: 8104.0
+Futility Pruned: 135254.0
+Razoring Used: 5732.0
+QS Delta Pruned: 10853.0
+QS SEE Pruned: 9314.0
+-------------------------
+
+FEN: 2r3k1/2r4p/4p1p1/1p1q1pP1/p2P1P1Q/P6R/4bB2/2R3K1 w - - 6 35
+Best move found: h4h7
+Score: 85
+rating: 1801
+theme: crushing deflection kingsideAttack long middlegame sacrifice
+
+Test PASSED: The engine found the correct move (h4h7).
+27 tests completed.
+----------------------------------------
+New game started. Caches and stats cleared.
+--- Running Test: Lichess Puzzle 001om ---
+info depth 1 score cp -655 nodes 51 nps 115501 time 0 pv b7b6
+info depth 2 score mate 2 nodes 76 nps 81777 time 0 pv e5e4 f2g3
+--- Search Statistics ---
+Total Time: 0.00s
+Nodes Searched: 76 (75806 NPS)
+- Quiescence Nodes: 46 (60.5%)
+Transposition Table Hits: 19.0 (25.0%)
+Beta Cutoffs: 1.0
+Null Move Cutoffs: 0.0
+Futility Pruned: 0.0
+Razoring Used: 0.0
+QS Delta Pruned: 2.0
+QS SEE Pruned: 5.0
+-------------------------
+
+FEN: 5r1k/pp4pp/5p2/1BbQp1r1/7K/7P/1PP3P1/3R3R b - - 3 26
+Best move found: e5e4
+Score: 29997
+rating: 991
+theme: mate mateIn2 middlegame short
+
+Test FAILED: The engine suggested e5e4, but the correct move is c5f2.
+28 tests completed.
+----------------------------------------
+New game started. Caches and stats cleared.
+--- Running Test: Lichess Puzzle 001u3 ---
+info depth 1 score cp 367 nodes 149 nps 240829 time 0 pv a6c8 g8h7
+info depth 2 score cp 341 nodes 228 nps 200188 time 1 pv a6c8 g8h7 c5e6
+info depth 3 score cp 15608 nodes 357 nps 190698 time 1 pv a6b6 g7g5 e1g2
+info depth 4 score cp 0 nodes 568 nps 157762 time 3 pv a6b6 a7b6 c5e6
+info depth 5 score cp 15608 nodes 1425 nps 195764 time 7 pv a6b6 f7f5 c5e6
+info depth 6 score cp 15508 nodes 1426 nps 173656 time 8 pv
+info depth 7 score cp 15608 nodes 1427 nps 171154 time 8 pv
+info depth 8 score cp 15507 nodes 81127 nps 190417 time 426 pv a6c8 b6d8 c5e6 c4e3 b6b1 h2h4 b1d3
+info depth 9 score cp 69 nodes 233605 nps 171349 time 1363 pv a6c8 g8h7 f2e2 b6b2 c1b2 c4b2 c8c7 a5c7 c5e6 f7e6 a6a5
+--- Search Statistics ---
+Total Time: 1.36s
+Nodes Searched: 233605 (171330 NPS)
+- Quiescence Nodes: 122324 (52.4%)
+Transposition Table Hits: 99283.0 (42.5%)
+Beta Cutoffs: 29905.0
+Null Move Cutoffs: 2124.0
+Futility Pruned: 120214.0
+Razoring Used: 1359.0
+QS Delta Pruned: 18416.0
+QS SEE Pruned: 13174.0
+-------------------------
+
+FEN: 2r3k1/p4pp1/Qq2p2p/b1Np4/2nP1P2/4P1P1/5K1P/2B1N3 w - - 4 34
+Best move found: a6c8
+Score: 69
+rating: 2175
+theme: advantage hangingPiece middlegame short
+
+Test PASSED: The engine found the correct move (a6c8).
+29 tests completed.
+----------------------------------------
+New game started. Caches and stats cleared.
+--- Running Test: Lichess Puzzle 001w5 ---
+info depth 1 score cp -75 nodes 31 nps 72115 time 0 pv d1a1
+info depth 2 score cp 25 nodes 42 nps 45343 time 0 pv d1a1
+info depth 3 score cp -302 nodes 952 nps 179799 time 5 pv f4f5 f7g7 d1a1
+info depth 4 score cp -295 nodes 1893 nps 193446 time 9 pv d1b1 f7g7 g1g7 g8g7 c2d3
+info depth 5 score cp -257 nodes 4237 nps 182364 time 23 pv f4f5 e6f5 d2d3 f7g7 g1g7
+info depth 6 score mate 2 nodes 4349 nps 69707 time 62 pv c2h7 g8h7 g7g8q
+--- Search Statistics ---
+Total Time: 0.06s
+Nodes Searched: 4349 (69591 NPS)
+- Quiescence Nodes: 2115 (48.6%)
+Transposition Table Hits: 2060.0 (47.4%)
+Beta Cutoffs: 526.0
+Null Move Cutoffs: 31.0
+Futility Pruned: 1568.0
+Razoring Used: 20.0
+QS Delta Pruned: 230.0
+QS SEE Pruned: 444.0
+-------------------------
+
+FEN: 1rb3k1/q4rP1/4p2p/3p3p/3P1P2/2P5/2QK3P/3R2R1 w - - 1 30
+Best move found: c2h7
+Score: 29997
+rating: 1444
+theme: advancedPawn attraction mate mateIn2 middlegame promotion short
+
+Test PASSED: The engine found the correct move (c2h7).
+30 tests completed.
+----------------------------------------
+New game started. Caches and stats cleared.
+--- Running Test: Lichess Puzzle 001xl ---
+info depth 1 score cp -769 nodes 35 nps 87851 time 0 pv h2h4
+info depth 2 score cp -712 nodes 202 nps 179921 time 1 pv d5c4 f4g4 g1f1
+info depth 3 score cp -283 nodes 529 nps 236091 time 2 pv e7e3 f4g4 d5g2 a6a5
+info depth 4 score cp -289 nodes 1056 nps 204865 time 5 pv e7e3 h6h5 h2h3 f4e3
+info depth 5 score cp -167 nodes 3242 nps 166819 time 19 pv e7e6 f6f5 e6a6 f4g4 d5g2 g4d1 g2f1 h6h5
+info depth 6 score cp -150 nodes 9675 nps 182707 time 52 pv e7e6 f6g7 e6a6 f4g5 d5g2 h6h5 h2h3 h5h4
+info depth 7 score cp -249 nodes 14238 nps 197919 time 71 pv e7e6 f6g5 e6a6 f4f6 d5g2
+info depth 8 score cp -150 nodes 16792 nps 197208 time 85 pv e7e6 f6g7 e6a6
+info depth 9 score cp -284 nodes 88659 nps 123701 time 716 pv e7f7 f6g5 h2h3 f4f7 g1g2 f7d5 g2f1
+info depth 10 score cp -278 nodes 141574 nps 115025 time 1230 pv e7f7 f6g5 f7b7 a6a5 g1g2 h6h5
+--- Search Statistics ---
+Total Time: 1.23s
+Nodes Searched: 141574 (115011 NPS)
+- Quiescence Nodes: 54789 (38.7%)
+Transposition Table Hits: 76790.0 (54.2%)
+Beta Cutoffs: 23315.0
+Null Move Cutoffs: 2417.0
+Futility Pruned: 25800.0
+Razoring Used: 4847.0
+QS Delta Pruned: 1031.0
+QS SEE Pruned: 1117.0
+-------------------------
+
+FEN: 8/4R3/p4kpp/3B4/5q2/8/5P1P/6K1 w - - 6 41
+Best move found: e7f7
+Score: -278
+rating: 1250
+theme: advantage endgame master masterVsMaster short skewer superGM
+
+Test PASSED: The engine found the correct move (e7f7).
+31 tests completed.
+----------------------------------------
+New game started. Caches and stats cleared.
+--- Running Test: Lichess Puzzle 002Cw ---
+info depth 1 score cp 178 nodes 37 nps 85692 time 0 pv g2g7 h7g7
+info depth 2 score cp 171 nodes 99 nps 121591 time 0 pv g2g7 f6g7 g1h2 a8d8
+info depth 3 score cp 170 nodes 266 nps 158253 time 1 pv g2g7 h7g7 g1h2 g7h7
+info depth 4 score cp 145 nodes 1867 nps 178662 time 10 pv g2g7 f6g7 g1f2 a8e8 a1e1 e8e4
+info depth 5 score cp 414 nodes 2512 nps 100269 time 25 pv e4e5 f6g6 g2g6 g7g6 g1h2 d6e5 a1f1
+info depth 6 score cp 513 nodes 4229 nps 127785 time 33 pv e4e5 f6g6 g2g6 g7g6 g1h2 d6e5 a1g1 a8d8
+info depth 7 score cp 568 nodes 7394 nps 160925 time 45 pv e4e5 f6g6 g2g6 g7g6 g1h2 h7g7 e5d6 c7d6 h2h1
+info depth 8 score cp 602 nodes 12266 nps 189061 time 64 pv e4e5 f6g6 g2g6 g7g6 g1h2 h7g7 e5d6 c7d6 a1g1 g6g1
+info depth 9 score cp 614 nodes 21551 nps 166067 time 129 pv e4e5 f6g6 g2g6 g7g6 g1h1 h7g7 e5d6 c7d6 a1e1 g6f6 e1e7 g7g8
+info depth 10 score cp 589 nodes 35727 nps 137607 time 259 pv e4e5 f6g6 g2g6 g7g6 g1f2 d6e5 a1g1
+info depth 11 score cp 689 nodes 35728 nps 91914 time 388 pv
+info depth 12 score cp 590 nodes 106542 nps 79789 time 1335 pv e4e5 f6g6 g2g6 g7g6 g1h1 a8g8 a1g1 d6e5 e5d6 h7h8 g1g6
+--- Search Statistics ---
+Total Time: 1.34s
+Nodes Searched: 106542 (79780 NPS)
+- Quiescence Nodes: 43352 (40.7%)
+Transposition Table Hits: 44956.0 (42.2%)
+Beta Cutoffs: 13248.0
+Null Move Cutoffs: 4496.0
+Futility Pruned: 89425.0
+Razoring Used: 1806.0
+QS Delta Pruned: 5235.0
+QS SEE Pruned: 3870.0
+-------------------------
+
+FEN: r7/2p3rk/p2p1q1p/Pp1P4/1P2P3/2PQ4/6R1/R5K1 w - - 3 29
+Best move found: e4e5
+Score: 590
+rating: 998
+theme: crushing discoveredAttack endgame short
+
+Test PASSED: The engine found the correct move (e4e5).
+32 tests completed.
+----------------------------------------
+New game started. Caches and stats cleared.
+--- Running Test: Lichess Puzzle 2.00E+04 ---
+info depth 1 score cp 217 nodes 19 nps 54028 time 0 pv g5d2
+info depth 2 score cp 185 nodes 37 nps 64287 time 0 pv g5d2 f5f4
+info depth 3 score cp 124 nodes 226 nps 168457 time 1 pv g5d2 a4b4 d2b4
+info depth 4 score cp 124 nodes 493 nps 186691 time 2 pv g5d2 a4b4 d2b4 a5b4
+info depth 5 score cp 180 nodes 1646 nps 248750 time 6 pv g5d2 a4b4 d2b4 a5b4 g2g4
+info depth 6 score cp 252 nodes 3477 nps 241502 time 14 pv g5d2 a4b4 d2e2 b6b5 e1f1 b4c4 e2c4
+info depth 7 score cp 198 nodes 12346 nps 242332 time 50 pv g5d2 a4c4 e1e5 c4f1 h1h2 a5a4 h3h4 b6b5
+info depth 8 score cp 232 nodes 18800 nps 215282 time 87 pv g5d2 a4c4 d2f2 c4b5 e1f1 b5f1 f2f1 b6b5 f1f5
+info depth 9 score cp 309 nodes 40786 nps 218578 time 186 pv g5d2 a4c4 d2g5 f5f4 g5h5 b6b5 e1e5 a6b6 h5d1
+info depth 10 score cp 313 nodes 90405 nps 152622 time 592 pv g5d2 h5h4 d2g5 a4b4 e1f1 a5a4 f1f5
+info depth 11 score cp 304 nodes 268072 nps 69414 time 3861 pv g5d2 a4b5 d2g5 a5a4 e1a1 b5b4 g5f5 h5h4 a1a4 b4a4
+--- Search Statistics ---
+Total Time: 3.86s
+Nodes Searched: 268072 (69411 NPS)
+- Quiescence Nodes: 102372 (38.2%)
+Transposition Table Hits: 131841.0 (49.2%)
+Beta Cutoffs: 44709.0
+Null Move Cutoffs: 6199.0
+Futility Pruned: 111813.0
+Razoring Used: 6414.0
+QS Delta Pruned: 11419.0
+QS SEE Pruned: 10239.0
+-------------------------
+
+FEN: 8/8/kp6/p4pQp/q7/7P/3r2P1/4R2K w - - 0 49
+Best move found: g5d2
+Score: 304
+rating: 974
+theme: crushing endgame hangingPiece oneMove
+
+Test PASSED: The engine found the correct move (g5d2).
+33 tests completed.
+----------------------------------------
+New game started. Caches and stats cleared.
+--- Running Test: Lichess Puzzle 002VP ---
+info depth 1 score cp 345 nodes 37 nps 94858 time 0 pv d4f6 g5f6
+info depth 2 score cp 345 nodes 93 nps 138519 time 0 pv d4f6 g5f5 c6d5
+info depth 3 score cp 155 nodes 205 nps 140174 time 1 pv c6d5 f6d5 d4g7
+info depth 4 score cp 20472 nodes 274 nps 81680 time 3 pv d4e3 g5f5 e3d4 d5c6 d4f6
+info depth 5 score cp 15608 nodes 417 nps 89587 time 4 pv c6d5 g5g6 d4f6
+info depth 6 score cp 15608 nodes 643 nps 120280 time 5 pv c6d5 g5h5 d4f6
+info depth 7 score cp 15608 nodes 975 nps 164360 time 5 pv c6d5 g5h5 d4f6
+info depth 8 score cp 20192 nodes 1807 nps 97723 time 18 pv d4c5 g5g6 c6d5 f6d5 g3g2
+info depth 9 score cp 20472 nodes 4117 nps 40459 time 101 pv g3f2 d5c6 d4c5 g5h5 f2e1
+info depth 10 score cp 20372 nodes 4119 nps 36864 time 111 pv g3f2 g3f2 d5c6 d4c5 g5h5
+info depth 11 score cp 20472 nodes 4120 nps 12876 time 319 pv
+info depth 12 score cp 20376 nodes 794023 nps 78902 time 10063 pv d4e3 g5g6 c6d5 h2g2 h5h6 f6d4 h6g6 h2g2 g7g6
+--- Search Statistics ---
+Total Time: 10.06s
+Nodes Searched: 794023 (78901 NPS)
+- Quiescence Nodes: 130029 (16.4%)
+Transposition Table Hits: 386947.0 (48.7%)
+Beta Cutoffs: 138912.0
+Null Move Cutoffs: 0.0
+Futility Pruned: 610289.0
+Razoring Used: 27668.0
+QS Delta Pruned: 52652.0
+QS SEE Pruned: 872.0
+-------------------------
+
+FEN: 8/6p1/2B2n2/3b2k1/3B4/6K1/4P3/8 w - - 5 45
+Best move found: d4e3
+Score: 20376
+rating: 1410
+theme: crushing endgame short
+
+Test FAILED: The engine suggested d4e3, but the correct move is d4f6.
+34 tests completed.
+----------------------------------------
+New game started. Caches and stats cleared.
+--- Running Test: Lichess Puzzle 002uV ---
+info depth 1 score cp 213 nodes 41 nps 99460 time 0 pv e6f5
+info depth 2 score cp 213 nodes 75 nps 117072 time 0 pv e6f5 e1e7
+info depth 3 score cp 213 nodes 263 nps 198828 time 1 pv e6f5 e1e7 c6e7
+info depth 4 score cp 170 nodes 574 nps 240368 time 2 pv e6f5 e1e7 c6e7 b2b4
+info depth 5 score cp 718 nodes 3054 nps 249998 time 12 pv e6f5 a2d5 e7e1 c1e1 d8d5 h2h4
+info depth 6 score cp 618 nodes 3055 nps 222880 time 13 pv
+info depth 7 score cp 718 nodes 3056 nps 219678 time 13 pv
+info depth 8 score cp 256 nodes 8597 nps 227929 time 37 pv e6f5 h2h3 c6d4 e1e7
+info depth 9 score cp 356 nodes 8598 nps 137867 time 62 pv
+info depth 10 score cp 273 nodes 78433 nps 176564 time 444 pv e6f5 c1c6 e7d7 c6c3 f5f4 e1d1 a8a5 b2b4 d7d4 f3d4
+info depth 11 score cp 373 nodes 78434 nps 85804 time 914 pv
+info depth 12 score cp 473 nodes 78435 nps 32784 time 2392 pv
+--- Search Statistics ---
+Total Time: 2.39s
+Nodes Searched: 78435 (32783 NPS)
+- Quiescence Nodes: 35746 (45.6%)
+Transposition Table Hits: 32028.0 (40.8%)
+Beta Cutoffs: 10330.0
+Null Move Cutoffs: 2009.0
+Futility Pruned: 52113.0
+Razoring Used: 440.0
+QS Delta Pruned: 5853.0
+QS SEE Pruned: 5987.0
+-------------------------
+
+FEN: r2r2k1/1p2qppp/2n1p3/5Q2/p2P4/P4N2/BP3PPP/2R1R1K1 b - - 0 20
+Best move found: e6f5
+Score: 473
+rating: 1629
+theme: advantage middlegame short
+
+Test PASSED: The engine found the correct move (e6f5).
+35 tests completed.
+----------------------------------------
+New game started. Caches and stats cleared.
+--- Running Test: Lichess Puzzle 002xh ---
+info depth 1 score cp 534 nodes 30 nps 72523 time 0 pv c6c7 d8d7
+info depth 2 score cp 10464 nodes 51 nps 80629 time 0 pv c5b5
+info depth 3 score cp 502 nodes 457 nps 270657 time 1 pv d6b8 h4f5 c6c7 d8d7
+info depth 4 score cp 402 nodes 903 nps 279496 time 3 pv d6b8 c8a7 b8a7 h4f3 c4e5
+info depth 5 score cp 15328 nodes 1163 nps 260798 time 4 pv d6b8 h4f3 b8d6
+info depth 6 score cp 15328 nodes 1552 nps 273143 time 5 pv d6b8 c8a7 b8d6 g4f5 e6f5
+info depth 7 score cp 15328 nodes 4175 nps 301990 time 13 pv d6b8 c8a7 b8d6 b5c5 e6e5 b4b5 h4f5
+info depth 8 score cp 20192 nodes 5716 nps 276843 time 20 pv d6b8 d8e8
+info depth 9 score cp 20192 nodes 7428 nps 249761 time 29 pv d6f8 c8a7 f8h6 h4g2 h6g5
+info depth 10 score cp 365 nodes 26572 nps 203778 time 130 pv d6f8 h4f5 g4f5 e6f5 c5b5 d8e8 f8c5 c8e7 c5e7 e8e7
+info depth 11 score cp 465 nodes 26573 nps 194355 time 136 pv
+info depth 12 score cp 222 nodes 172720 nps 99371 time 1738 pv c5b5 h4g2 b5a6 g2e3 a6b7 c8a7 b7b6 a7c6 b6a6 d8e8 e8d7
+--- Search Statistics ---
+Total Time: 1.74s
+Nodes Searched: 172720 (99363 NPS)
+- Quiescence Nodes: 51374 (29.7%)
+Transposition Table Hits: 103620.0 (60.0%)
+Beta Cutoffs: 33537.0
+Null Move Cutoffs: 6.0
+Futility Pruned: 43637.0
+Razoring Used: 3023.0
+QS Delta Pruned: 2927.0
+QS SEE Pruned: 3078.0
+-------------------------
+
+FEN: 2nk4/8/2PBp3/1pK1P1p1/1P4Pn/8/8/8 w - - 3 43
+Best move found: c5b5
+Score: 222
+rating: 2074
+theme: crushing endgame long
+
+Test PASSED: The engine found the correct move (c5b5).
+36 tests completed.
+----------------------------------------
+New game started. Caches and stats cleared.
+--- Running Test: Lichess Puzzle 0039T ---
+info depth 1 score cp 239 nodes 37 nps 95149 time 0 pv b8b1 e1f2
+info depth 2 score cp 239 nodes 89 nps 110507 time 0 pv b8b1 e1f2 b1h1
+info depth 3 score cp 214 nodes 255 nps 147686 time 1 pv b8b1 e1f2 b1h1 a4a7 e7f8
+info depth 4 score cp 192 nodes 440 nps 175895 time 2 pv b8b1 e1d2 b1h1 a4a7 e7f8 a7a8 f8g7
+info depth 5 score cp 299 nodes 1275 nps 171297 time 7 pv b8b1 e1d2 b1h1 a4a7 e7f8 a2a4 h1h2 d2d3
+info depth 6 score cp 243 nodes 3184 nps 204625 time 15 pv b8b1 e1e2 b1h1 a4a7 e7f8 a7a6 h6h5 a6e6
+info depth 7 score cp 215 nodes 7753 nps 243092 time 31 pv b8b1 e1f2 b1h1 a4a7 e7f8 a7a8 f8g7 a8h8 g7h8 f2g2
+info depth 8 score cp 238 nodes 12040 nps 251093 time 47 pv b8b1 e1f2 b1h1 a4a7 e7f8 a7a8 f8g7 a8h8 g7h8 f2g2 h1d1
+info depth 9 score cp 328 nodes 17288 nps 197088 time 87 pv b8b1 e1d2 b1h1
+info depth 10 score cp 327 nodes 42496 nps 194518 time 218 pv b8b1 e1d2 h8d8 d2e3 b1h1 a4a7 e7f8 h2h4 h1h3 e3f2 d8d2 f2e3 d2c2 e3d3
+info depth 11 score cp 242 nodes 95883 nps 149167 time 642 pv b8b1 e1f2 b1h1 a4a7 e7f8 f2g2 h1c1 a7c7 c1a1 c7a7 a1c1 a7c7 c1a1
+info depth 12 score cp 265 nodes 129938 nps 135329 time 960 pv b8b1 e1f2 b1h1 a4a7 e7f8 f2g2 h1d1 a7a8 f8g7 a8h8 g7h8 g2f2 d1c1 h2h4 c1c2 f2e3
+--- Search Statistics ---
+Total Time: 0.96s
+Nodes Searched: 129938 (135306 NPS)
+- Quiescence Nodes: 49937 (38.4%)
+Transposition Table Hits: 58654.0 (45.1%)
+Beta Cutoffs: 18235.0
+Null Move Cutoffs: 4429.0
+Futility Pruned: 38077.0
+Razoring Used: 3781.0
+QS Delta Pruned: 1519.0
+QS SEE Pruned: 1194.0
+-------------------------
+
+FEN: 1r5r/p3kp2/4p2p/4P3/R4Pp1/6P1/P1P4P/4K2R b K - 2 25
+Best move found: b8b1
+Score: 265
+rating: 1214
+theme: crushing defensiveMove endgame long rookEndgame skewer
+
+Test PASSED: The engine found the correct move (b8b1).
+37 tests completed.
+----------------------------------------
+New game started. Caches and stats cleared.
+--- Running Test: Lichess Puzzle 003IX ---
+info depth 1 score mate 1 nodes 18 nps 38856 time 0 pv e4g3
+--- Search Statistics ---
+Total Time: 0.00s
+Nodes Searched: 18 (32195 NPS)
+- Quiescence Nodes: 10 (55.6%)
+Transposition Table Hits: 0.0 (0.0%)
+Beta Cutoffs: 0.0
+Null Move Cutoffs: 0.0
+Futility Pruned: 0.0
+Razoring Used: 0.0
+QS Delta Pruned: 0.0
+QS SEE Pruned: 3.0
+-------------------------
+
+FEN: 8/3pk3/R7/1R2PK1p/2PPn1r1/8/8/8 b - - 0 43
+Best move found: e4g3
+Score: 29999
+rating: 1628
+theme: endgame mate mateIn1 oneMove
+
+Test PASSED: The engine found the correct move (e4g3).
+38 tests completed.
+----------------------------------------
+New game started. Caches and stats cleared.
+--- Running Test: Lichess Puzzle 003Jb ---
+info depth 1 score cp -151 nodes 88 nps 139493 time 0 pv d6d5
+info depth 2 score cp -151 nodes 501 nps 206398 time 2 pv d6d5 b3d5
+info depth 3 score cp -160 nodes 1181 nps 213107 time 5 pv d6d5 a7a5 d5e4
+info depth 4 score cp 175 nodes 4107 nps 188557 time 21 pv e7g5 c1b1 g5h6 a7a5 c6c8
+info depth 5 score cp 275 nodes 5201 nps 95812 time 54 pv e7g5 c1b1 g5c1 d1c1 c6c2 a7d7 f7d7
+info depth 6 score cp 176 nodes 6755 nps 59958 time 112 pv e7g5 c1b1 d7e8
+info depth 7 score cp 213 nodes 31595 nps 107520 time 293 pv e7g5 c1b1 c6c2 g2g4 d7c8 a7f7 g8f7 h6h7 f7g8 b1c2
+info depth 8 score cp 313 nodes 31596 nps 96644 time 326 pv
+info depth 9 score cp 322 nodes 101476 nps 99243 time 1022 pv e7g5 c1b1 g5c1 d1c1 c6a6 b3e6
+--- Search Statistics ---
+Total Time: 1.02s
+Nodes Searched: 101476 (99230 NPS)
+- Quiescence Nodes: 57702 (56.9%)
+Transposition Table Hits: 34150.0 (33.7%)
+Beta Cutoffs: 11938.0
+Null Move Cutoffs: 936.0
+Futility Pruned: 60361.0
+Razoring Used: 135.0
+QS Delta Pruned: 11354.0
+QS SEE Pruned: 13035.0
+-------------------------
+
+FEN: 6k1/Q2bqr1p/2rpp1pR/p7/Pp2P3/1B3P2/1PP3P1/2KR4 b - - 7 22
+Best move found: e7g5
+Score: 322
+rating: 1028
+theme: advantage fork middlegame short
+
+Test PASSED: The engine found the correct move (e7g5).
+39 tests completed.
+----------------------------------------
+New game started. Caches and stats cleared.
+--- Running Test: Lichess Puzzle 003Tx ---
+info depth 1 score cp -120 nodes 30 nps 77624 time 0 pv f3d2 b1a1
+info depth 2 score cp 15328 nodes 140 nps 155385 time 0 pv f3d2 b1a1 d2e4
+info depth 3 score cp 15328 nodes 198 nps 169691 time 1 pv f3d2 b1a1 d2e4
+info depth 4 score cp 15328 nodes 263 nps 190058 time 1 pv f3d2 b1a1 d2e4
+info depth 5 score cp 15328 nodes 499 nps 240321 time 2 pv f3g1 e4e5 f6e5
+info depth 6 score cp 15328 nodes 683 nps 281322 time 2 pv f3g1 e4e5 f6e5
+info depth 7 score cp 15328 nodes 956 nps 320242 time 2 pv f3g1 e4e5 f6e5
+info depth 8 score mate 2 nodes 1838 nps 126624 time 14 pv f3d2 b1a1 c8c1
+--- Search Statistics ---
+Total Time: 0.01s
+Nodes Searched: 1838 (125736 NPS)
+- Quiescence Nodes: 485 (26.4%)
+Transposition Table Hits: 606.0 (33.0%)
+Beta Cutoffs: 135.0
+Null Move Cutoffs: 190.0
+Futility Pruned: 383.0
+Razoring Used: 68.0
+QS Delta Pruned: 117.0
+QS SEE Pruned: 19.0
+-------------------------
+
+FEN: 2r5/pR5p/5p1k/4p3/4R3/B4nPP/PP3P2/1K6 b - - 0 27
+Best move found: f3d2
+Score: 29997
+rating: 1648
+theme: backRankMate endgame fork mate mateIn2 short
+
+Test PASSED: The engine found the correct move (f3d2).
+40 tests completed.
+----------------------------------------
+New game started. Caches and stats cleared.
+--- Running Test: Lichess Puzzle 003eP ---
+info depth 1 score cp -192 nodes 31 nps 70397 time 0 pv c3f6
+info depth 2 score cp -227 nodes 152 nps 158748 time 0 pv c3d4 g4e5
+info depth 3 score cp -161 nodes 374 nps 176393 time 2 pv c3d4 g6g5 a2c3
+info depth 4 score cp -123 nodes 1264 nps 177038 time 7 pv h1g1 g4e5 c3e5 c7e5
+info depth 5 score cp -123 nodes 4797 nps 201587 time 23 pv h1g1 g4e3 c3d4 c7f4 g1g6 g8h7
+info depth 6 score cp -196 nodes 14412 nps 194885 time 73 pv b2g2 e7g5 h1h8 g8f7 c1b1 c7e5 c3e5
+info depth 7 score cp -170 nodes 25820 nps 185738 time 139 pv h1g1 e7e6 c3d4 g6g5 a2c3 g8h7 b4b5
+info depth 8 score cp -205 nodes 41841 nps 178122 time 234 pv h1g1 e7g5 c1b1 g4e3 g1g5 c7f4 b2c2 e3c2
+info depth 9 score cp -184 nodes 75985 nps 134155 time 566 pv c1b1 g4e3 h1h8 b2d2 g5f5 c3d4 g6g5 a2c3
+info depth 10 score cp -199 nodes 341514 nps 102180 time 3342 pv h1h8 g8f7 b2f2 f7e6 f2f6 g4f6 h8h7 f6h7
+--- Search Statistics ---
+Total Time: 3.34s
+Nodes Searched: 341514 (102176 NPS)
+- Quiescence Nodes: 174301 (51.0%)
+Transposition Table Hits: 136269.0 (39.9%)
+Beta Cutoffs: 43084.0
+Null Move Cutoffs: 4251.0
+Futility Pruned: 188921.0
+Razoring Used: 2111.0
+QS Delta Pruned: 18552.0
+QS SEE Pruned: 39376.0
+-------------------------
+
+FEN: 6k1/r1b1q3/2p3p1/2Pp4/1P2p1n1/2B1P3/NQ6/2K4R w - - 2 37
+Best move found: h1h8
+Score: -199
+rating: 1097
+theme: crushing exposedKing long middlegame skewer
+
+Test PASSED: The engine found the correct move (h1h8).
+41 tests completed.
+----------------------------------------
+New game started. Caches and stats cleared.
+--- Running Test: Lichess Puzzle 003jH ---
+info depth 1 score cp 395 nodes 297 nps 262586 time 1 pv e5d3 f2e3
+info depth 2 score cp 395 nodes 623 nps 238940 time 2 pv e5d3 f2e3 d3f4
+info depth 3 score cp 466 nodes 939 nps 202501 time 4 pv e5d3 f2g1 h5h1 g1h1 d3f4
+info depth 4 score cp 397 nodes 1439 nps 197940 time 7 pv e5d3 f2g3 d3f4 h1h5 f4h5 g3h2
+info depth 5 score cp 20192 nodes 1704 nps 95070 time 17 pv h5f3 g2f3 e5d3 f2g1 d3f4
+info depth 6 score cp 445 nodes 8330 nps 167401 time 49 pv e5d3 f2g1 a7a6 b2a3 h5h1 g1h1 d3f4 d2d4
+info depth 7 score cp 408 nodes 13716 nps 180666 time 75 pv e5d3 f2g1 d3f4 h1h5 g7g6 d2d3 f4e2 g1f1 e2c1
+info depth 8 score cp 508 nodes 13717 nps 159220 time 86 pv
+info depth 9 score cp 608 nodes 13718 nps 116608 time 117 pv
+info depth 10 score cp 708 nodes 13719 nps 27768 time 494 pv
+info depth 11 score cp 808 nodes 13720 nps 4799 time 2858 pv
+--- Search Statistics ---
+Total Time: 2.86s
+Nodes Searched: 13720 (4799 NPS)
+- Quiescence Nodes: 7603 (55.4%)
+Transposition Table Hits: 5682.0 (41.4%)
+Beta Cutoffs: 1467.0
+Null Move Cutoffs: 188.0
+Futility Pruned: 8038.0
+Razoring Used: 129.0
+QS Delta Pruned: 1319.0
+QS SEE Pruned: 1447.0
+-------------------------
+
+FEN: rn3rk1/p5pp/3N4/4np1q/5Q2/1P6/PB1P1KP1/2R4R b - - 1 25
+Best move found: e5d3
+Score: 808
+rating: 1099
+theme: crushing fork long middlegame
+
+Test PASSED: The engine found the correct move (e5d3).
+42 tests completed.
+----------------------------------------
+New game started. Caches and stats cleared.
+--- Running Test: Lichess Puzzle 003jv ---
+info depth 1 score cp -9 nodes 23 nps 60330 time 0 pv h7h5
+info depth 2 score cp 401 nodes 25 nps 30314 time 0 pv
+info depth 3 score cp 343 nodes 140 nps 118939 time 1 pv d6f7 e5d4 f7h8 a2a4
+info depth 4 score cp 401 nodes 401 nps 207952 time 1 pv d6f7 e5d4 f7h8 a2a4 b7b5
+info depth 5 score cp 345 nodes 835 nps 258659 time 3 pv d6f7 e5d4 f7h8 a2a4 h8f7 h2h4
+info depth 6 score cp 410 nodes 1713 nps 298944 time 5 pv d6f7 e5d4 f7h8 a2a4 b7b5 a4b5 a6b5
+info depth 7 score cp 364 nodes 2598 nps 343357 time 7 pv d6f7 e5d4 f7h8 a2a4 h8f7 h2h4 b7b5 g3g4
+info depth 8 score cp 401 nodes 5248 nps 367984 time 14 pv d6f7 e5d4 f7h8 a2a4 h8f7 a4a5 h7h5 h2h4 g6g5
+info depth 9 score cp 399 nodes 9732 nps 183346 time 53 pv d6f7 e5d5 f7h8 a2a4 a2a4 b7b5 a4b5
+info depth 10 score cp 404 nodes 18797 nps 162021 time 116 pv d6f7 e5f4 f7h8 a2a4 h8f7 h2h4 b7b5
+info depth 11 score cp 408 nodes 30355 nps 132873 time 228 pv d6f7 e5d5 f7h8
+info depth 12 score cp 420 nodes 48751 nps 80818 time 603 pv d6f7 e5f4 f7h8 a2a4 b7b5
+info depth 13 score cp 431 nodes 120133 nps 67313 time 1784 pv d6f7 e5d5 f7h8 a2a4 h8f7 a4a5 h7h5 h2h4 f7d6 g3g4 h5g4
+--- Search Statistics ---
+Total Time: 1.78s
+Nodes Searched: 120133 (67307 NPS)
+- Quiescence Nodes: 35074 (29.2%)
+Transposition Table Hits: 54905.0 (45.7%)
+Beta Cutoffs: 20080.0
+Null Move Cutoffs: 1947.0
+Futility Pruned: 25766.0
+Razoring Used: 2818.0
+QS Delta Pruned: 161.0
+QS SEE Pruned: 412.0
+-------------------------
+
+FEN: 7R/1p2k2p/p2n2p1/4K3/8/6P1/P6P/8 b - - 11 37
+Best move found: d6f7
+Score: 431
+rating: 986
+theme: crushing endgame fork short
+
+Test PASSED: The engine found the correct move (d6f7).
+43 tests completed.
+----------------------------------------
+New game started. Caches and stats cleared.
+--- Running Test: Lichess Puzzle 003nQ ---
+info depth 1 score cp 586 nodes 40 nps 82891 time 0 pv f5g3 f2g3
+info depth 2 score cp 586 nodes 85 nps 110650 time 0 pv f5g3 f2g3 g8g3
+info depth 3 score cp 20192 nodes 167 nps 71365 time 2 pv f5g3 f2g3 h3g2 h1g2 g8g3
+info depth 4 score cp 20192 nodes 493 nps 142655 time 3 pv f5g3 f2g3 h3g2 h1g2 g8g3
+info depth 5 score cp 561 nodes 3550 nps 169240 time 20 pv f5g3 f2g3 g8g3 g2e1 g3g1 h1g1 d4c3
+info depth 6 score cp 609 nodes 7145 nps 198380 time 36 pv f5g3 f2g3 g8g3 g2e1 h5h4 c3d4 c6d4
+info depth 7 score cp 555 nodes 14485 nps 225293 time 64 pv f5g3 f2g3 g8g3 c3d4 c6d4 g2e1 g3g1 h1g1 d4e2 g1h1
+info depth 8 score cp 628 nodes 28261 nps 247232 time 114 pv f5g3 f2g3 g8g3 g2e1 h5h4 e1d3 d4c3 b2c3 g3g1 h1g1
+info depth 9 score cp 551 nodes 55790 nps 219784 time 253 pv f5g3 f2g3 h3g2 h1g2
+info depth 10 score cp 553 nodes 86473 nps 190971 time 452 pv f5g3 f2g3 g8g3 g2e1 g3g1 h1g1 d4c3 b2c3
+info depth 11 score cp 614 nodes 142782 nps 156701 time 911 pv f5g3 f2g3 g8g3 g2e1 g3g1 h1g1 d4c3 b2c3 e5e4 a1d1 e4f3 d1d5 f3f2 g1f2
+info depth 12 score cp 516 nodes 598921 nps 115214 time 5198 pv f5g3 f2g3 g8g3 g2e1 g3f3 e1f3 h3f3 g1g2 d4c3 b2c3 h8h7 a1c1
+--- Search Statistics ---
+Total Time: 5.20s
+Nodes Searched: 598921 (115210 NPS)
+- Quiescence Nodes: 249830 (41.7%)
+Transposition Table Hits: 239593.0 (40.0%)
+Beta Cutoffs: 79810.0
+Null Move Cutoffs: 23164.0
+Futility Pruned: 616127.0
+Razoring Used: 8430.0
+QS Delta Pruned: 69299.0
+QS SEE Pruned: 32805.0
+-------------------------
+
+FEN: 6rk/pp6/2n5/3ppn1p/3p4/2P2P1q/PP3QNB/R5RK b - - 3 29
+Best move found: f5g3
+Score: 516
+rating: 1307
+theme: crushing kingsideAttack master middlegame pin short
+
+Test PASSED: The engine found the correct move (f5g3).
+44 tests completed.
+----------------------------------------
+New game started. Caches and stats cleared.
+--- Running Test: Lichess Puzzle 003wQ ---
+info depth 1 score cp 121 nodes 27 nps 69905 time 0 pv f6d6
+info depth 2 score cp 121 nodes 76 nps 112678 time 0 pv f6d6 f4d6
+info depth 3 score cp 121 nodes 248 nps 177688 time 1 pv f6d6 f4d6 f8f1
+info depth 4 score cp 71 nodes 726 nps 217987 time 3 pv f6d6 f4d6 f8f1 a2a4
+info depth 5 score cp 900 nodes 3210 nps 207395 time 15 pv f6d6 f4e5 d6e5 f1f8 c8f8 d2d3
+info depth 6 score cp 800 nodes 3832 nps 150268 time 25 pv f6d6 h2h4 d6d4
+info depth 7 score cp 895 nodes 13511 nps 170834 time 79 pv f6d6 d2d3 c8c7 f1c1 f8f4 c1c7 d6c7
+info depth 8 score cp 994 nodes 33867 nps 62029 time 545 pv f6d4 d6d4 c8d8 d4d8 f3f2 d5d4 f2g2 c8a8
+info depth 9 score cp 1095 nodes 43870 nps 70497 time 622 pv f6d4 d6d4 f8d8 d4d8 g8f7 d2d3
+info depth 10 score cp 997 nodes 190226 nps 25952 time 7329 pv f6d4 d2e2 d4e4 e2f2 c8c2
+--- Search Statistics ---
+Total Time: 7.33s
+Nodes Searched: 190226 (25951 NPS)
+- Quiescence Nodes: 67497 (35.5%)
+Transposition Table Hits: 95838.0 (50.4%)
+Beta Cutoffs: 35487.0
+Null Move Cutoffs: 4992.0
+Futility Pruned: 145565.0
+Razoring Used: 3764.0
+QS Delta Pruned: 26481.0
+QS SEE Pruned: 6476.0
+-------------------------
+
+FEN: 2r2rk1/6pp/3Q1q2/8/3N1B2/6P1/PP1K3P/5R2 b - - 0 24
+Best move found: f6d4
+Score: 997
+rating: 1934
+theme: advantage discoveredAttack middlegame pin short
+
+Test FAILED: The engine suggested f6d4, but the correct move is f6d6.
+45 tests completed.
+----------------------------------------
+New game started. Caches and stats cleared.
+--- Running Test: Lichess Puzzle 0042j ---
+info depth 1 score cp 333 nodes 40 nps 88069 time 0 pv d2d8 b6d8
+info depth 2 score mate 2 nodes 66 nps 85071 time 0 pv f4e5 b6d8 d1d8
+--- Search Statistics ---
+Total Time: 0.00s
+Nodes Searched: 66 (78287 NPS)
+- Quiescence Nodes: 33 (50.0%)
+Transposition Table Hits: 14.0 (21.2%)
+Beta Cutoffs: 1.0
+Null Move Cutoffs: 0.0
+Futility Pruned: 0.0
+Razoring Used: 0.0
+QS Delta Pruned: 3.0
+QS SEE Pruned: 14.0
+-------------------------
+
+FEN: 3r2k1/4nppp/pq3b2/1p2p3/2r2P2/2P1NR2/PP1Q2BP/3R2K1 w - - 0 25
+Best move found: f4e5
+Score: 29997
+rating: 652
+theme: backRankMate mate mateIn2 middlegame short
+
+Test FAILED: The engine suggested f4e5, but the correct move is d2d8.
+46 tests completed.
+----------------------------------------
+New game started. Caches and stats cleared.
+--- Running Test: Lichess Puzzle 0048h ---
+info depth 1 score cp -231 nodes 56 nps 125941 time 0 pv e4f4
+info depth 2 score cp -266 nodes 175 nps 167964 time 1 pv e4e3 c6c7 g7f6
+info depth 3 score cp -266 nodes 395 nps 173882 time 2 pv e4e3 d1d4 e3h3 h1g1
+info depth 4 score cp -259 nodes 1136 nps 200924 time 5 pv e8f8 h1g2 f8f7 b4b5 g2f1 e2b2
+info depth 5 score cp -242 nodes 5100 nps 203223 time 25 pv e8e7 h1g2 e7f7 g2g3 e4e7 e2e3 c6a6
+info depth 6 score cp -243 nodes 12045 nps 226719 time 53 pv e4e1 d1e1 e8e1 h1g2 e1e2 g2f1 e2e3 c6a6 e3h3
+info depth 7 score cp -256 nodes 29555 nps 228292 time 129 pv e4e1 d1e1 e8e1 h1g2 e1e2 g2f1 e2e3 c6d6 e3f3 f1g2 f3a3
+info depth 8 score cp -273 nodes 43902 nps 223068 time 196 pv e4e1 d1e1 e8e1 h1g2 e1e2 g2f1 e2h2 c6d6 d4d3 d6d5 h2h3
+info depth 9 score cp -281 nodes 67680 nps 221968 time 304 pv e4e1 d1e1 e8e1 h1g2 e1e2 g2f1 e2e3 c6d6 e3h3 d6d5 h3f3 f1e2 f3e3 e2d2
+info depth 10 score cp -273 nodes 80299 nps 139056 time 577 pv e4e1 d1e1 e8e1 h1g2 e1e2 g2f1 e2e3 c6d6 e3h3 d6d5 h3f3 f1g2 f3f4 g2g3
+info depth 11 score cp -273 nodes 105588 nps 145913 time 723 pv e4e1 d1e1 e8e1 h1g2 e1e2 g2f1 e2e3 c6d6 e3h3 d6d5 h3f3 f1g2 f3f4 g2g3 g7f6
+info depth 12 score cp -237 nodes 162158 nps 140918 time 1150 pv e4e1 d1e1 e8e1 h1g2 e1e2 g2g1 e2e3 c6d6 e3h3 d6d5 h3g3 g1f2 g3g4 f2f3 g4h4 d5d7 g7f6
+--- Search Statistics ---
+Total Time: 1.15s
+Nodes Searched: 162158 (140892 NPS)
+- Quiescence Nodes: 65775 (40.6%)
+Transposition Table Hits: 78605.0 (48.5%)
+Beta Cutoffs: 22763.0
+Null Move Cutoffs: 4140.0
+Futility Pruned: 60933.0
+Razoring Used: 3670.0
+QS Delta Pruned: 2037.0
+QS SEE Pruned: 3131.0
+-------------------------
+
+FEN: 4r3/p5k1/2R4p/2Pp4/1P1pr1P1/P6P/8/3R3K b - - 0 35
+Best move found: e4e1
+Score: -237
+rating: 1137
+theme: crushing endgame exposedKing long rookEndgame
+
+Test PASSED: The engine found the correct move (e4e1).
+47 tests completed.
+----------------------------------------
+New game started. Caches and stats cleared.
+--- Running Test: Lichess Puzzle 004Ao ---
+info depth 1 score cp 73 nodes 11 nps 29035 time 0 pv e8f7
+info depth 2 score cp 40 nodes 66 nps 89500 time 0 pv e8f7 d3d4
+info depth 3 score cp 52 nodes 244 nps 155865 time 1 pv e8f7 h4h5 b7c6 g8g7
+info depth 4 score cp 152 nodes 675 nps 164134 time 4 pv f8f7 e5a1 b7e4 d3e4
+info depth 5 score cp 53 nodes 2140 nps 160943 time 13 pv e8f7 d1b1 f7g6 b1f1 f8g8 h4h5
+info depth 6 score cp 50 nodes 12495 nps 177193 time 70 pv e8f7 e5d6 f8g8 e4e5 c2f2 d1g1 f7g6 g1g6 g8h7
+info depth 7 score cp 74 nodes 25419 nps 159585 time 159 pv e8f7 e5d6 f8e8 d6b4 e8d8 e4e5 b7d5 d1b1
+info depth 8 score cp 171 nodes 100423 nps 147605 time 680 pv e8f7 e5d6 f8e8 d6e5 f7e7 e5a1 b7e4 d3e4 e7a3 a1a3
+info depth 9 score cp 171 nodes 119655 nps 143130 time 835 pv e8f7 e5d6 f8e8 d6e5 e8f8
+info depth 10 score cp 171 nodes 161317 nps 121416 time 1328 pv e8f7 e5d6 f8e8 d6e5 e8f8
+--- Search Statistics ---
+Total Time: 1.33s
+Nodes Searched: 161317 (121401 NPS)
+- Quiescence Nodes: 67915 (42.1%)
+Transposition Table Hits: 84190.0 (52.2%)
+Beta Cutoffs: 26718.0
+Null Move Cutoffs: 1499.0
+Futility Pruned: 63111.0
+Razoring Used: 2318.0
+QS Delta Pruned: 8243.0
+QS SEE Pruned: 9186.0
+-------------------------
+
+FEN: 4qk2/1b3R2/p7/1p2Q3/4P2P/P2P3K/2r5/3R4 b - - 0 41
+Best move found: e8f7
+Score: 171
+rating: 1735
+theme: advantage endgame short
+
+Test PASSED: The engine found the correct move (e8f7).
+48 tests completed.
+----------------------------------------
+New game started. Caches and stats cleared.
+--- Running Test: Lichess Puzzle 004LZ ---
+info depth 1 score cp 258 nodes 27 nps 65384 time 0 pv c3c2 b1a2
+info depth 2 score cp 258 nodes 70 nps 103344 time 0 pv c3c2 b1a1 c2c1q a1a2
+info depth 3 score cp 210 nodes 124 nps 137119 time 0 pv c3c2 b1a2 c2c1q g2f4
+info depth 4 score cp 111 nodes 242 nps 128272 time 1 pv c3c2 b1a2 c2c1q h7a7 f6f5
+info depth 5 score cp 237 nodes 1168 nps 202335 time 5 pv c3c2 b1a2 c2c1q h7d7 d2e2 h4h5 a5a4
+info depth 6 score cp 289 nodes 3805 nps 220301 time 17 pv c3c2 b1a2 c2c1q h7g7 c1c2 a2a1 c2c3 a1a2 f6f5
+info depth 7 score cp 292 nodes 13744 nps 239881 time 57 pv c3c2 b1b2 c2c1q b2a2
+info depth 8 score cp 297 nodes 27556 nps 230622 time 119 pv c3c2 b1a2 c2c1q h7d7 d2e2 d7g7 c1c4 a2b2 a5a4 h4h5 f6f5
+info depth 9 score cp 273 nodes 47315 nps 197996 time 238 pv c3c2 b1a2 c2c1q h7b7 c1c4 a2a1 f6f5
+info depth 10 score cp 312 nodes 84389 nps 162834 time 518 pv c3c2 b1a2 c2c1q h7g7 f6f5 g7b7 a5a4 h4h5 c1c4 a2a3 c4g4 b7b2 d2d3
+info depth 11 score cp 315 nodes 111292 nps 120302 time 925 pv c3c2 b1b2 c2c1q b2a2
+info depth 12 score cp 346 nodes 241606 nps 100205 time 2411 pv c3c2 b1a2 c2c1q h7g7 c1c6 a2b2 c6c2 b2a1 d2e2
+--- Search Statistics ---
+Total Time: 2.41s
+Nodes Searched: 241606 (100199 NPS)
+- Quiescence Nodes: 80933 (33.5%)
+Transposition Table Hits: 141808.0 (58.7%)
+Beta Cutoffs: 40511.0
+Null Move Cutoffs: 2941.0
+Futility Pruned: 54505.0
+Razoring Used: 4785.0
+QS Delta Pruned: 949.0
+QS SEE Pruned: 4923.0
+-------------------------
+
+FEN: 8/7R/5p2/p7/7P/2p5/3k2N1/1K6 b - - 0 48
+Best move found: c3c2
+Score: 346
+rating: 1188
+theme: advancedPawn crushing defensiveMove deflection endgame long promotion
+
+Test PASSED: The engine found the correct move (c3c2).
+49 tests completed.
+----------------------------------------
+New game started. Caches and stats cleared.
+--- Running Test: Lichess Puzzle 004Op ---
+info depth 1 score cp -109 nodes 110 nps 172411 time 0 pv a5b4
+info depth 2 score cp -52 nodes 824 nps 224802 time 3 pv h7f6 c5b6
+info depth 3 score cp 15608 nodes 959 nps 166784 time 5 pv c6c5 f4h6 a5b4
+info depth 4 score cp 20472 nodes 1117 nps 141170 time 7 pv c6g2 f2g2 a5b4 c5b6 b7g2
+info depth 5 score cp 25336 nodes 1811 nps 133207 time 13 pv g8g2 f2g2 c6g2 f1g2 d8d1 g2f1 d1f1
+info depth 6 score cp 801 nodes 26655 nps 171995 time 154 pv d8d1 g2g3 d1b1 f2f3 c6c5 f4e3 b1f1 a1f1
+info depth 7 score cp 799 nodes 56852 nps 155285 time 366 pv d8d1 b1e4 c6e4
+info depth 8 score cp 899 nodes 65311 nps 139877 time 466 pv d8d1
+info depth 9 score cp 1001 nodes 129620 nps 71547 time 1811 pv c6e4 f2f3 e4f3 b4a5 b6c5 g2g3 g8g3
+--- Search Statistics ---
+Total Time: 1.81s
+Nodes Searched: 129620 (71540 NPS)
+- Quiescence Nodes: 72561 (56.0%)
+Transposition Table Hits: 48253.0 (37.2%)
+Beta Cutoffs: 15134.0
+Null Move Cutoffs: 1689.0
+Futility Pruned: 109215.0
+Razoring Used: 59.0
+QS Delta Pruned: 31887.0
+QS SEE Pruned: 8979.0
+-------------------------
+
+FEN: 2kr2r1/1bp4n/1pq1p2p/p1P5/1P3B2/P6P/5RP1/RB3QK1 b - - 4 26
+Best move found: c6e4
+Score: 1001
+rating: 2164
+theme: crushing deflection kingsideAttack middlegame pin sacrifice skewer veryLong
+
+Test FAILED: The engine suggested c6e4, but the correct move is d8d1.
+50 tests completed.
+----------------------------------------
+New game started. Caches and stats cleared.
+--- Running Test: Lichess Puzzle 004RF ---
+info depth 1 score cp -441 nodes 32 nps 78444 time 0 pv g3c3
+info depth 2 score cp -124 nodes 98 nps 118798 time 0 pv g3g7 g8g7 f5f6 g7f6
+info depth 3 score cp -124 nodes 249 nps 186663 time 1 pv g3g7 g8g7 f5f6 g7f6 h5b5
+info depth 4 score mate 2 nodes 688 nps 239336 time 2 pv g3g7 g8h8 h5h7
+--- Search Statistics ---
+Total Time: 0.00s
+Nodes Searched: 688 (228749 NPS)
+- Quiescence Nodes: 277 (40.3%)
+Transposition Table Hits: 290.0 (42.2%)
+Beta Cutoffs: 85.0
+Null Move Cutoffs: 4.0
+Futility Pruned: 146.0
+Razoring Used: 19.0
+QS Delta Pruned: 28.0
+QS SEE Pruned: 29.0
+-------------------------
+
+FEN: 5rk1/5ppp/1p6/1q3P1Q/2pp3P/6R1/6PK/8 w - - 0 31
+Best move found: g3g7
+Score: 29997
+rating: 1788
+theme: attraction crushing discoveredAttack endgame long sacrifice
+
+Test PASSED: The engine found the correct move (g3g7).
+51 tests completed.
+----------------------------------------
+New game started. Caches and stats cleared.
+--- Running Test: Lichess Puzzle 004X6 ---
+info depth 1 score cp 553 nodes 17 nps 50569 time 0 pv b8b1 d2d1
+info depth 2 score mate 2 nodes 47 nps 66892 time 0 pv b8b1 d2d1 b1d1
+--- Search Statistics ---
+Total Time: 0.00s
+Nodes Searched: 47 (60730 NPS)
+- Quiescence Nodes: 18 (38.3%)
+Transposition Table Hits: 21.0 (44.7%)
+Beta Cutoffs: 1.0
+Null Move Cutoffs: 0.0
+Futility Pruned: 0.0
+Razoring Used: 0.0
+QS Delta Pruned: 0.0
+QS SEE Pruned: 0.0
+-------------------------
+
+FEN: 1r4k1/p4ppp/2Q5/3pq3/8/P6P/2PR1PP1/1R4K1 b - - 0 26
+Best move found: b8b1
+Score: 29997
+rating: 1176
+theme: endgame mate mateIn2 short
+
+Test PASSED: The engine found the correct move (b8b1).
+52 tests completed.
+----------------------------------------
+New game started. Caches and stats cleared.
+--- Running Test: Lichess Puzzle 004iZ ---
+info depth 1 score mate 1 nodes 46 nps 98639 time 0 pv g3g7
+--- Search Statistics ---
+Total Time: 0.00s
+Nodes Searched: 46 (81996 NPS)
+- Quiescence Nodes: 33 (71.7%)
+Transposition Table Hits: 0.0 (0.0%)
+Beta Cutoffs: 0.0
+Null Move Cutoffs: 0.0
+Futility Pruned: 0.0
+Razoring Used: 0.0
+QS Delta Pruned: 0.0
+QS SEE Pruned: 4.0
+-------------------------
+
+FEN: r2r2k1/2q1bpp1/3p3p/1ppn4/1P1BP3/P5Q1/4RPPP/R5K1 w - - 0 21
+Best move found: g3g7
+Score: 29999
+rating: 1004
+theme: kingsideAttack mate mateIn1 middlegame oneMove
+
+Test PASSED: The engine found the correct move (g3g7).
+53 tests completed.
+----------------------------------------
+New game started. Caches and stats cleared.
+--- Running Test: Lichess Puzzle 004nd ---
+info depth 1 score cp 270 nodes 27 nps 71493 time 0 pv e4f6 g8f7
+info depth 2 score cp 270 nodes 111 nps 121685 time 0 pv e4f6 g8f7 f6d7
+info depth 3 score cp 270 nodes 403 nps 157033 time 2 pv e4f6 g8f7 f6d7 d8d7
+info depth 4 score cp 294 nodes 703 nps 114642 time 6 pv e4f6 g8f7 f6d7 d8d7 a1f1 f7g8
+info depth 5 score cp -49 nodes 7877 nps 195803 time 40 pv h6c1 d7g7 b2b4 e5d3 c1f1
+info depth 6 score cp -47 nodes 19730 nps 204414 time 96 pv h6c1 d7d3 b2b4 c5e3 c1f1 g8g7 g8f7 h2h4
+info depth 7 score cp -34 nodes 30661 nps 205115 time 149 pv h6c1 c5e7 c1f1 a6a5 h2h4 e5d3 g2g3
+info depth 8 score cp -24 nodes 51059 nps 188639 time 270 pv e4f6 d8f6 h6g6 e4f6 e7f6 g2g3
+info depth 9 score cp -12 nodes 73473 nps 168696 time 435 pv a1f1 d7d1 h6f4 g8f7 f4f5 d1f1 f5f1 e5d3 b2b4 c5e3
+info depth 10 score cp 10 nodes 136185 nps 146328 time 930 pv a1f1 d7d1 h6f4 g8f7 g2g3 c5e7 h2h4 f7g8 h1g1 e5d3
+info depth 11 score cp 13 nodes 669096 nps 105384 time 6349 pv h6h5 d7g7 a1f1 c5e7 h5e2 g8f8 e4f6 e7f6 e2e5 e1f1 d8h4 h1g1 f7g7
+--- Search Statistics ---
+Total Time: 6.35s
+Nodes Searched: 669096 (105382 NPS)
+- Quiescence Nodes: 296216 (44.3%)
+Transposition Table Hits: 299092.0 (44.7%)
+Beta Cutoffs: 102636.0
+Null Move Cutoffs: 11701.0
+Futility Pruned: 381545.0
+Razoring Used: 6545.0
+QS Delta Pruned: 41728.0
+QS SEE Pruned: 65480.0
+-------------------------
+
+FEN: 3q2k1/3r4/pp3p1Q/2b1n3/P3N3/2P5/1P4PP/R6K w - - 1 25
+Best move found: h6h5
+Score: 13
+rating: 898
+theme: crushing fork middlegame short
+
+Test FAILED: The engine suggested h6h5, but the correct move is e4f6.
+54 tests completed.
+----------------------------------------
+New game started. Caches and stats cleared.
+--- Running Test: Lichess Puzzle 004sY ---
+info depth 1 score cp -191 nodes 13 nps 40033 time 0 pv g7e8
+info depth 2 score mate -1000 nodes 14 nps 25180 time 0 pv
+--- Search Statistics ---
+Total Time: 0.00s
+Nodes Searched: 14 (23018 NPS)
+- Quiescence Nodes: 7 (50.0%)
+Transposition Table Hits: 1.0 (7.1%)
+Beta Cutoffs: 0.0
+Null Move Cutoffs: 0.0
+Futility Pruned: 0.0
+Razoring Used: 0.0
+QS Delta Pruned: 0.0
+QS SEE Pruned: 0.0
+-------------------------
+
+FEN: 8/2k3n1/K2p2p1/2pP2Pp/2P4P/7B/8/8 b - - 1 57
+Best move found: g7e8
+Score: 32000
+rating: 2191
+theme: crushing endgame short
+
+Test FAILED: The engine suggested g7e8, but the correct move is c7d8.
+55 tests completed.
+----------------------------------------
+New game started. Caches and stats cleared.
+--- Running Test: Lichess Puzzle 004sg ---
+info depth 1 score cp 167 nodes 25 nps 75166 time 0 pv c4d2
+info depth 2 score cp 167 nodes 41 nps 75889 time 0 pv c4d2 c5b6
+info depth 3 score cp 15608 nodes 189 nps 119566 time 1 pv a7a6 c5b6 c4d2
+info depth 4 score cp 15608 nodes 274 nps 146586 time 1 pv c4d2 c5b6 a7b6
+info depth 5 score cp 15608 nodes 464 nps 201028 time 2 pv c4d2 c5b6 a7b6
+info depth 6 score cp 15608 nodes 660 nps 243105 time 2 pv c4d2 c5b6 a7b6
+info depth 7 score cp 15608 nodes 1011 nps 308799 time 3 pv c4d2 c5b6 a7b6
+info depth 8 score cp 15608 nodes 1342 nps 354277 time 3 pv c4d2 c5b6 a7b6
+info depth 9 score cp 20472 nodes 6998 nps 101118 time 69 pv d6c5 h4g3 c4d2 h2h1 g8g7
+info depth 10 score cp 20372 nodes 7000 nps 48615 time 143 pv d6c5 d6c5 h4g3 e7g5
+info depth 11 score cp 20472 nodes 7001 nps 48492 time 144 pv
+info depth 12 score cp 20572 nodes 7002 nps 2676 time 2615 pv
+--- Search Statistics ---
+Total Time: 2.62s
+Nodes Searched: 7002 (2676 NPS)
+- Quiescence Nodes: 1373 (19.6%)
+Transposition Table Hits: 3418.0 (48.8%)
+Beta Cutoffs: 1430.0
+Null Move Cutoffs: 185.0
+Futility Pruned: 3639.0
+Razoring Used: 37.0
+QS Delta Pruned: 2013.0
+QS SEE Pruned: 33.0
+-------------------------
+
+FEN: 6k1/p3b2p/1p1pP3/2P3P1/2np3B/P6P/3Q3K/8 b - - 0 38
+Best move found: d4d3
+Score: 20572
+rating: 2612
+theme: advantage clearance endgame hangingPiece long quietMove
+
+Test FAILED: The engine suggested d4d3, but the correct move is c4d2.
+56 tests completed.
+----------------------------------------
+New game started. Caches and stats cleared.
+--- Running Test: Lichess Puzzle 004zI ---
+info depth 1 score cp -280 nodes 36 nps 72039 time 0 pv h6g6 g8f8
+info depth 2 score mate 1 nodes 53 nps 48749 time 1 pv h6h8
+--- Search Statistics ---
+Total Time: 0.00s
+Nodes Searched: 53 (45995 NPS)
+- Quiescence Nodes: 26 (49.1%)
+Transposition Table Hits: 18.0 (34.0%)
+Beta Cutoffs: 0.0
+Null Move Cutoffs: 0.0
+Futility Pruned: 0.0
+Razoring Used: 0.0
+QS Delta Pruned: 4.0
+QS SEE Pruned: 8.0
+-------------------------
+
+FEN: 2q3k1/4br2/6pQ/1p1n2p1/7P/1P4P1/1B2PP2/6K1 w - - 0 28
+Best move found: h6h8
+Score: 29999
+rating: 1397
+theme: endgame mate mateIn1 oneMove
+
+Test PASSED: The engine found the correct move (h6h8).
+57 tests completed.
+----------------------------------------
+New game started. Caches and stats cleared.
+--- Running Test: Lichess Puzzle 0050w ---
+info depth 1 score cp 50 nodes 42 nps 92618 time 0 pv h3g3 e5g3
+info depth 2 score cp 413 nodes 100 nps 115960 time 0 pv h3g3 e5g3 h5g5 g8f7
+info depth 3 score cp 15608 nodes 176 nps 153503 time 1 pv h3g3 e5g3 h5h7
+info depth 4 score cp 15608 nodes 254 nps 180079 time 1 pv h5g5 g3g5 h3h7
+info depth 5 score cp 15608 nodes 421 nps 234814 time 1 pv h3g3 e5g3 h5h7
+info depth 6 score cp 15608 nodes 537 nps 265543 time 2 pv h3g3 e5g3 h5h7
+info depth 7 score cp 15608 nodes 770 nps 323155 time 2 pv h3g3 e5g3 h5h7
+info depth 8 score cp 15609 nodes 1025 nps 235003 time 4 pv h5g5 g3g5 h3g3 f8f3 e3e2
+info depth 9 score cp 15711 nodes 3005 nps 23715 time 126 pv e3d2 e5c3 d2c1 c3d2 c1d2 g3h3 h5h3 f8f3
+info depth 10 score cp 15811 nodes 3006 nps 16989 time 176 pv
+info depth 11 score cp 15714 nodes 99146 nps 84489 time 1173 pv h3h1 g3f3 e3d2 e5g3 e4e5 d6e5 d2e2 f3d3
+--- Search Statistics ---
+Total Time: 1.17s
+Nodes Searched: 99146 (84479 NPS)
+- Quiescence Nodes: 28034 (28.3%)
+Transposition Table Hits: 37618.0 (37.9%)
+Beta Cutoffs: 19609.0
+Null Move Cutoffs: 6403.0
+Futility Pruned: 25954.0
+Razoring Used: 885.0
+QS Delta Pruned: 26963.0
+QS SEE Pruned: 503.0
+-------------------------
+
+FEN: 5rk1/1p2p2p/p2p4/2pPb2R/2P1P3/1P1BKPrR/8/8 w - - 5 31
+Best move found: h3h1
+Score: 15714
+rating: 853
+theme: crushing endgame fork long
+
+Test FAILED: The engine suggested h3h1, but the correct move is h3g3.
+58 tests completed.
+----------------------------------------
+New game started. Caches and stats cleared.
+--- Running Test: Lichess Puzzle 0055Y ---
+info depth 1 score cp 57 nodes 28 nps 73171 time 0 pv c6a8
+info depth 2 score cp -43 nodes 56 nps 65100 time 0 pv f2e3 e5d4
+info depth 3 score cp 106 nodes 278 nps 136711 time 2 pv f2e3 c8f5 c6a8
+info depth 4 score cp 24 nodes 753 nps 152024 time 4 pv f2e3 e5e3 e1d1 c8e6 c6d5
+info depth 5 score cp 2 nodes 2719 nps 189961 time 14 pv f2e3 e5e3 e1d1 c8e6 c6d5 e6d5
+info depth 6 score cp -82 nodes 7385 nps 178305 time 41 pv f2e3 e5e3 e1f1 c8a6 c6b5 a6b5 b1b5 a8b8 c5d5
+info depth 7 score cp 18 nodes 7386 nps 123342 time 59 pv
+info depth 8 score cp -81 nodes 17998 nps 154767 time 116 pv f2e3 e5e3 e1d1 c8f5 c6d5 h4h3 d5a8 e3d4 d1e2 d4c5
+info depth 9 score cp 19 nodes 17999 nps 112520 time 159 pv
+info depth 10 score cp -80 nodes 140144 nps 94338 time 1485 pv f2e3 e5e3 e1d1 h4h3 c5d5 h3g2 d5g2
+--- Search Statistics ---
+Total Time: 1.49s
+Nodes Searched: 140144 (94327 NPS)
+- Quiescence Nodes: 59241 (42.3%)
+Transposition Table Hits: 67538.0 (48.2%)
+Beta Cutoffs: 20581.0
+Null Move Cutoffs: 3822.0
+Futility Pruned: 104258.0
+Razoring Used: 2542.0
+QS Delta Pruned: 14934.0
+QS SEE Pruned: 11937.0
+-------------------------
+
+FEN: r1b2rk1/p3pp2/2B5/2Qpq3/3N2pp/4b3/2P2PPP/1R2K2R w K - 0 24
+Best move found: f2e3
+Score: -80
+rating: 2089
+theme: advantage defensiveMove middlegame short
+
+Test PASSED: The engine found the correct move (f2e3).
+59 tests completed.
+----------------------------------------
+New game started. Caches and stats cleared.
+--- Running Test: Lichess Puzzle 005HF ---
+info depth 1 score cp 498 nodes 7 nps 19691 time 0 pv g8g7
+info depth 2 score cp 646 nodes 53 nps 67588 time 0 pv g8g7 e5d3
+info depth 3 score cp 481 nodes 161 nps 97782 time 1 pv g8g7 e5c4 d6h2 h3h2
+info depth 4 score cp 530 nodes 449 nps 137312 time 3 pv g8g7 e5c4 d6f4 e1e6
+info depth 5 score cp 0 nodes 587 nps 151455 time 3 pv g8g7 h3h7 g7h7 e5c4 d6h2 g1h2
+info depth 6 score cp 0 nodes 2108 nps 203704 time 10 pv g8g7 f2f4 d6e5 f4e5 d8d4 h3f5
+info depth 7 score cp 0 nodes 2693 nps 221915 time 12 pv g8g7 h3g4 f5g4 e1e3 d6e5 d4e5 f8f2 g1f2
+info depth 8 score cp 0 nodes 6307 nps 269416 time 23 pv g8g7 e1e2 d6e5 h3g4 f5g4 e2e3
+info depth 9 score cp 0 nodes 26377 nps 80038 time 329 pv g8g7 h3g3 g7f6 g3f4 d6e5 f4h4 f6g7 h4h7 g7h7 g2g4 f5g4 d4e5
+info depth 10 score cp 0 nodes 50257 nps 96037 time 523 pv g8g7 h3h6 g7h6 g7h6 e5g4 f5g4 e1e6 f8f6 e6d6
+info depth 11 score cp 98 nodes 76786 nps 98451 time 779 pv g8g7 h3g3 g7h8
+info depth 12 score cp 198 nodes 76787 nps 14455 time 5312 pv
+--- Search Statistics ---
+Total Time: 5.31s
+Nodes Searched: 76787 (14454 NPS)
+- Quiescence Nodes: 29310 (38.2%)
+Transposition Table Hits: 35434.0 (46.1%)
+Beta Cutoffs: 12069.0
+Null Move Cutoffs: 4720.0
+Futility Pruned: 45574.0
+Razoring Used: 1010.0
+QS Delta Pruned: 8822.0
+QS SEE Pruned: 3018.0
+-------------------------
+
+FEN: 3r1rk1/1p4Rp/p2bp3/1q2Np2/3P4/1P5Q/5PPP/4R1K1 b - - 0 27
+Best move found: g8g7
+Score: 198
+rating: 1347
+theme: crushing defensiveMove hangingPiece middlegame short
+
+Test PASSED: The engine found the correct move (g8g7).
+60 tests completed.
+----------------------------------------
+New game started. Caches and stats cleared.
+--- Running Test: Lichess Puzzle 005N7 ---
+info depth 1 score cp 428 nodes 25 nps 67562 time 0 pv a4a8 c7c8
+info depth 2 score cp 15328 nodes 50 nps 75873 time 0 pv a4a8 c7c8 a8c8
+info depth 3 score cp 15328 nodes 131 nps 143310 time 0 pv a4a8 c7c8 a8c8
+info depth 4 score mate 2 nodes 261 nps 198102 time 1 pv a4a8 c7c8 a8c8
+--- Search Statistics ---
+Total Time: 0.00s
+Nodes Searched: 261 (187965 NPS)
+- Quiescence Nodes: 107 (41.0%)
+Transposition Table Hits: 18.0 (6.9%)
+Beta Cutoffs: 17.0
+Null Move Cutoffs: 5.0
+Futility Pruned: 113.0
+Razoring Used: 0.0
+QS Delta Pruned: 13.0
+QS SEE Pruned: 0.0
+-------------------------
+
+FEN: r6k/2q3pp/8/2p5/R1np4/7P/2PB1PP1/6K1 w - - 0 33
+Best move found: a4a8
+Score: 29997
+rating: 600
+theme: backRankMate endgame hangingPiece mate mateIn2 short
+
+Test PASSED: The engine found the correct move (a4a8).
+61 tests completed.
+----------------------------------------
+New game started. Caches and stats cleared.
+--- Running Test: Lichess Puzzle 005YX ---
+info depth 1 score cp -43 nodes 27 nps 73968 time 0 pv f7e6
+info depth 2 score cp -43 nodes 69 nps 115624 time 0 pv f7e6 c6e6
+info depth 3 score cp -166 nodes 212 nps 137859 time 1 pv f7e6 c6a6 b5b4
+info depth 4 score cp -166 nodes 494 nps 167217 time 2 pv f7e6 c6a6 b5b4 a6e6
+info depth 5 score cp -79 nodes 1518 nps 198125 time 7 pv f7e6 c6e6 c8a8 a2a4 g7h8
+info depth 6 score cp -44 nodes 3943 nps 209712 time 18 pv f7e6 c6e6 d8e8 e6a6 c8a8 a6a8
+info depth 7 score cp -138 nodes 7473 nps 196073 time 38 pv f7e6 c6a6 e6e5 g2g3 d8e8 a6b5 g7h8
+info depth 8 score cp -41 nodes 21797 nps 144998 time 150 pv f7e6 g2g3 c8c6 h2h4
+info depth 9 score cp -64 nodes 56707 nps 130218 time 435 pv f7e6 c6b7 g7h8 b7h7
+info depth 10 score cp -130 nodes 78192 nps 130614 time 598 pv f7e6 c6b7 g7h8 b7a6 e6e5 a6f6 g5f6 a2a4
+info depth 11 score cp -68 nodes 193943 nps 116052 time 1671 pv f7e6 c6e6 a6a5 e6f6 g5f6 c2c3
+--- Search Statistics ---
+Total Time: 1.67s
+Nodes Searched: 193943 (116042 NPS)
+- Quiescence Nodes: 94283 (48.6%)
+Transposition Table Hits: 82919.0 (42.8%)
+Beta Cutoffs: 25086.0
+Null Move Cutoffs: 3638.0
+Futility Pruned: 117600.0
+Razoring Used: 1775.0
+QS Delta Pruned: 15447.0
+QS SEE Pruned: 12803.0
+-------------------------
+
+FEN: 2rr4/5pk1/p1Q1N1pp/1p4q1/3pP3/1B1P4/PPP3PP/6RK b - - 0 25
+Best move found: f7e6
+Score: -68
+rating: 1440
+theme: defensiveMove equality middlegame short
+
+Test PASSED: The engine found the correct move (f7e6).
+62 tests completed.
+----------------------------------------
+New game started. Caches and stats cleared.
+--- Running Test: Lichess Puzzle 005ws ---
+info depth 1 score cp 15 nodes 18 nps 50567 time 0 pv g6g5
+info depth 2 score cp 20 nodes 72 nps 130168 time 0 pv g6g5 d4f5
+info depth 3 score cp 37 nodes 214 nps 241090 time 0 pv g6g5 e6f6 g5h4
+info depth 4 score cp 27 nodes 428 nps 304936 time 1 pv f6f5 e6f6 g4h4 f6g6
+info depth 5 score cp 30 nodes 939 nps 337109 time 2 pv f6f5 e6f6 f5f4 f6e5 f4f3
+info depth 6 score cp 10 nodes 2267 nps 356925 time 6 pv f6f5 e6d5 g4h3 d4e2 e5d5
+info depth 7 score cp -88 nodes 4552 nps 285567 time 15 pv g6g5 e6f6 g4g3 f6g5 g3h3 g5h5
+info depth 8 score cp -15 nodes 8066 nps 328063 time 24 pv g6g5 h4g5 f6g5 e6f6 h5h4 d4e6 h4h3 e6g5
+info depth 9 score cp -28 nodes 12267 nps 353891 time 34 pv g6g5 h4g5 g4g5 d4f5 g5g6 f5d4 g6g7 d4f5 g7g6 f5d4
+info depth 10 score cp -31 nodes 21230 nps 378739 time 56 pv g6g5 h4g5 g4g5 d4f5 g5g6 f5e7 g6g5 e7f5 g5g6 f5e7 g6g5 e7d5
+info depth 11 score cp -21 nodes 28765 nps 348645 time 82 pv g6g5 h4g5 g4g5 d4f3 g5g4 f3d4
+info depth 12 score cp 70 nodes 62485 nps 234620 time 266 pv g6g5 e6f6 g5h4 d4e6 g4g3 e6d4 h4h3
+info depth 13 score cp 70 nodes 123123 nps 176784 time 696 pv g6g5 h4g5 f6g5 d4e2 h5h4 e6f6 h4h3 e2d4 g4f4 f6e7 f4g3 d4f5 g3f4 f5d4
+info depth 14 score cp 97 nodes 190789 nps 169335 time 1126 pv g6g5 h4g5 f6g5 d4f5 h5h4 f5e3 g4f3 e6f6
+--- Search Statistics ---
+Total Time: 1.13s
+Nodes Searched: 190789 (169314 NPS)
+- Quiescence Nodes: 47563 (24.9%)
+Transposition Table Hits: 113425.0 (59.5%)
+Beta Cutoffs: 33595.0
+Null Move Cutoffs: 0.0
+Futility Pruned: 23444.0
+Razoring Used: 1508.0
+QS Delta Pruned: 227.0
+QS SEE Pruned: 22.0
+-------------------------
+
+FEN: 8/8/4Kpp1/7p/3N2kP/8/8/8 b - - 3 62
+Best move found: g6g5
+Score: 97
+rating: 2281
+theme: crushing endgame knightEndgame master quietMove veryLong
+
+Test PASSED: The engine found the correct move (g6g5).
+63 tests completed.
+----------------------------------------
+New game started. Caches and stats cleared.
+--- Running Test: Lichess Puzzle 005xu ---
+info depth 1 score cp 166 nodes 26 nps 69151 time 0 pv a4a1
+info depth 2 score cp 66 nodes 88 nps 117922 time 0 pv a4a1 f3d5 f3d5
+info depth 3 score cp 144 nodes 209 nps 134222 time 1 pv a4a3 f3e4 a3a7 d7e6
+info depth 4 score cp 244 nodes 436 nps 114351 time 3 pv a4a7 d7e6 d6d7 f3e4 d7d8b
+info depth 5 score cp 145 nodes 766 nps 123780 time 6 pv a4a7 d7e6 a7e7 e6d5 d6d7 f3e4 e7e4
+info depth 6 score cp 45 nodes 905 nps 42840 time 21 pv c5c6 g8a8 a1e1 f3d5
+info depth 7 score cp 145 nodes 906 nps 42342 time 21 pv
+info depth 8 score cp 45 nodes 16248 nps 158610 time 102 pv a4a7 b6a5 d7e6 b8b5
+info depth 9 score cp 9 nodes 52479 nps 162266 time 323 pv a4d4 d7e6 d4f4 g8b8 b6c7 b8b3 c7c8 f3d5 f4h4 d5e4 e4c6
+info depth 10 score cp 8 nodes 129147 nps 153634 time 840 pv a4f4 g8b8 b6a5 f3d5 f4h4 d7c6
+info depth 11 score cp 8 nodes 164739 nps 150512 time 1094 pv a4f4 g8b8 b6a7 b8a8 a7b6 a8b8
+--- Search Statistics ---
+Total Time: 1.09s
+Nodes Searched: 164739 (150467 NPS)
+- Quiescence Nodes: 46792 (28.4%)
+Transposition Table Hits: 95978.0 (58.3%)
+Beta Cutoffs: 27396.0
+Null Move Cutoffs: 4245.0
+Futility Pruned: 42803.0
+Razoring Used: 2935.0
+QS Delta Pruned: 776.0
+QS SEE Pruned: 2820.0
+-------------------------
+
+FEN: 6r1/3k4/1K1P4/2P5/R7/5b2/8/8 w - - 1 69
+Best move found: a4f4
+Score: 8
+rating: 1956
+theme: advancedPawn crushing endgame exposedKing long
+
+Test FAILED: The engine suggested a4f4, but the correct move is a4a7.
+64 tests completed.
+----------------------------------------
+New game started. Caches and stats cleared.
+--- Running Test: Lichess Puzzle 0061g ---
+info depth 1 score cp -1095 nodes 48 nps 104422 time 0 pv g6f7 e6f7
+info depth 2 score cp -942 nodes 133 nps 140620 time 0 pv g6f7 g8f7 g3g7 f7e8
+info depth 3 score cp -842 nodes 274 nps 152015 time 1 pv g6f7 g8f7 g3g7 f7e8 g7g2
+info depth 4 score cp -1479 nodes 1322 nps 172420 time 7 pv g6f7 e6f7 g3g2 d5g2 g1g2
+info depth 5 score cp -2291 nodes 7751 nps 180843 time 42 pv g3d3 g2f1q d3f1 e6g6 g1h2 d1f1 f2f3
+info depth 6 score mate 2 nodes 9265 nps 113123 time 81 pv g3b8 e6c8 b8c8
+--- Search Statistics ---
+Total Time: 0.08s
+Nodes Searched: 9265 (112942 NPS)
+- Quiescence Nodes: 4676 (50.5%)
+Transposition Table Hits: 4326.0 (46.7%)
+Beta Cutoffs: 1159.0
+Null Move Cutoffs: 36.0
+Futility Pruned: 5431.0
+Razoring Used: 4.0
+QS Delta Pruned: 1874.0
+QS SEE Pruned: 426.0
+-------------------------
+
+FEN: 6k1/pp3pp1/2p1q1Pp/3b4/8/6Q1/PB3Pp1/3r1NK1 w - - 0 28
+Best move found: g3b8
+Score: 29997
+rating: 773
+theme: endgame mate mateIn2 short
+
+Test PASSED: The engine found the correct move (g3b8).
+65 tests completed.
+----------------------------------------
+New game started. Caches and stats cleared.
+--- Running Test: Lichess Puzzle 0066C ---
+info depth 1 score cp -191 nodes 72 nps 117734 time 0 pv f5e3
+info depth 2 score cp 35 nodes 216 nps 137455 time 1 pv b6f2 g1f2 f5d4 e6f7
+info depth 3 score cp 15608 nodes 395 nps 167636 time 2 pv b6f2 g1f2 d8d5
+info depth 4 score cp 360 nodes 4407 nps 211745 time 20 pv d8d5 e1e2 b6f2 g1h1 d5e6
+info depth 5 score cp 260 nodes 10054 nps 179640 time 55 pv d8d5 e6b6 c7b6 d2h6 h8g8 h6h5
+info depth 6 score cp 360 nodes 10055 nps 164750 time 61 pv
+info depth 7 score cp 261 nodes 12544 nps 150047 time 83 pv d8d5 e6d5
+info depth 8 score cp 161 nodes 12545 nps 42157 time 297 pv
+info depth 9 score cp 615 nodes 102714 nps 98599 time 1041 pv d8d5 e6e4 h6h5 e4d5 b6f2 g1f1
+--- Search Statistics ---
+Total Time: 1.04s
+Nodes Searched: 102714 (98586 NPS)
+- Quiescence Nodes: 53743 (52.3%)
+Transposition Table Hits: 43990.0 (42.8%)
+Beta Cutoffs: 13033.0
+Null Move Cutoffs: 1126.0
+Futility Pruned: 89210.0
+Razoring Used: 515.0
+QS Delta Pruned: 12552.0
+QS SEE Pruned: 7882.0
+-------------------------
+
+FEN: r2q1r1k/2p3p1/pb2Q2p/1p1B1n2/8/2P5/PP1B1PPP/3RR1K1 b - - 0 20
+Best move found: d8d5
+Score: 615
+rating: 1736
+theme: advantage discoveredAttack kingsideAttack long middlegame sacrifice
+
+Test FAILED: The engine suggested d8d5, but the correct move is b6f2.
+66 tests completed.
+----------------------------------------
+New game started. Caches and stats cleared.
+--- Running Test: Lichess Puzzle 6.00E+01 ---
+info depth 1 score cp -25 nodes 16 nps 43890 time 0 pv g7g5
+info depth 2 score cp -124 nodes 150 nps 148313 time 1 pv f8e8 e1f1 g4g3
+info depth 3 score cp -11 nodes 413 nps 120815 time 3 pv g7g5 a7e7 h6h5
+info depth 4 score cp -35 nodes 1905 nps 179243 time 10 pv g7g6 a7e7 g6g5 e1f1
+info depth 5 score cp 343 nodes 3730 nps 144770 time 25 pv f8e8 e1f1 g4h3 d5g2 e8e1 f1e1 h3g2 b4b5
+info depth 6 score cp 244 nodes 4324 nps 139359 time 31 pv f8e8 a7e7 e8e7 e1f1 h6h5
+info depth 7 score cp 344 nodes 4325 nps 133236 time 32 pv
+info depth 8 score cp 317 nodes 13081 nps 167244 time 78 pv f8e8 e1f1 g4h3 d5g2 e8e1 f1e1 h3g2 a7d7 g2g1 e1e2 g1b1 f2f4
+info depth 9 score cp 320 nodes 32583 nps 207050 time 157 pv f8e8 e1f1 g4h3 d5g2 e8e1 f1e1 h3g2 a7d7 g2h1 e1e2 h1b1 b4b5 b1a1
+info depth 10 score cp 327 nodes 51579 nps 196457 time 262 pv f8e8 e1f1 g4h3 d5g2 e8e1 f1e1 h3g2 a7d7 g2h1 e1e2 h1h5 e2d2 h5g4 d7d6 g4f3
+info depth 11 score cp 332 nodes 107738 nps 138367 time 778 pv f8e8 e1f1 g4h3 d5g2 e8e1 f1e1 h3g2 a7d7 g2a8 e1e2 a8a3 d7d8 g8h7 b4b5 a3b2 e2f3
+info depth 12 score cp 379 nodes 199379 nps 105839 time 1883 pv f8e8 e1f1 g4h3 d5g2 e8e1 f1e1 h3g2 e1e2 g2h3 e2d2 h3h2 a7a8 g8h7 d2e2 h2h3
+--- Search Statistics ---
+Total Time: 1.88s
+Nodes Searched: 199379 (105828 NPS)
+- Quiescence Nodes: 81394 (40.8%)
+Transposition Table Hits: 89877.0 (45.1%)
+Beta Cutoffs: 28373.0
+Null Move Cutoffs: 7242.0
+Futility Pruned: 70972.0
+Razoring Used: 6112.0
+QS Delta Pruned: 5581.0
+QS SEE Pruned: 4118.0
+-------------------------
+
+FEN: 5rk1/R4pp1/1p5p/3Q4/1PPp2q1/3P2P1/5P2/4K3 b - - 0 34
+Best move found: f8e8
+Score: 379
+rating: 1606
+theme: crushing deflection endgame veryLong
+
+Test PASSED: The engine found the correct move (f8e8).
+67 tests completed.
+----------------------------------------
+New game started. Caches and stats cleared.
+--- Running Test: Lichess Puzzle 006HV ---
+info depth 1 score cp -403 nodes 26 nps 59984 time 0 pv b4b3 a2a3
+info depth 2 score cp -370 nodes 127 nps 151543 time 0 pv b4b3 a2a3 e6e5
+info depth 3 score cp -500 nodes 755 nps 210776 time 3 pv d1c1 c3c4 e6e5
+info depth 4 score mate 2 nodes 1136 nps 136693 time 8 pv b4b3 a2a3 d1a1
+--- Search Statistics ---
+Total Time: 0.01s
+Nodes Searched: 1136 (134775 NPS)
+- Quiescence Nodes: 588 (51.8%)
+Transposition Table Hits: 508.0 (44.7%)
+Beta Cutoffs: 106.0
+Null Move Cutoffs: 0.0
+Futility Pruned: 167.0
+Razoring Used: 2.0
+QS Delta Pruned: 84.0
+QS SEE Pruned: 125.0
+-------------------------
+
+FEN: 1r6/5k2/2Q1pNp1/p5Pp/1p2P2P/2P4R/KP3P2/3q4 b - - 0 31
+Best move found: b4b3
+Score: 29997
+rating: 1214
+theme: endgame mate mateIn2 short
+
+Test PASSED: The engine found the correct move (b4b3).
+68 tests completed.
+----------------------------------------
+New game started. Caches and stats cleared.
+--- Running Test: Lichess Puzzle 006NL ---
+info depth 1 score cp -188 nodes 11 nps 31493 time 0 pv e7c6
+info depth 2 score cp -88 nodes 16 nps 11335 time 1 pv d7c6
+info depth 3 score cp 4 nodes 554 nps 152460 time 3 pv d7c6 b2b3 c4e5
+info depth 4 score cp -96 nodes 1108 nps 125799 time 8 pv e7c6 b2b3 c6e7 g5e6
+info depth 5 score cp -30 nodes 3440 nps 160585 time 21 pv d7c6 b2b3 c4b2 f3e2 b2d1
+info depth 6 score cp 70 nodes 3441 nps 56671 time 60 pv
+info depth 7 score cp -30 nodes 3442 nps 47401 time 72 pv
+info depth 8 score cp 23 nodes 29690 nps 104946 time 282 pv d7c6 b2b3 c6c5 f2f1 b8b6 g5e6 b6e6 f1c4
+info depth 9 score cp -75 nodes 65650 nps 143001 time 459 pv d7c6 b2b3 c6c5 f2c5 a7a8 b1a2 c4e5
+info depth 10 score cp -173 nodes 122141 nps 136566 time 894 pv d7c6 b2b3 c4e5 f4e5 g7e5
+info depth 11 score cp -178 nodes 361546 nps 114614 time 3154 pv e7c6 b2b3 c4e5 f4e5 c6e5 h1e1 e5f3 g5e6 f3e1 c5c6 g7d4 f2d4 a7a8
+--- Search Statistics ---
+Total Time: 3.15s
+Nodes Searched: 361546 (114608 NPS)
+- Quiescence Nodes: 185748 (51.4%)
+Transposition Table Hits: 103088.0 (28.5%)
+Beta Cutoffs: 43593.0
+Null Move Cutoffs: 5365.0
+Futility Pruned: 300610.0
+Razoring Used: 431.0
+QS Delta Pruned: 54352.0
+QS SEE Pruned: 59234.0
+-------------------------
+
+FEN: 1r6/k2qn1b1/p1N1p1p1/2PpPpN1/2n2P1P/p4B2/1PP2Q2/1K1R3R b - - 0 32
+Best move found: e7c6
+Score: -178
+rating: 2279
+theme: advancedPawn advantage middlegame pin veryLong
+
+Test PASSED: The engine found the correct move (e7c6).
+69 tests completed.
+----------------------------------------
+New game started. Caches and stats cleared.
+--- Running Test: Lichess Puzzle 006RM ---
+info depth 1 score cp 264 nodes 37 nps 86843 time 0 pv b4c5
+info depth 2 score cp 416 nodes 93 nps 115954 time 0 pv b4c5 b6c5
+info depth 3 score cp 416 nodes 222 nps 184639 time 1 pv b4c5 b6c5 d3d6
+info depth 4 score cp 423 nodes 538 nps 240568 time 2 pv b4c5 b6c5 d3d6 d8d6
+info depth 5 score cp 423 nodes 1211 nps 280562 time 4 pv b4c5 b6c5 d3d6 d8d6 d1d6
+info depth 6 score cp 514 nodes 2561 nps 337701 time 7 pv b4c5 b6c5 d3d6 d8d6 d1d6 c5c4
+info depth 7 score cp 415 nodes 6051 nps 345820 time 17 pv b4c5 b6c5 d3d6 b8c7 d6d8 h8d8 d1d8
+info depth 8 score cp 415 nodes 10527 nps 345948 time 30 pv b4c5 b6c5 d3d6 b8c7 d6d8 h8d8 d1d8 c7d8
+info depth 9 score cp 467 nodes 19018 nps 287063 time 66 pv b4c5 b6c5 d3d6 d8d6 d1d6 b8a7 a2a4 h8b8 c2c4
+info depth 10 score cp 435 nodes 32753 nps 237490 time 137 pv b4c5 b6c5 d3d6 b8c7 d6d8 h8d8 d1d8 c7d8 a2a4 g6g5
+info depth 11 score cp 455 nodes 64672 nps 135361 time 477 pv b4c5 b6c5 d3d6 b8c7 d6d8 h8d8 d1d8 c7d8 b2b3 a6a5 a2a4
+info depth 12 score cp 455 nodes 108584 nps 112674 time 963 pv b4c5 b6c5 d3d6 b8c7 d6d8 h8d8 d1d8 c7d8 a2a4 g6g5 c2c4 a6a5
+--- Search Statistics ---
+Total Time: 0.96s
+Nodes Searched: 108584 (112655 NPS)
+- Quiescence Nodes: 51033 (47.0%)
+Transposition Table Hits: 32673.0 (30.1%)
+Beta Cutoffs: 10951.0
+Null Move Cutoffs: 4945.0
+Futility Pruned: 92550.0
+Razoring Used: 1193.0
+QS Delta Pruned: 5131.0
+QS SEE Pruned: 4016.0
+-------------------------
+
+FEN: 1k1r3r/8/pp1n2p1/2q5/1Q6/3R2P1/PPP2P1P/3R2K1 w - - 5 30
+Best move found: b4c5
+Score: 455
+rating: 1556
+theme: crushing long middlegame
+
+Test PASSED: The engine found the correct move (b4c5).
+70 tests completed.
+----------------------------------------
+New game started. Caches and stats cleared.
+--- Running Test: Lichess Puzzle 006ia ---
+info depth 1 score cp -134 nodes 157 nps 221495 time 0 pv b2e2
+info depth 2 score cp -84 nodes 577 nps 283120 time 2 pv e7d6 e2b2
+info depth 3 score cp 16 nodes 839 nps 205502 time 4 pv b2c3 h6d2 c3c1
+info depth 4 score cp 116 nodes 1179 nps 221118 time 5 pv b2c3 h6g5 c3g3 g2g3
+info depth 5 score cp 194 nodes 2748 nps 198685 time 13 pv e7d6 a2a4 b2e2 c3e2 g7h6
+info depth 6 score cp -164 nodes 17356 nps 178221 time 97 pv b8b7 c3a4 b2d4 h6e3 d4a4 e3b6
+info depth 7 score cp -64 nodes 17357 nps 150032 time 115 pv
+info depth 8 score cp 36 nodes 17358 nps 52681 time 329 pv
+info depth 9 score cp 136 nodes 17359 nps 27209 time 637 pv
+info depth 10 score cp 236 nodes 17360 nps 21128 time 821 pv
+info depth 11 score cp 336 nodes 17361 nps 14503 time 1197 pv
+--- Search Statistics ---
+Total Time: 1.20s
+Nodes Searched: 17361 (14502 NPS)
+- Quiescence Nodes: 11686 (67.3%)
+Transposition Table Hits: 5425.0 (31.2%)
+Beta Cutoffs: 1635.0
+Null Move Cutoffs: 46.0
+Futility Pruned: 8337.0
+Razoring Used: 37.0
+QS Delta Pruned: 1751.0
+QS SEE Pruned: 1872.0
+-------------------------
+
+FEN: 1r4k1/4bpp1/1rp2n1B/3p4/3P4/2N3P1/Pq2QPKP/2R1R3 b - - 0 24
+Best move found: b2e2
+Score: 336
+rating: 2058
+theme: advantage long middlegame
+
+Test PASSED: The engine found the correct move (b2e2).
+71 tests completed.
+----------------------------------------
+New game started. Caches and stats cleared.
+--- Running Test: Lichess Puzzle 006om ---
+info depth 1 score cp 35 nodes 61 nps 142615 time 0 pv c2c6
+info depth 2 score cp 137 nodes 111 nps 135418 time 0 pv c2c6 a4a5
+info depth 3 score cp 137 nodes 277 nps 182303 time 1 pv c2c6 a4a5 c6e6
+info depth 4 score cp 103 nodes 656 nps 205778 time 3 pv c2c6 a4a5 c1a1 h7h5
+info depth 5 score cp 333 nodes 1425 nps 93549 time 15 pv e4c5 a4a5 c5d7 f8g8 d7b8 a5a3
+info depth 6 score cp 331 nodes 3334 nps 140223 time 23 pv e4c5 a4a5 c5d7 f8e7 d7b8 a5a3 b8c6 e7d6
+info depth 7 score cp 332 nodes 6152 nps 157863 time 38 pv e4c5 a4a5 c5d7 f8e7 d7b8 a5a3 b8c6 e7d6 g3g2
+info depth 8 score cp 317 nodes 13918 nps 202453 time 68 pv e4c5 a4a5 c5d7 f8e7 d7b8 a5a3 b8c6 e7d6 c2b2 h7h5
+info depth 9 score cp 314 nodes 29260 nps 214144 time 136 pv e4c5 a4a5 c5d7 f8e8 d7b8 f6f5 b8c6 f5f4 g3g2 a5a3 c2b2
+info depth 10 score cp 351 nodes 44177 nps 198484 time 222 pv e4c5 a4a5 c5d7 f8g8 d7b8 a5a3 b8c6 a3f3 g3f3 g8h8 f3g3
+info depth 11 score cp 347 nodes 83794 nps 182152 time 460 pv e4c5 a4a5 c5d7 f8e7 d7b8 a5a3 b8c6 e7d7 h2h4 f6f5 c6d4 h7h5 c2b2
+info depth 12 score cp 353 nodes 208193 nps 148962 time 1397 pv e4c5 a4a3 c5d7 f8g8
+--- Search Statistics ---
+Total Time: 1.40s
+Nodes Searched: 208193 (148948 NPS)
+- Quiescence Nodes: 84928 (40.8%)
+Transposition Table Hits: 94250.0 (45.3%)
+Beta Cutoffs: 26478.0
+Null Move Cutoffs: 7392.0
+Futility Pruned: 146222.0
+Razoring Used: 3943.0
+QS Delta Pruned: 5769.0
+QS SEE Pruned: 5662.0
+-------------------------
+
+FEN: 1r3k2/5p1p/2p1pp2/P2n4/r3N3/P4PK1/2R2P1P/2R5 w - - 10 30
+Best move found: e4c5
+Score: 353
+rating: 1900
+theme: crushing endgame fork long master
+
+Test PASSED: The engine found the correct move (e4c5).
+72 tests completed.
+----------------------------------------
+New game started. Caches and stats cleared.
+--- Running Test: Lichess Puzzle 006wz ---
+info depth 1 score cp 66 nodes 23 nps 62077 time 0 pv a3a4
+info depth 2 score cp 14 nodes 113 nps 144410 time 0 pv e3d4 b2d4 d1d4
+info depth 3 score cp 15328 nodes 195 nps 155374 time 1 pv b1b2 h7h6 b2c2
+info depth 4 score cp 15328 nodes 273 nps 184625 time 1 pv e3d4 b2d4 d1d4
+info depth 5 score cp 15328 nodes 511 nps 234136 time 2 pv b1b2 c2b2 f2f3
+info depth 6 score cp 15328 nodes 710 nps 273608 time 2 pv b1b2 c2b2 f2f3
+info depth 7 score cp 15428 nodes 711 nps 247645 time 2 pv
+info depth 8 score cp 15528 nodes 712 nps 90492 time 7 pv
+info depth 9 score cp 20192 nodes 13701 nps 189362 time 72 pv d1d6 b2f6 d6f6 g7f6 g1f1
+info depth 10 score cp 20192 nodes 37783 nps 170979 time 220 pv d1d6 b2f6 d6f6 g7f6 e3c1
+info depth 11 score cp 20292 nodes 37784 nps 109622 time 344 pv
+info depth 12 score cp 20194 nodes 254544 nps 74922 time 3397 pv e3h6 g7h6 g2g4 b2a3
+--- Search Statistics ---
+Total Time: 3.40s
+Nodes Searched: 254544 (74919 NPS)
+- Quiescence Nodes: 61737 (24.3%)
+Transposition Table Hits: 83630.0 (32.9%)
+Beta Cutoffs: 42708.0
+Null Move Cutoffs: 25497.0
+Futility Pruned: 124028.0
+Razoring Used: 3425.0
+QS Delta Pruned: 59770.0
+QS SEE Pruned: 901.0
+-------------------------
+
+FEN: 2r5/4ppkp/6p1/1p6/1P6/P3B3/1br2PPP/1R1R2K1 w - - 3 23
+Best move found: e3h6
+Score: 20194
+rating: 1466
+theme: attraction crushing endgame fork long sacrifice
+
+Test FAILED: The engine suggested e3h6, but the correct move is b1b2.
+73 tests completed.
+----------------------------------------
+New game started. Caches and stats cleared.
+--- Running Test: Lichess Puzzle 006x0 ---
+info depth 1 score cp -395 nodes 72 nps 125411 time 0 pv f7g8
+info depth 2 score cp -417 nodes 236 nps 185853 time 1 pv f7f6 d7d4
+info depth 3 score cp 99 nodes 652 nps 165598 time 3 pv f7f8 d7d4 e5d4
+info depth 4 score cp 199 nodes 813 nps 142182 time 5 pv f7f8 d7g7 f8e8 g7e5 e8f8
+info depth 5 score cp 230 nodes 1954 nps 177807 time 10 pv f7f8 h3h4 g7d7 f5d7 a3d3
+info depth 6 score cp 181 nodes 4130 nps 237102 time 17 pv f7f8 d7g7 f8g7 h2h1 f4d3 b5b6 g7f6
+info depth 7 score cp 167 nodes 7125 nps 245556 time 29 pv f7f8 d7g7 f8g7 f1g1 g7f7 g1f1 f7e7 b5b6 f4d3
+info depth 8 score cp 67 nodes 7127 nps 204178 time 34 pv f7f8 f7f8 d7g7 f8e8 f1f4 e5f4
+info depth 9 score cp -33 nodes 67654 nps 116962 time 578 pv f7f6 d7d8 f8f7 f5e4 f7e6 d8h4 g7g8 f1f4 e5f4 e4d5 e6f5
+info depth 10 score cp -133 nodes 67655 nps 67109 time 1008 pv
+--- Search Statistics ---
+Total Time: 1.01s
+Nodes Searched: 67655 (67104 NPS)
+- Quiescence Nodes: 26827 (39.7%)
+Transposition Table Hits: 36650.0 (54.2%)
+Beta Cutoffs: 9707.0
+Null Move Cutoffs: 831.0
+Futility Pruned: 39177.0
+Razoring Used: 942.0
+QS Delta Pruned: 3679.0
+QS SEE Pruned: 2206.0
+-------------------------
+
+FEN: 8/3Q1kr1/8/1P2pB2/2Pp1n2/q2P3P/7K/5R2 b - - 8 49
+Best move found: f7f6
+Score: -133
+rating: 1341
+theme: defensiveMove endgame equality short
+
+Test PASSED: The engine found the correct move (f7f6).
+74 tests completed.
+----------------------------------------
+New game started. Caches and stats cleared.
+--- Running Test: Lichess Puzzle 006yP ---
+info depth 1 score cp -2 nodes 20 nps 55043 time 0 pv g8g6
+info depth 2 score cp 589 nodes 22 nps 34341 time 0 pv
+info depth 3 score cp 689 nodes 78 nps 83097 time 0 pv g8c8 c6d7 c8c3
+info depth 4 score cp 738 nodes 170 nps 132091 time 1 pv g8c8 c6d7 c8c3 d5d4 a6b5
+info depth 5 score cp 638 nodes 1175 nps 286612 time 4 pv g8c8 c6d7 c8c3 b5b4 a3b4
+info depth 6 score cp 738 nodes 1176 nps 231823 time 5 pv
+info depth 7 score cp 789 nodes 1963 nps 268741 time 7 pv g8c8 c6d7 c8c3 d7e8 a6b5 d5d4 c3d3 e8d7
+info depth 8 score cp 791 nodes 3166 nps 305408 time 10 pv g8c8 c6d7 c8c3 d5d4 c3d3 d7c6 d3d4 c6c5 d4d3
+info depth 9 score cp 799 nodes 5080 nps 283946 time 17 pv g8c8 c6d7 c8c3 d5d4 c3d3 d7c6 d3d4 c6c5 d4d3 c5c6
+info depth 10 score cp 899 nodes 5081 nps 256755 time 19 pv
+info depth 11 score cp 960 nodes 15207 nps 119825 time 126 pv g8c8 c6d7 c8c3 d7e7 a6b6 e7e8
+info depth 12 score cp 991 nodes 27470 nps 116359 time 236 pv g8c8 c6d7 c8c3 d5d4 c3d3 d7c6 d3d4 c6c5 d4d3 b5b4 a3b4 c5b4 a6b6 b4a3
+info depth 13 score cp 963 nodes 37069 nps 95031 time 390 pv g8c8 c6d7 c8c3 d5d4 c3d3 d7c6 d3d4 c6c5 d4d6 b5b4 a3b4 c5b4 a6b6 b4b3 d6e6
+info depth 14 score cp 978 nodes 75363 nps 52563 time 1433 pv g8c8 c6d7 c8c3 d7e8 b3b4 e8f7 a6b6 f7g6 c3d3 g6f7
+--- Search Statistics ---
+Total Time: 1.43s
+Nodes Searched: 75363 (52557 NPS)
+- Quiescence Nodes: 24312 (32.3%)
+Transposition Table Hits: 33424.0 (44.4%)
+Beta Cutoffs: 11139.0
+Null Move Cutoffs: 3037.0
+Futility Pruned: 53955.0
+Razoring Used: 1321.0
+QS Delta Pruned: 9172.0
+QS SEE Pruned: 25.0
+-------------------------
+
+FEN: 6R1/8/Kpk1p3/1p1pP3/6P1/PPr5/8/8 w - - 0 41
+Best move found: g8c8
+Score: 978
+rating: 806
+theme: crushing endgame master rookEndgame short skewer
+
+Test PASSED: The engine found the correct move (g8c8).
+75 tests completed.
+----------------------------------------
+New game started. Caches and stats cleared.
+--- Running Test: Lichess Puzzle 761 ---
+info depth 1 score cp -130 nodes 68 nps 153753 time 0 pv b2b3
+info depth 2 score cp -94 nodes 198 nps 230111 time 0 pv f3d2 d8d6
+info depth 3 score cp -94 nodes 417 nps 290294 time 1 pv f3d2 d8d6 d2c4
+info depth 4 score cp 317 nodes 563 nps 260927 time 2 pv h7g7 g8g7 g5e6 g7h6 e6d8 b7c8
+info depth 5 score cp 15608 nodes 1130 nps 282672 time 3 pv h7g7 g8g7 f3h4
+info depth 6 score cp 15608 nodes 1307 nps 299625 time 4 pv h7g7 g8g7 f3h4
+info depth 7 score cp 15608 nodes 1549 nps 318885 time 4 pv h7g7 g8g7 f3h4
+info depth 8 score cp 20472 nodes 1808 nps 253325 time 7 pv h7h8 g8h8 f3h4 g7c3 b2c3
+info depth 9 score cp 20472 nodes 3951 nps 216098 time 18 pv h7h8 g8h8 f3h4 g7c3 b2c3
+info depth 10 score cp 25336 nodes 3952 nps 124135 time 31 pv
+info depth 11 score cp 25336 nodes 17240 nps 120230 time 143 pv h7h8 g8h8 d6d7 b7c8 f3e5 g7e5 d7c8q
+info depth 12 score cp 25436 nodes 17241 nps 65850 time 261 pv
+info depth 13 score mate -103 nodes 9601939 nps 121084 time 79299 pv f3d2 g7e5 c1b1 d8d6 h7d7 b7c8 c1c2 c3f6 c2b1 g8h7 d6d7
+--- Search Statistics ---
+Total Time: 79.30s
+Nodes Searched: 9601939 (121084 NPS)
+- Quiescence Nodes: 3947266 (41.1%)
+Transposition Table Hits: 4651727.0 (48.4%)
+Beta Cutoffs: 993940.0
+Null Move Cutoffs: 150489.0
+Futility Pruned: 2631922.0
+Razoring Used: 24601.0
+QS Delta Pruned: 627467.0
+QS SEE Pruned: 690085.0
+-------------------------
+
+FEN: 3r2k1/1b4bR/p2P2p1/3p2N1/2p5/2P2N2/PP6/2K5 w - - 0 29
+Best move found: f3d2
+Score: 30207
+rating: 1490
+theme: attraction crushing endgame exposedKing fork long sacrifice
+
+Test FAILED: The engine suggested f3d2, but the correct move is h7g7.
+76 tests completed.
+----------------------------------------
+New game started. Caches and stats cleared.
+--- Running Test: Lichess Puzzle 007Rn ---
+info depth 1 score cp -641 nodes 24 nps 56775 time 0 pv f7f5
+info depth 2 score cp -639 nodes 102 nps 121574 time 0 pv g4e5 d4e5
+info depth 3 score mate 2 nodes 144 nps 82941 time 1 pv g8f8 f3g4 e1f1
+--- Search Statistics ---
+Total Time: 0.00s
+Nodes Searched: 144 (79335 NPS)
+- Quiescence Nodes: 67 (46.5%)
+Transposition Table Hits: 53.0 (36.8%)
+Beta Cutoffs: 15.0
+Null Move Cutoffs: 0.0
+Futility Pruned: 87.0
+Razoring Used: 2.0
+QS Delta Pruned: 1.0
+QS SEE Pruned: 5.0
+-------------------------
+
+FEN: 4r1k1/p4p1p/1p6/6B1/3P2n1/P4Q2/1P4P1/7K b - - 0 34
+Best move found: g8f8
+Score: 29997
+rating: 994
+theme: endgame mate mateIn2 short
+
+Test FAILED: The engine suggested g8f8, but the correct move is e8e1.
+77 tests completed.
+----------------------------------------
+New game started. Caches and stats cleared.
+--- Running Test: Lichess Puzzle 007gO ---
+info depth 1 score cp -64 nodes 46 nps 100175 time 0 pv c8c3
+info depth 2 score cp 86 nodes 118 nps 105799 time 1 pv g8g2 g1g2 e5g5 g2f3
+info depth 3 score cp 86 nodes 388 nps 142266 time 2 pv g8g2 g1g2 e5g5 g2f3 c8c1
+info depth 4 score cp 21 nodes 868 nps 197015 time 4 pv c8c1 f1c1 g8g2 g1g2 e5g5 g2f3
+info depth 5 score cp 21 nodes 2174 nps 243287 time 8 pv c8c1 f1c1 g8g2 g1g2 e5g5 g2f3 g5c1
+info depth 6 score cp 13 nodes 5371 nps 235314 time 22 pv c8c1 f1c1 g8g2 g1g2 e5g5 g2f3 g5c1 b4f4
+info depth 7 score cp -8 nodes 11086 nps 180800 time 61 pv g8g2 g1g2 e5b2 c1c8 h8h7 b4b2 f7f5 g2h1 h8h7 h7g7
+info depth 8 score cp 395 nodes 18289 nps 91546 time 199 pv e5g5 g2g3 c8c1 h2h4 c1f1 g1f1 g5c1 f1g2 f7f5 f2f3
+info depth 9 score cp 383 nodes 34585 nps 130706 time 264 pv e5g5 g2g3 c8c1 f2f4 c1f1 g1f1 g5g7 f1g1 f7f5 b4e4
+info depth 10 score cp 381 nodes 53120 nps 148298 time 358 pv e5g5 g2g3 c8c1 f1c1 g5c1 g1g2 e6e5 b4b5 g8g3 g2g3 c1b2
+info depth 11 score cp 382 nodes 266623 nps 162845 time 1637 pv e5g5 g2g3 c8c1 h2h4 c1f1 g1f1 g5c1 f1g2 f7f5 f2f4 e6e5 f4e5 g8g3 g2g3
+--- Search Statistics ---
+Total Time: 1.64s
+Nodes Searched: 266623 (162829 NPS)
+- Quiescence Nodes: 103667 (38.9%)
+Transposition Table Hits: 116919.0 (43.9%)
+Beta Cutoffs: 42107.0
+Null Move Cutoffs: 9402.0
+Futility Pruned: 160698.0
+Razoring Used: 7634.0
+QS Delta Pruned: 12239.0
+QS SEE Pruned: 6720.0
+-------------------------
+
+FEN: 2r3rk/5p2/4p2p/4q3/1Q6/8/1P3PPP/2R2RK1 b - - 1 31
+Best move found: e5g5
+Score: 382
+rating: 2177
+theme: crushing endgame short
+
+Test PASSED: The engine found the correct move (e5g5).
+78 tests completed.
+----------------------------------------
+New game started. Caches and stats cleared.
+--- Running Test: Lichess Puzzle 007ku ---
+info depth 1 score cp -611 nodes 68 nps 148316 time 0 pv h8d8
+info depth 2 score cp -611 nodes 180 nps 185679 time 0 pv h8d8 b7d8
+info depth 3 score cp -1167 nodes 1292 nps 247976 time 5 pv f4d2 d8h8 d2c3
+info depth 4 score cp -1297 nodes 2705 nps 179521 time 15 pv h8h2 c3a1 f1e3 c4e3
+info depth 5 score mate 2 nodes 6173 nps 208626 time 29 pv h8h5 g6f6 f4g5
+--- Search Statistics ---
+Total Time: 0.03s
+Nodes Searched: 6173 (208023 NPS)
+- Quiescence Nodes: 3594 (58.2%)
+Transposition Table Hits: 1925.0 (31.2%)
+Beta Cutoffs: 566.0
+Null Move Cutoffs: 21.0
+Futility Pruned: 1636.0
+Razoring Used: 36.0
+QS Delta Pruned: 599.0
+QS SEE Pruned: 547.0
+-------------------------
+
+FEN: r1bq3Q/1np3p1/p5k1/1p1Pp3/1Pn2BP1/2b2P2/P3K3/R4N2 w - - 0 36
+Best move found: h8h5
+Score: 29997
+rating: 1700
+theme: mate mateIn2 middlegame short
+
+Test PASSED: The engine found the correct move (h8h5).
+79 tests completed.
+----------------------------------------
+New game started. Caches and stats cleared.
+--- Running Test: Lichess Puzzle 0088O ---
+info depth 1 score cp -410 nodes 40 nps 101067 time 0 pv g2g5 f5e4
+info depth 2 score cp -410 nodes 85 nps 117973 time 0 pv g2g5 f5e4 h8f6
+info depth 3 score cp -425 nodes 244 nps 185333 time 1 pv g2g5 f5e4 h8f6 a4c2 h2g1
+info depth 4 score cp -149 nodes 426 nps 139221 time 3 pv g2g5 f5e4 h8f6 a4a2 g5g2 a2g2 h2g2
+info depth 5 score cp -248 nodes 2113 nps 234571 time 9 pv g2g5 f5e4 g5h5
+info depth 6 score cp -348 nodes 11141 nps 236664 time 47 pv g2g5 f5e4 h8f6 f4f3 g5g6 c7c6 h2g1 h2g1
+info depth 7 score cp -248 nodes 11142 nps 124858 time 89 pv
+info depth 8 score cp -257 nodes 19318 nps 153969 time 125 pv g2g5 f5e4 h8f6 a4a3 g5a5 b6a5 f6e6 e4d4 e6f6 d4e4 f6f4
+info depth 9 score cp -157 nodes 19319 nps 122080 time 158 pv
+info depth 10 score cp -256 nodes 139131 nps 161336 time 862 pv g2g5 f5e4 h8f6 a4a3 f6e6 e4d3 e6e8 d3c3 g5g2 f4f3 e8g6 f3g2
+info depth 11 score cp -156 nodes 139132 nps 139063 time 1000 pv
+--- Search Statistics ---
+Total Time: 1.00s
+Nodes Searched: 139132 (139052 NPS)
+- Quiescence Nodes: 51400 (36.9%)
+Transposition Table Hits: 72503.0 (52.1%)
+Beta Cutoffs: 24558.0
+Null Move Cutoffs: 2971.0
+Futility Pruned: 65602.0
+Razoring Used: 3442.0
+QS Delta Pruned: 13212.0
+QS SEE Pruned: 3498.0
+-------------------------
+
+FEN: 7Q/2p5/1p2prp1/p4k1p/q4p1P/8/6RK/8 w - - 0 38
+Best move found: g2g5
+Score: -156
+rating: 1008
+theme: crushing deflection endgame short
+
+Test PASSED: The engine found the correct move (g2g5).
+80 tests completed.
+----------------------------------------
+New game started. Caches and stats cleared.
+--- Running Test: Lichess Puzzle 008GK ---
+info depth 1 score cp -554 nodes 106 nps 218046 time 0 pv a1g7
+info depth 2 score cp -554 nodes 366 nps 345047 time 1 pv a1g7 e3f1
+info depth 3 score cp -584 nodes 663 nps 331089 time 2 pv a1g7 e2g2 g1h1 g2g7
+info depth 4 score cp -12896 nodes 1187 nps 228682 time 5 pv c2c4 e3f1 d1e1
+info depth 5 score cp -12896 nodes 1613 nps 252374 time 6 pv c2c4 e3f1
+info depth 6 score cp -12896 nodes 1894 nps 272980 time 6 pv c2c4 e3f1
+info depth 7 score cp -12896 nodes 1974 nps 279045 time 7 pv c2c4 e3f1
+info depth 8 score mate 2 nodes 2593 nps 303632 time 8 pv f1f8 d1d8 f8d8
+--- Search Statistics ---
+Total Time: 0.01s
+Nodes Searched: 2593 (300802 NPS)
+- Quiescence Nodes: 1077 (41.5%)
+Transposition Table Hits: 1168.0 (45.0%)
+Beta Cutoffs: 221.0
+Null Move Cutoffs: 107.0
+Futility Pruned: 462.0
+Razoring Used: 3.0
+QS Delta Pruned: 715.0
+QS SEE Pruned: 28.0
+-------------------------
+
+FEN: 1k6/ppp3p1/8/1P5p/8/P3n2P/2P1r1P1/B2rNRK1 w - - 5 32
+Best move found: f1f8
+Score: 29997
+rating: 600
+theme: backRankMate endgame mate mateIn2 short
+
+Test PASSED: The engine found the correct move (f1f8).
+81 tests completed.
+----------------------------------------
+New game started. Caches and stats cleared.
+--- Running Test: Lichess Puzzle 008LT ---
+info depth 1 score cp -17 nodes 39 nps 91486 time 0 pv h3e6
+info depth 2 score cp -239 nodes 330 nps 149650 time 2 pv h3e6 g6f4 g2g1
+info depth 3 score cp -328 nodes 1531 nps 157223 time 9 pv h6f7 f8f7 h3g4 g6f4 f3f4
+info depth 4 score cp -347 nodes 3438 nps 167899 time 20 pv g2g1 h4f4 h6f7 f8f7 h3e6 h8g8
+info depth 5 score cp -321 nodes 7767 nps 148384 time 52 pv h6f7 f8f7 h3g4 g6f4 g2g1 f4h3 f3h3 h4h3
+info depth 6 score cp -421 nodes 7768 nps 70289 time 110 pv
+info depth 7 score cp -322 nodes 11081 nps 56246 time 197 pv h6f7 h8g8 h3e6 g6f4
+info depth 8 score cp -421 nodes 38438 nps 99780 time 385 pv h6f7 h8g8 f7h6 g8h7 h3e6 g6f4 f3f4 h4f4 g2f1 g7h6 e6d5
+info depth 9 score cp -421 nodes 102488 nps 96208 time 1065 pv h6f7 h8g8 f7h6 g8h8
+--- Search Statistics ---
+Total Time: 1.07s
+Nodes Searched: 102488 (96196 NPS)
+- Quiescence Nodes: 52850 (51.6%)
+Transposition Table Hits: 44505.0 (43.4%)
+Beta Cutoffs: 13927.0
+Null Move Cutoffs: 1241.0
+Futility Pruned: 51331.0
+Razoring Used: 255.0
+QS Delta Pruned: 11696.0
+QS SEE Pruned: 12849.0
+-------------------------
+
+FEN: r4r1k/6p1/b3p1nN/p1pp4/1p3P1q/3P1Q1B/PPP2PK1/R6R w - - 1 27
+Best move found: h6f7
+Score: -421
+rating: 1752
+theme: crushing kingsideAttack middlegame pin sacrifice short
+
+Test PASSED: The engine found the correct move (h6f7).
+82 tests completed.
+----------------------------------------
+New game started. Caches and stats cleared.
+--- Running Test: Lichess Puzzle 008Nz ---
+info depth 1 score cp -138 nodes 47 nps 110997 time 0 pv g1h2
+info depth 2 score cp -13176 nodes 100 nps 103130 time 0 pv g1h2 a2a5
+info depth 3 score cp -13176 nodes 155 nps 115906 time 1 pv g1h2 a2a5
+info depth 4 score mate 1 nodes 185 nps 116351 time 1 pv d1d8
+--- Search Statistics ---
+Total Time: 0.00s
+Nodes Searched: 185 (111582 NPS)
+- Quiescence Nodes: 61 (33.0%)
+Transposition Table Hits: 94.0 (50.8%)
+Beta Cutoffs: 21.0
+Null Move Cutoffs: 5.0
+Futility Pruned: 0.0
+Razoring Used: 0.0
+QS Delta Pruned: 85.0
+QS SEE Pruned: 4.0
+-------------------------
+
+FEN: 6k1/2p2ppp/pnp5/B7/2P3PP/1P2PPR1/r3b2r/3R2K1 w - - 2 30
+Best move found: d1d8
+Score: 29999
+rating: 622
+theme: backRankMate mate mateIn1 middlegame oneMove
+
+Test PASSED: The engine found the correct move (d1d8).
+83 tests completed.
+----------------------------------------
+New game started. Caches and stats cleared.
+--- Running Test: Lichess Puzzle 008P4 ---
+info depth 1 score cp 315 nodes 49 nps 116574 time 0 pv d4b3 d2e3
+info depth 2 score cp 15328 nodes 81 nps 113020 time 0 pv d4b3 d2d1 b3a1
+info depth 3 score cp 15328 nodes 188 nps 185405 time 1 pv d4b5 a4b5 a5a1
+info depth 4 score cp 15328 nodes 270 nps 221747 time 1 pv d4b3 d2d1 b3a1
+info depth 5 score cp 15328 nodes 488 nps 285589 time 1 pv d4b5 a4b5 a5a1
+info depth 6 score cp 15328 nodes 644 nps 321104 time 2 pv d4b5 a4b5 a5a1
+info depth 7 score cp 15328 nodes 922 nps 390030 time 2 pv d4b5 a4b5 a5a1
+info depth 8 score cp 15329 nodes 3343 nps 251512 time 13 pv d6d5 e4d5 d4b3
+info depth 9 score cp 15230 nodes 8377 nps 143659 time 58 pv d4f3 d2d1 d2c3
+info depth 10 score cp 15133 nodes 24935 nps 158933 time 156 pv e7d7 d2d1 d4b3 a1c2 e3d2 a5a4 d2c2 a4e4 c2d1 e4g4
+info depth 11 score cp 15034 nodes 50872 nps 154467 time 329 pv d4f3 d2d1 d6d5 e4d5 a5a4 a1a4 e7f6
+info depth 12 score cp 14934 nodes 50873 nps 54752 time 929 pv
+info depth 13 score cp 14834 nodes 50874 nps 6212 time 8188 pv
+--- Search Statistics ---
+Total Time: 8.19s
+Nodes Searched: 50874 (6212 NPS)
+- Quiescence Nodes: 14007 (27.5%)
+Transposition Table Hits: 18947.0 (37.2%)
+Beta Cutoffs: 7476.0
+Null Move Cutoffs: 3994.0
+Futility Pruned: 35435.0
+Razoring Used: 1128.0
+QS Delta Pruned: 10124.0
+QS SEE Pruned: 202.0
+-------------------------
+
+FEN: 8/4k3/1p1p4/rP2p1p1/P2nP1P1/3B4/3K4/R7 b - - 1 35
+Best move found: d4f3
+Score: 14834
+rating: 795
+theme: crushing endgame fork short
+
+Test FAILED: The engine suggested d4f3, but the correct move is d4b3.
+84 tests completed.
+----------------------------------------
+New game started. Caches and stats cleared.
+--- Running Test: Lichess Puzzle 008Sk ---
+info depth 1 score cp -206 nodes 9 nps 28107 time 0 pv h4h3
+info depth 2 score cp -252 nodes 38 nps 64164 time 0 pv h4h3 g7g5
+info depth 3 score cp -225 nodes 82 nps 94254 time 0 pv f1f2 g7g5 h5g6 a2f2
+info depth 4 score cp 116 nodes 280 nps 165339 time 1 pv f1f2 g7g5 h4g3 a2f2 g3f2
+info depth 5 score cp 16 nodes 339 nps 150478 time 2 pv f1f2 e4e3 f2a2
+info depth 6 score cp 20192 nodes 598 nps 195692 time 3 pv f1f2 a2a4 h4g3 e4e3 g3g2
+info depth 7 score cp 20192 nodes 1172 nps 259172 time 4 pv f1f2 g7g5 h4g3 a2a4
+info depth 8 score cp 20192 nodes 1303 nps 264145 time 4 pv f1f2 g7g5 h4g3 a2a4
+info depth 9 score cp 20192 nodes 2250 nps 281287 time 7 pv f1f2 g7g5 h4g3 a2a4
+info depth 10 score cp 20194 nodes 4169 nps 158782 time 26 pv f1f2 g7g5 h4h3 a2f2 d6e7 d5d4 e7g5
+info depth 11 score cp 20294 nodes 4170 nps 88997 time 46 pv
+info depth 12 score cp 20394 nodes 4171 nps 55852 time 74 pv
+info depth 13 score cp 20296 nodes 19045 nps 8771 time 2171 pv h4h3 f2h4 f1f3 e4e3
+--- Search Statistics ---
+Total Time: 2.17s
+Nodes Searched: 19045 (8770 NPS)
+- Quiescence Nodes: 3476 (18.3%)
+Transposition Table Hits: 8513.0 (44.7%)
+Beta Cutoffs: 2618.0
+Null Move Cutoffs: 1283.0
+Futility Pruned: 8867.0
+Razoring Used: 700.0
+QS Delta Pruned: 1442.0
+QS SEE Pruned: 14.0
+-------------------------
+
+FEN: 8/6pp/3Bp2k/p2pP2P/P3p1PK/8/r4b2/5R2 w - - 3 38
+Best move found: h4h3
+Score: 20296
+rating: 1950
+theme: crushing endgame long
+
+Test FAILED: The engine suggested h4h3, but the correct move is f1f2.
+85 tests completed.
+----------------------------------------
+New game started. Caches and stats cleared.
+--- Running Test: Lichess Puzzle 008lc ---
+info depth 1 score cp -15 nodes 44 nps 99380 time 0 pv e6b6
+info depth 2 score cp 132 nodes 112 nps 102055 time 1 pv h6g7 h8g7 e6e7 d7e7
+info depth 3 score cp 706 nodes 330 nps 144525 time 2 pv h6g7 h8g7 e6e7 g7h8 e7d7
+info depth 4 score cp 992 nodes 606 nps 165683 time 3 pv h6g7 h8g7 e6e7 g7h8 e7d7 h7f6
+info depth 5 score cp 25336 nodes 1300 nps 188684 time 6 pv h6g7 h8g7 e6e7 g7g8 e7d7 f5f4 d3h7
+info depth 6 score cp 25237 nodes 1750 nps 193837 time 9 pv h6g7 h8g7 e6e7 d7e7 e1e7 g7h6
+info depth 7 score cp 25138 nodes 3605 nps 247118 time 14 pv h6g7 h8g7 e6e7 g7h6 d3f5
+info depth 8 score cp 551 nodes 12241 nps 129366 time 94 pv h6g7 h8g7 e6e7 g7h6 e7d7 b7c8 d7h7 h6h7 d3f5 c8f5
+info depth 9 score cp 651 nodes 12242 nps 96187 time 127 pv
+info depth 10 score cp 751 nodes 12243 nps 82661 time 148 pv
+info depth 11 score cp 651 nodes 12244 nps 5001 time 2448 pv
+--- Search Statistics ---
+Total Time: 2.45s
+Nodes Searched: 12244 (5001 NPS)
+- Quiescence Nodes: 4538 (37.1%)
+Transposition Table Hits: 5381.0 (43.9%)
+Beta Cutoffs: 1822.0
+Null Move Cutoffs: 594.0
+Futility Pruned: 13856.0
+Razoring Used: 70.0
+QS Delta Pruned: 2480.0
+QS SEE Pruned: 773.0
+-------------------------
+
+FEN: 7k/pb1qn1rn/1p2R2Q/2p2p2/2Pp4/3B4/PP3P1P/4RK2 w - - 2 28
+Best move found: h6g7
+Score: 651
+rating: 1831
+theme: attraction crushing exposedKing fork long middlegame
+
+Test PASSED: The engine found the correct move (h6g7).
+86 tests completed.
+----------------------------------------
+New game started. Caches and stats cleared.
+--- Running Test: Lichess Puzzle 008nF ---
+info depth 1 score cp -148 nodes 20 nps 56111 time 0 pv h6f4
+info depth 2 score cp 287 nodes 96 nps 98352 time 0 pv h6f4 d2c4
+info depth 3 score cp 287 nodes 361 nps 191131 time 1 pv h6f4 d2c4 f4e5
+info depth 4 score cp 20472 nodes 790 nps 121227 time 6 pv d8d4 g1h1 d4e5 b5b6 h6f4
+info depth 5 score cp 466 nodes 3813 nps 159380 time 23 pv h6f4 g1h1 f4e5 b5e5 b6d5
+info depth 6 score cp 79 nodes 8464 nps 156495 time 54 pv h6f4 e5e1 b6d5 d2e4 f4c1 e1c1
+info depth 7 score cp -21 nodes 28105 nps 164613 time 170 pv f8e8 b5b6 e8e5 f8f6 e6e2 f4d2 e2d2
+info depth 8 score cp 79 nodes 28106 nps 127182 time 220 pv
+info depth 9 score cp 179 nodes 28107 nps 65258 time 430 pv
+info depth 10 score cp 278 nodes 136604 nps 57797 time 2363 pv d8d4 c3d4 c8e8 c8e8 g1h1
+--- Search Statistics ---
+Total Time: 2.36s
+Nodes Searched: 136604 (57793 NPS)
+- Quiescence Nodes: 67637 (49.5%)
+Transposition Table Hits: 54697.0 (40.0%)
+Beta Cutoffs: 16968.0
+Null Move Cutoffs: 3010.0
+Futility Pruned: 114154.0
+Razoring Used: 573.0
+QS Delta Pruned: 15909.0
+QS SEE Pruned: 15597.0
+-------------------------
+
+FEN: 2rq1rk1/7p/1n4pb/1R2Q3/pPpP1P2/P1B5/3N2PP/2R3K1 b - - 0 31
+Best move found: d8d4
+Score: 278
+rating: 2241
+theme: crushing master middlegame short trappedPiece
+
+Test FAILED: The engine suggested d8d4, but the correct move is f8e8.
+87 tests completed.
+----------------------------------------
+New game started. Caches and stats cleared.
+--- Running Test: Lichess Puzzle 008o6 ---
+info depth 1 score mate 1 nodes 17 nps 46240 time 0 pv f1f8
+--- Search Statistics ---
+Total Time: 0.00s
+Nodes Searched: 17 (37370 NPS)
+- Quiescence Nodes: 7 (41.2%)
+Transposition Table Hits: 0.0 (0.0%)
+Beta Cutoffs: 0.0
+Null Move Cutoffs: 0.0
+Futility Pruned: 0.0
+Razoring Used: 0.0
+QS Delta Pruned: 0.0
+QS SEE Pruned: 0.0
+-------------------------
+
+FEN: Q4rk1/p1p3p1/6P1/8/3P4/7P/q3r3/B4RK1 w - - 2 35
+Best move found: f1f8
+Score: 29999
+rating: 1017
+theme: endgame mate mateIn1 oneMove
+
+Test FAILED: The engine suggested f1f8, but the correct move is a8f8.
+88 tests completed.
+----------------------------------------
+New game started. Caches and stats cleared.
+--- Running Test: Lichess Puzzle 008oX ---
+info depth 1 score cp -495 nodes 38 nps 90765 time 0 pv c2c4
+info depth 2 score cp -503 nodes 174 nps 183369 time 0 pv c2c4 e1d1 b1c2
+info depth 3 score cp -518 nodes 379 nps 222172 time 1 pv b1a2 e1d1 a3a4 b1a2
+info depth 4 score mate 2 nodes 478 nps 92475 time 5 pv c7c8 e1e8 c8e8
+--- Search Statistics ---
+Total Time: 0.01s
+Nodes Searched: 478 (91006 NPS)
+- Quiescence Nodes: 237 (49.6%)
+Transposition Table Hits: 198.0 (41.4%)
+Beta Cutoffs: 50.0
+Null Move Cutoffs: 1.0
+Futility Pruned: 110.0
+Razoring Used: 4.0
+QS Delta Pruned: 5.0
+QS SEE Pruned: 19.0
+-------------------------
+
+FEN: 6k1/2R3pp/2p4q/1p1p4/3P4/P7/1PP2R2/1K1Nr3 w - - 4 33
+Best move found: c7c8
+Score: 29997
+rating: 974
+theme: endgame mate mateIn2 short
+
+Test PASSED: The engine found the correct move (c7c8).
+89 tests completed.
+----------------------------------------
+New game started. Caches and stats cleared.
+--- Running Test: Lichess Puzzle 008tL ---
+info depth 1 score cp 258 nodes 18 nps 55269 time 0 pv e3e2
+info depth 2 score cp 158 nodes 35 nps 58416 time 0 pv e3e2 g2g3
+info depth 3 score cp 740 nodes 270 nps 197293 time 1 pv e3e2 g2g3 e2e1q g1h2
+info depth 4 score cp 302 nodes 421 nps 159109 time 2 pv e3e2 a6e6 f4f1 g1h2 e2e1q
+info depth 5 score cp 302 nodes 1096 nps 231374 time 4 pv e3e2 a6e6 f4f1 g1h2 e2e1q e6e1
+info depth 6 score cp 302 nodes 2256 nps 238875 time 9 pv e3e2 a6e6 f4f1 g1h2 e2e1q e6e1 f1e1
+info depth 7 score cp 245 nodes 4427 nps 261023 time 16 pv e3e2 a6e6 f4f1 g1h2 e2e1r e6e1 f1e1 a2a4
+info depth 8 score cp 344 nodes 10309 nps 242237 time 42 pv e3e2 a6e6 f4f1 g1h2 h7g8 e6e2
+info depth 9 score cp 340 nodes 18886 nps 188946 time 99 pv e3e2 a6e6 f4f1 g1h2 e2e1q e6e1 f1e1 a2a4 e1c1 g2g4
+info depth 10 score cp 340 nodes 31408 nps 202126 time 155 pv e3e2 a6e6 f4f1 g1h2 e2e1q e6e1
+info depth 11 score cp 340 nodes 47749 nps 174287 time 273 pv e3e2 a6e6 f4f1 g1h2 e2e1q e6e1 f1e1 a2a4 e1c1 g2g4 c1c2 h2g3 c2c3 g3h2
+info depth 12 score cp 340 nodes 94979 nps 97079 time 978 pv e3e2 a6e6 f4f1 g1h2 e2e1q e6e1 f1e1 g2g4 e1a1 h3h4 a1a2 h2g1 a2a1 g1f2 h7g6
+--- Search Statistics ---
+Total Time: 0.98s
+Nodes Searched: 94979 (97059 NPS)
+- Quiescence Nodes: 40133 (42.3%)
+Transposition Table Hits: 40567.0 (42.7%)
+Beta Cutoffs: 13843.0
+Null Move Cutoffs: 2841.0
+Futility Pruned: 39361.0
+Razoring Used: 2077.0
+QS Delta Pruned: 893.0
+QS SEE Pruned: 997.0
+-------------------------
+
+FEN: 8/7k/R6p/3p4/5r2/2P1p2P/P5P1/6K1 b - - 0 40
+Best move found: e3e2
+Score: 340
+rating: 1058
+theme: advancedPawn crushing endgame master rookEndgame short
+
+Test PASSED: The engine found the correct move (e3e2).
+90 tests completed.
+----------------------------------------
+New game started. Caches and stats cleared.
+--- Running Test: Lichess Puzzle 0092z ---
+info depth 1 score cp 256 nodes 45 nps 111947 time 0 pv f5f7 g8h8
+info depth 2 score mate 2 nodes 95 nps 122565 time 0 pv f5f7 g8h8 f7g7
+--- Search Statistics ---
+Total Time: 0.00s
+Nodes Searched: 95 (111863 NPS)
+- Quiescence Nodes: 51 (53.7%)
+Transposition Table Hits: 7.0 (7.4%)
+Beta Cutoffs: 3.0
+Null Move Cutoffs: 0.0
+Futility Pruned: 0.0
+Razoring Used: 0.0
+QS Delta Pruned: 4.0
+QS SEE Pruned: 1.0
+-------------------------
+
+FEN: 2r3k1/3R1ppp/p1q5/2p2Q2/P7/7P/5PP1/6K1 w - - 4 27
+Best move found: f5f7
+Score: 29997
+rating: 1088
+theme: endgame mate mateIn2 short
+
+Test PASSED: The engine found the correct move (f5f7).
+91 tests completed.
+----------------------------------------
+New game started. Caches and stats cleared.
+--- Running Test: Lichess Puzzle 009IO ---
+info depth 1 score cp 33 nodes 28 nps 73446 time 0 pv f2f7 h7f7
+info depth 2 score cp 15608 nodes 57 nps 68937 time 0 pv f2f7 h7f7 d6f7
+info depth 3 score cp 15608 nodes 170 nps 143930 time 1 pv d6f7 h7f7 f2f7
+info depth 4 score cp 15608 nodes 264 nps 180930 time 1 pv f2f7 h7f7 d6f7
+info depth 5 score cp 15608 nodes 592 nps 258325 time 2 pv d6f7 h7f7 f2f7
+info depth 6 score cp 15608 nodes 818 nps 295847 time 2 pv d6f7 h7f7 f2f7
+info depth 7 score cp 15608 nodes 1161 nps 351848 time 3 pv d6f7 h7f7 f2f7
+info depth 8 score mate 2 nodes 2999 nps 410130 time 7 pv f2f7 h7f7 d6f7
+--- Search Statistics ---
+Total Time: 0.01s
+Nodes Searched: 2999 (405059 NPS)
+- Quiescence Nodes: 705 (23.5%)
+Transposition Table Hits: 1650.0 (55.0%)
+Beta Cutoffs: 130.0
+Null Move Cutoffs: 182.0
+Futility Pruned: 1375.0
+Razoring Used: 1.0
+QS Delta Pruned: 214.0
+QS SEE Pruned: 12.0
+-------------------------
+
+FEN: 3r4/4kp1r/p2Np1p1/3bP3/P2n4/8/1P3RPP/5RK1 w - - 5 26
+Best move found: f2f7
+Score: 29997
+rating: 1174
+theme: hookMate mate mateIn2 middlegame short
+
+Test PASSED: The engine found the correct move (f2f7).
+92 tests completed.
+----------------------------------------
+New game started. Caches and stats cleared.
+--- Running Test: Lichess Puzzle 009L0 ---
+info depth 1 score mate 1 nodes 14 nps 40054 time 0 pv c1d1
+--- Search Statistics ---
+Total Time: 0.00s
+Nodes Searched: 14 (32035 NPS)
+- Quiescence Nodes: 6 (42.9%)
+Transposition Table Hits: 0.0 (0.0%)
+Beta Cutoffs: 0.0
+Null Move Cutoffs: 0.0
+Futility Pruned: 0.0
+Razoring Used: 0.0
+QS Delta Pruned: 0.0
+QS SEE Pruned: 0.0
+-------------------------
+
+FEN: 6k1/pb2r1pN/1n4Bp/3p4/1P2pR2/P7/5PPP/2rR2K1 b - - 3 30
+Best move found: c1d1
+Score: 29999
+rating: 706
+theme: backRankMate hangingPiece mate mateIn1 middlegame oneMove
+
+Test PASSED: The engine found the correct move (c1d1).
+93 tests completed.
+----------------------------------------
+New game started. Caches and stats cleared.
+--- Running Test: Lichess Puzzle 009Os ---
+info depth 1 score cp 430 nodes 23 nps 57939 time 0 pv h4f4
+info depth 2 score cp -134 nodes 108 nps 118987 time 0 pv h4f4 d2f4
+info depth 3 score cp 15608 nodes 182 nps 138692 time 1 pv h4f4 d2f4 f7f4
+info depth 4 score cp 15608 nodes 245 nps 153053 time 1 pv h4h2 h1h2 f7f4
+info depth 5 score cp 260 nodes 1381 nps 200315 time 6 pv f7f4 d2f4 h4f4 g3f4
+info depth 6 score cp 161 nodes 2022 nps 184318 time 10 pv f7f4 d2f4 h4f4
+info depth 7 score cp 62 nodes 4499 nps 186199 time 24 pv f7f4 d2f4 b7b5 c4b5 a6b5 f4g5 d8g5
+info depth 8 score cp 162 nodes 6343 nps 155437 time 40 pv f7f4 d2f4 b7b5 c4b5 a6b5
+info depth 9 score cp 67 nodes 22229 nps 93948 time 236 pv h4f4 d2f4 f7f4 g3f4
+info depth 10 score cp -32 nodes 85743 nps 73077 time 1173 pv f7f4 g3g5 d8g5 h2h3 f4d2
+--- Search Statistics ---
+Total Time: 1.17s
+Nodes Searched: 85743 (73067 NPS)
+- Quiescence Nodes: 31209 (36.4%)
+Transposition Table Hits: 39975.0 (46.6%)
+Beta Cutoffs: 13311.0
+Null Move Cutoffs: 4654.0
+Futility Pruned: 61789.0
+Razoring Used: 1244.0
+QS Delta Pruned: 8090.0
+QS SEE Pruned: 4666.0
+-------------------------
+
+FEN: r2b2k1/1p3q1p/p2p4/3P2p1/2P1PR1r/6Q1/P2B3P/2R4K b - - 2 29
+Best move found: f7f4
+Score: -32
+rating: 1392
+theme: crushing long middlegame
+
+Test FAILED: The engine suggested f7f4, but the correct move is h4f4.
+94 tests completed.
+----------------------------------------
+New game started. Caches and stats cleared.
+--- Running Test: Lichess Puzzle 009f8 ---
+info depth 1 score cp 32 nodes 29 nps 56785 time 0 pv g2g4 f5e4
+info depth 2 score mate 2 nodes 61 nps 41561 time 1 pv f3h4 f5e4 f2f3
+--- Search Statistics ---
+Total Time: 0.00s
+Nodes Searched: 61 (39031 NPS)
+- Quiescence Nodes: 28 (45.9%)
+Transposition Table Hits: 17.0 (27.9%)
+Beta Cutoffs: 2.0
+Null Move Cutoffs: 0.0
+Futility Pruned: 0.0
+Razoring Used: 0.0
+QS Delta Pruned: 2.0
+QS SEE Pruned: 8.0
+-------------------------
+
+FEN: 8/1p4p1/pb2pp1p/3n1k2/3P4/P3BN1P/1P2KPP1/8 w - - 1 27
+Best move found: f3h4
+Score: 29997
+rating: 1183
+theme: endgame mate mateIn2 short
+
+Test PASSED: The engine found the correct move (f3h4).
+95 tests completed.
+----------------------------------------
+New game started. Caches and stats cleared.
+--- Running Test: Lichess Puzzle 009lk ---
+info depth 1 score cp -1411 nodes 94 nps 100168 time 0 pv h5h4
+info depth 2 score mate 2 nodes 200 nps 98922 time 2 pv f3d1 e3e1 d1e1
+--- Search Statistics ---
+Total Time: 0.00s
+Nodes Searched: 200 (94743 NPS)
+- Quiescence Nodes: 116 (58.0%)
+Transposition Table Hits: 69.0 (34.5%)
+Beta Cutoffs: 7.0
+Null Move Cutoffs: 0.0
+Futility Pruned: 15.0
+Razoring Used: 0.0
+QS Delta Pruned: 35.0
+QS SEE Pruned: 30.0
+-------------------------
+
+FEN: 1R6/6pk/2p4p/3bP2r/5B1P/2P1RqP1/P4P1Q/6K1 b - - 3 40
+Best move found: f3d1
+Score: 29997
+rating: 952
+theme: mate mateIn2 middlegame short
+
+Test PASSED: The engine found the correct move (f3d1).
+96 tests completed.
+----------------------------------------
+New game started. Caches and stats cleared.
+--- Running Test: Lichess Puzzle 009oc ---
+info depth 1 score cp -962 nodes 32 nps 70939 time 0 pv f8f4 h6h5
+info depth 2 score cp -936 nodes 140 nps 140110 time 0 pv f8f4 h6h5 g3h2
+info depth 3 score mate 2 nodes 265 nps 102168 time 2 pv f8f4 h6h5 f4g5
+--- Search Statistics ---
+Total Time: 0.00s
+Nodes Searched: 265 (98676 NPS)
+- Quiescence Nodes: 114 (43.0%)
+Transposition Table Hits: 123.0 (46.4%)
+Beta Cutoffs: 25.0
+Null Move Cutoffs: 0.0
+Futility Pruned: 0.0
+Razoring Used: 3.0
+QS Delta Pruned: 11.0
+QS SEE Pruned: 12.0
+-------------------------
+
+FEN: 5Q2/pbp3np/1p1pq1pk/1P6/P6P/6K1/8/8 w - - 0 33
+Best move found: f8f4
+Score: 29997
+rating: 1500
+theme: endgame mate mateIn2 short
+
+Test PASSED: The engine found the correct move (f8f4).
+97 tests completed.
+----------------------------------------
+New game started. Caches and stats cleared.
+--- Running Test: Lichess Puzzle 009tE ---
+info depth 1 score cp 186 nodes 17 nps 49516 time 0 pv f4g5
+info depth 2 score cp 127 nodes 51 nps 50761 time 1 pv f4g5 h7h5
+info depth 3 score cp 15608 nodes 96 nps 51834 time 1 pv a2a4 b5a4 f4g5
+info depth 4 score cp 15608 nodes 156 nps 70644 time 2 pv a2a4 b5a4 f4g5
+info depth 5 score cp 15608 nodes 337 nps 120439 time 2 pv a2a4 b5a4 f4g5 c6e7 g8f7
+info depth 6 score cp 15608 nodes 649 nps 173062 time 3 pv a2a4 b5a4 f4g5 a2a4 b5a4 c6b4
+info depth 7 score cp 15608 nodes 912 nps 212263 time 4 pv c2c4 b5c4 f4g5
+info depth 8 score cp 15608 nodes 3004 nps 198899 time 15 pv c2c4 b5c4 f4g5
+info depth 9 score cp 132 nodes 54070 nps 133409 time 405 pv b2b4 f5c2 d1e2 a6a5 a2a4
+info depth 10 score cp 232 nodes 54071 nps 130103 time 415 pv
+info depth 11 score cp 131 nodes 67873 nps 46951 time 1445 pv b2b4 f5e4 f4g5 e4f3 d1c1 f3e4 a2a4 g8h8
+--- Search Statistics ---
+Total Time: 1.45s
+Nodes Searched: 67873 (46939 NPS)
+- Quiescence Nodes: 16461 (24.3%)
+Transposition Table Hits: 44163.0 (65.1%)
+Beta Cutoffs: 17344.0
+Null Move Cutoffs: 0.0
+Futility Pruned: 13236.0
+Razoring Used: 1343.0
+QS Delta Pruned: 3205.0
+QS SEE Pruned: 190.0
+-------------------------
+
+FEN: 6k1/6pp/p1N5/1pP2bp1/5P2/8/PPP5/3K4 w - - 0 29
+Best move found: b2b4
+Score: 131
+rating: 669
+theme: crushing endgame fork short
+
+Test FAILED: The engine suggested b2b4, but the correct move is c6e7.
+98 tests completed.
+----------------------------------------
+New game started. Caches and stats cleared.
+--- Running Test: Lichess Puzzle 009zR ---
+info depth 1 score cp 100 nodes 26 nps 28048 time 0 pv d2f1
+info depth 2 score mate 2 nodes 62 nps 23262 time 2 pv d2f3 g2f3 c2h2
+--- Search Statistics ---
+Total Time: 0.00s
+Nodes Searched: 62 (22176 NPS)
+- Quiescence Nodes: 27 (43.5%)
+Transposition Table Hits: 15.0 (24.2%)
+Beta Cutoffs: 1.0
+Null Move Cutoffs: 0.0
+Futility Pruned: 0.0
+Razoring Used: 0.0
+QS Delta Pruned: 6.0
+QS SEE Pruned: 4.0
+-------------------------
+
+FEN: 3Q4/p1p2ppp/4k3/8/5P2/4P3/Prqn2PP/3R1RK1 b - - 0 22
+Best move found: d2f3
+Score: 29997
+rating: 1591
+theme: discoveredAttack endgame mate mateIn2 short
+
+Test PASSED: The engine found the correct move (d2f3).
+99 tests completed.
+----------------------------------------
+New game started. Caches and stats cleared.
+--- Running Test: Lichess Puzzle 00A1H ---
+info depth 1 score cp 226 nodes 25 nps 61717 time 0 pv e7g5
+info depth 2 score cp 15608 nodes 54 nps 35328 time 1 pv f5f2 d4f2 e7g5
+info depth 3 score cp 1016 nodes 921 nps 110087 time 8 pv f5f2 h2h3 g6f5 g1g4 h5g4 d1g4
+info depth 4 score cp 20472 nodes 1402 nps 95790 time 14 pv f5h3 h2h3 f7f3 g1g3 f3g3
+info depth 5 score cp 25336 nodes 3067 nps 92893 time 33 pv f5f2 d4f2 f7f2 h2h1 g6e4 g1g2 e4g2
+info depth 6 score cp 20473 nodes 4182 nps 55321 time 75 pv f5f4 g1g3 f4g3
+info depth 7 score cp 20473 nodes 5120 nps 60543 time 84 pv f5f4 g1g3 h2h3 e7c5
+info depth 8 score cp 20573 nodes 5121 nps 53990 time 94 pv
+info depth 9 score cp 25337 nodes 156240 nps 41304 time 3782 pv e7d6 c5d6 f5h3
+--- Search Statistics ---
+Total Time: 3.78s
+Nodes Searched: 156240 (41303 NPS)
+- Quiescence Nodes: 66551 (42.6%)
+Transposition Table Hits: 77114.0 (49.4%)
+Beta Cutoffs: 23625.0
+Null Move Cutoffs: 3389.0
+Futility Pruned: 127614.0
+Razoring Used: 386.0
+QS Delta Pruned: 47885.0
+QS SEE Pruned: 7551.0
+-------------------------
+
+FEN: 2r3k1/4brp1/2p3b1/2Pp1qNp/3B3P/2P5/PP3P1K/R2Q2R1 b - - 2 31
+Best move found: e7d6
+Score: 25337
+rating: 2041
+theme: crushing middlegame short
+
+Test FAILED: The engine suggested e7d6, but the correct move is f5f4.
+100 tests completed.
+----------------------------------------
+New game started. Caches and stats cleared.
+--- Running Test: Lichess Puzzle 00A5v ---
+info depth 1 score cp 222 nodes 27 nps 66071 time 0 pv e7e5
+info depth 2 score cp 348 nodes 77 nps 89811 time 0 pv e7e5 a2a4
+info depth 3 score cp 380 nodes 232 nps 165574 time 1 pv e7e5 e1e5 e8e5
+info depth 4 score cp 358 nodes 424 nps 192091 time 2 pv e7e5 e1e5 e8e5 a2a4
+info depth 5 score cp 373 nodes 1144 nps 250367 time 4 pv e7e5 e1e5 e8e5 g2g3 e5d5
+info depth 6 score cp 358 nodes 2658 nps 252278 time 10 pv e7e5 e1e5 e8e5 a2a4 a7a5 g2g4
+info depth 7 score cp 381 nodes 5222 nps 248042 time 21 pv e7e5 e1e5 e8e5 a2a4 a7a5 d2f4 e5d5
+info depth 8 score cp 281 nodes 5223 nps 178229 time 29 pv
+info depth 9 score cp 381 nodes 5224 nps 95976 time 54 pv
+info depth 10 score cp 281 nodes 5225 nps 61496 time 84 pv
+info depth 11 score cp 349 nodes 37185 nps 106569 time 348 pv e7e5 e1e5 e8e5 d2f4 d7d6 f4d2 g7g5 a2a4 e5f5 h2h4 f5d5
+info depth 12 score cp 249 nodes 37186 nps 63351 time 586 pv
+info depth 13 score cp 319 nodes 118830 nps 66963 time 1774 pv e7e5 e1e5 e8e5 d2f4 d7d6 f4d2 a7a6 f3f4 e5f5 h2h4 f5f4 g2g3 b7b6
+--- Search Statistics ---
+Total Time: 1.77s
+Nodes Searched: 118830 (66954 NPS)
+- Quiescence Nodes: 49606 (41.7%)
+Transposition Table Hits: 41051.0 (34.5%)
+Beta Cutoffs: 15638.0
+Null Move Cutoffs: 4235.0
+Futility Pruned: 95304.0
+Razoring Used: 1577.0
+QS Delta Pruned: 7055.0
+QS SEE Pruned: 8096.0
+-------------------------
+
+FEN: 4r1k1/pp1qr1p1/7p/2pPR3/2P2p2/1P3P2/P2Q2PP/4R1K1 b - - 4 33
+Best move found: e7e5
+Score: 319
+rating: 681
+theme: crushing endgame short
+
+Test PASSED: The engine found the correct move (e7e5).
+101 tests completed.
+----------------------------------------
+New game started. Caches and stats cleared.
+--- Running Test: Lichess Puzzle 00AB1 ---
+info depth 1 score cp -353 nodes 27 nps 49866 time 0 pv f2f4
+info depth 2 score cp -266 nodes 168 nps 111653 time 1 pv h7c7 b5b4
+info depth 3 score cp 535 nodes 359 nps 59716 time 6 pv h7h8 f6e6 h8c3 g6g5
+info depth 4 score cp 597 nodes 1134 nps 98403 time 11 pv h7h8 f6e7 h8c3 g6g5 f2f4
+info depth 5 score cp 588 nodes 3217 nps 133650 time 24 pv h7h8 f6f7 h8c3 d6d5 f2f4 f7e6
+info depth 6 score cp 688 nodes 3218 nps 75698 time 42 pv
+info depth 7 score cp 589 nodes 4192 nps 87730 time 47 pv h7h8 f6e7 f2f4
+info depth 8 score cp 489 nodes 4409 nps 32229 time 136 pv h7h8 f6e7 h8c3 e7e6
+info depth 9 score cp 674 nodes 52399 nps 97933 time 535 pv h7h8 f6e6 h8c3 e6f7 f2f4 d6d5
+info depth 10 score cp 686 nodes 102272 nps 85645 time 1194 pv h7h8 f6e6 h8c3 e6f7 f2f4 f7e7 g2g4 e7e6
+--- Search Statistics ---
+Total Time: 1.19s
+Nodes Searched: 102272 (85625 NPS)
+- Quiescence Nodes: 30520 (29.8%)
+Transposition Table Hits: 61133.0 (59.8%)
+Beta Cutoffs: 18911.0
+Null Move Cutoffs: 1921.0
+Futility Pruned: 34400.0
+Razoring Used: 3835.0
+QS Delta Pruned: 1924.0
+QS SEE Pruned: 985.0
+-------------------------
+
+FEN: 8/7Q/3p1kp1/1p6/2b5/2q4P/5PPK/8 w - - 0 37
+Best move found: h7h8
+Score: 686
+rating: 1058
+theme: crushing endgame short skewer
+
+Test PASSED: The engine found the correct move (h7h8).
+102 tests completed.
+----------------------------------------
+New game started. Caches and stats cleared.
+--- Running Test: Lichess Puzzle 00Aae ---
+info depth 1 score cp 86 nodes 58 nps 82324 time 0 pv b8f8 f6e7
+info depth 2 score cp 86 nodes 169 nps 122742 time 1 pv b8f8 f6e7 b7b8q
+info depth 3 score cp 86 nodes 347 nps 124480 time 2 pv b8f8 f6e7 b7b8q b1b8
+info depth 4 score cp 86 nodes 1139 nps 156586 time 7 pv b8f8 f6e7 b7b8r b1b8 f8b8
+info depth 5 score cp 514 nodes 1642 nps 85905 time 19 pv b8f8 f6g5 b7b8q h3h2 f8f5 g5h4
+info depth 6 score cp -57 nodes 5276 nps 122824 time 42 pv b8f8 f6g5 b7b8r b1b8 f8b8 h3h2 b8h8
+info depth 7 score cp 44 nodes 17004 nps 119192 time 142 pv b8f8 f6g7 b7b8r b1b8 f8b8 h3h2 b8b7 g7f6 e3e4
+info depth 8 score cp -42 nodes 19165 nps 124789 time 153 pv b8f8 f6g7 b7b8r b1b8 f8b8 h3h2 b8b1 g7f6 e3e4
+info depth 9 score cp 57 nodes 24569 nps 126920 time 193 pv b8f8 f6g7 b7b8r b1b8 f8b8 h3h2 b8b1 f5f4 e3f4 h2h1r
+info depth 10 score cp 155 nodes 80120 nps 114751 time 698 pv b8f8 f6e7 b7b8q b1b8 f8b8 e7d7 b8h8 d7e7
+info depth 11 score cp 203 nodes 99843 nps 97232 time 1026 pv b8f8 f6g7 b7b8q b1b8 f8b8 g6g5 b8b1 g7f6 d3d2 f5f4
+--- Search Statistics ---
+Total Time: 1.03s
+Nodes Searched: 99843 (97207 NPS)
+- Quiescence Nodes: 45277 (45.3%)
+Transposition Table Hits: 48355.0 (48.4%)
+Beta Cutoffs: 12851.0
+Null Move Cutoffs: 1997.0
+Futility Pruned: 26912.0
+Razoring Used: 1903.0
+QS Delta Pruned: 1778.0
+QS SEE Pruned: 1582.0
+-------------------------
+
+FEN: 1R6/1P6/4pkp1/5p2/3P4/3KP2p/8/1r6 w - - 0 44
+Best move found: b8f8
+Score: 203
+rating: 1019
+theme: advancedPawn clearance crushing endgame long promotion rookEndgame
+
+Test PASSED: The engine found the correct move (b8f8).
+103 tests completed.
+----------------------------------------
+
+--- Test Summary ---
+Total tests: 103
+Passed: 71
+Failed: 32
+Total script execution time: 284.48 seconds
+Total engine thinking time: 280.17 seconds
+Total nodes searched: 24281702
+Transposition Table Usage: 10874770.0/24281702 (44.79%)
+Average NPS: 86668
+Average search depth: 8.79
+
+--- Failed Puzzles ---
+Name: Lichess Puzzle 000mr
+  FEN: 5r1k/5rp1/p7/1b2B2p/1P1P1Pq1/2R3Q1/P3p1P1/2R3K1 b - - 1 41
+  Correct Answer: f7f4
+  Engine's Answer: g4g3
+--------------------
+Name: Lichess Puzzle 002LW
+  FEN: 3r1rk1/1b3pp1/3p4/p3nPPQ/4P3/3q1BN1/8/2R2RK1 w - - 2 29
+  Correct Answer: f5f6
+  Engine's Answer: c1c7
+--------------------
+Name: Lichess Puzzle 002rd
+  FEN: r6k/q1p2p1p/1b2bPr1/p1ppP2Q/3P2p1/4B3/PP2NRPP/3R2K1 w - - 2 26
+  Correct Answer: e2f4
+  Engine's Answer: d4c5
+--------------------
+Name: Lichess Puzzle 004d8
+  FEN: 8/4kr2/R2p4/1p1Pp3/5pp1/3K1P2/PPP5/8 w - - 0 40
+  Correct Answer: a6a7
+  Engine's Answer: f3g4
+--------------------
+Name: Lichess Puzzle 006eO
+  FEN: 8/8/2p5/1p1p1k2/3P4/1PP1pK2/8/8 w - - 4 65
+  Correct Answer: b3b4
+  Engine's Answer: f3e3
+--------------------
+Name: Lichess Puzzle 0078T
+  FEN: rk5r/1b3R2/pp2p2q/4P2p/B6B/4p2P/PP4P1/5Q1K w - - 0 28
+  Correct Answer: f7b7
+  Engine's Answer: h1g1
+--------------------
+Name: Lichess Puzzle 007eS
+  FEN: 6k1/p4p2/1p5p/4r3/P3B3/1P2KP2/2P3PP/8 b - - 1 29
+  Correct Answer: f7f5
+  Engine's Answer: h6h5
+--------------------
+Name: Lichess Puzzle 00AHY
+  FEN: r6k/3NR1p1/4n2p/5b1P/p7/6R1/8/6K1 b - - 0 43
+  Correct Answer: a4a3
+  Engine's Answer: e6d8
+--------------------
+Name: Lichess Puzzle 000tp
+  FEN: 4r3/5pk1/1Q3np1/3p3p/2q5/P4N1P/1P3RP1/7K b - - 0 34
+  Correct Answer: f6e4
+  Engine's Answer: c4f4
+--------------------
+Name: Lichess Puzzle 0018S
+  FEN: 2kr3r/p4p2/1p2p2p/1N1p2p1/3Q4/1P1P4/2q2PPP/5RK1 w - - 0 21
+  Correct Answer: d4a1
+  Engine's Answer: b5d6
+--------------------
+Name: Lichess Puzzle 001XA
+  FEN: 2r2rk1/pbq1bppp/8/8/2p1N3/P1Bn2P1/2Q2PBP/1R3RK1 w - - 4 24
+  Correct Answer: b1b7
+  Engine's Answer: f1d1
+--------------------
+Name: Lichess Puzzle 001om
+  FEN: 5r1k/pp4pp/5p2/1BbQp1r1/7K/7P/1PP3P1/3R3R b - - 3 26
+  Correct Answer: c5f2
+  Engine's Answer: e5e4
+--------------------
+Name: Lichess Puzzle 002VP
+  FEN: 8/6p1/2B2n2/3b2k1/3B4/6K1/4P3/8 w - - 5 45
+  Correct Answer: d4f6
+  Engine's Answer: d4e3
+--------------------
+Name: Lichess Puzzle 003wQ
+  FEN: 2r2rk1/6pp/3Q1q2/8/3N1B2/6P1/PP1K3P/5R2 b - - 0 24
+  Correct Answer: f6d6
+  Engine's Answer: f6d4
+--------------------
+Name: Lichess Puzzle 0042j
+  FEN: 3r2k1/4nppp/pq3b2/1p2p3/2r2P2/2P1NR2/PP1Q2BP/3R2K1 w - - 0 25
+  Correct Answer: d2d8
+  Engine's Answer: f4e5
+--------------------
+Name: Lichess Puzzle 004Op
+  FEN: 2kr2r1/1bp4n/1pq1p2p/p1P5/1P3B2/P6P/5RP1/RB3QK1 b - - 4 26
+  Correct Answer: d8d1
+  Engine's Answer: c6e4
+--------------------
+Name: Lichess Puzzle 004nd
+  FEN: 3q2k1/3r4/pp3p1Q/2b1n3/P3N3/2P5/1P4PP/R6K w - - 1 25
+  Correct Answer: e4f6
+  Engine's Answer: h6h5
+--------------------
+Name: Lichess Puzzle 004sY
+  FEN: 8/2k3n1/K2p2p1/2pP2Pp/2P4P/7B/8/8 b - - 1 57
+  Correct Answer: c7d8
+  Engine's Answer: g7e8
+--------------------
+Name: Lichess Puzzle 004sg
+  FEN: 6k1/p3b2p/1p1pP3/2P3P1/2np3B/P6P/3Q3K/8 b - - 0 38
+  Correct Answer: c4d2
+  Engine's Answer: d4d3
+--------------------
+Name: Lichess Puzzle 0050w
+  FEN: 5rk1/1p2p2p/p2p4/2pPb2R/2P1P3/1P1BKPrR/8/8 w - - 5 31
+  Correct Answer: h3g3
+  Engine's Answer: h3h1
+--------------------
+Name: Lichess Puzzle 005xu
+  FEN: 6r1/3k4/1K1P4/2P5/R7/5b2/8/8 w - - 1 69
+  Correct Answer: a4a7
+  Engine's Answer: a4f4
+--------------------
+Name: Lichess Puzzle 0066C
+  FEN: r2q1r1k/2p3p1/pb2Q2p/1p1B1n2/8/2P5/PP1B1PPP/3RR1K1 b - - 0 20
+  Correct Answer: b6f2
+  Engine's Answer: d8d5
+--------------------
+Name: Lichess Puzzle 006wz
+  FEN: 2r5/4ppkp/6p1/1p6/1P6/P3B3/1br2PPP/1R1R2K1 w - - 3 23
+  Correct Answer: b1b2
+  Engine's Answer: e3h6
+--------------------
+Name: Lichess Puzzle 761
+  FEN: 3r2k1/1b4bR/p2P2p1/3p2N1/2p5/2P2N2/PP6/2K5 w - - 0 29
+  Correct Answer: h7g7
+  Engine's Answer: f3d2
+--------------------
+Name: Lichess Puzzle 007Rn
+  FEN: 4r1k1/p4p1p/1p6/6B1/3P2n1/P4Q2/1P4P1/7K b - - 0 34
+  Correct Answer: e8e1
+  Engine's Answer: g8f8
+--------------------
+Name: Lichess Puzzle 008P4
+  FEN: 8/4k3/1p1p4/rP2p1p1/P2nP1P1/3B4/3K4/R7 b - - 1 35
+  Correct Answer: d4b3
+  Engine's Answer: d4f3
+--------------------
+Name: Lichess Puzzle 008Sk
+  FEN: 8/6pp/3Bp2k/p2pP2P/P3p1PK/8/r4b2/5R2 w - - 3 38
+  Correct Answer: f1f2
+  Engine's Answer: h4h3
+--------------------
+Name: Lichess Puzzle 008nF
+  FEN: 2rq1rk1/7p/1n4pb/1R2Q3/pPpP1P2/P1B5/3N2PP/2R3K1 b - - 0 31
+  Correct Answer: f8e8
+  Engine's Answer: d8d4
+--------------------
+Name: Lichess Puzzle 008o6
+  FEN: Q4rk1/p1p3p1/6P1/8/3P4/7P/q3r3/B4RK1 w - - 2 35
+  Correct Answer: a8f8
+  Engine's Answer: f1f8
+--------------------
+Name: Lichess Puzzle 009Os
+  FEN: r2b2k1/1p3q1p/p2p4/3P2p1/2P1PR1r/6Q1/P2B3P/2R4K b - - 2 29
+  Correct Answer: h4f4
+  Engine's Answer: f7f4
+--------------------
+Name: Lichess Puzzle 009tE
+  FEN: 6k1/6pp/p1N5/1pP2bp1/5P2/8/PPP5/3K4 w - - 0 29
+  Correct Answer: c6e7
+  Engine's Answer: b2b4
+--------------------
+Name: Lichess Puzzle 00A1H
+  FEN: 2r3k1/4brp1/2p3b1/2Pp1qNp/3B3P/2P5/PP3P1K/R2Q2R1 b - - 2 31
+  Correct Answer: f5f4
+  Engine's Answer: e7d6
+--------------------

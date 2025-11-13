@@ -3,22 +3,7 @@
 import numba
 import numpy as np
 
-from chess_engine.constants import (
-    MG_MATERIAL_VALUES, EG_MATERIAL_VALUES,
-    PST_MG, PST_EG,
-    PHASE_WEIGHTS, MAX_PHASE,
-    KING_SAFETY_ATTACK_UNITS, KING_SAFETY_TABLE,
-    KING_TROPISM_MAX_DISTANCE, KING_TROPISM_WEIGHTS,
-    PAWN_STORM_PENALTY, SCALING_WEIGHTS, MAX_SCALING_MATERIAL,
-    PASSED_PAWN_BONUS, ISOLATED_PAWN_PENALTY, DOUBLED_PAWN_PENALTY,
-    BISHOP_PAIR_BONUS, ROOK_ON_SEMI_OPEN_FILE_BONUS, ROOK_ON_OPEN_FILE_BONUS,
-    KNIGHT_MOBILITY_BASE_MOVES, KNIGHT_MOBILITY_WEIGHT,
-    BISHOP_MOBILITY_BASE_MOVES, BISHOP_MOBILITY_WEIGHT,
-    ROOK_MOBILITY_BASE_MOVES, ROOK_MOBILITY_WEIGHT,
-    QUEEN_MOBILITY_BASE_MOVES, QUEEN_MOBILITY_WEIGHT,
-    INITIATIVE_BONUS, INITIATIVE_PHASE_THRESHOLD,
-    BB_SQUARES
-)
+from chess_engine.constants import *
 
 from chess_engine.zobrist import get_lsb_index
 from chess_engine.engine_types import piece_bbs_signature, occupancy_bbs_signature, game_state_signature
@@ -105,7 +90,7 @@ def evaluate_pawn_structure(piece_bbs):
     temp_wp = white_pawns
     while temp_wp:
         sq = get_lsb_index(temp_wp)
-        if not (BLACK_PASSED_PAWN_MASKS[sq] & black_pawns):
+        if not (WHITE_PASSED_PAWN_MASKS[sq] & black_pawns):
             rank = sq // 8
             mg_score += PASSED_PAWN_BONUS[rank][0]
             eg_score += PASSED_PAWN_BONUS[rank][1]
@@ -115,7 +100,7 @@ def evaluate_pawn_structure(piece_bbs):
     temp_bp = black_pawns
     while temp_bp:
         sq = get_lsb_index(temp_bp)
-        if not (WHITE_PASSED_PAWN_MASKS[sq] & white_pawns):
+        if not (BLACK_PASSED_PAWN_MASKS[sq] & white_pawns):
             rank = 7 - (sq // 8) # Rank from Black's perspective
             mg_score -= PASSED_PAWN_BONUS[rank][0]
             eg_score -= PASSED_PAWN_BONUS[rank][1]
@@ -391,8 +376,10 @@ def evaluate_king_safety(piece_bbs, occupancy_bbs):
 
     mg_safety_score = white_final_safety - black_final_safety
 
-    # For now, EG score is the same as MG score. This can be adjusted later.
-    eg_safety_score = mg_safety_score
+    # In the endgame, king safety is much less of a concern, and an active king is
+    # often an advantage. The King's PST already encourages centralization.
+    # Therefore, we set the endgame king safety score to 0.
+    eg_safety_score = mg_safety_score * EG_SAFETY_SCALE
 
     return mg_safety_score, eg_safety_score
 
@@ -487,11 +474,77 @@ def evaluate_mobility(piece_bbs, occupancy_bbs):
     return mg_score, eg_score
 
 
+@numba.njit(numba.int32(piece_bbs_signature), cache=True, boundscheck=False, fastmath=True)
+def _evaluate_king_pawn_endgame(piece_bbs):
+    """
+    專門為王兵殘局設計的評估函數。
+    """
+    score = np.int32(0)
+
+    white_pawns = piece_bbs[0]
+    white_king_sq = get_lsb_index(piece_bbs[5])
+    black_pawns = piece_bbs[6]
+    black_king_sq = get_lsb_index(piece_bbs[11])
+
+    # 1. 基礎兵價和位置
+    # White pawns
+    temp_wp = white_pawns
+    while temp_wp:
+        sq = get_lsb_index(temp_wp)
+        score += EG_MATERIAL_VALUES[0] + PST_EG[0][sq]
+        temp_wp &= temp_wp - np.uint64(1)
+
+    # Black pawns
+    temp_bp = black_pawns
+    while temp_bp:
+        sq = get_lsb_index(temp_bp)
+        score -= (EG_MATERIAL_VALUES[0] + PST_EG[0][sq ^ 56])
+        temp_bp &= temp_bp - np.uint64(1)
+
+    # King position
+    score += PST_EG[5][white_king_sq]
+    score -= PST_EG[5][black_king_sq ^ 56]
+
+    # 2. 通路兵獎勵 (使用 evaluate_pawn_structure 簡化計算)
+    _, eg_pawn_score = evaluate_pawn_structure(piece_bbs)
+    score += eg_pawn_score
+
+    # 3. 國王活動獎勵
+    # 獎勵國王靠近所有兵 (自己的和對手的)
+    # White king proximity
+    temp_pawns = white_pawns | black_pawns
+    while temp_pawns:
+        sq = get_lsb_index(temp_pawns)
+        # 距離越近，獎勵/懲罰越小，所以用最大距離減去實際距離
+        distance = MANHATTAN_DISTANCE[white_king_sq, sq]
+        score += (KING_TROPISM_MAX_DISTANCE - distance) * 5 # 給予一個較小的權重
+        temp_pawns &= temp_pawns - np.uint64(1)
+
+    # Black king proximity
+    temp_pawns = white_pawns | black_pawns
+    while temp_pawns:
+        sq = get_lsb_index(temp_pawns)
+        distance = MANHATTAN_DISTANCE[black_king_sq, sq]
+        score -= (KING_TROPISM_MAX_DISTANCE - distance) * 5
+        temp_pawns &= temp_pawns - np.uint64(1)
+
+    return score
+
+
 @numba.njit(numba.int32(piece_bbs_signature, occupancy_bbs_signature, game_state_signature, numba.boolean), cache=True, boundscheck=False, fastmath=True)
 def evaluate_position(piece_bbs, occupancy_bbs, game_state, lazy: bool = False):
     """
     使用 Tapered Evaluation (加權評估) 模型評估目前局面，並從當前執棋方的角度返回分數。
     """
+    # --- King and Pawn Endgame Check ---
+    # 檢查是否只有王和兵，如果
+    all_pieces_except_pawns_and_kings = (
+        piece_bbs[1] | piece_bbs[2] | piece_bbs[3] | piece_bbs[4] |
+        piece_bbs[7] | piece_bbs[8] | piece_bbs[9] | piece_bbs[10]
+    )
+    if all_pieces_except_pawns_and_kings == 0:
+        score = _evaluate_king_pawn_endgame(piece_bbs)
+        return score if game_state[0] == 0 else -score
     side_to_move = game_state[0]
 
     # --- 1. 計算遊戲階段 (Game Phase) ---
