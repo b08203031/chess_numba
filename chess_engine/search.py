@@ -11,7 +11,7 @@ from chess_engine.zobrist import get_lsb_index
 from chess_engine.board_operations import make_move, unmake_move, make_null_move
 from chess_engine.move import (
     get_to_square, get_from_square, get_special_move_flag,
-    SPECIAL_MOVE_FLAG_PROMOTION
+    SPECIAL_MOVE_FLAG_PROMOTION, SPECIAL_MOVE_FLAG_EN_PASSANT
 )
 from chess_engine.constants import (
     BB_SQUARES, MG_MATERIAL_VALUES, INFINITY, MAX_QUIESCENCE_DEPTH, ASPIRATION_WINDOW_SIZE,
@@ -114,8 +114,14 @@ def quiescence_search(piece_bbs, occupancy_bbs, game_state, alpha, beta, ply):
         if ENABLE_DELTA_PRUNING:
             is_promotion = get_special_move_flag(move) == SPECIAL_MOVE_FLAG_PROMOTION
             promotion_gain = MG_MATERIAL_VALUES[4] - MG_MATERIAL_VALUES[0] if is_promotion else 0
-            victim_type = find_piece_type_on_square(piece_bbs, get_to_square(move))
-            victim_value = MG_MATERIAL_VALUES[victim_type % 6] if victim_type != -1 else 0
+
+            is_en_passant = get_special_move_flag(move) == SPECIAL_MOVE_FLAG_EN_PASSANT
+            if is_en_passant:
+                victim_value = MG_MATERIAL_VALUES[0]  # Pawn value
+            else:
+                victim_type = find_piece_type_on_square(piece_bbs, get_to_square(move))
+                victim_value = MG_MATERIAL_VALUES[victim_type % 6] if victim_type != -1 else 0
+
             potential_gain = victim_value + promotion_gain
             
             if stand_pat + potential_gain + DELTA_PRUNING_MARGIN < alpha:
@@ -435,12 +441,17 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
         if is_quiet_move: quiet_move_counter += 1
 
     final_flag = TT_FLAG_ALPHA if max_eval <= original_alpha else (TT_FLAG_BETA if max_eval >= beta else TT_FLAG_EXACT)
-    if best_move == NO_MOVE and len(moves) > 0: best_move = moves[0]
     
+    move_to_store = best_move
+    if final_flag == TT_FLAG_ALPHA:
+        move_to_store = NO_MOVE
+    elif best_move == NO_MOVE and len(moves) > 0:
+        move_to_store = moves[0]
+
     tt_score = max_eval
     if tt_score > MATE_IN_MAX_PLY: tt_score -= ply
     elif tt_score < -MATE_IN_MAX_PLY: tt_score += ply
-    store_tt(search_context.transposition_table, zobrist_key, depth, tt_score, final_flag, best_move)
+    store_tt(search_context.transposition_table, zobrist_key, depth, tt_score, final_flag, move_to_store)
 
     return (max_eval, best_move, nodes_searched, quiescence_nodes, cutoffs, tt_hits,
             null_move_cutoffs, futility_pruned, razoring_used, rfp_pruned, lmp_pruned, probcut_pruned, qs_delta_pruned, qs_see_pruned,
