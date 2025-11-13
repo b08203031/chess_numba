@@ -372,12 +372,9 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                 break # Stop searching quiet moves at this node
 
         # --- Futility Pruning (F-Pruning) ---
-        if ENABLE_FP and is_quiet_move and not is_currently_in_check:
-            # Ensure static_score is computed if not already done for shallow depths
-            # This reuses the static_score calculated in the shallow pruning section
-            if static_score == -INFINITY:
-                static_score = evaluate_position(piece_bbs, occupancy_bbs, game_state, lazy=False)
-
+        if ENABLE_FP and is_quiet_move and not is_currently_in_check and static_score != -INFINITY:
+            # This pruning relies on static_score being calculated before the move loop for shallow depths.
+            # The check `static_score != -INFINITY` ensures we only prune when that score is available.
             margin = 0
             if depth == 1: margin = FP_MARGIN_D1
             elif depth == 2: margin = FP_MARGIN_D2
