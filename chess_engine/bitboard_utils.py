@@ -26,6 +26,41 @@ def _init_king_attack_zones():
 
 KING_ATTACK_ZONES = _init_king_attack_zones()
 
+def _init_color_specific_king_zones(is_white):
+    """
+    Precomputes color-specific king zones (king moves + 3 squares forward).
+    """
+    zones = np.zeros(64, dtype=np.uint64)
+    for sq in range(64):
+        zone_bb = np.uint64(0)
+        rank, file = sq // 8, sq % 8
+
+        # King's standard 3x3 zone
+        for r in range(rank - 1, rank + 2):
+            for f in range(file - 1, file + 2):
+                if 0 <= r < 8 and 0 <= f < 8:
+                    zone_bb |= BB_SQUARES[r * 8 + f]
+
+        # Add 3 squares in front, depending on color
+        if is_white:
+            if rank < 5: # White king on rank 1-6
+                for i in range(1, 4):
+                    if 0 <= file - 1 < 8: zone_bb |= BB_SQUARES[sq + i*8 - 1]
+                    zone_bb |= BB_SQUARES[sq + i*8]
+                    if 0 <= file + 1 < 8: zone_bb |= BB_SQUARES[sq + i*8 + 1]
+        else: # Black
+            if rank > 2: # Black king on rank 8-3
+                 for i in range(1, 4):
+                    if 0 <= file - 1 < 8: zone_bb |= BB_SQUARES[sq - i*8 - 1]
+                    zone_bb |= BB_SQUARES[sq - i*8]
+                    if 0 <= file + 1 < 8: zone_bb |= BB_SQUARES[sq - i*8 + 1]
+
+        zones[sq] = zone_bb
+    return zones
+
+WHITE_KING_ZONES = _init_color_specific_king_zones(is_white=True)
+BLACK_KING_ZONES = _init_color_specific_king_zones(is_white=False)
+
 def _init_file_masks():
     """
     Precomputes bitboard masks for each file.
