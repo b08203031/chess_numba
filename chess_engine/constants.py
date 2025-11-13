@@ -274,7 +274,7 @@ KING_SAFETY_TABLE = np.array([
 ] + [400] * 50, dtype=np.int32)
 
 # --- Phase 3: King Tropism ---
-KING_TROPISM_MAX_DISTANCE = 14 # Max Manhattan distance
+KING_TROPISM_MAX_DISTANCE = 7 # Max Chebyshev distance
 KING_TROPISM_WEIGHTS = np.array([1, 2, 2, 3, 5], dtype=np.int32) # P, N, B, R, Q
 
 # --- Phase 4: Advanced & Dynamic ---
