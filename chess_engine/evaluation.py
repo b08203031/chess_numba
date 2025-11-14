@@ -620,3 +620,5 @@ def evaluate_position(piece_bbs, occupancy_bbs, game_state, lazy: bool = False):
         return np.int32(final_score)
     else:  # 黑方回合
         return np.int32(-final_score)
+    # return np.int32(0)  # Placeholder return statement
+

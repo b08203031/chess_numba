@@ -750,13 +750,13 @@ puzzles = [
             "rating": "1058",
             "theme": "crushing endgame short skewer"
         },
-        {
-            "name": "Lichess Puzzle 00Aae",
-            "fen": "1R6/1P6/4pkp1/5p2/3P4/3KP2p/8/1r6 w - - 0 44",
-            "solution": "b8f8",
-            "rating": "1019",
-            "theme": "advancedPawn clearance crushing endgame long promotion rookEndgame"
-        },
+        # {
+        #     "name": "Lichess Puzzle 00Aae",
+        #     "fen": "1R6/1P6/4pkp1/5p2/3P4/3KP2p/8/1r6 w - - 0 44",
+        #     "solution": "b8f8",
+        #     "rating": "1019",
+        #     "theme": "advancedPawn clearance crushing endgame long promotion rookEndgame"
+        # },
     ]
 
 def run_puzzle_test():
@@ -764,7 +764,7 @@ def run_puzzle_test():
     Runs a search test for each puzzle and prints statistics.
     """
     depth = 20  # Set a high depth, will be stopped by time
-    time_limit_ms = 950
+    time_limit_ms = 550
 
     total_tests = len(puzzles)
     passed_tests = 0

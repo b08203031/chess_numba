@@ -89,9 +89,12 @@ def make_move(piece_bbs: np.ndarray, occupancy_bbs: np.ndarray, game_state: np.n
         promo_piece_type = get_promotion_piece(move) + 1
         promo_piece_bb_idx = side * 6 + promo_piece_type
 
-        piece_bbs[moving_piece_bb_idx] &= ~(np.uint64(1) << to_sq)
+        # Correctly handle promotion: remove the pawn from the 'to' square and add the new piece.
+        # The pawn was already moved by the initial XOR, so we XOR it again at 'to_sq' to remove it.
+        piece_bbs[moving_piece_bb_idx] ^= (np.uint64(1) << to_sq)
         piece_bbs[promo_piece_bb_idx] |= (np.uint64(1) << to_sq)
-
+        
+        # The key was updated for a pawn moving to 'to_sq'. We need to reverse that and apply the key for the promoted piece.
         key ^= PIECE_SQUARE_KEYS[moving_piece_bb_idx, to_sq]
         key ^= PIECE_SQUARE_KEYS[promo_piece_bb_idx, to_sq]
 
