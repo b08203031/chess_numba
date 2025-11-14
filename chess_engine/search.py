@@ -362,14 +362,16 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
         is_capture = (opponent_pieces_bb & BB_SQUARES[get_to_square(move)]) != 0
         is_quiet_move = not is_capture and not (get_special_move_flag(move) == SPECIAL_MOVE_FLAG_PROMOTION) and not is_giving_check_after_move
         
-        # --- Late Move Pruning (LMP) ---
-        if ENABLE_LMP and is_quiet_move and not is_currently_in_check:
-            # LMP_MOVE_COUNT is an array indexed by depth
-            if quiet_move_counter >= LMP_MOVE_COUNT[depth]:
-                lmp_pruned += 1
-                # IMPORTANT: We MUST unmake the move before we break the loop
-                unmake_move(piece_bbs, occupancy_bbs, game_state, move, unmake_info)
-                break # Stop searching quiet moves at this node
+        if is_quiet_move:
+            quiet_move_counter += 1
+            # --- Late Move Pruning (LMP) ---
+            if ENABLE_LMP and not is_currently_in_check:
+                # LMP_MOVE_COUNT is an array indexed by depth
+                if quiet_move_counter >= LMP_MOVE_COUNT[depth]:
+                    lmp_pruned += 1
+                    # IMPORTANT: We MUST unmake the move before we break the loop
+                    unmake_move(piece_bbs, occupancy_bbs, game_state, move, unmake_info)
+                    break # Stop searching quiet moves at this node
 
         # --- Futility Pruning (F-Pruning) ---
         if ENABLE_FP and is_quiet_move and not is_currently_in_check and static_score != -INFINITY:
@@ -432,7 +434,6 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                     search_context.killer_moves[ply * 2 + 1] = search_context.killer_moves[ply * 2]
                     search_context.killer_moves[ply * 2] = move
             break
-        if is_quiet_move: quiet_move_counter += 1
 
     final_flag = TT_FLAG_ALPHA if max_eval <= original_alpha else (TT_FLAG_BETA if max_eval >= beta else TT_FLAG_EXACT)
     if best_move == NO_MOVE and len(moves) > 0: best_move = moves[0]

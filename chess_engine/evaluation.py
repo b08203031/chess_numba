@@ -259,13 +259,11 @@ def _evaluate_king_attackers(king_sq, color, piece_bbs, occupancy_bbs):
             attacker_count += 1
         temp_bb &= temp_bb - np.uint64(1)
 
-    temp_occ = all_pieces_occupancy & ~king_zone
-
     # Bishops
     temp_bb = en_b
     while temp_bb:
         sq = get_lsb_index(temp_bb)
-        attacks = get_bishop_attacks(sq, temp_occ & ~BB_SQUARES[sq])
+        attacks = get_bishop_attacks(sq, all_pieces_occupancy & ~BB_SQUARES[sq])
         if attacks & king_zone:
             total_attack_units += KING_SAFETY_ATTACK_UNITS[1]
             attacker_count += 1
@@ -275,7 +273,7 @@ def _evaluate_king_attackers(king_sq, color, piece_bbs, occupancy_bbs):
     temp_bb = en_r
     while temp_bb:
         sq = get_lsb_index(temp_bb)
-        attacks = get_rook_attacks(sq, temp_occ & ~BB_SQUARES[sq])
+        attacks = get_rook_attacks(sq, all_pieces_occupancy & ~BB_SQUARES[sq])
         if attacks & king_zone:
             total_attack_units += KING_SAFETY_ATTACK_UNITS[2]
             attacker_count += 1
@@ -285,7 +283,7 @@ def _evaluate_king_attackers(king_sq, color, piece_bbs, occupancy_bbs):
     temp_bb = en_q
     while temp_bb:
         sq = get_lsb_index(temp_bb)
-        attacks = get_queen_attacks(sq, temp_occ & ~BB_SQUARES[sq])
+        attacks = get_queen_attacks(sq, all_pieces_occupancy & ~BB_SQUARES[sq])
         if attacks & king_zone:
             total_attack_units += KING_SAFETY_ATTACK_UNITS[3]
             attacker_count += 1

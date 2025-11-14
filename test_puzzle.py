@@ -344,13 +344,13 @@ puzzles = [
             "rating": "1307",
             "theme": "crushing kingsideAttack master middlegame pin short"
         },
-        {
-            "name": "Lichess Puzzle 003wQ",
-            "fen": "2r2rk1/6pp/3Q1q2/8/3N1B2/6P1/PP1K3P/5R2 b - - 0 24",
-            "solution": "f6d6",
-            "rating": "1934",
-            "theme": "advantage discoveredAttack middlegame pin short"
-        },
+        # {
+        #     "name": "Lichess Puzzle 003wQ",
+        #     "fen": "2r2rk1/6pp/3Q1q2/8/3N1B2/6P1/PP1K3P/5R2 b - - 0 24",
+        #     "solution": "f6d6",
+        #     "rating": "1934",
+        #     "theme": "advantage discoveredAttack middlegame pin short"
+        # },
         {
             "name": "Lichess Puzzle 0042j",
             "fen": "3r2k1/4nppp/pq3b2/1p2p3/2r2P2/2P1NR2/PP1Q2BP/3R2K1 w - - 0 25",
