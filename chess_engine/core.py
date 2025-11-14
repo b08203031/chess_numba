@@ -57,9 +57,6 @@ def perft(piece_bbs, occupancy_bbs, game_state, depth: int):
     nodes = np.uint64(0)
     moves = generate_legal_moves(piece_bbs, occupancy_bbs, game_state)
 
-    if depth == 1:
-        return np.uint64(len(moves))
-
     for i in range(len(moves)):
         move = moves[i]
         unmake_info = make_move(piece_bbs, occupancy_bbs, game_state, move)
@@ -77,10 +74,19 @@ def _jit_perft_divide(piece_bbs, occupancy_bbs, game_state, depth: int):
 
     moves = generate_legal_moves(piece_bbs, occupancy_bbs, game_state)
 
+    # Simplified logic to avoid recursion issues and align with perft changes
+    if depth == 1:
+        results = np.zeros((len(moves), 2), dtype=np.uint64)
+        for i in range(len(moves)):
+            results[i, 0] = moves[i]
+            results[i, 1] = np.uint64(1)
+        return results
+
     results = np.zeros((len(moves), 2), dtype=np.uint64)
     for i in range(len(moves)):
         move = moves[i]
         unmake_info = make_move(piece_bbs, occupancy_bbs, game_state, move)
+        # Directly call perft for the next level
         nodes = perft(piece_bbs, occupancy_bbs, game_state, depth - 1)
         unmake_move(piece_bbs, occupancy_bbs, game_state, move, unmake_info)
 
