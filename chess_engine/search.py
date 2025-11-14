@@ -191,8 +191,8 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
     if tt_entry['flag'] != TT_FLAG_NONE and tt_entry['depth'] >= depth:
         tt_hits += 1
         tt_score = np.int32(tt_entry['score'])
-        if tt_score > MATE_IN_MAX_PLY: tt_score += ply
-        elif tt_score < -MATE_IN_MAX_PLY: tt_score -= ply
+        if tt_score > MATE_IN_MAX_PLY: tt_score -= ply
+        elif tt_score < -MATE_IN_MAX_PLY: tt_score += ply
 
         if tt_entry['flag'] == TT_FLAG_EXACT:
             search_context.pv_table[ply, :].fill(NO_MOVE)
@@ -436,11 +436,15 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
             break
 
     final_flag = TT_FLAG_ALPHA if max_eval <= original_alpha else (TT_FLAG_BETA if max_eval >= beta else TT_FLAG_EXACT)
+    # If max_eval is still -INFINITY, it means we couldn't raise alpha.
+    # In this case, the score of the node is the original alpha.
+    if max_eval == -INFINITY:
+        max_eval = original_alpha
     if best_move == NO_MOVE and len(moves) > 0: best_move = moves[0]
     
     tt_score = max_eval
-    if tt_score > MATE_IN_MAX_PLY: tt_score -= ply
-    elif tt_score < -MATE_IN_MAX_PLY: tt_score += ply
+    if tt_score > MATE_IN_MAX_PLY: tt_score += ply
+    elif tt_score < -MATE_IN_MAX_PLY: tt_score -= ply
     store_tt(search_context.transposition_table, zobrist_key, depth, tt_score, final_flag, best_move)
 
     return (max_eval, best_move, nodes_searched, quiescence_nodes, cutoffs, tt_hits,
@@ -490,6 +494,11 @@ def iterative_deepening_search(piece_bbs, occupancy_bbs, game_state, max_depth, 
         pv_string = " ".join(pv_moves)
 
         # --- Format Score for UCI ---
+        # Clamp the score to be within the valid mate range before formatting
+        if score >= MATE_SCORE:
+            score = MATE_IN_MAX_PLY
+        elif score <= -MATE_SCORE:
+            score = -MATE_IN_MAX_PLY
         uci_score_string = format_score_for_uci(score)
 
         # --- Print UCI Info String ---
