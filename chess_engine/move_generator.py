@@ -94,32 +94,45 @@ def set_occupancy(index, bits_in_mask, attack_mask):
         attack_mask &= ~BB_SQUARES[sq]
         if index & (1 << count): occupancy |= BB_SQUARES[sq]
     return occupancy
+
+@numba.njit(cache=True, boundscheck=False, fastmath=True)
 def init_sliders_attacks():
     bishop_attacks, rook_attacks = np.empty((64, 512), dtype=np.uint64), np.empty((64, 4096), dtype=np.uint64)
     for sq in range(64):
         attack_mask, relevant_bits_count = BISHOP_MASKS[sq], count_bits(BISHOP_MASKS[sq])
         for i in range(1 << relevant_bits_count):
             occ = set_occupancy(i, relevant_bits_count, attack_mask)
-            product = int(occ) * int(BISHOP_MAGIC_NUMBERS[sq])
-            magic_index = (product & 0xFFFFFFFFFFFFFFFF) >> (64 - BISHOP_RELEVANT_BITS[sq])
+            magic_index = (np.uint64(occ) * BISHOP_MAGIC_NUMBERS[sq]) >> np.uint64(64 - BISHOP_RELEVANT_BITS[sq])
             bishop_attacks[sq][magic_index] = bishop_attacks_on_the_fly(sq, occ)
         attack_mask, relevant_bits_count = ROOK_MASKS[sq], count_bits(ROOK_MASKS[sq])
+        
         for i in range(1 << relevant_bits_count):
             occ = set_occupancy(i, relevant_bits_count, attack_mask)
-            product = int(occ) * int(ROOK_MAGIC_NUMBERS[sq])
-            magic_index = (product & 0xFFFFFFFFFFFFFFFF) >> (64 - ROOK_RELEVANT_BITS[sq])
+            magic_index = (np.uint64(occ) * ROOK_MAGIC_NUMBERS[sq]) >> np.uint64(64 - ROOK_RELEVANT_BITS[sq])
             rook_attacks[sq][magic_index] = rook_attacks_on_the_fly(sq, occ)
     return bishop_attacks, rook_attacks
-# BISHOP_ATTACKS, ROOK_ATTACKS = init_sliders_attacks()
-BISHOP_ATTACKS = np.empty((64, 512), dtype=np.uint64)
-ROOK_ATTACKS = np.empty((64, 4096), dtype=np.uint64)
+BISHOP_ATTACKS, ROOK_ATTACKS = init_sliders_attacks()
+# BISHOP_ATTACKS = np.empty((64, 512), dtype=np.uint64)
+# ROOK_ATTACKS = np.empty((64, 4096), dtype=np.uint64)
 
 @numba.njit(numba.uint64(numba.uint8, numba.uint64), cache=True, boundscheck=False, fastmath=True)
 def get_bishop_attacks(sq, occ):
-    return bishop_attacks_on_the_fly(sq, occ)
+    """
+    使用魔法位元棋盤查表獲取主教的攻擊。
+    """
+    occ &= BISHOP_MASKS[sq]; occ *= BISHOP_MAGIC_NUMBERS[sq]; occ >>= np.uint64(64-BISHOP_RELEVANT_BITS[sq])
+    return BISHOP_ATTACKS[sq][occ]
+    # return bishop_attacks_on_the_fly(sq, occ)
+
 @numba.njit(numba.uint64(numba.uint8, numba.uint64), cache=True, boundscheck=False, fastmath=True)
 def get_rook_attacks(sq, occ):
-    return rook_attacks_on_the_fly(sq, occ)
+    """
+    使用魔法位元棋盤查表獲取城堡的攻擊。
+    """
+    occ &= ROOK_MASKS[sq]; occ *= ROOK_MAGIC_NUMBERS[sq]; occ >>= np.uint64(64-ROOK_RELEVANT_BITS[sq])
+    return ROOK_ATTACKS[sq][occ]
+    # return rook_attacks_on_the_fly(sq, occ)
+
 @numba.njit(numba.uint64(numba.uint8, numba.uint64), cache=True, boundscheck=False, fastmath=True)
 def get_queen_attacks(sq, occ): return get_rook_attacks(sq, occ) | get_bishop_attacks(sq, occ)
 
