@@ -100,14 +100,16 @@ def init_sliders_attacks():
         attack_mask, relevant_bits_count = BISHOP_MASKS[sq], count_bits(BISHOP_MASKS[sq])
         for i in range(1 << relevant_bits_count):
             occ = set_occupancy(i, relevant_bits_count, attack_mask)
-            product = int(occ) * int(BISHOP_MAGIC_NUMBERS[sq])
-            magic_index = (product & 0xFFFFFFFFFFFFFFFF) >> (64 - BISHOP_RELEVANT_BITS[sq])
+            # Crucially, perform multiplication with uint64 to get correct wrapping behavior
+            product = np.uint64(occ) * BISHOP_MAGIC_NUMBERS[sq]
+            magic_index = product >> (64 - BISHOP_RELEVANT_BITS[sq])
             bishop_attacks[sq][magic_index] = bishop_attacks_on_the_fly(sq, occ)
         attack_mask, relevant_bits_count = ROOK_MASKS[sq], count_bits(ROOK_MASKS[sq])
         for i in range(1 << relevant_bits_count):
             occ = set_occupancy(i, relevant_bits_count, attack_mask)
-            product = int(occ) * int(ROOK_MAGIC_NUMBERS[sq])
-            magic_index = (product & 0xFFFFFFFFFFFFFFFF) >> (64 - ROOK_RELEVANT_BITS[sq])
+            # Crucially, perform multiplication with uint64 to get correct wrapping behavior
+            product = np.uint64(occ) * ROOK_MAGIC_NUMBERS[sq]
+            magic_index = product >> (64 - ROOK_RELEVANT_BITS[sq])
             rook_attacks[sq][magic_index] = rook_attacks_on_the_fly(sq, occ)
     return bishop_attacks, rook_attacks
 # BISHOP_ATTACKS, ROOK_ATTACKS = init_sliders_attacks()
