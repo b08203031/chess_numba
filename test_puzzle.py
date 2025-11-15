@@ -790,10 +790,15 @@ def run_puzzle_test():
         start_time = time.time()
 
         # Unpack all 17 return values from the search function
+        time_config = {
+            'optimum_time': time_limit_ms,
+            'maximum_time': time_limit_ms,
+        }
+
         (best_move, best_eval, nodes_searched, quiescence_nodes, cutoffs, tt_hits,
         last_completed_depth, total_nmc, total_fp, total_ru, total_rfp, total_lmp, total_pcp, total_qdp, total_qsp,
         total_iid, total_se) = iterative_deepening_search(
-            piece_bbs, occupancy_bbs, game_state, depth, time_limit_ms, transposition_table
+            piece_bbs, occupancy_bbs, game_state, depth, time_config, transposition_table
         )
 
         end_time = time.time()

@@ -10,6 +10,7 @@ from chess_engine.debug_utils import log_info
 from chess_engine.fen_parser import parse_fen
 from chess_engine.move import move_to_uci
 from chess_engine.search import iterative_deepening_search
+from chess_engine.time_manager import calculate_search_time
 from chess_engine.transposition_table import (
     create_transposition_table,
     clear_transposition_table,
@@ -94,44 +95,59 @@ def uci_loop():
                         log_info(f"Illegal move {move_uci} received. Ignoring.")
                         break
         elif command == "go":
-            # --- Parse go command ---
-            max_depth = 64  # Default max depth
-            move_time_ms = float('inf')  # Default to almost infinite time
+            if not board_state:
+                log_info("No position set. Ignoring 'go' command.")
+                continue
 
+            # --- Parse go command ---
+            max_depth = 128  # A sufficiently high default max depth
+            time_config = {}
+
+            # Case 1: Fixed time per move
             if "movetime" in tokens:
-                move_time_ms = int(tokens[tokens.index("movetime") + 1])
+                movetime_ms = int(tokens[tokens.index("movetime") + 1])
+                time_config = {
+                    'optimum_time': movetime_ms,
+                    'maximum_time': movetime_ms
+                }
+            # Case 2: Fixed depth search
             elif "depth" in tokens:
                 max_depth = int(tokens[tokens.index("depth") + 1])
+                # No time limit, search until depth is reached
+                time_config = {'optimum_time': 0, 'maximum_time': 0}
+            # Case 3: Standard time controls (wtime, btime, etc.)
             else:
-                side_to_move = board_state[15]
-                wtime = int(tokens[tokens.index("wtime") + 1]) if "wtime" in tokens else 0
-                btime = int(tokens[tokens.index("btime") + 1]) if "btime" in tokens else 0
-                movestogo = int(tokens[tokens.index("movestogo") + 1]) if "movestogo" in tokens else 40
+                wtime_ms = int(tokens[tokens.index("wtime") + 1]) if "wtime" in tokens else 0
+                btime_ms = int(tokens[tokens.index("btime") + 1]) if "btime" in tokens else 0
+                winc_ms = int(tokens[tokens.index("winc") + 1]) if "winc" in tokens else 0
+                binc_ms = int(tokens[tokens.index("binc") + 1]) if "binc" in tokens else 0
+                movestogo = int(tokens[tokens.index("movestogo") + 1]) if "movestogo" in tokens else None
 
-                time_for_move = (wtime if side_to_move == 0 else btime) / movestogo
-                move_time_ms = time_for_move - 100 # Safety margin
+                # The board_state is a tuple of numpy arrays. The game_state array is the last one.
+                # game_state[0] is the side to move.
+                side_to_move = board_state[2][0]
 
-            if board_state:
-                # --- Opening Book Logic ---
-                book_moves = []
-                # halfmove_clock is at index 18 of game_state tuple
-                zobrist_key = board_state[19]
-                if board_state[18] < 20: # Query book for the first 10 moves (20 half-moves)
-                    book_moves = opening_book.lookup(zobrist_key, board_state)
+                time_config = calculate_search_time(wtime_ms, btime_ms, winc_ms, binc_ms, movestogo, side_to_move)
 
-                if book_moves:
-                    # If moves are found, choose one based on weight
-                    moves, weights = zip(*book_moves)
-                    selected_move = random.choices(moves, weights=weights, k=1)[0]
-                    log_info("Playing from book")
-                    print(f"bestmove {move_to_uci(selected_move)}")
-                    continue # Skip search
+            # --- Opening Book Logic ---
+            book_moves = []
+            zobrist_key = board_state[2][4]
+            # Use halfmove clock from game_state[3]
+            if board_state[2][3] < 20: # Query book for the first 10 moves (20 half-moves)
+                book_moves = opening_book.lookup(zobrist_key, board_state[0], board_state[1], board_state[2])
 
-                # --- Regular Search Logic ---
-                best_move, _, _, _, _ = iterative_deepening_search(
-                    board_state, max_depth, move_time_ms, transposition_table, killer_moves
-                )
-                print(f"bestmove {move_to_uci(best_move)}")
+            if book_moves:
+                moves, weights = zip(*book_moves)
+                selected_move = random.choices(moves, weights=weights, k=1)[0]
+                log_info("Playing from book")
+                print(f"bestmove {move_to_uci(selected_move)}")
+                continue
+
+            # --- Regular Search Logic ---
+            best_move, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _ = iterative_deepening_search(
+                board_state[0], board_state[1], board_state[2], max_depth, time_config, transposition_table
+            )
+            print(f"bestmove {move_to_uci(best_move)}")
         elif command == "stop":
             # (Advanced) Handle stop command
             pass

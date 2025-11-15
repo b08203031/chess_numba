@@ -294,6 +294,9 @@ MAX_PLY = 128
 MATE_IN_MAX_PLY = MATE_SCORE - MAX_PLY
 NO_MOVE = np.uint16(0)
 
+# Special value to indicate that the search was stopped due to timeout
+STOP_SEARCH_FLAG = 66666
+
 
 # --- Aspiration Windows ---
 ASPIRATION_WINDOW_SIZE = 100 # centipawns
