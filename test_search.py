@@ -6,6 +6,7 @@ from pathlib import Path
 
 # --- Transposition Table Setup ---
 from chess_engine.transposition_table import TT_SIZE_MB, create_transposition_table, clear_transposition_table
+from chess_engine.engine_types import SearchContext
 transposition_table = create_transposition_table(TT_SIZE_MB)
 
 from chess_engine.debug_utils import log_info
@@ -36,8 +37,8 @@ def run_search_test():
     Runs a search test from a given position and prints statistics.
     """
     fen = "r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1"
-    depth = 12
-    time_limit = 10
+    depth = 15
+    time_limit = 13
     time_limit_ms = time_limit * 1000
 
     log_info("--- Starting Iterative Deepening Search Test ---")
@@ -59,10 +60,18 @@ def run_search_test():
         'maximum_time': time_limit_ms,
     }
 
+    # Initialize search context components
+    MAX_PLY = 128
+    killer_moves = np.zeros(MAX_PLY * 2, dtype=np.uint16)
+    pv_table = np.zeros((MAX_PLY, MAX_PLY), dtype=np.uint16)
+    history_table = np.zeros((12, 64), dtype=np.int32)
+    
+    search_context = SearchContext(transposition_table, killer_moves, pv_table, history_table)
+
     (best_move, best_eval, nodes_searched, quiescence_nodes, cutoffs, tt_hits,
      last_completed_depth, total_nmc, total_fp, total_ru, total_rfp, total_lmp, total_pcp, total_qdp, total_qsp,
      total_iid, total_se) = iterative_deepening_search(
-        piece_bbs, occupancy_bbs, game_state, depth, time_config, transposition_table
+        piece_bbs, occupancy_bbs, game_state, depth, time_config, search_context
     )
     
     end_time = time.time()
