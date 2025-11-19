@@ -28,6 +28,8 @@ search_context_spec = [
     ('pv_table', numba.uint16[:, :]),
     ('history_table', numba.int32[:, :]),
     ('nodes_searched', numba.uint64),
+    ('end_time', numba.float64),
+    ('stop_flag', numba.boolean[:]),
 ]
 
 @jitclass(search_context_spec)
@@ -38,5 +40,7 @@ class SearchContext:
         self.pv_table = pv_table
         self.history_table = history_table
         self.nodes_searched = np.uint64(0)
+        self.end_time = 0.0
+        self.stop_flag = np.array([False], dtype=np.bool_)
 
 search_context_type = SearchContext.class_type.instance_type

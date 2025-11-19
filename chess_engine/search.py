@@ -2,6 +2,7 @@
 import time
 import numba
 import numpy as np
+import threading
 
 from chess_engine.evaluation import evaluate_position
 from chess_engine.move_generator import (
@@ -100,6 +101,11 @@ def quiescence_search(piece_bbs, occupancy_bbs, game_state, alpha, beta, ply, se
     delta_pruned = np.uint64(0)
     see_pruned = np.uint64(0)
 
+    # Check for stop flag every 2048 nodes
+    if (search_context.nodes_searched & 2047) == 0:
+        if search_context.stop_flag[0]:
+            return np.int32(0), q_nodes, delta_pruned, see_pruned
+
     if ply >= MAX_QUIESCENCE_DEPTH:
         return evaluate_position(piece_bbs, occupancy_bbs, game_state, lazy=False), q_nodes, delta_pruned, see_pruned
 
@@ -178,6 +184,13 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
     qs_see_pruned = np.uint64(0)
     iid_searches = np.uint64(0)
     singular_extensions = np.uint64(0)
+
+    # Check for stop flag every 2048 nodes
+    if (search_context.nodes_searched & 2047) == 0:
+        if search_context.stop_flag[0]:
+            return (np.int32(0), NO_MOVE, nodes_searched, quiescence_nodes, cutoffs, tt_hits,
+                    null_move_cutoffs, futility_pruned, razoring_used, rfp_pruned, lmp_pruned, probcut_pruned, qs_delta_pruned, qs_see_pruned,
+                    iid_searches, singular_extensions)
 
     if ply >= MAX_PLY:
         search_context.pv_table[ply, :].fill(NO_MOVE)
@@ -420,19 +433,33 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
             null_move_cutoffs, futility_pruned, razoring_used, rfp_pruned, lmp_pruned, probcut_pruned, qs_delta_pruned, qs_see_pruned,
             iid_searches, singular_extensions)
 
-def iterative_deepening_search(piece_bbs, occupancy_bbs, game_state, max_depth, time_config, transposition_table):
+def iterative_deepening_search(piece_bbs, occupancy_bbs, game_state, max_depth, time_config, search_context):
     start_time = time.time()
 
     maximum_time_ms = time_config.get('maximum_time', 0)
     optimum_time_ms = time_config.get('optimum_time', 0)
 
-    pv_table = np.zeros((MAX_PLY, MAX_PLY), dtype=np.uint16)
-    history_table = np.zeros((12, 64), dtype=np.int32)
-    killer_moves = np.zeros(MAX_PLY * 2, dtype=np.uint16)
-
     # We no longer need the stop_search flag in the context for this simplified approach
-    # The context is now simpler and doesn't need to be recreated in a loop
-    search_context = SearchContext(transposition_table, killer_moves, pv_table, history_table)
+    # The context is now passed in
+    # search_context = SearchContext(transposition_table, killer_moves, pv_table, history_table)
+    
+    transposition_table = search_context.transposition_table
+    
+    if maximum_time_ms > 0:
+        search_context.end_time = start_time + (maximum_time_ms / 1000.0)
+    else:
+        search_context.end_time = 0.0
+    
+    # Reset stop flag
+    search_context.stop_flag[0] = False
+    
+    timer = None
+    if maximum_time_ms > 0:
+        def stop_search():
+            search_context.stop_flag[0] = True
+        
+        timer = threading.Timer(maximum_time_ms / 1000.0, stop_search)
+        timer.start()
 
     last_score, best_move_total = 0, NO_MOVE
     total_nodes, total_q_nodes, total_cutoffs, total_tt_hits = (np.uint64(v) for v in [0]*4)
@@ -449,12 +476,18 @@ def iterative_deepening_search(piece_bbs, occupancy_bbs, game_state, max_depth, 
         score, _, nodes, q_nodes, cutoffs, tt_hits, nmc, fp, ru, rfp, lmp, pcp, qdp, qsp, iid, se = _search(
             piece_bbs, occupancy_bbs, game_state, current_depth, alpha, beta, search_context, 0, NO_MOVE)
 
+        if search_context.stop_flag[0]:
+            break
+
         if score <= alpha or score >= beta:
             log_info(f"depth {current_depth} aspiration window failed, re-searching...")
             alpha, beta = -INFINITY, INFINITY
             search_context.nodes_searched = np.uint64(0)
             score, _, nodes, q_nodes, cutoffs, tt_hits, nmc, fp, ru, rfp, lmp, pcp, qdp, qsp, iid, se = _search(
                 piece_bbs, occupancy_bbs, game_state, current_depth, alpha, beta, search_context, 0, NO_MOVE)
+            
+            if search_context.stop_flag[0]:
+                break
 
         total_nodes += search_context.nodes_searched
         total_q_nodes += q_nodes
@@ -468,7 +501,7 @@ def iterative_deepening_search(piece_bbs, occupancy_bbs, game_state, max_depth, 
              best_move_from_last_depth = best_move_total
 
         elapsed_time_ms = (time.time() - start_time) * 1000
-        pv_moves = [move_to_uci(pv_table[0, i]) for i in range(MAX_PLY) if pv_table[0, i] != NO_MOVE]
+        pv_moves = [move_to_uci(search_context.pv_table[0, i]) for i in range(MAX_PLY) if search_context.pv_table[0, i] != NO_MOVE]
         pv_string = " ".join(pv_moves)
         uci_score_string = format_score_for_uci(score)
 
@@ -484,7 +517,15 @@ def iterative_deepening_search(piece_bbs, occupancy_bbs, game_state, max_depth, 
 
         if maximum_time_ms > 0 and elapsed_time_ms > optimum_time_ms:
             log_info(f"Optimum time reached at depth {current_depth}. Stopping.")
+            # We don't break immediately here to allow the current depth to finish if it's close,
+            # but for strict time controls we might want to.
+            # For now, let's just rely on the hard limit in _search or break here if we want to be safe.
+            # Given we have a hard limit check inside _search now, we can just let it run until that triggers
+            # or we can soft-stop here. Let's soft-stop.
             break
+
+    if timer:
+        timer.cancel()
 
     final_best_move = best_move_from_last_depth if best_move_from_last_depth != NO_MOVE else best_move_total
     return (final_best_move, last_score, total_nodes, total_q_nodes, total_cutoffs, total_tt_hits,

@@ -33,7 +33,7 @@ from chess_engine.move import move_to_uci
 from chess_engine.core import SQUARE_TO_ALGEBRAIC
 
 # Maximum search depth (Ply) for arrays like killer moves
-MAX_PLY = 64
+from chess_engine.constants import MAX_PLY
 
 puzzles = [
         {
@@ -750,13 +750,13 @@ puzzles = [
             "rating": "1058",
             "theme": "crushing endgame short skewer"
         },
-        # {
-        #     "name": "Lichess Puzzle 00Aae",
-        #     "fen": "1R6/1P6/4pkp1/5p2/3P4/3KP2p/8/1r6 w - - 0 44",
-        #     "solution": "b8f8",
-        #     "rating": "1019",
-        #     "theme": "advancedPawn clearance crushing endgame long promotion rookEndgame"
-        # },
+        {
+            "name": "Lichess Puzzle 00Aae",
+            "fen": "1R6/1P6/4pkp1/5p2/3P4/3KP2p/8/1r6 w - - 0 44",
+            "solution": "b8f8",
+            "rating": "1019",
+            "theme": "advancedPawn clearance crushing endgame long promotion rookEndgame"
+        },
     ]
 
 def run_puzzle_test():
@@ -777,6 +777,8 @@ def run_puzzle_test():
 
     script_start_time = time.time()
 
+    from chess_engine.engine_types import SearchContext
+
     for i, puzzle in enumerate(puzzles):
         print("New game started. Caches and stats cleared.")
         print(f"--- Running Test: {puzzle['name']} ---")
@@ -784,8 +786,13 @@ def run_puzzle_test():
         piece_bbs, occupancy_bbs, game_state = parse_fen(puzzle["fen"])
         board_state_flat = np.concatenate((piece_bbs, occupancy_bbs, game_state))
 
-        killer_moves = np.zeros((MAX_PLY, 2), dtype=np.uint16)
+        killer_moves = np.zeros(MAX_PLY * 2, dtype=np.uint16)
+        pv_table = np.zeros((MAX_PLY, MAX_PLY), dtype=np.uint16)
+        history_table = np.zeros((6, 64), dtype=np.int32)
+        
         clear_transposition_table(transposition_table)
+        
+        search_context = SearchContext(transposition_table, killer_moves, pv_table, history_table)
 
         start_time = time.time()
 
@@ -798,7 +805,7 @@ def run_puzzle_test():
         (best_move, best_eval, nodes_searched, quiescence_nodes, cutoffs, tt_hits,
         last_completed_depth, total_nmc, total_fp, total_ru, total_rfp, total_lmp, total_pcp, total_qdp, total_qsp,
         total_iid, total_se) = iterative_deepening_search(
-            piece_bbs, occupancy_bbs, game_state, depth, time_config, transposition_table
+            piece_bbs, occupancy_bbs, game_state, depth, time_config, search_context
         )
 
         end_time = time.time()
