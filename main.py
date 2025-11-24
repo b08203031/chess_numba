@@ -22,73 +22,42 @@ from chess_engine.opening_book import OpeningBook
 from chess_engine.engine_types import SearchContext
 
 # Maximum search depth (Ply) for arrays like killer moves
-MAX_PLY = 64
+# 殺手步等陣列的最大搜尋深度（層數）
+MAX_PLY = 128 # Updated to match constant.py and search.py consistency
 
 # Global variable to hold the current search thread and context
+# 用於保存當前搜尋線程和上下文的全局變量
 search_thread = None
 global_search_context = None
 
 def run_search(board_state, max_depth, time_config, transposition_table, killer_moves, history_table, pv_table):
     """
     Wrapper function to run the search in a separate thread.
+    在單獨線程中運行搜尋的包裝函數。（目前未使用，邏輯已整合到 uci_loop 中）
     """
     global global_search_context
-    
-    # Create a temporary context to hold the stop flag and other shared data
-    # Note: In a more complex engine, we might pass the context directly, 
-    # but here we need to expose the stop flag to the main thread.
-    # The iterative_deepening_search creates its own context, but we need a way to signal it.
-    # We modified iterative_deepening_search to use a passed context or we need to modify it to accept a stop flag.
-    # Wait, I modified iterative_deepening_search to CREATE a context. 
-    # Let's look at search.py again. 
-    # Ah, I modified it to: search_context = SearchContext(...)
-    # This means I cannot easily pass the stop flag from outside unless I change the signature of iterative_deepening_search
-    # OR I make the context global/shared.
-    
-    # Actually, the cleaner way is to pass a "stop_signal" object or similar.
-    # But since I already modified engine_types.py to have stop_flag in SearchContext,
-    # and search.py creates the context inside iterative_deepening_search...
-    # I need to change iterative_deepening_search to ACCEPT a context or at least the stop flag array.
-    
-    # However, for now, let's stick to the plan. I can't easily change the signature of the JIT-compiled function 
-    # without recompiling everything and potentially breaking things if I'm not careful.
-    # BUT, I can use a global variable in the python side that the JIT function checks? No, JIT functions can't see python globals easily.
-    
-    # Let's re-read search.py.
-    # search_context = SearchContext(transposition_table, killer_moves, pv_table, history_table)
-    # It creates a NEW context.
-    
-    # To make this work with threading, I should have modified iterative_deepening_search to TAKE the context as an argument.
-    # OR, I can rely on the fact that I can't easily stop it from the main thread with the current design 
-    # UNLESS I modify iterative_deepening_search to accept the stop flag.
-    
-    # Let's do a quick fix: I will modify iterative_deepening_search in search.py to accept an optional context 
-    # or at least return the context it created so I can't... wait, if it returns it, it's too late.
-    
-    # Correct approach:
-    # 1. Create the SearchContext OUTSIDE iterative_deepening_search.
-    # 2. Pass it TO iterative_deepening_search.
-    
-    # I need to modify search.py one more time to accept search_context as an argument to iterative_deepening_search.
-    # This is better design anyway.
     pass
 
 def uci_loop():
     """
     The main UCI loop of the engine.
     Listens for and responds to UCI commands from a GUI.
+    
+    引擎的主 UCI 循環。
+    監聽並回應來自 GUI 的 UCI 命令。
     """
     global search_thread, global_search_context
 
-    # Initialize engine components before the loop starts
+    # Initialize engine components before the loop starts / 在循環開始前初始化引擎組件
     transposition_table = create_transposition_table(TT_SIZE_MB)
     
-    # We need persistent tables for the search context
-    killer_moves = np.zeros((MAX_PLY, 2), dtype=np.uint16)
+    # We need persistent tables for the search context / 我們需要搜尋上下文的持久化表
+    # Update killer_moves to be 1D array matching SearchContext definition
+    killer_moves = np.zeros(MAX_PLY * 2, dtype=np.uint16)
     history_table = np.zeros((12, 64), dtype=np.int32)
     pv_table = np.zeros((MAX_PLY, MAX_PLY), dtype=np.uint16)
 
-    # --- Initialize Opening Book ---
+    # --- Initialize Opening Book / 初始化開局書 ---
     script_dir = os.path.dirname(os.path.realpath(__file__))
     book_path = os.path.join(script_dir, "polyglot.bin")
     opening_book = OpeningBook(book_path)
@@ -121,7 +90,7 @@ def uci_loop():
             history_table.fill(0)
             pv_table.fill(0)
         elif command == "position":
-            # --- Parse position command ---
+            # --- Parse position command / 解析 position 命令 ---
             if "startpos" in tokens:
                 fen = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
                 piece_bbs, occupancy_bbs, game_state = parse_fen(fen)
@@ -132,7 +101,7 @@ def uci_loop():
                 piece_bbs, occupancy_bbs, game_state = parse_fen(fen)
                 board_state = (piece_bbs, occupancy_bbs, game_state)
             
-            # Handle 'moves'
+            # Handle 'moves' / 處理 'moves'
             if "moves" in tokens:
                 moves_start_index = tokens.index("moves") + 1
                 # We need to update board_state. Since tuples are immutable, we reconstruct it.
@@ -144,8 +113,7 @@ def uci_loop():
                     for legal_move in legal_moves:
                         if move_to_uci(legal_move) == move_uci:
                             # make_move modifies in-place but returns info. 
-                            # However, for the loop to work with the tuple structure we might need to be careful.
-                            # Actually, the arrays inside the tuple are mutable.
+                            # make_move 會就地修改，但返回 info。
                             make_move(p_bbs, o_bbs, g_state, legal_move)
                             found_move = True
                             break
@@ -159,13 +127,13 @@ def uci_loop():
                 log_info("No position set. Ignoring 'go' command.")
                 continue
 
-            # Stop any existing search
+            # Stop any existing search / 停止任何現有的搜尋
             if global_search_context is not None:
                 global_search_context.stop_flag[0] = True
             if search_thread is not None and search_thread.is_alive():
                 search_thread.join()
 
-            # --- Parse go command ---
+            # --- Parse go command / 解析 go 命令 ---
             max_depth = 128
             time_config = {}
 
@@ -185,9 +153,10 @@ def uci_loop():
                 side_to_move = board_state[2][0]
                 time_config = calculate_search_time(wtime_ms, btime_ms, winc_ms, binc_ms, movestogo, side_to_move)
 
-            # --- Opening Book Logic ---
+            # --- Opening Book Logic / 開局書邏輯 ---
             book_moves = []
             zobrist_key = board_state[2][4]
+            # Only use book if halfmove clock is low (early game)
             if board_state[2][3] < 20:
                 book_moves = opening_book.lookup(zobrist_key, board_state[0], board_state[1], board_state[2])
 
@@ -198,11 +167,11 @@ def uci_loop():
                 print(f"bestmove {move_to_uci(selected_move)}")
                 continue
 
-            # --- Prepare Search Context ---
-            # Create a new context for this search
+            # --- Prepare Search Context / 準備搜尋上下文 ---
+            # Create a new context for this search / 為此搜尋創建新的上下文
             global_search_context = SearchContext(transposition_table, killer_moves, pv_table, history_table)
             
-            # Start Search Thread
+            # Start Search Thread / 啟動搜尋線程
             def search_worker():
                 best_move, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _ = iterative_deepening_search(
                     board_state[0], board_state[1], board_state[2], max_depth, time_config, global_search_context
@@ -216,6 +185,7 @@ def uci_loop():
             if global_search_context is not None:
                 global_search_context.stop_flag[0] = True
                 # The search thread will see this flag and exit, printing bestmove
+                # 搜尋線程將看到此標誌並退出，打印 bestmove
         
         elif command == "quit":
             if global_search_context is not None:

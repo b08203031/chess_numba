@@ -5,8 +5,11 @@ from chess_engine.engine_types import piece_bbs_signature
 
 def _init_king_attack_zones():
     """
-    Precomputes 5x5 king attack zones for each square on the board.
-    A 5x5 zone is centered around the king.
+    預計算棋盤上每個方格的 5x5 王的攻擊區域。
+    5x5 區域以王為中心。
+
+    Returns:
+        np.array: 大小為 64 的 uint64 陣列，每個元素代表對應方格的王周圍的攻擊區域位元棋盤。
     """
     zones = np.zeros(64, dtype=np.uint64)
     for sq in range(64):
@@ -19,7 +22,7 @@ def _init_king_attack_zones():
                     target_sq = r * 8 + f
                     zone_bb |= BB_SQUARES[target_sq]
         
-        # Exclude the king's own square
+        # Exclude the king's own square / 排除王所在的方格
         zone_bb &= ~BB_SQUARES[sq]
         zones[sq] = zone_bb
     return zones
@@ -28,7 +31,10 @@ KING_ATTACK_ZONES = _init_king_attack_zones()
 
 def _init_file_masks():
     """
-    Precomputes bitboard masks for each file.
+    預計算每條直線（File）的位元棋盤掩碼。
+
+    Returns:
+        np.array: 大小為 8 的 uint64 陣列，每個元素代表一條直線的掩碼。
     """
     masks = np.zeros(8, dtype=np.uint64)
     for f in range(8):
@@ -43,8 +49,14 @@ FILE_MASKS = _init_file_masks()
 @nb.njit(nb.int8(piece_bbs_signature, nb.uint8), cache=True)
 def find_piece_type_on_square(piece_bbs, square):
     """
-    Finds the piece type (0-11) on a given square.
-    Returns -1 if no piece is found.
+    在給定的方格上尋找棋子類型（0-11）。
+    
+    Args:
+        piece_bbs (np.uint64[::1]): 12 個棋子位元棋盤的陣列。
+        square (int): 方格索引 (0-63)。
+
+    Returns:
+        int: 棋子類型索引 (0-11)，如果在該方格上沒有找到棋子，則返回 -1。
     """
     bb_square = BB_SQUARES[square]
     for piece_type in range(12):
@@ -55,10 +67,16 @@ def find_piece_type_on_square(piece_bbs, square):
 @nb.njit(nb.int32(nb.uint64), cache=True)
 def count_bits(bb: np.uint64) -> np.int32:
     """
-    Counts the number of set bits in a uint64 bitboard using SWAR.
-    This is an O(1) constant-time operation.
+    使用 SWAR (SIMD within a register) 技術計算 uint64 位元棋盤中設置為 1 的位元數量。
+    這是一個 O(1) 的常數時間操作，不依賴於設置位元的數量。
+    
+    Args:
+        bb (np.uint64): 需要計算位元數的位元棋盤。
+        
+    Returns:
+        np.int32: 設置為 1 的位元數量。
     """
-    # A series of parallel bitwise operations
+    # A series of parallel bitwise operations / 一系列並行的位元運算
     bb = bb - ((bb >> np.uint64(1)) & np.uint64(0x5555555555555555))
     bb = (bb & np.uint64(0x3333333333333333)) + ((bb >> np.uint64(2)) & np.uint64(0x3333333333333333))
     bb = (bb + (bb >> np.uint64(4))) & np.uint64(0x0F0F0F0F0F0F0F0F)

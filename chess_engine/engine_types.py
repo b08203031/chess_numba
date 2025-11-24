@@ -1,15 +1,21 @@
 # chess_engine/engine_types.py
 import numba
 import numpy as np
+from chess_engine.transposition_table import numba_tt_entry_type
 
-# --- Color Constants ---
+"""
+此模組定義了西洋棋引擎中使用的 Numba 類型和類別。
+它包含了用於搜尋上下文的 jitclass 定義以及棋盤狀態的類型簽名。
+"""
+
+# --- Color Constants / 顏色常量 ---
 WHITE, BLACK = 0, 1
 
-# --- Piece Type Constants ---
+# --- Piece Type Constants / 棋子類型常量 ---
 PAWN, KNIGHT, BISHOP, ROOK, QUEEN, KING = 0, 1, 2, 3, 4, 5
 
 
-# --- Numba Type Signatures for the Refactored Board State ---
+# --- Numba Type Signatures for the Refactored Board State / 重構後棋盤狀態的 Numba 類型簽名 ---
 piece_bbs_signature = numba.uint64[::1]
 occupancy_bbs_signature = numba.uint64[::1]
 game_state_signature = numba.uint64[::1]
@@ -18,9 +24,8 @@ unmake_info_signature = numba.types.Tuple([
     numba.int8, numba.uint8, numba.uint8, numba.uint8, numba.uint64
 ])
 
-# --- Search Context ---
+# --- Search Context / 搜尋上下文 ---
 from numba.experimental import jitclass
-from chess_engine.transposition_table import numba_tt_entry_type
 
 search_context_spec = [
     ('transposition_table', numba.types.Array(numba_tt_entry_type, 1, 'C')),
@@ -34,13 +39,35 @@ search_context_spec = [
 
 @jitclass(search_context_spec)
 class SearchContext:
+    """
+    用於在遞歸搜尋函數之間傳遞共享數據和狀態的上下文類別。
+    
+    Attributes:
+        transposition_table (numba.types.Array): 置換表陣列。
+        killer_moves (numba.uint16[::1]): 殺手步表。
+        pv_table (numba.uint16[:, :]): 主要變例（PV）表。
+        history_table (numba.int32[:, :]): 歷史啟發表。
+        nodes_searched (numba.uint64): 已搜尋的節點總數。
+        end_time (numba.float64): 搜尋應結束的目標時間戳。
+        stop_flag (numba.boolean[:]): 用於信號通知搜尋停止的標誌陣列（作為引用傳遞）。
+    """
     def __init__(self, transposition_table, killer_moves, pv_table, history_table):
+        """
+        初始化搜尋上下文。
+
+        Args:
+            transposition_table: 預先分配的置換表。
+            killer_moves: 預先分配的殺手步表。
+            pv_table: 預先分配的 PV 表。
+            history_table: 預先分配的歷史表。
+        """
         self.transposition_table = transposition_table
         self.killer_moves = killer_moves
         self.pv_table = pv_table
         self.history_table = history_table
         self.nodes_searched = np.uint64(0)
         self.end_time = 0.0
+        # 使用陣列來包裝布林值，以便可以作為引用傳遞並在外部修改
         self.stop_flag = np.array([False], dtype=np.bool_)
 
 search_context_type = SearchContext.class_type.instance_type

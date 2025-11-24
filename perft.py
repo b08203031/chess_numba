@@ -10,38 +10,45 @@ from chess_engine.move import get_from_square, get_to_square
 from chess_engine.core import perft, _jit_perft_divide, SQUARE_TO_ALGEBRAIC, PERFT_RESULTS
 
 def do_perft(args):
-    """Handles the 'perft' command."""
+    """處理 'perft' 命令。"""
     run_perft_test(args.fen, args.depth, divide_on_mismatch=True)
 
 def do_divide(args):
-    """Handles the 'divide' command."""
+    """處理 'divide' 命令。"""
     perft_divide(args.fen, args.depth)
 
 def do_test_reversibility(args):
-    """Handles the 'test-reversibility' command."""
+    """處理 'test-reversibility' 命令。"""
     test_make_unmake_for_fen(args.fen)
 
 def do_run_tests(args):
-    """Handles the 'run-tests' command."""
+    """處理 'run-tests' 命令。"""
     test_perft_suite()
 
 def get_test_key(fen: str) -> str:
-    """Gets the dictionary key for known perft results based on FEN."""
+    """根據 FEN 獲取已知 perft 結果的字典鍵。"""
     if fen == "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1":
         return "startpos"
     if fen == "r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq -":
         return "kiwipete"
-    # Add other FENs here if needed
+    # 如果需要，在此處添加其他 FEN
     return "custom"
 
 def test_perft_suite():
-    """Runs a suite of Perft tests to validate move generation."""
+    """運行一組 Perft 測試以驗證移動生成。"""
     print("--- Running Perft Test Suite ---")
-    # ... (Implementation can be added if needed, but is not the priority now) ...
+    # ... (如果有需要可以添加實現，但現在不是優先事項) ...
     print("--- Test Suite Complete ---")
 
 def run_perft_test(fen_string: str, max_depth: int, divide_on_mismatch: bool = False):
-    """Runs a Perft test for a given FEN string using the new mutable architecture."""
+    """
+    為給定的 FEN 字串運行 Perft 測試，使用新的可變架構。
+    
+    Args:
+        fen_string: 局面的 FEN 字串。
+        max_depth: 測試的最大深度。
+        divide_on_mismatch: 如果結果不匹配，是否自動運行 divide。
+    """
     print("--- Starting Perft Test ---")
     print(f"FEN: {fen_string}")
     print(f"Max Depth: {max_depth}")
@@ -59,7 +66,7 @@ def run_perft_test(fen_string: str, max_depth: int, divide_on_mismatch: bool = F
         perft(piece_bbs.copy(), occupancy_bbs.copy(), game_state.copy(), 1)
 
     for depth in range(1, max_depth + 1):
-        # We must pass COPIES to the perft function because it modifies the arrays in-place
+        # 我們必須將 COPY 傳遞給 perft 函數，因為它會就地修改陣列
         p_bbs_copy = piece_bbs.copy()
         o_bbs_copy = occupancy_bbs.copy()
         g_state_copy = game_state.copy()
@@ -92,7 +99,7 @@ def run_perft_test(fen_string: str, max_depth: int, divide_on_mismatch: bool = F
 
 
 def perft_divide(fen_string: str, depth: int):
-    """Shows the node count for each move at a given depth."""
+    """顯示給定深度的每個移動的節點計數。"""
     print(f"--- Perft Divide for Depth {depth} ---")
     piece_bbs, occupancy_bbs, game_state = parse_fen(fen_string)
 
@@ -111,7 +118,7 @@ def perft_divide(fen_string: str, depth: int):
 
 
 def test_make_unmake_for_fen(fen: str):
-    """Tests if make_move and unmake_move are perfectly reversible."""
+    """測試 make_move 和 unmake_move 是否完全可逆。"""
     print(f"--- Testing make/unmake for FEN: {fen} ---")
 
     # 1. Get initial state
