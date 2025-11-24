@@ -21,17 +21,20 @@ SQUARE_MAP = {
 
 def parse_fen(fen_string: str):
     """
-    Parses a FEN string and returns the board state in the engine's NumPy array format.
+    解析 FEN (Forsyth-Edwards Notation) 字串並返回引擎 NumPy 陣列格式的棋盤狀態。
 
     Args:
-        fen_string: The FEN string representing the board position.
+        fen_string (str): 代表棋盤局面的 FEN 字串。
 
     Returns:
-        A tuple containing (piece_bbs, occupancy_bbs, game_state) as NumPy arrays.
+        tuple: 包含三個 NumPy 陣列的元組 (piece_bbs, occupancy_bbs, game_state)。
+            - piece_bbs: 12 個位元棋盤，分別代表每種棋子的位置。
+            - occupancy_bbs: 3 個位元棋盤，分別代表白方、黑方和所有棋子的佔用情況。
+            - game_state: 包含遊戲狀態資訊（行棋方、易位權、吃過路兵方格、半步鐘、Zobrist 鍵值）。
     """
     parts = fen_string.split()
 
-    # --- 1. Parse Piece Placements ---
+    # --- 1. Parse Piece Placements / 解析棋子位置 ---
     piece_bbs = np.zeros(12, dtype=np.uint64)
     fen_board = parts[0]
     rank, file = 7, 0
@@ -47,29 +50,30 @@ def parse_fen(fen_string: str):
             piece_bbs[piece_type_index] |= (np.uint64(1) << square_index)
             file += 1
 
-    # --- 2. Parse Side to Move ---
+    # --- 2. Parse Side to Move / 解析行棋方 ---
     side_to_move = np.uint64(WHITE if parts[1] == 'w' else BLACK)
 
-    # --- 3. Parse Castling Rights ---
+    # --- 3. Parse Castling Rights / 解析王車易位權限 ---
     castling_rights = np.uint64(0)
     if len(parts) > 2 and parts[2] != '-':
         for char in parts[2]:
             castling_rights |= np.uint64(CASTLING_MAP.get(char, 0))
 
-    # --- 4. Parse En Passant Square (using 64 as sentinel for 'no EP square') ---
+    # --- 4. Parse En Passant Square / 解析吃過路兵方格 ---
+    # using 64 as sentinel for 'no EP square' / 使用 64 作為「無吃過路兵方格」的標記
     en_passant_square = np.uint64(64)
     if len(parts) > 3 and parts[3] != '-':
         en_passant_square = np.uint64(SQUARE_MAP.get(parts[3], 64))
 
-    # --- 5. Parse Halfmove Clock ---
+    # --- 5. Parse Halfmove Clock / 解析半步鐘 ---
     halfmove_clock = np.uint64(0)
     if len(parts) > 4:
         try:
             halfmove_clock = np.uint64(int(parts[4]))
         except (ValueError, IndexError):
-            pass  # Keep default
+            pass  # Keep default / 保持預設值
 
-    # --- 6. Assemble Final State Arrays ---
+    # --- 6. Assemble Final State Arrays / 組裝最終狀態陣列 ---
     white_occupancy = piece_bbs[0] | piece_bbs[1] | piece_bbs[2] | \
                       piece_bbs[3] | piece_bbs[4] | piece_bbs[5]
     black_occupancy = piece_bbs[6] | piece_bbs[7] | piece_bbs[8] | \
@@ -82,11 +86,12 @@ def parse_fen(fen_string: str):
     ], dtype=np.uint64)
 
     # Create a temporary game_state array to compute the initial hash
+    # 創建一個臨時的 game_state 陣列來計算初始哈希
     temp_game_state_arr = np.array([
         side_to_move, castling_rights, en_passant_square, halfmove_clock, np.uint64(0)
     ], dtype=np.uint64)
 
-    # Pass NumPy arrays directly to the JIT'd function
+    # Pass NumPy arrays directly to the JIT'd function / 直接將 NumPy 陣列傳遞給 JIT 函數
     zobrist_key = compute_initial_hash(piece_bbs, temp_game_state_arr)
 
     game_state = np.array([
@@ -97,7 +102,7 @@ def parse_fen(fen_string: str):
         zobrist_key
     ], dtype=np.uint64)
 
-    # --- Sanity Checks ---
+    # --- Sanity Checks / 健全性檢查 ---
     assert (occupancy_bbs[0] | occupancy_bbs[1]) == occupancy_bbs[2], \
         "FEN Parser Error: Occupancy calculation is incorrect."
     assert np.count_nonzero(occupancy_bbs[0] & occupancy_bbs[1]) == 0, \

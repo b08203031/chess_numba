@@ -12,11 +12,12 @@ from chess_engine.move_generator import (
     get_bishop_attacks, get_rook_attacks, get_queen_attacks, KNIGHT_ATTACKS
 )
 
-# --- Pre-computed Manhattan Distance Table ---
+# --- Pre-computed Manhattan Distance Table / 預計算曼哈頓距離表 ---
 def _create_manhattan_distance_table():
     """
     Pre-computes a 64x64 lookup table for the manhattan distance between any two squares.
     Distance = max(abs(rank1 - rank2), abs(file1 - file2)).
+    預計算任意兩個方格之間的曼哈頓距離。
     """
     table = np.zeros((64, 64), dtype=np.int32)
     for sq1 in range(64):
@@ -29,9 +30,10 @@ def _create_manhattan_distance_table():
 MANHATTAN_DISTANCE = _create_manhattan_distance_table()
 
 
-# --- Pre-computed Masks for Pawn Structure Evaluation ---
+# --- Pre-computed Masks for Pawn Structure Evaluation / 兵型評估的預計算掩碼 ---
 
 # Masks for adjacent files (e.g., for file B, it's file A and C)
+# 相鄰直線的掩碼（例如 B 線的相鄰線是 A 和 C）
 ADJACENT_FILES_MASKS = np.array([
     FILE_MASKS[1],  # File A
     FILE_MASKS[0] | FILE_MASKS[2],  # File B
@@ -44,6 +46,9 @@ ADJACENT_FILES_MASKS = np.array([
 ], dtype=np.uint64)
 
 def _create_passed_pawn_masks():
+    """
+    預計算通路兵掩碼。通路兵是指前方沒有敵方兵阻擋（包括相鄰直線）。
+    """
     white_masks = np.zeros(64, dtype=np.uint64)
     black_masks = np.zeros(64, dtype=np.uint64)
     for sq in range(64):
@@ -51,15 +56,18 @@ def _create_passed_pawn_masks():
         rank_idx = sq // 8
         
         # Mask includes the pawn's own file and adjacent files
+        # 掩碼包括兵自己的直線和相鄰直線
         path_mask = FILE_MASKS[file_idx] | ADJACENT_FILES_MASKS[file_idx]
         
         # White passed pawn: no black pawns in front on the path
+        # 白方通路兵：前方路徑上沒有黑兵
         white_front_span = np.uint64(0)
         for r in range(rank_idx + 1, 8):
             white_front_span |= (path_mask & (np.uint64(0xFF) << np.uint64(r * 8)))
         white_masks[sq] = white_front_span
 
         # Black passed pawn: no white pawns in front on the path
+        # 黑方通路兵：前方路徑上沒有白兵
         black_front_span = np.uint64(0)
         for r in range(rank_idx - 1, -1, -1):
             black_front_span |= (path_mask & (np.uint64(0xFF) << np.uint64(r * 8)))
@@ -73,8 +81,13 @@ WHITE_PASSED_PAWN_MASKS, BLACK_PASSED_PAWN_MASKS = _create_passed_pawn_masks()
 @numba.njit(numba.types.UniTuple(numba.int32, 2)(piece_bbs_signature), cache=True, boundscheck=False, fastmath=True)
 def evaluate_pawn_structure(piece_bbs):
     """
-    Evaluates pawn structure for both sides (passed, isolated, doubled).
-    Returns a tuple of (mg_score, eg_score) from White's perspective.
+    評估雙方的兵型結構（通路兵、孤兵、重疊兵）。
+    
+    Args:
+        piece_bbs (np.ndarray): 12 個棋子的位元棋盤。
+        
+    Returns:
+        tuple: (mg_score, eg_score) 從白方視角。
     """
     mg_score = np.int32(0)
     eg_score = np.int32(0)
@@ -82,9 +95,10 @@ def evaluate_pawn_structure(piece_bbs):
     white_pawns = piece_bbs[0]
     black_pawns = piece_bbs[6]
 
-    # --- 1. Passed Pawns ---
+    # --- 1. Passed Pawns / 通路兵 ---
     # A pawn is passed if there are no opponent pawns in front of it on its
     # own file or on adjacent files.
+    # 如果兵的前方（本線及相鄰線）沒有敵方兵，則為通路兵。
     
     # White passed pawns
     temp_wp = white_pawns
@@ -106,7 +120,7 @@ def evaluate_pawn_structure(piece_bbs):
             eg_score -= PASSED_PAWN_BONUS[rank][1]
         temp_bp &= temp_bp - np.uint64(1)
 
-    # --- 2. Isolated and Doubled Pawns ---
+    # --- 2. Isolated and Doubled Pawns / 孤兵與重疊兵 ---
     # Iterate through each file to check for pawn formations.
     for f in range(8):
         file_mask = FILE_MASKS[f]
@@ -143,8 +157,13 @@ def evaluate_pawn_structure(piece_bbs):
 @numba.njit(numba.types.UniTuple(numba.int32, 2)(piece_bbs_signature), cache=True, boundscheck=False, fastmath=True)
 def evaluate_piece_coordination(piece_bbs):
     """
-    Evaluates piece coordination features (bishop pair, rooks on open files).
-    Returns a tuple of (mg_score, eg_score) from White's perspective.
+    評估棋子協同性特徵（雙象、車在開放線）。
+    
+    Args:
+        piece_bbs (np.ndarray): 12 個棋子的位元棋盤。
+        
+    Returns:
+        tuple: (mg_score, eg_score) 從白方視角。
     """
     mg_score = np.int32(0)
     eg_score = np.int32(0)
@@ -156,8 +175,9 @@ def evaluate_piece_coordination(piece_bbs):
     black_bishops = piece_bbs[8]
     black_rooks = piece_bbs[9]
 
-    # --- 1. Bishop Pair ---
+    # --- 1. Bishop Pair / 雙象 ---
     # A bonus is awarded if a side has two or more bishops.
+    # 擁有雙象給予獎勵。
     if count_bits(white_bishops) >= 2:
         mg_score += BISHOP_PAIR_BONUS[0]
         eg_score += BISHOP_PAIR_BONUS[1]
@@ -165,7 +185,7 @@ def evaluate_piece_coordination(piece_bbs):
         mg_score -= BISHOP_PAIR_BONUS[0]
         eg_score -= BISHOP_PAIR_BONUS[1]
 
-    # --- 2. Rooks on Open and Semi-Open Files ---
+    # --- 2. Rooks on Open and Semi-Open Files / 車在開放線和半開放線 ---
     for f in range(8):
         file_mask = FILE_MASKS[f]
         
@@ -176,11 +196,11 @@ def evaluate_piece_coordination(piece_bbs):
         if (white_rooks & file_mask):
             if not white_pawns_on_file:
                 if not black_pawns_on_file:
-                    # Open file for White
+                    # Open file for White / 白方開放線
                     mg_score += ROOK_ON_OPEN_FILE_BONUS[0]
                     eg_score += ROOK_ON_OPEN_FILE_BONUS[1]
                 else:
-                    # Semi-open file for White
+                    # Semi-open file for White / 白方半開放線
                     mg_score += ROOK_ON_SEMI_OPEN_FILE_BONUS[0]
                     eg_score += ROOK_ON_SEMI_OPEN_FILE_BONUS[1]
         
@@ -188,11 +208,11 @@ def evaluate_piece_coordination(piece_bbs):
         if (black_rooks & file_mask):
             if not black_pawns_on_file:
                 if not white_pawns_on_file:
-                    # Open file for Black
+                    # Open file for Black / 黑方開放線
                     mg_score -= ROOK_ON_OPEN_FILE_BONUS[0]
                     eg_score -= ROOK_ON_OPEN_FILE_BONUS[1]
                 else:
-                    # Semi-open file for Black
+                    # Semi-open file for Black / 黑方半開放線
                     mg_score -= ROOK_ON_SEMI_OPEN_FILE_BONUS[0]
                     eg_score -= ROOK_ON_SEMI_OPEN_FILE_BONUS[1]
 
@@ -203,6 +223,7 @@ def evaluate_piece_coordination(piece_bbs):
 def _evaluate_pawn_shield_for_color(king_sq, friendly_pawns, enemy_pawns, color):
     """
     (Phase 1) Evaluates the pawn shield in front of the king for a single color.
+    (階段 1) 評估單一方國王前方的兵盾。
     """
     score = np.int32(0)
     king_file = king_sq % 8
@@ -240,6 +261,7 @@ def _evaluate_pawn_shield_for_color(king_sq, friendly_pawns, enemy_pawns, color)
 def _evaluate_king_attackers(king_sq, color, piece_bbs, occupancy_bbs):
     """
     (Phase 2) Calculates the threat score based on pieces attacking the king zone.
+    (階段 2) 根據攻擊國王區域的棋子計算威脅分數。
     """
     king_zone = KING_ATTACK_ZONES[king_sq]
     total_attack_units = np.int32(0)
@@ -298,6 +320,7 @@ def _evaluate_king_attackers(king_sq, color, piece_bbs, occupancy_bbs):
 def _evaluate_king_tropism(king_sq, color, piece_bbs):
     """
     (Phase 3) Calculates a penalty based on the proximity of enemy pieces to the king.
+    (階段 3) 根據敵方棋子與國王的距離計算懲罰。
     """
     penalty = np.int32(0)
     enemy_start_idx = 6 if color == 0 else 0
@@ -319,6 +342,7 @@ def _evaluate_king_tropism(king_sq, color, piece_bbs):
 def _evaluate_pawn_storm(king_sq, color, piece_bbs):
     """
     (Phase 4) Calculates a penalty for enemy pawns near the king (pawn storm).
+    (階段 4) 計算國王附近敵方兵的懲罰（兵風暴）。
     """
     penalty = np.int32(0)
     king_zone = KING_ATTACK_ZONES[king_sq]
@@ -333,6 +357,7 @@ def _evaluate_pawn_storm(king_sq, color, piece_bbs):
 def evaluate_king_safety(piece_bbs, occupancy_bbs):
     """
     Refactored King Safety evaluation based on Chess Programming Wiki.
+    重構的國王安全評估，基於 Chess Programming Wiki。
     """
     (wp_bb, wn_bb, wb_bb, wr_bb, wq_bb, wk_bb,
     bp_bb, bn_bb, bb_bb, br_bb, bq_bb, bk_bb) = piece_bbs
@@ -340,7 +365,7 @@ def evaluate_king_safety(piece_bbs, occupancy_bbs):
     white_king_sq = get_lsb_index(wk_bb)
     black_king_sq = get_lsb_index(bk_bb)
 
-    # --- Calculate raw scores for each component ---
+    # --- Calculate raw scores for each component / 計算每個組件的原始分數 ---
     white_shield = _evaluate_pawn_shield_for_color(white_king_sq, wp_bb, bp_bb, 0)
     white_attackers = _evaluate_king_attackers(white_king_sq, 0, piece_bbs, occupancy_bbs)
     white_tropism = _evaluate_king_tropism(white_king_sq, 0, piece_bbs)
@@ -351,11 +376,11 @@ def evaluate_king_safety(piece_bbs, occupancy_bbs):
     black_tropism = _evaluate_king_tropism(black_king_sq, 1, piece_bbs)
     black_pawn_storm = _evaluate_pawn_storm(black_king_sq, 1, piece_bbs)
 
-    # --- Sum raw scores ---
+    # --- Sum raw scores / 加總原始分數 ---
     white_raw_safety = white_shield + white_attackers + white_tropism + white_pawn_storm
     black_raw_safety = black_shield + black_attackers + black_tropism + black_pawn_storm
 
-    # --- Phase 4: Scaling based on enemy material ---
+    # --- Phase 4: Scaling based on enemy material / 階段 4：基於敵方材質進行縮放 ---
     black_material_for_scaling = (count_bits(bn_bb) * SCALING_WEIGHTS[0] +
                                  count_bits(bb_bb) * SCALING_WEIGHTS[1] +
                                  count_bits(br_bb) * SCALING_WEIGHTS[2] +
@@ -377,6 +402,8 @@ def evaluate_king_safety(piece_bbs, occupancy_bbs):
     # In the endgame, king safety is much less of a concern, and an active king is
     # often an advantage. The King's PST already encourages centralization.
     # Therefore, we set the endgame king safety score to 0.
+    # 在殘局中，國王安全通常不那麼重要，活躍的國王往往是優勢。
+    # 國王的 PST 已經鼓勵中心化。因此，我們將殘局國王安全分數設為 0（或按比例縮減）。
     eg_safety_score = mg_safety_score * EG_SAFETY_SCALE
 
     return mg_safety_score, eg_safety_score
@@ -385,7 +412,14 @@ def evaluate_king_safety(piece_bbs, occupancy_bbs):
 @numba.njit(numba.types.UniTuple(numba.int32, 2)(piece_bbs_signature, occupancy_bbs_signature), cache=True, boundscheck=False, fastmath=True)
 def evaluate_mobility(piece_bbs, occupancy_bbs):
     """
-    Evaluates piece mobility for both sides.
+    評估雙方棋子的機動性。
+    
+    Args:
+        piece_bbs (np.ndarray): 12 個棋子的位元棋盤。
+        occupancy_bbs (np.ndarray): 佔用位元棋盤。
+        
+    Returns:
+        tuple: (mg_score, eg_score) 從白方視角。
     """
     mg_score = np.int32(0)
     eg_score = np.int32(0)
@@ -394,7 +428,7 @@ def evaluate_mobility(piece_bbs, occupancy_bbs):
     black_occupancy = occupancy_bbs[1]
     all_pieces_occupancy = occupancy_bbs[2]
 
-    # --- White Mobility ---
+    # --- White Mobility / 白方機動性 ---
     # Knights
     temp_bb = piece_bbs[1]
     while temp_bb:
@@ -432,7 +466,7 @@ def evaluate_mobility(piece_bbs, occupancy_bbs):
         temp_bb &= temp_bb - np.uint64(1)
 
 
-    # --- Black Mobility ---
+    # --- Black Mobility / 黑方機動性 ---
     # Knights
     temp_bb = piece_bbs[7]
     while temp_bb:
@@ -533,8 +567,18 @@ def _evaluate_king_pawn_endgame(piece_bbs):
 def evaluate_position(piece_bbs, occupancy_bbs, game_state, lazy: bool = False):
     """
     使用 Tapered Evaluation (加權評估) 模型評估目前局面，並從當前執棋方的角度返回分數。
+    評估包括：材質、PST、國王安全、兵形結構、棋子協同性和機動性。
+    
+    Args:
+        piece_bbs (np.ndarray): 12 個棋子的位元棋盤。
+        occupancy_bbs (np.ndarray): 佔用位元棋盤。
+        game_state (np.ndarray): 遊戲狀態。
+        lazy (bool): 是否使用懶惰評估（僅材質和 PST，用於 Razoring 等）。
+        
+    Returns:
+        int: 從行棋方視角的評估分數。
     """
-    # --- King and Pawn Endgame Check ---
+    # --- King and Pawn Endgame Check / 檢查王兵殘局 ---
     # 檢查是否只有王和兵，如果
     all_pieces_except_pawns_and_kings = (
         piece_bbs[1] | piece_bbs[2] | piece_bbs[3] | piece_bbs[4] |
@@ -583,7 +627,7 @@ def evaluate_position(piece_bbs, occupancy_bbs, game_state, lazy: bool = False):
             eg_score -= PST_EG[piece_type][sq ^ 56]
             bb &= bb - np.uint64(1)
 
-    # --- Lazy Evaluation Checkpoint ---
+    # --- Lazy Evaluation Checkpoint / 懶惰評估檢查點 ---
     if lazy:
         final_score = (mg_score * phase + eg_score * (MAX_PHASE - phase)) // MAX_PHASE
         return np.int32(final_score) if side_to_move == 0 else np.int32(-final_score)
@@ -611,7 +655,7 @@ def evaluate_position(piece_bbs, occupancy_bbs, game_state, lazy: bool = False):
     # --- 7. 根據遊戲階段進行插值計算 ---
     final_score = (mg_score * phase + eg_score * (MAX_PHASE - phase)) // MAX_PHASE
 
-    # --- 8. (Optional) Initiative Bonus ---
+    # --- 8. (Optional) Initiative Bonus / 主動權獎勵 ---
     if phase > INITIATIVE_PHASE_THRESHOLD:
         final_score += INITIATIVE_BONUS
 
@@ -621,4 +665,3 @@ def evaluate_position(piece_bbs, occupancy_bbs, game_state, lazy: bool = False):
     else:  # 黑方回合
         return np.int32(-final_score)
     # return np.int32(0)  # Placeholder return statement
-

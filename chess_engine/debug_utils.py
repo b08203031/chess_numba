@@ -4,16 +4,16 @@ import sys
 
 PIECE_CHARS = ['P', 'N', 'B', 'R', 'Q', 'K', 'p', 'n', 'b', 'r', 'q', 'k']
 """
-A list of characters representing the pieces.
+代表棋子的字符列表。
 """
 
 def print_board(piece_bbs, name: str = "Board State"):
     """
-    Prints a visual representation of the board showing piece characters.
+    打印棋盤的可視化表示，顯示棋子字符。
 
     Args:
-        piece_bbs: A tuple of 12 uint64 bitboards, one for each piece type.
-        name: The name of the board state.
+        piece_bbs (list): 12 個 uint64 位元棋盤的列表，每個對應一種棋子類型。
+        name (str): 棋盤狀態的名稱。
     """
     print(f"\n--- {name} ---")
     print("   a b c d e f g h")
@@ -37,12 +37,12 @@ def print_board(piece_bbs, name: str = "Board State"):
 
 def compare_move_lists(moves1, moves2, labels=("List 1", "List 2")):
     """
-    Compares two lists of moves and prints the differences.
+    比較兩個移動列表並打印差異。
 
     Args:
-        moves1: The first list of moves.
-        moves2: The second list of moves.
-        labels: A tuple of two strings representing the names of the two lists.
+        moves1 (list): 第一個移動列表。
+        moves2 (list): 第二個移動列表。
+        labels (tuple): 代表兩個列表名稱的元組。
     """
     set1 = set(moves1)
     set2 = set(moves2)
@@ -71,6 +71,9 @@ def compare_move_lists(moves1, moves2, labels=("List 1", "List 2")):
 
 def log_info(message):
     """
-    Prints debug information to stderr, prefixed with "info string" for UCI compatibility.
+    將調試信息打印到 stderr，並加上 "info string" 前綴以兼容 UCI 協議。
+
+    Args:
+        message (str): 要記錄的消息。
     """
     print(f"info string {message}", file=sys.stderr, flush=True)

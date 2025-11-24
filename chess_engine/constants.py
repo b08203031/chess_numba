@@ -2,37 +2,55 @@
 
 import numpy as np
 
-# =============================================================================
-# --- Material Values (Tapered) ---
-# =============================================================================
-# Values are in centipawns
+"""
+此模組定義了西洋棋引擎中使用的所有常量。
+包含了棋盤表示、棋子值、位置分數（PST）、搜尋參數、剪枝開關以及位元棋盤的輔助常量。
+"""
 
-# Index mapping for pieces
+# =============================================================================
+# --- Material Values (Tapered) / 棋子材質值（漸進式） ---
+# =============================================================================
+# Values are in centipawns / 單位為分（centipawns）
+
+# Index mapping for pieces / 棋子索引映射
 # PAWN, KNIGHT, BISHOP, ROOK, QUEEN, KING
 #  0  ,   1   ,   2   ,  3  ,   4  ,  5
 
+# 中局（Middle Game）材質值
 MG_MATERIAL_VALUES = np.array([100, 320, 330, 500, 900, 0], dtype=np.int32)
+# 殘局（End Game）材質值
 EG_MATERIAL_VALUES = np.array([120, 310, 340, 530, 950, 0], dtype=np.int32)
 
 # =============================================================================
-# --- Game Phase Calculation ---
+# --- Game Phase Calculation / 遊戲階段計算 ---
 # =============================================================================
-# Weights for each piece type to determine the game phase
+# Weights for each piece type to determine the game phase / 每個棋子類型的權重，用於確定遊戲階段
 PHASE_WEIGHTS = np.array([0, 1, 1, 2, 4, 0], dtype=np.int32)
+# 最大階段值（初始局面所有非兵棋子的權重總和）
 MAX_PHASE = np.sum(PHASE_WEIGHTS * np.array([8, 2, 2, 2, 1, 1])) * 2 # Pawns are not counted
 
 # =============================================================================
-# --- Piece-Square Tables (PSTs) ---
+# --- Piece-Square Tables (PSTs) / 棋子位置分數表 ---
 # =============================================================================
 # All tables are from White's perspective.
 # For Black, the board is flipped vertically (sq ^ 56).
 # The arrays are flattened 8x8 matrices, index 0 is A1, 63 is H8.
+# 所有表格均以白方視角定義。黑方使用時需垂直翻轉棋盤。
+# 陣列為展平的 8x8 矩陣，索引 0 為 A1，63 為 H8。
 
 def _create_pst(values):
-    """Helper to create a flattened 8x8 PST from a 2D list."""
+    """
+    輔助函式：從 2D 列表創建展平的 8x8 PST 陣列。
+    
+    Args:
+        values (list of list of int): 8x8 的分數列表。
+        
+    Returns:
+        np.array: 展平的一維 numpy 陣列。
+    """
     return np.array([val for row in reversed(values) for val in row], dtype=np.int32)
 
-# --- Middlegame PSTs ---
+# --- Middlegame PSTs / 中局位置分數表 ---
 
 PAWN_PST_MG = _create_pst([
     [0,  0,  0,  0,  0,  0,  0,  0],
@@ -101,7 +119,7 @@ KING_PST_MG = _create_pst([
 ])
 
 
-# --- Endgame PSTs ---
+# --- Endgame PSTs / 殘局位置分數表 ---
 
 PAWN_PST_EG = _create_pst([
     [0,  0,  0,  0,  0,  0,  0,  0],
@@ -170,8 +188,8 @@ KING_PST_EG = _create_pst([
 ])
 
 
-# --- Aggregated PSTs for easier access ---
-# The order must match the piece index mapping
+# --- Aggregated PSTs for easier access / 聚合 PST 以便於訪問 ---
+# The order must match the piece index mapping / 順序必須與棋子索引映射匹配
 # PAWN, KNIGHT, BISHOP, ROOK, QUEEN, KING
 
 PST_MG = np.array([
@@ -184,21 +202,24 @@ PST_EG = np.array([
 
 
 # =============================================================================
-# --- Other Evaluation Constants ---
+# --- Other Evaluation Constants / 其他評估常量 ---
 # =============================================================================
 
-# --- Initiative Bonus ---
+# --- Initiative Bonus / 主動權獎勵 ---
 # A small bonus awarded to the side to move, acknowledging the advantage of having the turn.
 # This bonus is tapered and disappears in the endgame.
+# 給予輪到行棋一方的小獎勵，承認擁有下棋權的優勢。此獎勵是漸進的，在殘局中會消失。
 INITIATIVE_BONUS = 10 # centipawns
-INITIATIVE_PHASE_THRESHOLD = MAX_PHASE * 0.4 # Apply only when phase is above 40% of max
+INITIATIVE_PHASE_THRESHOLD = MAX_PHASE * 0.4 # Apply only when phase is above 40% of max / 僅在階段值高於最大值的 40% 時應用
 
 
 # =============================================================================
-# --- Mobility Constants ---
+# --- Mobility Constants / 機動性常量 ---
 # =============================================================================
 # Bonus for piece mobility, calculated as: (move_count - base_moves) * weight.
 # This rewards active pieces and penalizes pieces that are blocked or restricted.
+# 棋子機動性獎勵，計算方式為：(移動次數 - 基礎移動數) * 權重。
+# 這獎勵活躍的棋子，懲罰被阻擋或受限的棋子。
 
 # --- Knight Mobility ---
 KNIGHT_MOBILITY_BASE_MOVES = 4
@@ -218,27 +239,31 @@ QUEEN_MOBILITY_WEIGHT = np.array([2, 1], dtype=np.int32) # MG, EG
 
 
 # =============================================================================
-# --- Piece Coordination Constants ---
+# --- Piece Coordination Constants / 棋子協同常量 ---
 # =============================================================================
 
-# --- Bishop Pair ---
+# --- Bishop Pair / 雙象優勢 ---
 # Bonus for having both bishops. This bonus is generally stronger in open positions.
+# 擁有雙象的獎勵。這個獎勵在開放局面中通常更強。
 BISHOP_PAIR_BONUS = np.array([10, 20], dtype=np.int32) # MG, EG
 
-# --- Rook on Open/Semi-Open File ---
+# --- Rook on Open/Semi-Open File / 車在開放線/半開放線 ---
 # Bonus for a rook on a file with no friendly pawns (semi-open)
 # or no pawns at all (open).
+# 車在沒有己方兵（半開放線）或完全沒有兵（開放線）的直線上的獎勵。
 ROOK_ON_SEMI_OPEN_FILE_BONUS = np.array([15, 10], dtype=np.int32) # MG, EG
 ROOK_ON_OPEN_FILE_BONUS = np.array([25, 15], dtype=np.int32) # MG, EG
 
 
 # =============================================================================
-# --- Pawn Structure Constants ---
+# --- Pawn Structure Constants / 兵型結構常量 ---
 # =============================================================================
 
-# --- Passed Pawns ---
+# --- Passed Pawns / 通路兵 ---
 # Bonus for having a passed pawn, scaled by its rank. (Values increased significantly)
 # Index corresponds to the pawn's rank (1-8, though rank 1 and 8 are not used for pawns).
+# 通路兵的獎勵，根據其橫排進行縮放。（數值已顯著增加）
+# 索引對應於兵的橫排（1-8，雖然 1 和 8 橫排不用於兵）。
 PASSED_PAWN_BONUS = np.array([
     # MG, EG
     [  0,   0], # Rank 1
@@ -251,20 +276,22 @@ PASSED_PAWN_BONUS = np.array([
     [  0,   0]  # Rank 8
 ], dtype=np.int32)
 
-# --- Isolated Pawns ---
+# --- Isolated Pawns / 孤兵 ---
 # Penalty for each isolated pawn on a file.
+# 每一個孤兵的懲罰。
 ISOLATED_PAWN_PENALTY = np.array([-10, -15], dtype=np.int32) # MG, EG
 
-# --- Doubled Pawns ---
+# --- Doubled Pawns / 重疊兵 ---
 # Penalty for each doubled pawn on a file.
+# 每一個重疊兵的懲罰。
 DOUBLED_PAWN_PENALTY = np.array([-15, -20], dtype=np.int32) # MG, EG
 
 
 # =============================================================================
-# --- King Safety Constants (NEW - based on Chessprogramming Wiki) ---
+# --- King Safety Constants (NEW - based on Chessprogramming Wiki) / 王的安全常量 ---
 # =============================================================================
 
-# --- Phase 2: Attacking the King Zone ---
+# --- Phase 2: Attacking the King Zone / 攻擊王翼區域 ---
 KING_SAFETY_ATTACK_UNITS = np.array([2, 2, 3, 5], dtype=np.int32) # N, B, R, Q
 KING_SAFETY_TABLE = np.array([
     0, 0, 1, 2, 4, 6, 9, 12, 16, 20, 25, 30, 36, 42, 49, 56,
@@ -273,19 +300,19 @@ KING_SAFETY_TABLE = np.array([
     350, 360, 370, 380, 390, 400
 ] + [400] * 50, dtype=np.int32)
 
-# --- Phase 3: King Tropism ---
-KING_TROPISM_MAX_DISTANCE = 14 # Max MANHATTAN distance
+# --- Phase 3: King Tropism / 王的向性 ---
+KING_TROPISM_MAX_DISTANCE = 14 # Max MANHATTAN distance / 最大曼哈頓距離
 KING_TROPISM_WEIGHTS = np.array([1, 2, 2, 3, 5], dtype=np.int32) # P, N, B, R, Q
 
-# --- Phase 4: Advanced & Dynamic ---
-PAWN_STORM_PENALTY = -5 # Penalty for each enemy pawn near the king
-SCALING_WEIGHTS = np.array([0, 4, 4, 6, 10], dtype=np.int32) # N, B, R, Q - for scaling factor
-MAX_SCALING_MATERIAL = (2*4 + 2*4 + 2*6 + 1*10) # Sum of all weights for one side
+# --- Phase 4: Advanced & Dynamic / 進階與動態 ---
+PAWN_STORM_PENALTY = -5 # Penalty for each enemy pawn near the king / 每個敵方兵接近王的懲罰
+SCALING_WEIGHTS = np.array([0, 4, 4, 6, 10], dtype=np.int32) # N, B, R, Q - for scaling factor / 用於縮放因子的權重
+MAX_SCALING_MATERIAL = (2*4 + 2*4 + 2*6 + 1*10) # Sum of all weights for one side / 一方所有權重的總和
 
-EG_SAFETY_SCALE = 0.5 # Scale down endgame king safety impact
+EG_SAFETY_SCALE = 0.5 # Scale down endgame king safety impact / 縮減殘局王的安全影響
 
 # =============================================================================
-# --- Search Constants ---
+# --- Search Constants / 搜尋常量 ---
 # =============================================================================
 
 INFINITY = 32000
@@ -295,14 +322,15 @@ MATE_IN_MAX_PLY = MATE_SCORE - MAX_PLY
 NO_MOVE = np.uint16(0)
 
 # Special value to indicate that the search was stopped due to timeout
+# 特殊值，表示搜尋因超時而停止
 STOP_SEARCH_FLAG = 66666
 
 
-# --- Aspiration Windows ---
+# --- Aspiration Windows / 期望窗口 ---
 ASPIRATION_WINDOW_SIZE = 100 # centipawns
 
-# --- Pruning Techniques ---
-# Master switches for new pruning techniques
+# --- Pruning Techniques / 剪枝技術 ---
+# Master switches for new pruning techniques / 新剪枝技術的總開關
 ENABLE_LMP = True           # Late Move Pruning
 ENABLE_PROBCUT = True       # ProbCut
 ENABLE_DELTA_PRUNING = True # Delta Pruning in Quiescence Search
@@ -315,7 +343,7 @@ MIN_SINGULAR_DEPTH = 6
 SINGULAR_EXTENSION_MARGIN = 150 # centipawns
 
 
-# Master switches for existing pruning techniques
+# Master switches for existing pruning techniques / 現有剪枝技術的總開關
 ENABLE_NMP = True           # Null Move Pruning
 ENABLE_RAZORING = True      # Razoring
 ENABLE_FP = True            # Futility Pruning
@@ -336,11 +364,12 @@ FP_MARGIN_D2 = 250
 RFP_MARGIN_D1 = 100
 
 # Late Move Reductions (LMR)
-LMR_MIN_DEPTH = 3           # Minimum depth to apply LMR
-LMR_MIN_QUIET_MOVE_INDEX = 4 # Minimum number of quiet moves before LMR
-LMR_REDUCTION = 2           # Depth reduction for LMR
+LMR_MIN_DEPTH = 3           # Minimum depth to apply LMR / 應用 LMR 的最小深度
+LMR_MIN_QUIET_MOVE_INDEX = 4 # Minimum number of quiet moves before LMR / LMR 前的最小寧靜步數
+LMR_REDUCTION = 2           # Depth reduction for LMR / LMR 的深度減少值
 
 # Late Move Pruning (LMP) - Prune moves after a certain number of quiet moves have been searched
+# 晚期移動剪枝（LMP） - 在搜尋了一定數量的寧靜步後剪枝
 LMP_MOVE_COUNT = np.array([
  # depth: 0  1  2   3   4   5   6   7   8   9  10 ...
           0, 6, 10, 14, 20, 25, 30, 35, 40, 50, 60, 70, 80, 90, 90, 90, 90
@@ -355,23 +384,24 @@ PROBCUT_MARGIN = 150 # centipawns
 # Delta Pruning
 DELTA_PRUNING_MARGIN = 500
 
-# --- Static Exchange Evaluation (SEE) Threshold ---
+# --- Static Exchange Evaluation (SEE) Threshold / SEE 閾值 ---
 SEE_THRESHOLD = 0  # centipawns
-ENABLE_SEE_IN_QUIESCENCE = True # Master switch to enable/disable SEE in quiescence search
+ENABLE_SEE_IN_QUIESCENCE = True # Master switch to enable/disable SEE in quiescence search / 啟用/禁用靜態搜尋中 SEE 的總開關
 
 # =============================================================================
-# --- Bitboard Utilities Constants ---
+# --- Bitboard Utilities Constants / 位元棋盤工具常量 ---
 # =============================================================================
 
 BB_SQUARES = np.array([np.uint64(1) << i for i in range(64)], dtype=np.uint64)
 """
-An array of bitboards, where each bitboard has a single bit set at the corresponding square index.
+位元棋盤陣列，其中每個位元棋盤在對應的方格索引處設置了一個位元。
 """
 
-# De Bruijn sequence for fast bit scanning
+# De Bruijn sequence for fast bit scanning / 用於快速位掃描的 De Bruijn 序列
 DE_BRUIJN_SEQUENCE = np.uint64(0x03f79d71b4cb0a89)
 
 # Lookup table for mapping the De Bruijn hash to a square index (0-63)
+# 將 De Bruijn 哈希映射到方格索引（0-63）的查找表
 DE_BRUIJN_INDEX = np.array([
      0,  1, 48,  2, 57, 49, 28,  3,
     61, 58, 50, 42, 38, 29, 17,  4,
@@ -385,7 +415,7 @@ DE_BRUIJN_INDEX = np.array([
 
 
 # =============================================================================
-# --- Transposition Table Constants ---
+# --- Transposition Table Constants / 置換表常量 ---
 # =============================================================================
 
 TT_SIZE_MB = 256

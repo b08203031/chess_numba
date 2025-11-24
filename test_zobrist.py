@@ -10,16 +10,14 @@ from chess_engine.move import move_to_uci
 
 def uci_to_move(piece_bbs, occupancy_bbs, game_state, uci_string):
     """
-    Finds the encoded move corresponding to a UCI string.
+    尋找與 UCI 字串對應的編碼移動。
     """
     # Ensure game_state tuple has Numba-compatible types, as it's passed to a JIT function
-    side, castling, ep, halfmove, zobrist = game_state
-    typed_game_state = (
-        np.uint8(side), np.uint8(castling), np.int8(ep),
-        np.uint8(halfmove), np.uint64(zobrist)
-    )
+    # 確保 game_state 具有 Numba 兼容的類型
+    # side, castling, ep, halfmove, zobrist = game_state
     # The piece and occupancy bbs are already typed correctly when this is called from _test_zobrist_hash
-    moves = generate_legal_moves(piece_bbs, occupancy_bbs, typed_game_state)
+    # 當此函數被調用時，piece_bbs 和 occupancy_bbs 已經是正確的 NumPy 陣列
+    moves = generate_legal_moves(piece_bbs, occupancy_bbs, game_state)
     for move in moves:
         if move_to_uci(move) == uci_string:
             return move
@@ -27,126 +25,104 @@ def uci_to_move(piece_bbs, occupancy_bbs, game_state, uci_string):
 
 def _test_zobrist_hash(fen, uci_move):
     """
-    Core Zobrist hash test function.
+    核心 Zobrist 哈希測試函數。
     
-    1. Loads a position from FEN.
-    2. Makes a move.
-    3. Verifies that the incrementally updated Zobrist key matches a fully recomputed key.
-    4. Unmakes the move.
-    5. Verifies that the Zobrist key is perfectly restored.
+    1. 從 FEN 加載局面。
+    2. 執行一個移動。
+    3. 驗證增量更新的 Zobrist 鍵值與完全重新計算的鍵值匹配。
+    4. 撤銷移動。
+    5. 驗證 Zobrist 鍵值完全恢復。
     """
     # 1. Load position and get initial hash
     piece_bbs, occupancy_bbs, game_state = parse_fen(fen)
     
-    # Ensure all tuples have Numba-compatible types before passing to JIT functions
-    typed_piece_bbs = tuple(np.uint64(bb) for bb in piece_bbs)
-    typed_occupancy_bbs = tuple(np.uint64(bb) for bb in occupancy_bbs)
-    typed_game_state = (
-        np.uint8(game_state[0]), np.uint8(game_state[1]), np.int8(game_state[2]),
-        np.uint8(game_state[3]), np.uint64(game_state[4])
-    )
-    original_key = typed_game_state[4]
+    original_key = game_state[4]
 
     # Find the move object corresponding to the UCI string
-    move = uci_to_move(typed_piece_bbs, typed_occupancy_bbs, typed_game_state, uci_move)
+    move = uci_to_move(piece_bbs, occupancy_bbs, game_state, uci_move)
     assert move is not None, f"Could not find legal move for {uci_move} in FEN {fen}"
 
     # 2. Make the move and get the incrementally updated key
-    new_piece_bbs, new_occupancy_bbs, new_game_state, unmake_info = make_move(
-        typed_piece_bbs, typed_occupancy_bbs, typed_game_state, move
-    )
-    updated_key = new_game_state[4]
-
-    # Re-cast the tuples returned from the JIT function to ensure correct types before passing them back in
-    typed_new_piece_bbs = tuple(np.uint64(bb) for bb in new_piece_bbs)
-    typed_new_occupancy_bbs = tuple(np.uint64(bb) for bb in new_occupancy_bbs)
-    typed_new_game_state = (
-        np.uint8(new_game_state[0]), np.uint8(new_game_state[1]), np.int8(new_game_state[2]),
-        np.uint8(new_game_state[3]), np.uint64(new_game_state[4])
-    )
-    typed_unmake_info = (
-        np.int8(unmake_info[0]), np.uint8(unmake_info[1]), np.int8(unmake_info[2]),
-        np.uint8(unmake_info[3]), np.uint64(unmake_info[4])
-    )
+    unmake_info = make_move(piece_bbs, occupancy_bbs, game_state, move)
+    updated_key = game_state[4]
 
     # 3. Recompute the hash from the new position and verify
     # We create a temporary game state with a zeroed key to ensure the re-computation is truly from scratch.
-    temp_game_state_for_recompute = (
-        typed_new_game_state[0], typed_new_game_state[1], typed_new_game_state[2], typed_new_game_state[3], np.uint64(0)
-    )
-    recomputed_key = compute_initial_hash(typed_new_piece_bbs, temp_game_state_for_recompute)
+    # 創建一個臨時的 game_state 並將 key 歸零，以確保重新計算是從頭開始的。
+    temp_game_state_for_recompute = game_state.copy()
+    temp_game_state_for_recompute[4] = np.uint64(0)
+    
+    recomputed_key = compute_initial_hash(piece_bbs, temp_game_state_for_recompute)
     assert updated_key == recomputed_key, f"Zobrist key mismatch after make_move for {uci_move} in FEN {fen}"
 
     # 4. Unmake the move
-    restored_piece_bbs, restored_occupancy_bbs, restored_game_state = unmake_move(
-        typed_new_piece_bbs, typed_new_occupancy_bbs, typed_new_game_state, move, typed_unmake_info
-    )
+    unmake_move(piece_bbs, occupancy_bbs, game_state, move, unmake_info)
     
     # 5. Verify the key is restored
-    restored_key = restored_game_state[4]
+    restored_key = game_state[4]
     assert restored_key == original_key, f"Zobrist key mismatch after unmake_move for {uci_move} in FEN {fen}"
 
-# --- White Piece Test Cases ---
+# --- White Piece Test Cases / 白方棋子測試用例 ---
 
 def test_basic_move():
-    """Tests the Zobrist key update for a simple pawn push."""
+    """測試簡單兵推進的 Zobrist 鍵值更新。"""
     fen = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
     uci_move = "e2e4"
     _test_zobrist_hash(fen, uci_move)
 
 def test_capture():
-    """Tests the Zobrist key update for a simple capture."""
+    """測試簡單吃子的 Zobrist 鍵值更新。"""
     # This position is after 1. e4 e5 2. Nf3 f6
     fen = "rnbqkbnr/pppp2pp/5p2/4p3/4P3/5N2/PPPP1PPP/RNBQKB1R w KQkq - 0 3"
     uci_move = "f3e5"
     _test_zobrist_hash(fen, uci_move)
 
 def test_castling_rights_loss_king_move():
-    """Tests Zobrist update after king move forfeits castling rights."""
+    """測試王移動失去易位權後的 Zobrist 更新。"""
     fen = "rnbqkbnr/pppp1ppp/8/4p3/4P3/8/PPPP1PPP/RNBQKBNR w KQkq - 0 2"
     uci_move = "e1e2"
     _test_zobrist_hash(fen, uci_move)
 
 def test_castling_rights_loss_rook_move():
-    """Tests Zobrist update after rook move forfeits a castling right."""
+    """測試車移動失去易位權後的 Zobrist 更新。"""
     fen = "r3k2r/pppppppp/8/8/8/8/PPPPPPPP/R3K2R w KQkq - 0 1"
     uci_move = "h1g1"
     _test_zobrist_hash(fen, uci_move)
 
 def test_en_passant():
-    """Tests the Zobrist key update for an en passant capture."""
+    """測試吃過路兵的 Zobrist 鍵值更新。"""
     fen = "rnbqkbnr/ppp1p1pp/8/3pPp2/8/8/PPPP1PPP/RNBQKBNR w KQkq f6 0 3"
     uci_move = "e5f6"
     _test_zobrist_hash(fen, uci_move)
 
 def test_promotion_simple():
-    """Tests the Zobrist key update for a simple promotion."""
+    """測試簡單升變的 Zobrist 鍵值更新。"""
     fen = "rnbqkbr1/pp5P/2p1pp2/3p4/8/8/PPPP1PP1/RNBQKBNR w KQq - 0 1"
     uci_move = "h7h8q"
     _test_zobrist_hash(fen, uci_move)
 
 def test_promotion_capture():
-    """Tests the Zobrist key update for a capture promotion."""
+    """測試吃子升變的 Zobrist 鍵值更新。"""
     fen = "rnb1kbnr/ppP4p/4pp2/3p4/8/8/PPPP1PPP/RNBQKBNR w KQkq - 0 1"
     uci_move = "c7b8q"
     _test_zobrist_hash(fen, uci_move)
 
-# --- Black Piece Test Cases ---
+# --- Black Piece Test Cases / 黑方棋子測試用例 ---
 
 def test_black_en_passant():
-    """Tests the Zobrist key update for a Black en passant capture."""
+    """測試黑方吃過路兵的 Zobrist 鍵值更新。"""
     fen = "rnbqkbnr/pppp1ppp/8/8/4PpP1/8/PPPP3P/RNBQKBNR b KQkq g3 0 3"
     uci_move = "f4g3"
     _test_zobrist_hash(fen, uci_move)
 
 def test_black_promotion_capture():
-    """Tests the Zobrist key update for a Black capture promotion."""
+    """測試黑方吃子升變的 Zobrist 鍵值更新。"""
     fen = "rnbqkbnr/1Ppppp1p/8/8/8/8/pP1P1P1P/RNBQKBNR b KQkq - 0 1"
     uci_move = "a2b1q"
     _test_zobrist_hash(fen, uci_move)
 
 def test_black_castling():
-    """Tests the Zobrist key update for Black castling."""
+    """測試黑方王車易位的 Zobrist 鍵值更新。"""
     fen = "r3k2r/pppppppp/8/8/8/8/PPPPPPPP/R3K2R b KQkq - 0 1"
     uci_move = "e8g8"
     _test_zobrist_hash(fen, uci_move)
