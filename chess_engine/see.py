@@ -117,6 +117,9 @@ def see(piece_bbs, occupancy_bbs, side_to_move, from_sq, to_sq):
         victim_piece_type = PAWN + (6 if side_to_move == WHITE else 0)
     gain[depth] = MG_MATERIAL_VALUES[victim_piece_type % 6]
 
+    moved_piece_type = find_piece_type_on_square(piece_bbs, from_sq)
+    previous_aggressor_value = MG_MATERIAL_VALUES[moved_piece_type % 6]
+
     # --- Lightweight Simulation Setup / 輕量級模擬設置 ---
     current_side = side_to_move
     occupancy = occupancy_bbs[2]
@@ -131,6 +134,31 @@ def see(piece_bbs, occupancy_bbs, side_to_move, from_sq, to_sq):
     # Remove the initial attacker from the occupancy and attacker sets
     # 從佔用和攻擊者集合中移除初始攻擊者（即移動的棋子）
     occupancy ^= from_sq_bb
+    
+    # --- Handle X-Ray Attacks (First Move) ---
+    # We must check for X-Ray attacks revealed by the first move
+    bishop_attacks_bb = get_bishop_attacks(to_sq, occupancy)
+    new_w_bishops = bishop_attacks_bb & (piece_bbs[BISHOP] | piece_bbs[QUEEN]) & occupancy
+    new_b_bishops = bishop_attacks_bb & (piece_bbs[BISHOP + 6] | piece_bbs[QUEEN + 6]) & occupancy
+    
+    revealed_attackers = (new_w_bishops | new_b_bishops) & ~all_attackers
+    
+    if revealed_attackers:
+        all_attackers |= revealed_attackers
+        white_attackers |= new_w_bishops
+        black_attackers |= new_b_bishops
+
+    rook_attacks_bb = get_rook_attacks(to_sq, occupancy)
+    new_w_rooks = rook_attacks_bb & (piece_bbs[ROOK] | piece_bbs[QUEEN]) & occupancy
+    new_b_rooks = rook_attacks_bb & (piece_bbs[ROOK + 6] | piece_bbs[QUEEN + 6]) & occupancy
+    
+    revealed_attackers = (new_w_rooks | new_b_rooks) & ~all_attackers
+    
+    if revealed_attackers:
+        all_attackers |= revealed_attackers
+        white_attackers |= new_w_rooks
+        black_attackers |= new_b_rooks
+
     all_attackers &= ~from_sq_bb
 
     while True:
@@ -167,37 +195,38 @@ def see(piece_bbs, occupancy_bbs, side_to_move, from_sq, to_sq):
         aggressor_sq_bb = BB_SQUARES[aggressor_sq]
 
         # --- Update Gain Array / 更新增益陣列 ---
-        gain[depth] = MG_MATERIAL_VALUES[aggressor_piece_type] - gain[depth - 1]
+        # gain[depth] = value_captured - gain[depth - 1]
+        gain[depth] = previous_aggressor_value - gain[depth - 1]
+
+        previous_aggressor_value = MG_MATERIAL_VALUES[aggressor_piece_type]
 
         # --- Update Simulation State / 更新模擬狀態 ---
         occupancy ^= aggressor_sq_bb
-        all_attackers &= ~aggressor_sq_bb
 
         # --- Handle X-Ray Attacks / 處理 X-Ray 攻擊 ---
-        # If the removed piece was a slider, we need to check if its removal
-        # revealed a new attack from another slider behind it.
-        # 如果被移除的棋子是滑動棋子，我們需要檢查它的移除是否暴露了背後另一個滑動棋子的攻擊。
-        if aggressor_piece_type == BISHOP or aggressor_piece_type == QUEEN:
-            bishop_attacks_bb = get_bishop_attacks(to_sq, occupancy)
-            new_w_bishops = bishop_attacks_bb & (piece_bbs[BISHOP] | piece_bbs[QUEEN])
-            new_b_bishops = bishop_attacks_bb & (piece_bbs[BISHOP + 6] | piece_bbs[QUEEN + 6])
-            
-            revealed_attackers = (new_w_bishops | new_b_bishops) & ~all_attackers
-            if revealed_attackers:
-                all_attackers |= revealed_attackers
-                white_attackers |= new_w_bishops
-                black_attackers |= new_b_bishops
+        bishop_attacks_bb = get_bishop_attacks(to_sq, occupancy)
+        new_w_bishops = bishop_attacks_bb & (piece_bbs[BISHOP] | piece_bbs[QUEEN]) & occupancy
+        new_b_bishops = bishop_attacks_bb & (piece_bbs[BISHOP + 6] | piece_bbs[QUEEN + 6]) & occupancy
+        
+        revealed_attackers = (new_w_bishops | new_b_bishops) & ~all_attackers
+        
+        if revealed_attackers:
+            all_attackers |= revealed_attackers
+            white_attackers |= new_w_bishops
+            black_attackers |= new_b_bishops
 
-        if aggressor_piece_type == ROOK or aggressor_piece_type == QUEEN:
-            rook_attacks_bb = get_rook_attacks(to_sq, occupancy)
-            new_w_rooks = rook_attacks_bb & (piece_bbs[ROOK] | piece_bbs[QUEEN])
-            new_b_rooks = rook_attacks_bb & (piece_bbs[ROOK + 6] | piece_bbs[QUEEN + 6])
-            
-            revealed_attackers = (new_w_rooks | new_b_rooks) & ~all_attackers
-            if revealed_attackers:
-                all_attackers |= revealed_attackers
-                white_attackers |= new_w_rooks
-                black_attackers |= new_b_rooks
+        rook_attacks_bb = get_rook_attacks(to_sq, occupancy)
+        new_w_rooks = rook_attacks_bb & (piece_bbs[ROOK] | piece_bbs[QUEEN]) & occupancy
+        new_b_rooks = rook_attacks_bb & (piece_bbs[ROOK + 6] | piece_bbs[QUEEN + 6]) & occupancy
+        
+        revealed_attackers = (new_w_rooks | new_b_rooks) & ~all_attackers
+        
+        if revealed_attackers:
+            all_attackers |= revealed_attackers
+            white_attackers |= new_w_rooks
+            black_attackers |= new_b_rooks
+        
+        all_attackers &= ~aggressor_sq_bb
 
 
     # --- Minimax Calculation / 極大極小值計算 ---
