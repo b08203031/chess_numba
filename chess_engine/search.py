@@ -106,6 +106,14 @@ def quiescence_search(piece_bbs, occupancy_bbs, game_state, alpha, beta, ply, se
         if search_context.stop_flag[0]:
             return np.int32(0), q_nodes, delta_pruned, see_pruned
 
+        if search_context.end_time > 0.0:
+            current_time = 0.0
+            with numba.objmode(current_time='float64'):
+                current_time = time.time()
+            if current_time >= search_context.end_time:
+                search_context.stop_flag[0] = True
+                return np.int32(0), q_nodes, delta_pruned, see_pruned
+
     if ply >= MAX_QUIESCENCE_DEPTH:
         return evaluate_position(piece_bbs, occupancy_bbs, game_state, lazy=False), q_nodes, delta_pruned, see_pruned
 
@@ -145,6 +153,9 @@ def quiescence_search(piece_bbs, occupancy_bbs, game_state, alpha, beta, ply, se
             piece_bbs, occupancy_bbs, game_state, -beta, -alpha, ply + 1, search_context
         )
         unmake_move(piece_bbs, occupancy_bbs, game_state, move, unmake_info)
+
+        if search_context.stop_flag[0]:
+            return np.int32(0), q_nodes, delta_pruned, see_pruned
 
         q_nodes += child_q_nodes
         delta_pruned += child_delta_pruned
@@ -192,6 +203,16 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                     null_move_cutoffs, futility_pruned, razoring_used, rfp_pruned, lmp_pruned, probcut_pruned, qs_delta_pruned, qs_see_pruned,
                     iid_searches, singular_extensions)
 
+        if search_context.end_time > 0.0:
+            current_time = 0.0
+            with numba.objmode(current_time='float64'):
+                current_time = time.time()
+            if current_time >= search_context.end_time:
+                search_context.stop_flag[0] = True
+                return (np.int32(0), NO_MOVE, nodes_searched, quiescence_nodes, cutoffs, tt_hits,
+                        null_move_cutoffs, futility_pruned, razoring_used, rfp_pruned, lmp_pruned, probcut_pruned, qs_delta_pruned, qs_see_pruned,
+                        iid_searches, singular_extensions)
+
     if ply >= MAX_PLY:
         search_context.pv_table[ply, :].fill(NO_MOVE)
         return (evaluate_position(piece_bbs, occupancy_bbs, game_state, lazy=False), NO_MOVE, nodes_searched, quiescence_nodes, cutoffs, tt_hits,
@@ -227,6 +248,12 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
     if ENABLE_IID and depth >= 8 and tt_move == NO_MOVE:
         iid_searches += 1
         _search(piece_bbs, occupancy_bbs, game_state, depth -5, -INFINITY, INFINITY, search_context, ply + 1, NO_MOVE)
+
+        if search_context.stop_flag[0]:
+            return (np.int32(0), NO_MOVE, nodes_searched, quiescence_nodes, cutoffs, tt_hits,
+                    null_move_cutoffs, futility_pruned, razoring_used, rfp_pruned, lmp_pruned, probcut_pruned, qs_delta_pruned, qs_see_pruned,
+                    iid_searches, singular_extensions)
+
         tt_entry = probe_tt(search_context.transposition_table, zobrist_key)
         if tt_entry['flag'] != TT_FLAG_NONE: tt_move = tt_entry['best_move']
 
@@ -236,6 +263,12 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
         exclusion_beta = tt_score - SINGULAR_EXTENSION_MARGIN
         exclusion_score, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _ = _search(
             piece_bbs, occupancy_bbs, game_state, depth - 3, exclusion_beta - 1, exclusion_beta, search_context, ply + 1, tt_move)
+
+        if search_context.stop_flag[0]:
+            return (np.int32(0), NO_MOVE, nodes_searched, quiescence_nodes, cutoffs, tt_hits,
+                    null_move_cutoffs, futility_pruned, razoring_used, rfp_pruned, lmp_pruned, probcut_pruned, qs_delta_pruned, qs_see_pruned,
+                    iid_searches, singular_extensions)
+
         if exclusion_score < exclusion_beta:
             extension = 1
             singular_extensions += 1
@@ -248,6 +281,12 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                     piece_bbs, occupancy_bbs, game_state, depth - PROBCUT_R_PRIME,
                     beta - 1, beta, search_context, ply + 1, NO_MOVE
                 )
+
+                if search_context.stop_flag[0]:
+                    return (np.int32(0), NO_MOVE, nodes_searched, quiescence_nodes, cutoffs, tt_hits,
+                            null_move_cutoffs, futility_pruned, razoring_used, rfp_pruned, lmp_pruned, probcut_pruned, qs_delta_pruned, qs_see_pruned,
+                            iid_searches, singular_extensions)
+
                 if probcut_score >= beta:
                     probcut_pruned += 1
                     return (np.int32(beta), NO_MOVE, nodes_searched, quiescence_nodes, cutoffs, tt_hits,
@@ -259,6 +298,12 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                     piece_bbs, occupancy_bbs, game_state, depth - PROBCUT_R_PRIME,
                     alpha, beta, search_context, ply + 1, NO_MOVE
                 )
+
+                if search_context.stop_flag[0]:
+                    return (np.int32(0), NO_MOVE, nodes_searched, quiescence_nodes, cutoffs, tt_hits,
+                            null_move_cutoffs, futility_pruned, razoring_used, rfp_pruned, lmp_pruned, probcut_pruned, qs_delta_pruned, qs_see_pruned,
+                            iid_searches, singular_extensions)
+
                 if probcut_score <= alpha:
                     probcut_pruned += 1
                     return (np.int32(alpha), NO_MOVE, nodes_searched, quiescence_nodes, cutoffs, tt_hits,
@@ -289,6 +334,11 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
 
         game_state[:] = original_state_for_null
         null_move_score = -null_move_score
+
+        if search_context.stop_flag[0]:
+            return (np.int32(0), NO_MOVE, nodes_searched, quiescence_nodes, cutoffs, tt_hits,
+                    null_move_cutoffs, futility_pruned, razoring_used, rfp_pruned, lmp_pruned, probcut_pruned, qs_delta_pruned, qs_see_pruned,
+                    iid_searches, singular_extensions)
 
         nodes_searched += child_nodes; quiescence_nodes += child_q_nodes; cutoffs += child_cutoffs; tt_hits += child_tt_hits
         null_move_cutoffs += child_nmc; futility_pruned += child_fp; razoring_used += child_ru; rfp_pruned += child_rfp
@@ -393,6 +443,11 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
 
         unmake_move(piece_bbs, occupancy_bbs, game_state, move, unmake_info)
 
+        if search_context.stop_flag[0]:
+            return (np.int32(0), NO_MOVE, nodes_searched, quiescence_nodes, cutoffs, tt_hits,
+                    null_move_cutoffs, futility_pruned, razoring_used, rfp_pruned, lmp_pruned, probcut_pruned, qs_delta_pruned, qs_see_pruned,
+                    iid_searches, singular_extensions)
+
         nodes_searched += child_nodes; quiescence_nodes += child_q_nodes; cutoffs += child_cutoffs; tt_hits += child_tt_hits
         null_move_cutoffs += child_nmc; futility_pruned += child_fp; razoring_used += child_ru; rfp_pruned += child_rfp
         lmp_pruned += child_lmp; probcut_pruned += child_pcp; qs_delta_pruned += child_qdp; qs_see_pruned += child_qsp
@@ -438,10 +493,6 @@ def iterative_deepening_search(piece_bbs, occupancy_bbs, game_state, max_depth, 
 
     maximum_time_ms = time_config.get('maximum_time', 0)
     optimum_time_ms = time_config.get('optimum_time', 0)
-
-    # We no longer need the stop_search flag in the context for this simplified approach
-    # The context is now passed in
-    # search_context = SearchContext(transposition_table, killer_moves, pv_table, history_table)
     
     transposition_table = search_context.transposition_table
     
@@ -450,17 +501,8 @@ def iterative_deepening_search(piece_bbs, occupancy_bbs, game_state, max_depth, 
     else:
         search_context.end_time = 0.0
     
-    # Reset stop flag
     search_context.stop_flag[0] = False
     
-    timer = None
-    if maximum_time_ms > 0:
-        def stop_search():
-            search_context.stop_flag[0] = True
-        
-        timer = threading.Timer(maximum_time_ms / 1000.0, stop_search)
-        timer.start()
-
     last_score, best_move_total = 0, NO_MOVE
     total_nodes, total_q_nodes, total_cutoffs, total_tt_hits = (np.uint64(v) for v in [0]*4)
     total_nmc, total_fp, total_ru, total_rfp, total_lmp, total_pcp, total_qdp, total_qsp = (np.uint64(v) for v in [0]*8)
@@ -477,6 +519,7 @@ def iterative_deepening_search(piece_bbs, occupancy_bbs, game_state, max_depth, 
             piece_bbs, occupancy_bbs, game_state, current_depth, alpha, beta, search_context, 0, NO_MOVE)
 
         if search_context.stop_flag[0]:
+            log_info(f"Search stopped at depth {current_depth} due to time limit.")
             break
 
         if score <= alpha or score >= beta:
@@ -487,7 +530,12 @@ def iterative_deepening_search(piece_bbs, occupancy_bbs, game_state, max_depth, 
                 piece_bbs, occupancy_bbs, game_state, current_depth, alpha, beta, search_context, 0, NO_MOVE)
             
             if search_context.stop_flag[0]:
+                log_info(f"Search stopped during re-search at depth {current_depth} due to time limit.")
                 break
+
+        # --- This block only runs if the search for the current depth was completed ---
+        last_completed_depth = current_depth
+        last_score = score
 
         total_nodes += search_context.nodes_searched
         total_q_nodes += q_nodes
@@ -497,37 +545,29 @@ def iterative_deepening_search(piece_bbs, occupancy_bbs, game_state, max_depth, 
 
         tt_entry = probe_tt(transposition_table, game_state[4])
         if tt_entry['flag'] != TT_FLAG_NONE and tt_entry['best_move'] != NO_MOVE:
-             best_move_total = tt_entry['best_move']
-             best_move_from_last_depth = best_move_total
-
+             best_move_from_last_depth = tt_entry['best_move']
+        
         elapsed_time_ms = (time.time() - start_time) * 1000
         pv_moves = [move_to_uci(search_context.pv_table[0, i]) for i in range(MAX_PLY) if search_context.pv_table[0, i] != NO_MOVE]
         pv_string = " ".join(pv_moves)
         uci_score_string = format_score_for_uci(score)
 
-        total_nodes_searched_so_far = total_nodes
-        nps = int(total_nodes_searched_so_far / (elapsed_time_ms / 1000)) if elapsed_time_ms > 0 else 0
-        print(f"info depth {current_depth} score {uci_score_string} nodes {total_nodes_searched_so_far} nps {nps} time {int(elapsed_time_ms)} pv {pv_string}")
-
-        last_completed_depth = current_depth
-        last_score = score
+        nps = int(total_nodes / (elapsed_time_ms / 1000)) if elapsed_time_ms > 0 else 0
+        print(f"info depth {current_depth} score {uci_score_string} nodes {total_nodes} nps {nps} time {int(elapsed_time_ms)} pv {pv_string}")
 
         if "mate" in uci_score_string:
             break
 
-        if maximum_time_ms > 0 and elapsed_time_ms > optimum_time_ms:
-            log_info(f"Optimum time reached at depth {current_depth}. Stopping.")
-            # We don't break immediately here to allow the current depth to finish if it's close,
-            # but for strict time controls we might want to.
-            # For now, let's just rely on the hard limit in _search or break here if we want to be safe.
-            # Given we have a hard limit check inside _search now, we can just let it run until that triggers
-            # or we can soft-stop here. Let's soft-stop.
-            break
+        # Predictive soft time limit
+        if maximum_time_ms > 0:
+            if optimum_time_ms > 0 and elapsed_time_ms > optimum_time_ms:
+                log_info(f"Optimum time reached at depth {current_depth}. Stopping.")
+                break
+            if elapsed_time_ms * 2.5 > maximum_time_ms:
+                log_info(f"Predictive termination at depth {current_depth} to avoid timeout.")
+                break
 
-    if timer:
-        timer.cancel()
-
-    final_best_move = best_move_from_last_depth if best_move_from_last_depth != NO_MOVE else best_move_total
+    final_best_move = best_move_from_last_depth
     return (final_best_move, last_score, total_nodes, total_q_nodes, total_cutoffs, total_tt_hits,
             last_completed_depth, total_nmc, total_fp, total_ru, total_rfp, total_lmp, total_pcp, total_qdp, total_qsp,
             total_iid, total_se)
