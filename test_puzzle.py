@@ -25,7 +25,7 @@ def clear_numba_cache():
 from chess_engine.debug_utils import log_info
 
 # Clear cache before importing the engine to avoid stale cache issues
-clear_numba_cache()
+# clear_numba_cache()
 
 from chess_engine.fen_parser import parse_fen
 from chess_engine.search import iterative_deepening_search
@@ -782,13 +782,14 @@ def run_puzzle_test():
     for i, puzzle in enumerate(puzzles):
         print("New game started. Caches and stats cleared.")
         print(f"--- Running Test: {puzzle['name']} ---")
+        print(f"FEN: {puzzle['fen']}")
 
         piece_bbs, occupancy_bbs, game_state = parse_fen(puzzle["fen"])
-        board_state_flat = np.concatenate((piece_bbs, occupancy_bbs, game_state))
-
+        
+        # killer_moves, pv_table, and history_table are now initialized inside the loop
         killer_moves = np.zeros(MAX_PLY * 2, dtype=np.uint16)
         pv_table = np.zeros((MAX_PLY, MAX_PLY), dtype=np.uint16)
-        history_table = np.zeros((6, 64), dtype=np.int32)
+        history_table = np.zeros((12, 64), dtype=np.int32) # Note: history_table size is 12x64 in search.py
         
         clear_transposition_table(transposition_table)
         
