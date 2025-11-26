@@ -114,7 +114,12 @@ def see(piece_bbs, occupancy_bbs, side_to_move, from_sq, to_sq):
     # Handle en-passant, where the victim is on a different square
     # 處理吃過路兵，受害者在不同的方格
     if victim_piece_type == -1:
-        victim_piece_type = PAWN + (6 if side_to_move == WHITE else 0)
+        # This is not a direct capture. The current `see` implementation cannot
+        # evaluate threats from quiet moves and lacks the context to properly
+        # identify en passant captures. Returning 0 is the only safe option.
+        # 這不是直接吃子。目前的 `see` 實現無法評估安靜移動的威脅，
+        # 也缺乏正確識別吃過路兵的上下文。返回 0 是唯一安全的選擇。
+        return np.int32(0)
     gain[depth] = MG_MATERIAL_VALUES[victim_piece_type % 6]
 
     moved_piece_type = find_piece_type_on_square(piece_bbs, from_sq)

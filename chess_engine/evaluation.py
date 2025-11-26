@@ -9,7 +9,7 @@ from chess_engine.zobrist import get_lsb_index
 from chess_engine.engine_types import piece_bbs_signature, occupancy_bbs_signature, game_state_signature
 from chess_engine.bitboard_utils import count_bits, KING_ATTACK_ZONES, FILE_MASKS
 from chess_engine.move_generator import (
-    get_bishop_attacks, get_rook_attacks, get_queen_attacks, KNIGHT_ATTACKS
+    get_bishop_attacks, get_rook_attacks, get_queen_attacks, KNIGHT_ATTACKS, PAWN_ATTACKS
 )
 
 # --- Pre-computed Manhattan Distance Table / 預計算曼哈頓距離表 ---
@@ -260,24 +260,40 @@ def _evaluate_pawn_shield_for_color(king_sq, friendly_pawns, enemy_pawns, color)
 @numba.njit(numba.int32(numba.int32, numba.int32, piece_bbs_signature, occupancy_bbs_signature), cache=True, boundscheck=False, fastmath=True)
 def _evaluate_king_attackers(king_sq, color, piece_bbs, occupancy_bbs):
     """
-    (Phase 2) Calculates the threat score based on pieces attacking the king zone.
-    (階段 2) 根據攻擊國王區域的棋子計算威脅分數。
+    (Phase 2) Calculates the threat score based on pieces attacking the king zone using a non-linear model.
+    (階段 2) 根據攻擊國王區域的棋子，使用非線性模型計算威脅分數。
     """
     king_zone = KING_ATTACK_ZONES[king_sq]
     total_attack_units = np.int32(0)
     attacker_count = np.int32(0)
 
     enemy_start_idx = 6 if color == 0 else 0
-    (_, en_n, en_b, en_r, en_q, _) = piece_bbs[enemy_start_idx : enemy_start_idx + 6]
+    (en_p, en_n, en_b, en_r, en_q, _) = piece_bbs[enemy_start_idx : enemy_start_idx + 6]
 
     all_pieces_occupancy = occupancy_bbs[2]
+
+    # Pawns - Find all enemy pawns that attack any square in the king zone
+    # 兵 - 尋找所有攻擊國王區域內任何方格的敵兵
+    pawn_attack_sources_bb = np.uint64(0)
+    temp_king_zone = king_zone
+    while temp_king_zone:
+        zone_sq = get_lsb_index(temp_king_zone)
+        # PAWN_ATTACKS[color_of_king, zone_sq] gives squares from which enemy pawns would attack zone_sq
+        pawn_attack_sources_bb |= PAWN_ATTACKS[color, zone_sq]
+        temp_king_zone &= temp_king_zone - np.uint64(1)
+
+    actual_pawn_attackers = pawn_attack_sources_bb & en_p
+    if actual_pawn_attackers:
+        num_pawn_attackers = count_bits(actual_pawn_attackers)
+        total_attack_units += num_pawn_attackers * KING_SAFETY_ATTACK_UNITS[0]
+        attacker_count += num_pawn_attackers
 
     # Knights
     temp_bb = en_n
     while temp_bb:
         sq = get_lsb_index(temp_bb)
         if KNIGHT_ATTACKS[sq] & king_zone:
-            total_attack_units += KING_SAFETY_ATTACK_UNITS[0]
+            total_attack_units += KING_SAFETY_ATTACK_UNITS[1]
             attacker_count += 1
         temp_bb &= temp_bb - np.uint64(1)
 
@@ -287,7 +303,7 @@ def _evaluate_king_attackers(king_sq, color, piece_bbs, occupancy_bbs):
         sq = get_lsb_index(temp_bb)
         attacks = get_bishop_attacks(sq, all_pieces_occupancy & ~BB_SQUARES[sq])
         if attacks & king_zone:
-            total_attack_units += KING_SAFETY_ATTACK_UNITS[1]
+            total_attack_units += KING_SAFETY_ATTACK_UNITS[2]
             attacker_count += 1
         temp_bb &= temp_bb - np.uint64(1)
 
@@ -297,7 +313,7 @@ def _evaluate_king_attackers(king_sq, color, piece_bbs, occupancy_bbs):
         sq = get_lsb_index(temp_bb)
         attacks = get_rook_attacks(sq, all_pieces_occupancy & ~BB_SQUARES[sq])
         if attacks & king_zone:
-            total_attack_units += KING_SAFETY_ATTACK_UNITS[2]
+            total_attack_units += KING_SAFETY_ATTACK_UNITS[3]
             attacker_count += 1
         temp_bb &= temp_bb - np.uint64(1)
 
@@ -307,13 +323,16 @@ def _evaluate_king_attackers(king_sq, color, piece_bbs, occupancy_bbs):
         sq = get_lsb_index(temp_bb)
         attacks = get_queen_attacks(sq, all_pieces_occupancy & ~BB_SQUARES[sq])
         if attacks & king_zone:
-            total_attack_units += KING_SAFETY_ATTACK_UNITS[3]
+            total_attack_units += KING_SAFETY_ATTACK_UNITS[4]
             attacker_count += 1
         temp_bb &= temp_bb - np.uint64(1)
 
+    # Only apply penalty if there are multiple attackers, to avoid penalizing single-piece harassment.
+    # 僅在有多個攻擊者時才施加懲罰，以避免懲罰單個棋子的騷擾。
     if attacker_count < 2:
         return np.int32(0)
 
+    # The score from the table is a penalty, so it should be negative.
     return -KING_SAFETY_TABLE[min(total_attack_units, len(KING_SAFETY_TABLE) - 1)]
 
 @numba.njit(numba.int32(numba.int32, numba.int32, piece_bbs_signature), cache=True, boundscheck=False, fastmath=True)
