@@ -291,8 +291,14 @@ DOUBLED_PAWN_PENALTY = np.array([-15, -20], dtype=np.int32) # MG, EG
 # --- King Safety Constants (NEW - based on Chessprogramming Wiki) / 王的安全常量 ---
 # =============================================================================
 
-# --- Phase 2: Attacking the King Zone / 攻擊王翼區域 ---
-KING_SAFETY_ATTACK_UNITS = np.array([2, 2, 3, 5], dtype=np.int32) # N, B, R, Q
+# --- Phase 2: Attacking the King Zone (Non-Linear Model) / 攻擊王翼區域（非線性模型） ---
+# Attack units for each piece type. Order: P, N, B, R, Q
+# 每個棋子類型的攻擊單位。順序：兵、馬、象、車、后
+KING_SAFETY_ATTACK_UNITS = np.array([1, 2, 2, 3, 5], dtype=np.int32) # P, N, B, R, Q
+
+# A non-linear table where the index is the sum of attack units, and the value is the penalty.
+# The penalty grows exponentially, rewarding multi-piece attacks.
+# 一個非線性表格，索引是攻擊單位的總和，值是懲罰分數。懲罰呈指數增長，獎勵多子協同攻擊。
 KING_SAFETY_TABLE = np.array([
     0, 0, 1, 2, 4, 6, 9, 12, 16, 20, 25, 30, 36, 42, 49, 56,
     64, 72, 81, 90, 100, 110, 120, 130, 140, 150, 160, 170, 180, 190, 200,

@@ -399,11 +399,23 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
         move_count += 1
         
         opponent_pieces_bb = occupancy_bbs[1] if game_state[0] == 0 else occupancy_bbs[0]
-        unmake_info = make_move(piece_bbs, occupancy_bbs, game_state, move)
-        is_giving_check_after_move = is_in_check(piece_bbs, occupancy_bbs, game_state)
-        is_capture = (opponent_pieces_bb & BB_SQUARES[get_to_square(move)]) != 0
-        is_quiet_move = not is_capture and not (get_special_move_flag(move) == SPECIAL_MOVE_FLAG_PROMOTION) and not is_giving_check_after_move
         
+        # --- Pre-move checks for extensions and move type ---
+        from_sq = get_from_square(move)
+        to_sq = get_to_square(move)
+        is_capture = (opponent_pieces_bb & BB_SQUARES[to_sq]) != 0
+        is_promotion = get_special_move_flag(move) == SPECIAL_MOVE_FLAG_PROMOTION
+        is_pseudo_quiet = not is_capture and not is_promotion
+
+        # --- Make the move ---
+        unmake_info = make_move(piece_bbs, occupancy_bbs, game_state, move)
+        
+        # --- Post-move checks ---
+        is_giving_check_after_move = is_in_check(piece_bbs, occupancy_bbs, game_state)
+        
+        # Final determination of quiet move
+        is_quiet_move = is_pseudo_quiet and not is_giving_check_after_move
+
         if is_quiet_move:
             quiet_move_counter += 1
             if ENABLE_LMP and not is_currently_in_check:
@@ -421,8 +433,10 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                 futility_pruned += 1
                 unmake_move(piece_bbs, occupancy_bbs, game_state, move, unmake_info)
                 continue
-
-        current_extension = 1 if is_giving_check_after_move else 0
+        
+        # --- Determine total extension ---
+        check_extension = 1 if is_giving_check_after_move else 0
+        current_extension = check_extension
         if move == tt_move: current_extension = max(current_extension, extension)
         search_depth = depth - 1 + current_extension
 
