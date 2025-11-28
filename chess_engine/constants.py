@@ -337,6 +337,10 @@ MAX_PLY = 128
 MATE_IN_MAX_PLY = MATE_SCORE - MAX_PLY
 NO_MOVE = np.uint16(0)
 
+# Move Ordering Bonuses
+PAWN_PUSH_RANK_BONUS = 2000
+PAWN_PUSH_ATTACK_BONUS = 3000
+
 # Special value to indicate that the search was stopped due to timeout
 # 特殊值，表示搜尋因超時而停止
 STOP_SEARCH_FLAG = 66666
@@ -380,15 +384,15 @@ FP_MARGIN_D2 = 350 # Increased from 250
 RFP_MARGIN_D1 = 100
 
 # Late Move Reductions (LMR)
-LMR_MIN_DEPTH = 3           # Minimum depth to apply LMR / 應用 LMR 的最小深度
+LMR_MIN_DEPTH = 4           # Minimum depth to apply LMR / 應用 LMR 的最小深度
 LMR_MIN_QUIET_MOVE_INDEX = 4 # Minimum number of quiet moves before LMR / LMR 前的最小寧靜步數
-LMR_REDUCTION = 2           # Depth reduction for LMR / LMR 的深度減少值
+LMR_REDUCTION = 1           # Depth reduction for LMR / LMR 的深度減少值
 
 # Late Move Pruning (LMP) - Prune moves after a certain number of quiet moves have been searched
 # 晚期移動剪枝（LMP） - 在搜尋了一定數量的寧靜步後剪枝
-# Updated: Relaxed constraints to search more moves (6 + 6*depth)
+# Updated: Relaxed constraints to search more moves (12 + 12*depth)
 LMP_MOVE_COUNT = np.array([
-    0 if d == 0 else 6 + 6 * d for d in range(MAX_PLY)
+    0 if d == 0 else 12 + 12 * d for d in range(MAX_PLY)
 ], dtype=np.int32)
 
 
@@ -401,7 +405,7 @@ PROBCUT_MARGIN = 150 # centipawns
 DELTA_PRUNING_MARGIN = 500
 
 # --- Static Exchange Evaluation (SEE) Threshold / SEE 閾值 ---
-SEE_THRESHOLD = 0  # centipawns
+SEE_THRESHOLD = -50  # centipawns
 ENABLE_SEE_IN_QUIESCENCE = True # Master switch to enable/disable SEE in quiescence search / 啟用/禁用靜態搜尋中 SEE 的總開關
 
 # =============================================================================
