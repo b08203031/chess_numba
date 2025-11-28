@@ -365,7 +365,7 @@ ENABLE_SINGULAR_EXTENSIONS = True # Singular Extensions
 
 # IID and Singular Extension Parameters
 MIN_SINGULAR_DEPTH = 6
-SINGULAR_EXTENSION_MARGIN = 100 # centipawns
+SINGULAR_EXTENSION_MARGIN = 150 # centipawns
 
 
 # Master switches for existing pruning techniques / 現有剪枝技術的總開關
