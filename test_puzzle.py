@@ -36,19 +36,34 @@ from chess_engine.core import SQUARE_TO_ALGEBRAIC
 from chess_engine.constants import MAX_PLY
 
 puzzles = [
+    {
+            "name": "Lichess Puzzle 006eO",
+            "fen": "8/8/2p5/1p1p1k2/3P4/1PP1pK2/8/8 w - - 4 65",
+            "solution": "b3b4",
+            "rating": "2186",
+            "theme": "defensiveMove endgame equality oneMove pawnEndgame"
+        },
+        {
+            "name": "Lichess Puzzle 006of",
+            "fen": "r2qr2k/1pp2Qp1/1b4np/pP2P3/P4n2/B1N2N1P/5PP1/R3R1K1 b - - 0 20",
+            "solution": "d8d3",
+            "rating": "2500",
+            "theme": "advantage kingsideAttack long middlegame"
+        },
+        {
+            "name": "Lichess Puzzle 0078T",
+            "fen": "rk5r/1b3R2/pp2p2q/4P2p/B6B/4p2P/PP4P1/5Q1K w - - 0 28",
+            "solution": "f7b7",
+            "rating": "2286",
+            "theme": "attraction crushing defensiveMove exposedKing long middlegame queensideAttack sacrifice"
+        },
+        
         {
             "name": "Lichess Puzzle 000mr",
             "fen": "5r1k/5rp1/p7/1b2B2p/1P1P1Pq1/2R3Q1/P3p1P1/2R3K1 b - - 1 41",
             "solution": "f7f4",
             "rating": "1478",
             "theme": "crushing middlegame short"
-        },
-        {
-            "name": "Lichess Puzzle 002LW",
-            "fen": "3r1rk1/1b3pp1/3p4/p3nPPQ/4P3/3q1BN1/8/2R2RK1 w - - 2 29",
-            "solution": "f5f6",
-            "rating": "2489",
-            "theme": "advantage middlegame short"
         },
         {
             "name": "Lichess Puzzle 002rd",
@@ -65,18 +80,33 @@ puzzles = [
             "theme": "crushing endgame long rookEndgame"
         },
         {
-            "name": "Lichess Puzzle 005f3",
-            "fen": "r5k1/2p1pp2/pp4p1/1q5r/5P2/2QP2R1/PP6/1K4R1 w - - 1 33",
-            "solution": "g3g6",
-            "rating": "1986",
-            "theme": "crushing endgame sacrifice veryLong"
-        },
-        {
             "name": "Lichess Puzzle 005qG",
             "fen": "8/8/1p1k1p1p/3np3/2B2p2/PP1K1PP1/7P/8 w - - 0 37",
             "solution": "c4d5",
             "rating": "2244",
             "theme": "crushing defensiveMove endgame long"
+        },
+        {
+            "name": "Lichess Puzzle 004sY",
+            "fen": "8/2k3n1/K2p2p1/2pP2Pp/2P4P/7B/8/8 b - - 1 57",
+            "solution": "c7d8",
+            "rating": "2191",
+            "theme": "crushing endgame short"
+        },
+        #------------------------
+        {
+            "name": "Lichess Puzzle 002LW",
+            "fen": "3r1rk1/1b3pp1/3p4/p3nPPQ/4P3/3q1BN1/8/2R2RK1 w - - 2 29",
+            "solution": "f5f6",
+            "rating": "2489",
+            "theme": "advantage middlegame short"
+        },
+        {
+            "name": "Lichess Puzzle 005f3",
+            "fen": "r5k1/2p1pp2/pp4p1/1q5r/5P2/2QP2R1/PP6/1K4R1 w - - 1 33",
+            "solution": "g3g6",
+            "rating": "1986",
+            "theme": "crushing endgame sacrifice veryLong"
         },
         {
             "name": "Lichess Puzzle 005wy",
@@ -98,27 +128,6 @@ puzzles = [
             "solution": "f6h6",
             "rating": "1901",
             "theme": "crushing endgame veryLong"
-        },
-        {
-            "name": "Lichess Puzzle 006eO",
-            "fen": "8/8/2p5/1p1p1k2/3P4/1PP1pK2/8/8 w - - 4 65",
-            "solution": "b3b4",
-            "rating": "2186",
-            "theme": "defensiveMove endgame equality oneMove pawnEndgame"
-        },
-        {
-            "name": "Lichess Puzzle 006of",
-            "fen": "r2qr2k/1pp2Qp1/1b4np/pP2P3/P4n2/B1N2N1P/5PP1/R3R1K1 b - - 0 20",
-            "solution": "d8d3",
-            "rating": "2500",
-            "theme": "advantage kingsideAttack long middlegame"
-        },
-        {
-            "name": "Lichess Puzzle 0078T",
-            "fen": "rk5r/1b3R2/pp2p2q/4P2p/B6B/4p2P/PP4P1/5Q1K w - - 0 28",
-            "solution": "f7b7",
-            "rating": "2286",
-            "theme": "attraction crushing defensiveMove exposedKing long middlegame queensideAttack sacrifice"
         },
         {
             "name": "Lichess Puzzle 007eS",
@@ -413,13 +422,6 @@ puzzles = [
             "solution": "e4f6",
             "rating": "898",
             "theme": "crushing fork middlegame short"
-        },
-        {
-            "name": "Lichess Puzzle 004sY",
-            "fen": "8/2k3n1/K2p2p1/2pP2Pp/2P4P/7B/8/8 b - - 1 57",
-            "solution": "c7d8",
-            "rating": "2191",
-            "theme": "crushing endgame short"
         },
         {
             "name": "Lichess Puzzle 004sg",
@@ -764,7 +766,7 @@ def run_puzzle_test():
     Runs a search test for each puzzle and prints statistics.
     """
     depth = 20  # Set a high depth, will be stopped by time
-    time_limit_ms = 3300
+    time_limit_ms = 3000
 
     total_tests = len(puzzles)
     passed_tests = 0
