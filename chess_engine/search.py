@@ -115,10 +115,11 @@ quiescence_search_return_type = numba.types.Tuple([
     numba.int32, numba.uint64, numba.uint64, numba.uint64
 ])
 
-@numba.njit(quiescence_search_return_type(
-    piece_bbs_signature, occupancy_bbs_signature, game_state_signature,
-    numba.int32, numba.int32, numba.int32, search_context_type
-), cache=True)
+# @numba.njit(quiescence_search_return_type(
+#     piece_bbs_signature, occupancy_bbs_signature, game_state_signature,
+#     numba.int32, numba.int32, numba.int32, search_context_type
+# ), cache=True)
+@numba.njit(cache=True)
 def quiescence_search(piece_bbs, occupancy_bbs, game_state, alpha, beta, ply, search_context):
     q_nodes = np.uint64(1)
     search_context.nodes_searched += 1
@@ -199,10 +200,11 @@ search_return_type = numba.types.Tuple([
     numba.uint64, numba.uint64, numba.uint64, numba.uint64
 ])
 
-@numba.njit(search_return_type(
-    piece_bbs_signature, occupancy_bbs_signature, game_state_signature,
-    numba.int32, numba.int32, numba.int32, search_context_type, numba.int32, numba.uint16
-), cache=True)
+# @numba.njit(search_return_type(
+#     piece_bbs_signature, occupancy_bbs_signature, game_state_signature,
+#     numba.int32, numba.int32, numba.int32, search_context_type, numba.int32, numba.uint16
+# ), cache=True)
+@numba.njit(cache=True)
 def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_context, ply, excluded_move: np.uint16 = NO_MOVE):
     nodes_searched = np.uint64(1)
     search_context.nodes_searched += 1

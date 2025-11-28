@@ -1,8 +1,8 @@
 
 import sys
+import os
 import numpy as np
 import random
-import os
 import threading
 import time
 
@@ -158,7 +158,7 @@ def uci_loop():
             zobrist_key = board_state[2][4]
             # Only use book if halfmove clock is low (early game)
             if board_state[2][3] < 20:
-                book_moves = opening_book.lookup(zobrist_key, board_state[0], board_state[1], board_state[2])
+                book_moves = opening_book.lookup(zobrist_key, board_state)
 
             if book_moves:
                 moves, weights = zip(*book_moves)
