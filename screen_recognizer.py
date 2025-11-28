@@ -272,9 +272,9 @@ if __name__ == '__main__':
     try:
         recognizer = ScreenRecognizer(templates_path="templates/")
         
-        print("準備在 5 秒後自動偵測棋盤並進行辨識...")
+        print("準備在 2 秒後自動偵測棋盤並進行辨識...")
         import time
-        time.sleep(5)
+        time.sleep(2)
 
         fen_string = recognizer.get_fen_from_screen(
             player_color='w',
