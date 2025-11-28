@@ -65,7 +65,7 @@ def get_2d_val(theta, base_idx, row, col_size, col):
 def evaluate_pawn_structure(piece_bbs, theta):
     mg_score = np.int32(0)
     eg_score = np.int32(0)
-
+    
     white_pawns = piece_bbs[0]
     black_pawns = piece_bbs[6]
 
@@ -73,7 +73,7 @@ def evaluate_pawn_structure(piece_bbs, theta):
     # passed_pawn: (8, 2) but flattened
     # isolated: (2,)
     # doubled: (2,)
-
+    
     # White passed pawns
     temp_wp = white_pawns
     while temp_wp:
@@ -139,7 +139,7 @@ def evaluate_piece_coordination(piece_bbs, theta):
     black_pawns = piece_bbs[6]
     black_bishops = piece_bbs[8]
     black_rooks = piece_bbs[9]
-
+    
     bp_mg = get_array_val(theta, IDX_BISHOP_PAIR, 0)
     bp_eg = get_array_val(theta, IDX_BISHOP_PAIR, 1)
 
@@ -168,7 +168,7 @@ def evaluate_piece_coordination(piece_bbs, theta):
                 else:
                     mg_score += semi_mg
                     eg_score += semi_eg
-
+        
         if (black_rooks & file_mask):
             if not black_pawns_on_file:
                 if not white_pawns_on_file:
@@ -213,7 +213,7 @@ def _evaluate_king_attackers(king_sq, color, piece_bbs, occupancy_bbs, theta):
             total_attack_units += get_array_val(theta, IDX_KING_SAFETY_UNITS, 1)
             attacker_count += 1
         temp_bb &= temp_bb - np.uint64(1)
-
+        
     # Bishops (Unit Index 2)
     temp_bb = en_b
     while temp_bb:
@@ -223,7 +223,7 @@ def _evaluate_king_attackers(king_sq, color, piece_bbs, occupancy_bbs, theta):
             total_attack_units += get_array_val(theta, IDX_KING_SAFETY_UNITS, 2)
             attacker_count += 1
         temp_bb &= temp_bb - np.uint64(1)
-
+        
     # Rooks (Unit Index 3)
     temp_bb = en_r
     while temp_bb:
@@ -233,7 +233,7 @@ def _evaluate_king_attackers(king_sq, color, piece_bbs, occupancy_bbs, theta):
             total_attack_units += get_array_val(theta, IDX_KING_SAFETY_UNITS, 3)
             attacker_count += 1
         temp_bb &= temp_bb - np.uint64(1)
-
+        
     # Queens (Unit Index 4)
     temp_bb = en_q
     while temp_bb:
@@ -452,43 +452,43 @@ def _evaluate_king_pawn_endgame(piece_bbs, theta):
     white_king_sq = get_lsb_index(piece_bbs[5])
     black_pawns = piece_bbs[6]
     black_king_sq = get_lsb_index(piece_bbs[11])
-
+    
     # Values
     eg_pawn_val = get_array_val(theta, IDX_EG_MATERIAL, 0)
-
+    
     # White
     temp_wp = white_pawns
     while temp_wp:
         sq = get_lsb_index(temp_wp)
         score += eg_pawn_val + get_2d_val(theta, IDX_PST_EG, 0, 64, sq)
         temp_wp &= temp_wp - np.uint64(1)
-
+        
     # Black
     temp_bp = black_pawns
     while temp_bp:
         sq = get_lsb_index(temp_bp)
         score -= (eg_pawn_val + get_2d_val(theta, IDX_PST_EG, 0, 64, sq^56))
         temp_bp &= temp_bp - np.uint64(1)
-
+        
     score += get_2d_val(theta, IDX_PST_EG, 5, 64, white_king_sq)
     score -= get_2d_val(theta, IDX_PST_EG, 5, 64, black_king_sq^56)
-
+    
     _, eg_struct = evaluate_pawn_structure(piece_bbs, theta)
     score += eg_struct
-
+    
     # Proximity
     temp_pawns = white_pawns | black_pawns
     while temp_pawns:
         sq = get_lsb_index(temp_pawns)
         score += (KING_TROPISM_MAX_DISTANCE - MANHATTAN_DISTANCE[white_king_sq, sq]) * 5
         temp_pawns &= temp_pawns - np.uint64(1)
-
+        
     temp_pawns = white_pawns | black_pawns
     while temp_pawns:
         sq = get_lsb_index(temp_pawns)
         score -= (KING_TROPISM_MAX_DISTANCE - MANHATTAN_DISTANCE[black_king_sq, sq]) * 5
         temp_pawns &= temp_pawns - np.uint64(1)
-
+        
     return score
 
 @numba.njit(numba.int32(piece_bbs_signature, occupancy_bbs_signature, game_state_signature, numba.float64[:]), cache=True, boundscheck=False, fastmath=True)
@@ -501,9 +501,9 @@ def evaluate_position_tunable(piece_bbs, occupancy_bbs, game_state, theta):
     if all_pieces_except_pawns_and_kings == 0:
         score = _evaluate_king_pawn_endgame(piece_bbs, theta)
         return score if game_state[0] == 0 else -score
-
+    
     side_to_move = game_state[0]
-
+    
     # Phase
     phase = np.int32(0)
     phase += count_bits(piece_bbs[1]) * PHASE_WEIGHTS[1]
@@ -515,20 +515,20 @@ def evaluate_position_tunable(piece_bbs, occupancy_bbs, game_state, theta):
     phase += count_bits(piece_bbs[9]) * PHASE_WEIGHTS[3]
     phase += count_bits(piece_bbs[10]) * PHASE_WEIGHTS[4]
     phase = min(phase, MAX_PHASE)
-
+    
     mg_score = np.int32(0)
     eg_score = np.int32(0)
-
+    
     # Material
     for pt in range(6):
         cnt_w = count_bits(piece_bbs[pt])
         cnt_b = count_bits(piece_bbs[pt+6])
         val_mg = get_array_val(theta, IDX_MG_MATERIAL, pt)
         val_eg = get_array_val(theta, IDX_EG_MATERIAL, pt)
-
+        
         mg_score += (cnt_w - cnt_b) * val_mg
         eg_score += (cnt_w - cnt_b) * val_eg
-
+        
     # PST
     for pt in range(6):
         # White
@@ -545,25 +545,25 @@ def evaluate_position_tunable(piece_bbs, occupancy_bbs, game_state, theta):
             mg_score -= get_2d_val(theta, IDX_PST_MG, pt, 64, sq^56)
             eg_score -= get_2d_val(theta, IDX_PST_EG, pt, 64, sq^56)
             bb &= bb - np.uint64(1)
-
+            
     # Sub modules
     mks, eks = evaluate_king_safety(piece_bbs, occupancy_bbs, theta)
     mg_score += mks; eg_score += eks
-
+    
     mps, eps = evaluate_pawn_structure(piece_bbs, theta)
     mg_score += mps; eg_score += eps
-
+    
     mpc, epc = evaluate_piece_coordination(piece_bbs, theta)
     mg_score += mpc; eg_score += epc
-
+    
     mmb, emb = evaluate_mobility(piece_bbs, occupancy_bbs, theta)
     mg_score += mmb; eg_score += emb
-
+    
     final_score = (mg_score * phase + eg_score * (MAX_PHASE - phase)) // MAX_PHASE
-
+    
     if phase > INITIATIVE_PHASE_THRESHOLD:
         final_score += get_int(theta, IDX_INITIATIVE)
-
+        
     if side_to_move == 0:
         return np.int32(final_score)
     else:

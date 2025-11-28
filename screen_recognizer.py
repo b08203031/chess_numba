@@ -2,7 +2,7 @@ import cv2
 import numpy as np
 import mss
 from PIL import Image
-import os # <<< 匯入 os 模組
+import os
 
 class ScreenRecognizer:
     """
@@ -25,7 +25,6 @@ class ScreenRecognizer:
         
         重要：模板圖片必須是帶有透明背景的 PNG 檔案，且棋子樣式需與螢幕上完全一致。
         """
-        # <<< MODIFIED: 使用絕對路徑來載入模板
         script_dir = os.path.dirname(os.path.abspath(__file__))
         base_path = os.path.join(script_dir, path)
 
@@ -33,25 +32,30 @@ class ScreenRecognizer:
         pieces = ['wP', 'wN', 'wB', 'wR', 'wQ', 'wK', 'bP', 'bN', 'bB', 'bR', 'bQ', 'bK']
         for piece in pieces:
             file_path = os.path.join(base_path, f"{piece}.png")
-            # 修正：使用能處理 Unicode 路徑的方式讀取圖片
-            # template = cv2.imread(file_path, cv2.IMREAD_UNCHANGED)
-            img_stream = open(file_path, "rb")
-            img_array = np.asarray(bytearray(img_stream.read()), dtype=np.uint8)
-            template = cv2.imdecode(img_array, cv2.IMREAD_UNCHANGED)
-            img_stream.close()
-            if template is None:
-                raise FileNotFoundError(f"找不到模板檔案: {file_path}")
-            
-            if template.shape[2] == 4:
-                templates[piece] = {
-                    'template': cv2.cvtColor(template, cv2.COLOR_BGRA2BGR),
-                    'mask': template[:,:,3]
-                }
-            else:
-                templates[piece] = {
-                    'template': template,
-                    'mask': None
-                }
+            try:
+                # 修正：使用能處理 Unicode 路徑的方式讀取圖片
+                with open(file_path, "rb") as img_stream:
+                    img_array = np.asarray(bytearray(img_stream.read()), dtype=np.uint8)
+                    template = cv2.imdecode(img_array, cv2.IMREAD_UNCHANGED)
+                
+                if template is None:
+                    raise FileNotFoundError(f"無法解碼模板檔案: {file_path}")
+                
+                if template.shape[2] == 4:
+                    templates[piece] = {
+                        'template': cv2.cvtColor(template, cv2.COLOR_BGRA2BGR),
+                        'mask': template[:,:,3]
+                    }
+                else:
+                    templates[piece] = {
+                        'template': template,
+                        'mask': None
+                    }
+            except FileNotFoundError:
+                 raise FileNotFoundError(f"找不到模板檔案: {file_path}")
+            except Exception as e:
+                raise Exception(f"載入模板失敗 {file_path}: {e}")
+
         return templates
 
     def capture_screen(self, region=None):
@@ -65,7 +69,15 @@ class ScreenRecognizer:
             numpy.ndarray: 返回 OpenCV 格式的圖像。
         """
         with mss.mss() as sct:
-            monitor = sct.monitors[1] if region is None else region
+            # 安全地選擇顯示器：如果 monitors[1] 不存在（例如無顯示器環境），則退回到 monitors[0]
+            if region is None:
+                if len(sct.monitors) > 1:
+                    monitor = sct.monitors[1]
+                else:
+                    monitor = sct.monitors[0]
+            else:
+                monitor = region
+            
             sct_img = sct.grab(monitor)
             img = Image.frombytes("RGB", sct_img.size, sct_img.bgra, "raw", "BGRX")
             return cv2.cvtColor(np.array(img), cv2.COLOR_RGB2BGR)
@@ -89,8 +101,7 @@ class ScreenRecognizer:
         x, y = max(0, x - padding), max(0, y - padding)
         w, h = min(screenshot.shape[1] - x, w + 2*padding), min(screenshot.shape[0] - y, h + 2*padding)
         board_roi = screenshot[y:y+h, x:x+w]
-        # cv2.imwrite("debug_board_roi.png", board_roi)
-
+        
         # 2. 在ROI內，建立精確的棋子遮罩
         hsv_roi = cv2.cvtColor(board_roi, cv2.COLOR_BGR2HSV)
         lower_white = np.array([0, 0, 180])
@@ -102,11 +113,9 @@ class ScreenRecognizer:
         pieces_mask = cv2.bitwise_or(white_mask, black_mask)
         kernel = np.ones((3,3), np.uint8)
         pieces_mask = cv2.morphologyEx(pieces_mask, cv2.MORPH_CLOSE, kernel, iterations=1)
-        # cv2.imwrite("debug_pieces_mask.png", pieces_mask)
 
         # 3. 反轉棋子遮罩，得到棋盤本身的遮罩
         board_only_mask = cv2.bitwise_not(pieces_mask)
-        # cv2.imwrite("debug_board_only_mask.png", board_only_mask)
 
         # 4. 在棋盤遮罩上找到最外層的輪廓
         contours, _ = cv2.findContours(board_only_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
@@ -135,9 +144,9 @@ class ScreenRecognizer:
         tl_index = np.argmin(np.sum(sorted_points, axis=1))
         sorted_rect = np.roll(sorted_points, -tl_index, axis=0)
 
+        # Debug outputs removed or commented out to avoid I/O errors
         # debug_screenshot = screenshot.copy()
         # cv2.drawContours(debug_screenshot, [sorted_rect.astype(np.int32)], -1, (0, 255, 0), 3)
-        # cv2.imwrite("debug_detected_board_contour.png", debug_screenshot)
 
         side_length = 800
         dst = np.array([[0,0], [side_length-1,0], [side_length-1,side_length-1], [0,side_length-1]], dtype="float32")
@@ -245,14 +254,19 @@ class ScreenRecognizer:
         screenshot = self.capture_screen()
         
         print("正在自動偵測棋盤...")
-        board_img = self.find_board(screenshot)
+        try:
+            # Wrap potential cv2 failures in a try block
+            board_img = self.find_board(screenshot)
+        except Exception as e:
+            print(f"棋盤偵測發生錯誤: {e}")
+            return None
         
         if board_img is None:
             print("無法從螢幕上找到棋盤。")
             return None
 
         print("成功找到棋盤，正在進行辨識...")
-        cv2.imwrite("debug_captured_board.png", board_img)
+        # debug write removed
         squares = self.split_into_squares(board_img)
 
         board_representation = []
