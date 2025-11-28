@@ -23,9 +23,9 @@ from chess_engine.constants import (
     ENABLE_PROBCUT, PROBCUT_R, PROBCUT_R_PRIME, PROBCUT_MARGIN,
     ENABLE_NMP, ENABLE_RAZORING, ENABLE_FP, ENABLE_RFP, ENABLE_LMR, ENABLE_IID,
     ENABLE_SINGULAR_EXTENSIONS, MIN_SINGULAR_DEPTH, SINGULAR_EXTENSION_MARGIN,
-    STOP_SEARCH_FLAG
+    STOP_SEARCH_FLAG, PAWN_PUSH_RANK_BONUS, PAWN_PUSH_ATTACK_BONUS
 )
-from chess_engine.bitboard_utils import find_piece_type_on_square
+from chess_engine.bitboard_utils import find_piece_type_on_square, KING_ATTACK_ZONES
 from chess_engine.debug_utils import log_info
 from chess_engine.see import see
 from chess_engine.transposition_table import (
@@ -61,7 +61,13 @@ def _quicksort_recursive(moves, scores, low, high):
 @numba.njit(cache=True, boundscheck=False, fastmath=True)
 def score_moves(piece_bbs, occupancy_bbs, game_state, moves, tt_move, killer_moves_at_ply, history_table):
     scores = np.zeros(len(moves), dtype=np.int32)
-    opponent_pieces_bb = occupancy_bbs[1] if game_state[0] == 0 else occupancy_bbs[0]
+    side_to_move = game_state[0]
+    opponent_pieces_bb = occupancy_bbs[1] if side_to_move == 0 else occupancy_bbs[0]
+    
+    # Determine opponent king square for attack bonus
+    opponent_king_bb = piece_bbs[11] if side_to_move == 0 else piece_bbs[5]
+    opponent_king_sq = get_lsb_index(opponent_king_bb) if opponent_king_bb != 0 else -1
+    
     for i in range(len(moves)):
         move = moves[i]
         score = 0
@@ -83,6 +89,25 @@ def score_moves(piece_bbs, occupancy_bbs, game_state, moves, tt_move, killer_mov
                 else:
                     aggressor_type = find_piece_type_on_square(piece_bbs, get_from_square(move))
                     score = history_table[aggressor_type, to_square]
+                    
+                    # --- Pawn Push Bonuses ---
+                    if aggressor_type == 0 or aggressor_type == 6: # PAWN (White=0, Black=6)
+                        # Rank Bonus (Rank 6/7)
+                        rank = to_square // 8
+                        is_advanced_pawn = False
+                        if side_to_move == 0: # White
+                            if rank >= 5: is_advanced_pawn = True 
+                        else: # Black
+                            if rank <= 2: is_advanced_pawn = True
+                        
+                        if is_advanced_pawn:
+                            score += PAWN_PUSH_RANK_BONUS
+                            
+                        # King Attack Bonus
+                        if opponent_king_sq != -1:
+                             if (KING_ATTACK_ZONES[opponent_king_sq] & BB_SQUARES[to_square]) != 0:
+                                score += PAWN_PUSH_ATTACK_BONUS
+
         scores[i] = score
     return scores
 
