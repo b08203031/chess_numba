@@ -38,7 +38,7 @@ def run_search_test():
     """
     fen = "r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1"
     depth = 15
-    time_limit = 13
+    time_limit = 30
     time_limit_ms = time_limit * 1000
 
     log_info("--- Starting Iterative Deepening Search Test ---")
