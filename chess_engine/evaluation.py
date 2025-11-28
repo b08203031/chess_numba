@@ -361,14 +361,37 @@ def _evaluate_king_tropism(king_sq, color, piece_bbs):
 def _evaluate_pawn_storm(king_sq, color, piece_bbs):
     """
     (Phase 4) Calculates a penalty for enemy pawns near the king (pawn storm).
-    (階段 4) 計算國王附近敵方兵的懲罰（兵風暴）。
+    Revised to use rank-based penalty.
     """
     penalty = np.int32(0)
-    king_zone = KING_ATTACK_ZONES[king_sq]
+    king_file = king_sq % 8
     enemy_pawn_idx = 6 if color == 0 else 0
+    enemy_pawns = piece_bbs[enemy_pawn_idx]
 
-    enemy_pawns_in_zone = piece_bbs[enemy_pawn_idx] & king_zone
-    penalty += count_bits(enemy_pawns_in_zone) * PAWN_STORM_PENALTY
+    # Iterate over files adjacent to the king
+    for f in range(max(0, king_file - 1), min(7, king_file + 1) + 1):
+        file_mask = FILE_MASKS[f]
+        pawns_on_file = enemy_pawns & file_mask
+        
+        while pawns_on_file:
+            sq = get_lsb_index(pawns_on_file)
+            rank = sq // 8
+            
+            # Determine the penalty index based on the pawn's rank relative to the defending king's back rank
+            # White King (color 0) is at rank 0. Black pawns attack. 
+            # Black pawn at Rank 2 (index 2) -> Very close -> High penalty.
+            # Black King (color 1) is at rank 7. White pawns attack.
+            # White pawn at Rank 5 (index 5) -> 7-5=2 -> Very close -> High penalty.
+            
+            table_idx = rank if color == 0 else (7 - rank)
+            penalty -= PAWN_STORM_PENALTY_BY_RANK[table_idx] # Penalty should be subtracted (score is relative to side to move) or returned as positive penalty to be subtracted later?
+            # The function returns "penalty", and caller does: white_raw_safety + white_pawn_storm.
+            # But the other functions return "score" (often negative for penalties).
+            # Let's check _evaluate_king_tropism: returns -penalty.
+            # Let's check _evaluate_king_attackers: returns -KING_SAFETY_TABLE[...].
+            # So this function should return a NEGATIVE value.
+            
+            pawns_on_file &= pawns_on_file - np.uint64(1)
 
     return penalty
 

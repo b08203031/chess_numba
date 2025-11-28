@@ -269,22 +269,22 @@ PASSED_PAWN_BONUS = np.array([
     [  0,   0], # Rank 1
     [ 10,  20], # Rank 2
     [ 20,  40], # Rank 3
-    [ 35,  70], # Rank 4
-    [ 50, 100], # Rank 5
-    [ 80, 180], # Rank 6
-    [150, 300], # Rank 7
+    [ 35,  80], # Rank 4
+    [ 50, 120], # Rank 5
+    [ 80, 200], # Rank 6
+    [150, 350], # Rank 7
     [  0,   0]  # Rank 8
 ], dtype=np.int32)
 
 # --- Isolated Pawns / 孤兵 ---
 # Penalty for each isolated pawn on a file.
 # 每一個孤兵的懲罰。
-ISOLATED_PAWN_PENALTY = np.array([-10, -15], dtype=np.int32) # MG, EG
+ISOLATED_PAWN_PENALTY = np.array([-10, -5], dtype=np.int32) # MG, EG
 
 # --- Doubled Pawns / 重疊兵 ---
 # Penalty for each doubled pawn on a file.
 # 每一個重疊兵的懲罰。
-DOUBLED_PAWN_PENALTY = np.array([-15, -20], dtype=np.int32) # MG, EG
+DOUBLED_PAWN_PENALTY = np.array([-15, -10], dtype=np.int32) # MG, EG
 
 
 # =============================================================================
@@ -294,24 +294,34 @@ DOUBLED_PAWN_PENALTY = np.array([-15, -20], dtype=np.int32) # MG, EG
 # --- Phase 2: Attacking the King Zone (Non-Linear Model) / 攻擊王翼區域（非線性模型） ---
 # Attack units for each piece type. Order: P, N, B, R, Q
 # 每個棋子類型的攻擊單位。順序：兵、馬、象、車、后
-KING_SAFETY_ATTACK_UNITS = np.array([1, 2, 2, 3, 5], dtype=np.int32) # P, N, B, R, Q
+# Updated: Aggressive weights for R and Q
+KING_SAFETY_ATTACK_UNITS = np.array([1, 3, 3, 5, 9], dtype=np.int32) # P, N, B, R, Q
 
 # A non-linear table where the index is the sum of attack units, and the value is the penalty.
 # The penalty grows exponentially, rewarding multi-piece attacks.
 # 一個非線性表格，索引是攻擊單位的總和，值是懲罰分數。懲罰呈指數增長，獎勵多子協同攻擊。
+# Updated: Steeper, quadratic-plus growth curve
 KING_SAFETY_TABLE = np.array([
-    0, 0, 1, 2, 4, 6, 9, 12, 16, 20, 25, 30, 36, 42, 49, 56,
-    64, 72, 81, 90, 100, 110, 120, 130, 140, 150, 160, 170, 180, 190, 200,
-    210, 220, 230, 240, 250, 260, 270, 280, 290, 300, 310, 320, 330, 340,
-    350, 360, 370, 380, 390, 400
-] + [400] * 50, dtype=np.int32)
+    min(int((i**2) / 2.5), 1000) for i in range(100)
+], dtype=np.int32)
 
 # --- Phase 3: King Tropism / 王的向性 ---
 KING_TROPISM_MAX_DISTANCE = 14 # Max MANHATTAN distance / 最大曼哈頓距離
 KING_TROPISM_WEIGHTS = np.array([1, 2, 2, 3, 5], dtype=np.int32) # P, N, B, R, Q
 
 # --- Phase 4: Advanced & Dynamic / 進階與動態 ---
-PAWN_STORM_PENALTY = -5 # Penalty for each enemy pawn near the king / 每個敵方兵接近王的懲罰
+# REMOVED: Flat penalty
+# PAWN_STORM_PENALTY = -5 
+
+# NEW: Rank-based pawn storm penalty
+# Penalty for enemy pawns on files adjacent to the king, based on their rank relative to the defender's back rank.
+# Index 0: 8th rank (impossible/promotion), Index 1: 7th rank... Index 2: 2nd rank (close).
+# We interpret index as "distance from defender's back rank" or simply "relative rank".
+# For White King (Rank 0), enemy Black pawn at Rank 2 is index 2.
+# For Black King (Rank 7), enemy White pawn at Rank 5 is index 2 (7-5=2).
+# Values: [Dummy, Dummy, Rank2, Rank3, Rank4, Rank5, Rank6, Rank7]
+PAWN_STORM_PENALTY_BY_RANK = np.array([0, 0, 80, 50, 30, 10, 5, 0], dtype=np.int32)
+
 SCALING_WEIGHTS = np.array([0, 4, 4, 6, 10], dtype=np.int32) # N, B, R, Q - for scaling factor / 用於縮放因子的權重
 MAX_SCALING_MATERIAL = (2*4 + 2*4 + 2*6 + 1*10) # Sum of all weights for one side / 一方所有權重的總和
 
@@ -360,11 +370,11 @@ NULL_MOVE_REDUCTION = 2
 MAX_QUIESCENCE_DEPTH = 5
 
 # Razoring
-RAZORING_MARGIN = 250
+RAZORING_MARGIN = 350 # Increased from 250
 
 # Futility Pruning
-FP_MARGIN_D1 = 100
-FP_MARGIN_D2 = 250
+FP_MARGIN_D1 = 150 # Increased from 100
+FP_MARGIN_D2 = 350 # Increased from 250
 
 # Reverse Futility Pruning
 RFP_MARGIN_D1 = 100
@@ -376,10 +386,10 @@ LMR_REDUCTION = 2           # Depth reduction for LMR / LMR 的深度減少值
 
 # Late Move Pruning (LMP) - Prune moves after a certain number of quiet moves have been searched
 # 晚期移動剪枝（LMP） - 在搜尋了一定數量的寧靜步後剪枝
+# Updated: Relaxed constraints to search more moves (6 + 6*depth)
 LMP_MOVE_COUNT = np.array([
- # depth: 0  1  2   3   4   5   6   7   8   9  10 ...
-          0, 6, 10, 14, 20, 25, 30, 35, 40, 50, 60, 70, 80, 90, 90, 90, 90
-] + [90] * (MAX_PLY - 17), dtype=np.int32)
+    0 if d == 0 else 6 + 6 * d for d in range(MAX_PLY)
+], dtype=np.int32)
 
 
 # ProbCut
