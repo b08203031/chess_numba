@@ -19,12 +19,12 @@ from chess_engine.see import see
 
 # Define the failed puzzles
 failed_puzzles = [
-    # {
-    #     "name": "Lichess Puzzle 000mr",
-    #     "fen": "5r1k/5rp1/p7/1b2B2p/1P1P1Pq1/2R3Q1/P3p1P1/2R3K1 b - - 1 41",
-    #     "solution": "f7f4",
-    #     "engine_move": "g4g3"
-    # },
+    {
+        "name": "Lichess Puzzle 000mr",
+        "fen": "5r1k/5rp1/p7/1b2B2p/1P1P1Pq1/2R3Q1/P3p1P1/2R3K1 b - - 1 41",
+        "solution": "f7f4",
+        "engine_move": "g4g3"
+    },
     # {
     #     "name": "Lichess Puzzle 004d8",
     #     "fen": "8/4kr2/R2p4/1p1Pp3/5pp1/3K1P2/PPP5/8 w - - 0 40",
@@ -49,12 +49,12 @@ failed_puzzles = [
         "solution": "b3b4",
         "engine_move": "f3e3"
     },
-    # {
-    #     "name": "Lichess Puzzle 006of",
-    #     "fen": "r2qr2k/1pp2Qp1/1b4np/pP2P3/P4n2/B1N2N1P/5PP1/R3R1K1 b - - 0 20",
-    #     "solution": "d8d3",
-    #     "engine_move": "f4d3"
-    # },
+    {
+        "name": "Lichess Puzzle 006of",
+        "fen": "r2qr2k/1pp2Qp1/1b4np/pP2P3/P4n2/B1N2N1P/5PP1/R3R1K1 b - - 0 20",
+        "solution": "d8d3",
+        "engine_move": "f4d3"
+    },
     {       "name": "Lichess Puzzle 002rd",
             "fen": "r6k/q1p2p1p/1b2bPr1/p1ppP2Q/3P2p1/4B3/PP2NRPP/3R2K1 w - - 2 26",
             "solution": "e2f4",
