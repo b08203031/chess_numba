@@ -286,6 +286,11 @@ ISOLATED_PAWN_PENALTY = np.array([-10, -5], dtype=np.int32) # MG, EG
 # 每一個重疊兵的懲罰。
 DOUBLED_PAWN_PENALTY = np.array([-15, -10], dtype=np.int32) # MG, EG
 
+# --- Connected Passed Pawns / 連結通路兵 ---
+# Bonus for each passed pawn that is connected to another passed pawn.
+# 每個連結通路兵的獎勵。
+CONNECTED_PASSED_PAWN_BONUS = np.array([40, 80], dtype=np.int32) # MG, EG
+
 
 # =============================================================================
 # --- King Safety Constants (NEW - based on Chessprogramming Wiki) / 王的安全常量 ---
@@ -295,7 +300,7 @@ DOUBLED_PAWN_PENALTY = np.array([-15, -10], dtype=np.int32) # MG, EG
 # Attack units for each piece type. Order: P, N, B, R, Q
 # 每個棋子類型的攻擊單位。順序：兵、馬、象、車、后
 # Updated: Aggressive weights for R and Q
-KING_SAFETY_ATTACK_UNITS = np.array([1, 3, 3, 5, 9], dtype=np.int32) # P, N, B, R, Q
+KING_SAFETY_ATTACK_UNITS = np.array([1, 3, 4, 7, 11], dtype=np.int32) # P, N, B, R, Q
 
 # A non-linear table where the index is the sum of attack units, and the value is the penalty.
 # The penalty grows exponentially, rewarding multi-piece attacks.
@@ -307,7 +312,7 @@ KING_SAFETY_TABLE = np.array([
 
 # --- Phase 3: King Tropism / 王的向性 ---
 KING_TROPISM_MAX_DISTANCE = 14 # Max MANHATTAN distance / 最大曼哈頓距離
-KING_TROPISM_WEIGHTS = np.array([1, 2, 2, 3, 5], dtype=np.int32) # P, N, B, R, Q
+KING_TROPISM_WEIGHTS = np.array([1, 2, 3, 5, 8], dtype=np.int32) # P, N, B, R, Q
 
 # --- Phase 4: Advanced & Dynamic / 進階與動態 ---
 # REMOVED: Flat penalty
@@ -360,7 +365,7 @@ ENABLE_SINGULAR_EXTENSIONS = True # Singular Extensions
 
 # IID and Singular Extension Parameters
 MIN_SINGULAR_DEPTH = 6
-SINGULAR_EXTENSION_MARGIN = 150 # centipawns
+SINGULAR_EXTENSION_MARGIN = 100 # centipawns
 
 
 # Master switches for existing pruning techniques / 現有剪枝技術的總開關
