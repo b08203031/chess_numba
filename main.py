@@ -59,10 +59,18 @@ def uci_loop():
 
     # --- Initialize Opening Book / 初始化開局書 ---
     script_dir = os.path.dirname(os.path.realpath(__file__))
-    book_path = os.path.join(script_dir, "polyglot.bin")
+    # Updated path to look in chess_engine subdirectory
+    book_path = os.path.join(script_dir, "chess_engine", "polyglot.bin")
     opening_book = OpeningBook(book_path)
     if opening_book.book is None:
+        # Fallback to root if not found in subdirectory
+        book_path_root = os.path.join(script_dir, "polyglot.bin")
+        opening_book = OpeningBook(book_path_root)
+        
+    if opening_book.book is None:
         log_info("Opening book not found or failed to load.")
+    else:
+        log_info(f"Opening book loaded from {book_path}")
 
     board_state = None
 

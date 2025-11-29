@@ -8,7 +8,6 @@ import os
 import time
 import chess
 import traceback
-# import screen_recognizer  <-- Moved to local import
 
 # --- Configuration & Constants ---
 UNICODE_PIECES = {
@@ -17,7 +16,7 @@ UNICODE_PIECES = {
     None: ''
 }
 
-BOARD_COLORS = ["#F0D9B5", "#B58863"]  # Light, Dark squares (Wood theme)
+BOARD_COLORS = [ "#B58863", "#F0D9B5"]  # Light, Dark squares (Wood theme)
 HIGHLIGHT_COLOR = "#FFFF00" # Yellow for best move
 LAST_MOVE_COLOR = "#BBCB2B" # Greenish for last move
 
@@ -68,7 +67,13 @@ class EngineProcess:
         except Exception as e:
             self.callback_queue.put({"type": "error", "message": f"Failed to start engine: {e}"})
 
-    def stop(self):
+    def stop_calculation(self):
+        """Sends 'stop' command to engine to gracefully end current search."""
+        if self.running and self.process:
+            self.send_command("stop")
+
+    def quit_engine(self):
+        """Terminates the engine process."""
         if self.running and self.process:
             self.send_command("quit")
             time.sleep(0.1)
@@ -157,7 +162,7 @@ class ChessVisionApp(tk.Tk):
     def __init__(self):
         super().__init__()
         self.title("西洋棋視覺助理 (Chess Vision App)")
-        self.geometry("600x750")
+        self.geometry("600x850") # Increased height for new controls
         
         # State
         self.board = chess.Board()
@@ -166,43 +171,73 @@ class ChessVisionApp(tk.Tk):
         self.engine = EngineProcess(self.message_queue)
         self.engine.start()
         self.analyzing = False
+        self.warming_up = False
+        self.is_first_analysis = True
         
         # UI Components
         self._create_ui()
         
         # Start message polling
         self.after(100, self._process_queue)
+        
+        # Warm-up (Silent)
+        self.after(1000, self._run_warmup)
 
     def _create_ui(self):
         # 1. Controls Frame
         control_frame = ttk.LabelFrame(self, text="設定 (Settings)", padding=10)
         control_frame.pack(fill="x", padx=10, pady=5)
         
+        row_idx = 0
+        
         # Side to Move
-        ttk.Label(control_frame, text="輪到誰走 (Side to Move):").grid(row=0, column=0, sticky="w")
+        ttk.Label(control_frame, text="輪到誰走 (Side to Move):").grid(row=row_idx, column=0, sticky="w")
         self.side_var = tk.StringVar(value="w")
-        ttk.Radiobutton(control_frame, text="白方 (White)", variable=self.side_var, value="w").grid(row=0, column=1)
-        ttk.Radiobutton(control_frame, text="黑方 (Black)", variable=self.side_var, value="b").grid(row=0, column=2)
+        ttk.Radiobutton(control_frame, text="白方 (White)", variable=self.side_var, value="w").grid(row=row_idx, column=1)
+        ttk.Radiobutton(control_frame, text="黑方 (Black)", variable=self.side_var, value="b").grid(row=row_idx, column=2)
+        row_idx += 1
 
         # My Color (for board orientation)
-        ttk.Label(control_frame, text="我的顏色 (My Color):").grid(row=1, column=0, sticky="w")
+        ttk.Label(control_frame, text="我的顏色 (My Color):").grid(row=row_idx, column=0, sticky="w")
         self.my_color_var = tk.StringVar(value="w")
-        ttk.Radiobutton(control_frame, text="白方 (White)", variable=self.my_color_var, value="w", command=self.draw_board).grid(row=1, column=1)
-        ttk.Radiobutton(control_frame, text="黑方 (Black)", variable=self.my_color_var, value="b", command=self.draw_board).grid(row=1, column=2)
+        ttk.Radiobutton(control_frame, text="白方 (White)", variable=self.my_color_var, value="w", command=self.draw_board).grid(row=row_idx, column=1)
+        ttk.Radiobutton(control_frame, text="黑方 (Black)", variable=self.my_color_var, value="b", command=self.draw_board).grid(row=row_idx, column=2)
+        row_idx += 1
+
+        # Auto Detect Checkbox
+        self.auto_detect_var = tk.BooleanVar(value=True)
+        ttk.Checkbutton(control_frame, text="自動偵測權利 (Auto-detect Rights)", variable=self.auto_detect_var).grid(row=row_idx, column=0, columnspan=2, sticky="w", pady=5)
+        row_idx += 1
 
         # Castling Rights (New Feature)
-        ttk.Label(control_frame, text="王車易位 (Castling Rights):").grid(row=2, column=0, sticky="w")
+        ttk.Label(control_frame, text="王車易位 (Castling Rights):").grid(row=row_idx, column=0, sticky="w")
         self.castling_var = tk.StringVar(value="KQkq")
-        ttk.Entry(control_frame, textvariable=self.castling_var, width=10).grid(row=2, column=1, sticky="w")
+        ttk.Entry(control_frame, textvariable=self.castling_var, width=10).grid(row=row_idx, column=1, sticky="w")
+        row_idx += 1
+
+        # En Passant (New Feature)
+        ttk.Label(control_frame, text="吃過路兵 (En Passant):").grid(row=row_idx, column=0, sticky="w")
+        self.ep_var = tk.StringVar(value="-")
+        ttk.Entry(control_frame, textvariable=self.ep_var, width=5).grid(row=row_idx, column=1, sticky="w")
+        row_idx += 1
 
         # Time Limit
-        ttk.Label(control_frame, text="思考時間 (Time Limit ms):").grid(row=3, column=0, sticky="w")
+        ttk.Label(control_frame, text="思考時間 (Time Limit ms):").grid(row=row_idx, column=0, sticky="w")
         self.time_var = tk.StringVar(value="10000")
-        ttk.Entry(control_frame, textvariable=self.time_var, width=10).grid(row=3, column=1, sticky="w")
+        ttk.Entry(control_frame, textvariable=self.time_var, width=10).grid(row=row_idx, column=1, sticky="w")
+        row_idx += 1
+
+        # Buttons Frame
+        btn_frame = ttk.Frame(control_frame)
+        btn_frame.grid(row=row_idx, column=0, columnspan=3, pady=10, sticky="ew")
 
         # Start Button
-        self.btn_analyze = ttk.Button(control_frame, text="開始分析 (Start Analysis)", command=self.start_analysis_thread)
-        self.btn_analyze.grid(row=4, column=0, columnspan=3, pady=10, sticky="ew")
+        self.btn_analyze = ttk.Button(btn_frame, text="開始分析 (Start)", command=self.start_analysis_thread)
+        self.btn_analyze.pack(side="left", fill="x", expand=True, padx=(0, 5))
+
+        # Stop Button
+        self.btn_stop = ttk.Button(btn_frame, text="停止 (Stop)", command=self.stop_analysis, state="disabled")
+        self.btn_stop.pack(side="left", fill="x", expand=True, padx=(5, 0))
 
         # 2. Info Frame
         info_frame = ttk.LabelFrame(self, text="分析結果 (Analysis)", padding=10)
@@ -226,20 +261,58 @@ class ChessVisionApp(tk.Tk):
         # Initial Draw
         self.draw_board()
 
+    def _run_warmup(self):
+        """Runs a silent short search to warm up the engine JIT."""
+        if not self.analyzing:
+            print("[INFO] Warming up engine...")
+            self.warming_up = True
+            # Search startpos for depth 2
+            self.engine.send_command("position startpos")
+            self.engine.send_command("go depth 2")
+
     def start_analysis_thread(self):
         if self.analyzing:
             return
         
         self.analyzing = True
         self.btn_analyze.config(state="disabled")
+        self.btn_stop.config(state="normal")
         self.lbl_score.config(text="評分 (Score): 計算中...")
         self.lbl_bestmove.config(text="最佳著法 (Best Move): ...")
         self.lbl_pv.config(text="變例 (PV): ...")
         
         threading.Thread(target=self._run_analysis, daemon=True).start()
 
+    def stop_analysis(self):
+        if self.analyzing:
+            self.engine.stop_calculation()
+            # We don't enable buttons here; we wait for 'bestmove' from engine
+
+    def infer_castling_rights(self, board):
+        """
+        Infer likely castling rights based on piece positions.
+        Heuristic: If King and Rook are on starting squares, assume castling is possible.
+        """
+        rights = ""
+        # White
+        if board.piece_at(chess.E1) == chess.Piece(chess.KING, chess.WHITE):
+            if board.piece_at(chess.H1) == chess.Piece(chess.ROOK, chess.WHITE): rights += "K"
+            if board.piece_at(chess.A1) == chess.Piece(chess.ROOK, chess.WHITE): rights += "Q"
+        # Black
+        if board.piece_at(chess.E8) == chess.Piece(chess.KING, chess.BLACK):
+            if board.piece_at(chess.H8) == chess.Piece(chess.ROOK, chess.BLACK): rights += "k"
+            if board.piece_at(chess.A8) == chess.Piece(chess.ROOK, chess.BLACK): rights += "q"
+        
+        return rights if rights else "-"
+
     def _run_analysis(self):
         try:
+            # First time analysis delay (requested by user)
+            if self.is_first_analysis:
+                print("[INFO] First analysis: Waiting 2 seconds before capture...")
+                time.sleep(2)
+                self.is_first_analysis = False
+
             import screen_recognizer
             # Lazy init recognizer to avoid slow startup if not used
             if not self.recognizer:
@@ -248,24 +321,57 @@ class ChessVisionApp(tk.Tk):
                 except Exception as e:
                     self.message_queue.put({"type": "error", "message": f"Recognizer Init Failed: {e}"})
                     traceback.print_exc()
+                    self.message_queue.put({"type": "analysis_finished"}) # Fail safe
                     return
 
-            # Read user settings
-            castling_rights = self.castling_var.get().strip()
-            if not castling_rights: castling_rights = "-" # Handle empty input
-
-            # Capture & Recognize
-            fen = self.recognizer.get_fen_from_screen(
+            # Capture Raw Pieces (using defaults for rights to get just pieces first)
+            fen_raw = self.recognizer.get_fen_from_screen(
                 player_color=self.my_color_var.get(),
                 active_player=self.side_var.get(),
-                castling=castling_rights
+                castling='-', # Placeholder
+                en_passant='-' # Placeholder
             )
             
-            if not fen:
+            if not fen_raw:
                 self.message_queue.put({"type": "error", "message": "無法辨識棋盤 (Recognition Failed)"})
+                self.message_queue.put({"type": "analysis_finished"})
                 return
 
-            self.message_queue.put({"type": "fen_update", "fen": fen})
+            fen_final = fen_raw
+
+            if self.auto_detect_var.get():
+                try:
+                    # Parse board to infer rights
+                    board = chess.Board(fen_raw)
+                    new_rights = self.infer_castling_rights(board)
+                    
+                    # Update UI in main thread
+                    def update_ui_fields(r):
+                        self.castling_var.set(r)
+                        self.ep_var.set("-") # Default EP to empty as it's hard to guess
+
+                    self.after(0, update_ui_fields, new_rights)
+
+                    # Reconstruct FEN
+                    parts = fen_raw.split()
+                    parts[2] = new_rights
+                    parts[3] = "-"
+                    fen_final = " ".join(parts)
+                except Exception as e:
+                    print(f"Auto-detect rights failed: {e}")
+            else:
+                # Use User Input
+                user_rights = self.castling_var.get().strip()
+                if not user_rights: user_rights = "-"
+                user_ep = self.ep_var.get().strip()
+                if not user_ep: user_ep = "-"
+
+                parts = fen_raw.split()
+                parts[2] = user_rights
+                parts[3] = user_ep
+                fen_final = " ".join(parts)
+
+            self.message_queue.put({"type": "fen_update", "fen": fen_final})
 
             # Send to Engine
             try:
@@ -277,13 +383,15 @@ class ChessVisionApp(tk.Tk):
             self.engine.send_command("ucinewgame")
             time.sleep(0.05) # Brief pause to ensure processing
             
-            self.engine.send_command(f"position fen {fen}")
+            self.engine.send_command(f"position fen {fen_final}")
             self.engine.send_command(f"go movetime {time_limit}")
+
+            # Note: We do NOT send "analysis_finished" here. 
+            # We wait for "bestmove" from the engine to signal completion.
 
         except Exception as e:
             traceback.print_exc() # Print full stack trace for debugging
             self.message_queue.put({"type": "error", "message": f"Analysis Error: {e}"})
-        finally:
             self.message_queue.put({"type": "analysis_finished"})
 
     def _process_queue(self):
@@ -292,34 +400,38 @@ class ChessVisionApp(tk.Tk):
                 msg = self.message_queue.get_nowait()
                 
                 if msg["type"] == "info":
+                    if self.warming_up: continue
+
                     # Update Info
                     if "score_type" in msg:
                         s_type = msg["score_type"]
                         s_val = msg["score_val"]
                         display_score = f"{s_val} cp" if s_type == "cp" else f"Mate in {s_val}"
-                        # Invert score if black to move? 
-                        # UCI 'cp' is usually from engine's perspective (side to move).
-                        # But standard GUIs often show white's perspective. 
-                        # For simplicity, we just show what engine says.
                         self.lbl_score.config(text=f"評分 (Score): {display_score}")
                     
                     if "pv" in msg:
                         self.lbl_pv.config(text=f"變例 (PV): {msg['pv']}")
 
                 elif msg["type"] == "bestmove":
+                    if self.warming_up:
+                        self.warming_up = False
+                        print("[INFO] Warmup complete.")
+                        continue
+
                     move_uci = msg["move"]
                     self.lbl_bestmove.config(text=f"最佳著法 (Best Move): {move_uci}")
                     
                     # Highlight move on board
                     try:
                         move = chess.Move.from_uci(move_uci)
-                        # We also want to apply it to board to update state
                         if move in self.board.legal_moves:
                             self.board.push(move)
                             self.draw_board()
-                            # Highlight the move arrows? (Simple draw for now)
                     except:
                         pass
+                    
+                    # Signal that analysis is done
+                    self.message_queue.put({"type": "analysis_finished"})
 
                 elif msg["type"] == "fen_update":
                     fen = msg["fen"]
@@ -335,6 +447,7 @@ class ChessVisionApp(tk.Tk):
                 elif msg["type"] == "analysis_finished":
                     self.analyzing = False
                     self.btn_analyze.config(state="normal")
+                    self.btn_stop.config(state="disabled")
                 
                 elif msg["type"] == "log":
                     print(f"[LOG] {msg['message']}")
@@ -352,9 +465,6 @@ class ChessVisionApp(tk.Tk):
         for rank in range(8):
             for file in range(8):
                 # Calculate coordinates
-                # Standard: rank 7 is top, rank 0 is bottom
-                # Flipped: rank 0 is top, rank 7 is bottom
-                
                 display_rank = rank if is_flipped else (7 - rank)
                 display_file = (7 - file) if is_flipped else file
                 
@@ -368,18 +478,11 @@ class ChessVisionApp(tk.Tk):
                 self.canvas.create_rectangle(x1, y1, x2, y2, fill=color, outline="")
                 
                 # Piece
-                # python-chess board.piece_at uses (file, rank) where rank 0 is bottom
-                # We iterate rank 0..7
                 square_idx = chess.square(file, rank)
                 piece = self.board.piece_at(square_idx)
                 
                 if piece:
                     symbol = UNICODE_PIECES.get(piece.symbol())
-                    # Piece color handling for text?
-                    # Generally black pieces are filled black in unicode, white are hollow/white.
-                    # But on a dark/light board, visibility varies.
-                    # Standard Unicode pieces have their own colors.
-                    
                     self.canvas.create_text(
                         x1 + self.square_size // 2,
                         y1 + self.square_size // 2,
@@ -388,7 +491,7 @@ class ChessVisionApp(tk.Tk):
                     )
 
     def on_closing(self):
-        self.engine.stop()
+        self.engine.quit_engine()
         self.destroy()
 
 if __name__ == "__main__":
