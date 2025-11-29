@@ -81,10 +81,10 @@ def _convert_polyglot_move_to_engine_move(poly_move: np.uint16, board_state) -> 
     (3 bits)(3 bits)  (3 bits)  (3 bits)    (3 bits)
     """
 
-    from_file = poly_move & 0b111
-    from_rank = (poly_move >> 3) & 0b111
-    to_file = (poly_move >> 6) & 0b111
-    to_rank = (poly_move >> 9) & 0b111
+    to_file = poly_move & 0b111
+    to_rank = (poly_move >> 3) & 0b111
+    from_file = (poly_move >> 6) & 0b111
+    from_rank = (poly_move >> 9) & 0b111
     promotion_piece_poly = (poly_move >> 12) & 0b111
 
     from_sq = from_rank * 8 + from_file
