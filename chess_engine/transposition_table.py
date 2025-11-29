@@ -91,10 +91,22 @@ def store_tt(tt, zobrist_key, depth, score, flag, best_move):
     index = zobrist_key % len(tt)
     existing_entry = tt[index]
 
-    # Simple replacement strategy: replace if new depth is greater or equal to existing depth
-    # 簡單的替換策略：如果新深度大於或等於現有深度，則替換
-    # Ideally, should also consider aging or other factors.
-    if depth >= existing_entry['depth']:
+    # Replacement Strategy / 替換策略:
+    # 1. If the key matches (update same position), replace if new depth is >= existing depth.
+    #    This ensures we always have the freshest data for the current search path.
+    # 2. If the key is different (collision), replace if new depth is >= existing depth.
+    #    (Standard Depth-Preferred).
+    # 3. Tie-breaker: If depths are equal, we currently replace (favoring new).
+    
+    replace = False
+    if zobrist_key == existing_entry['key']:
+        if depth >= existing_entry['depth']:
+            replace = True
+    else:
+        if depth >= existing_entry['depth']:
+            replace = True
+
+    if replace:
         tt[index]['key'] = zobrist_key
         tt[index]['depth'] = np.uint8(depth)
         tt[index]['score'] = np.int16(score)
