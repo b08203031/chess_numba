@@ -39,6 +39,26 @@ from chess_engine.engine_types import (
 from .move import move_to_uci
 
 @numba.njit(cache=True, boundscheck=False, fastmath=True)
+def is_repetition(search_context, zobrist_key, halfmove_clock):
+    """
+    Checks if the current Zobrist key has appeared previously in the game history
+    within the reversible move window (halfmove clock).
+    """
+    # Only need to check back as far as the halfmove clock allows (reversible moves)
+    # The current key is NOT yet in the table when this is called at the start of the node.
+    # However, since we append the key BEFORE recursive call, the current position is at `repetition_index - 1`.
+    # We must compare against previous positions (indices 0 to repetition_index - 2).
+    start_index = max(0, int(search_context.repetition_index) - int(halfmove_clock))
+    end_index = int(search_context.repetition_index) - 1
+    
+    # Iterate backwards for efficiency (more likely to hit recent repetition)
+    for i in range(end_index - 1, start_index - 1, -1):
+        if search_context.repetition_table[i] == zobrist_key:
+            return True
+            
+    return False
+
+@numba.njit(cache=True, boundscheck=False, fastmath=True)
 def _partition(moves, scores, low, high):
     pivot_score = scores[high]
     i = low - 1
@@ -246,8 +266,19 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                 null_move_cutoffs, futility_pruned, razoring_used, rfp_pruned, lmp_pruned, probcut_pruned, qs_delta_pruned, qs_see_pruned,
                 iid_searches, singular_extensions)
 
-    original_alpha = alpha
     zobrist_key = game_state[4]
+    
+    # Check for Repetition
+    # We skip this at the root (ply 0) because we assume the root position itself is not a draw 
+    # (or if it is, the user wants us to play something anyway, though usually the GUI handles that).
+    # Checking at ply > 0 ensures we detect cycles generated during the search.
+    if ply > 0 and is_repetition(search_context, zobrist_key, game_state[3]):
+        search_context.pv_table[ply, :].fill(NO_MOVE)
+        return (np.int32(0), NO_MOVE, nodes_searched, quiescence_nodes, cutoffs, tt_hits,
+                null_move_cutoffs, futility_pruned, razoring_used, rfp_pruned, lmp_pruned, probcut_pruned, qs_delta_pruned, qs_see_pruned,
+                iid_searches, singular_extensions)
+
+    original_alpha = alpha
 
     tt_move = NO_MOVE
     tt_entry = probe_tt(search_context.transposition_table, zobrist_key)
@@ -445,6 +476,10 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
         # --- Make the move ---
         unmake_info = make_move(piece_bbs, occupancy_bbs, game_state, move)
         
+        # Add to Repetition Table
+        search_context.repetition_table[search_context.repetition_index] = game_state[4] # The new Zobrist key
+        search_context.repetition_index += 1
+
         # --- Post-move checks ---
         is_giving_check_after_move = is_in_check(piece_bbs, occupancy_bbs, game_state)
         
@@ -490,6 +525,9 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                     piece_bbs, occupancy_bbs, game_state, search_depth, -beta, -alpha, search_context, ply + 1, NO_MOVE)
                 evaluation = -evaluation
 
+        # Remove from Repetition Table (Restore)
+        search_context.repetition_index -= 1
+        
         unmake_move(piece_bbs, occupancy_bbs, game_state, move, unmake_info)
 
         if search_context.stop_flag[0]:
