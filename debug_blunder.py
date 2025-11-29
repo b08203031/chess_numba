@@ -35,7 +35,7 @@ def run_debug():
     
     piece_bbs, occupancy_bbs, game_state = parse_fen(fen)
     
-    max_depth = 10
+    max_depth = 15
     print(f"Running search up to depth {max_depth}...")
     
     start_time = time.time()
