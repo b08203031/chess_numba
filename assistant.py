@@ -190,14 +190,19 @@ class ChessVisionApp(tk.Tk):
         ttk.Radiobutton(control_frame, text="白方 (White)", variable=self.my_color_var, value="w", command=self.draw_board).grid(row=1, column=1)
         ttk.Radiobutton(control_frame, text="黑方 (Black)", variable=self.my_color_var, value="b", command=self.draw_board).grid(row=1, column=2)
 
+        # Castling Rights (New Feature)
+        ttk.Label(control_frame, text="王車易位 (Castling Rights):").grid(row=2, column=0, sticky="w")
+        self.castling_var = tk.StringVar(value="KQkq")
+        ttk.Entry(control_frame, textvariable=self.castling_var, width=10).grid(row=2, column=1, sticky="w")
+
         # Time Limit
-        ttk.Label(control_frame, text="思考時間 (Time Limit ms):").grid(row=2, column=0, sticky="w")
+        ttk.Label(control_frame, text="思考時間 (Time Limit ms):").grid(row=3, column=0, sticky="w")
         self.time_var = tk.StringVar(value="10000")
-        ttk.Entry(control_frame, textvariable=self.time_var, width=10).grid(row=2, column=1)
+        ttk.Entry(control_frame, textvariable=self.time_var, width=10).grid(row=3, column=1, sticky="w")
 
         # Start Button
         self.btn_analyze = ttk.Button(control_frame, text="開始分析 (Start Analysis)", command=self.start_analysis_thread)
-        self.btn_analyze.grid(row=3, column=0, columnspan=3, pady=10, sticky="ew")
+        self.btn_analyze.grid(row=4, column=0, columnspan=3, pady=10, sticky="ew")
 
         # 2. Info Frame
         info_frame = ttk.LabelFrame(self, text="分析結果 (Analysis)", padding=10)
@@ -245,12 +250,15 @@ class ChessVisionApp(tk.Tk):
                     traceback.print_exc()
                     return
 
+            # Read user settings
+            castling_rights = self.castling_var.get().strip()
+            if not castling_rights: castling_rights = "-" # Handle empty input
+
             # Capture & Recognize
-            # Default castling to all allowed for now, recognizer might improve later
             fen = self.recognizer.get_fen_from_screen(
                 player_color=self.my_color_var.get(),
                 active_player=self.side_var.get(),
-                castling='KQkq' 
+                castling=castling_rights
             )
             
             if not fen:
@@ -265,6 +273,10 @@ class ChessVisionApp(tk.Tk):
             except:
                 time_limit = 10000
 
+            # FORCE CLEAR STATE to prevent hallucinations from previous analyses
+            self.engine.send_command("ucinewgame")
+            time.sleep(0.05) # Brief pause to ensure processing
+            
             self.engine.send_command(f"position fen {fen}")
             self.engine.send_command(f"go movetime {time_limit}")
 

@@ -251,26 +251,47 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
 
     tt_move = NO_MOVE
     tt_entry = probe_tt(search_context.transposition_table, zobrist_key)
+
+    moves_generated = False
+    moves = np.empty(0, dtype=np.uint16)
+
     if tt_entry['flag'] != TT_FLAG_NONE and tt_entry['depth'] >= depth:
-        tt_hits += 1
-        tt_score = np.int32(tt_entry['score'])
-        if tt_score > MATE_IN_MAX_PLY: tt_score -= ply
-        elif tt_score < -MATE_IN_MAX_PLY: tt_score += ply
+        
+        valid_tt_found = True
+        # Verify legality of the TT move if present to prevent collision issues
+        if tt_entry['best_move'] != NO_MOVE:
+            moves = generate_legal_moves(piece_bbs, occupancy_bbs, game_state)
+            moves_generated = True
+            
+            is_legal = False
+            for i in range(len(moves)):
+                if moves[i] == tt_entry['best_move']:
+                    is_legal = True
+                    break
+            
+            if not is_legal:
+                valid_tt_found = False
+        
+        if valid_tt_found:
+            tt_hits += 1
+            tt_score = np.int32(tt_entry['score'])
+            if tt_score > MATE_IN_MAX_PLY: tt_score -= ply
+            elif tt_score < -MATE_IN_MAX_PLY: tt_score += ply
 
-        if tt_entry['flag'] == TT_FLAG_EXACT:
-            search_context.pv_table[ply, :].fill(NO_MOVE)
-            return (tt_score, tt_entry['best_move'], nodes_searched, quiescence_nodes, cutoffs, tt_hits,
-                    null_move_cutoffs, futility_pruned, razoring_used, rfp_pruned, lmp_pruned, probcut_pruned, qs_delta_pruned, qs_see_pruned,
-                    iid_searches, singular_extensions)
-        elif tt_entry['flag'] == TT_FLAG_ALPHA: beta = min(beta, tt_score)
-        elif tt_entry['flag'] == TT_FLAG_BETA: alpha = max(alpha, tt_score)
+            if tt_entry['flag'] == TT_FLAG_EXACT:
+                search_context.pv_table[ply, :].fill(NO_MOVE)
+                return (tt_score, tt_entry['best_move'], nodes_searched, quiescence_nodes, cutoffs, tt_hits,
+                        null_move_cutoffs, futility_pruned, razoring_used, rfp_pruned, lmp_pruned, probcut_pruned, qs_delta_pruned, qs_see_pruned,
+                        iid_searches, singular_extensions)
+            elif tt_entry['flag'] == TT_FLAG_ALPHA: beta = min(beta, tt_score)
+            elif tt_entry['flag'] == TT_FLAG_BETA: alpha = max(alpha, tt_score)
 
-        if alpha >= beta:
-            search_context.pv_table[ply, :].fill(NO_MOVE)
-            return (tt_score, tt_entry['best_move'], nodes_searched, quiescence_nodes, cutoffs, tt_hits,
-                    null_move_cutoffs, futility_pruned, razoring_used, rfp_pruned, lmp_pruned, probcut_pruned, qs_delta_pruned, qs_see_pruned,
-                    iid_searches, singular_extensions)
-        tt_move = tt_entry['best_move']
+            if alpha >= beta:
+                search_context.pv_table[ply, :].fill(NO_MOVE)
+                return (tt_score, tt_entry['best_move'], nodes_searched, quiescence_nodes, cutoffs, tt_hits,
+                        null_move_cutoffs, futility_pruned, razoring_used, rfp_pruned, lmp_pruned, probcut_pruned, qs_delta_pruned, qs_see_pruned,
+                        iid_searches, singular_extensions)
+            tt_move = tt_entry['best_move']
 
     if ENABLE_IID and depth >= 8 and tt_move == NO_MOVE:
         iid_searches += 1
@@ -379,7 +400,8 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                     null_move_cutoffs, futility_pruned, razoring_used, rfp_pruned, lmp_pruned, probcut_pruned, qs_delta_pruned, qs_see_pruned,
                     iid_searches, singular_extensions)
 
-    moves = generate_legal_moves(piece_bbs, occupancy_bbs, game_state)
+    if not moves_generated:
+        moves = generate_legal_moves(piece_bbs, occupancy_bbs, game_state)
 
     static_score = -INFINITY
     if depth <= 2 and not is_currently_in_check:
