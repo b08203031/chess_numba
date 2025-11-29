@@ -268,10 +268,12 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
 
     zobrist_key = game_state[4]
     
-    # Check for Repetition
+    # Check for Repetition / 檢查重複局面
     # We skip this at the root (ply 0) because we assume the root position itself is not a draw 
     # (or if it is, the user wants us to play something anyway, though usually the GUI handles that).
     # Checking at ply > 0 ensures we detect cycles generated during the search.
+    # Note: is_repetition returns True if the position appears AT LEAST once in history.
+    # This implements "Draw on 2nd occurrence" logic to prune cycles early.
     if ply > 0 and is_repetition(search_context, zobrist_key, game_state[3]):
         search_context.pv_table[ply, :].fill(NO_MOVE)
         return (np.int32(0), NO_MOVE, nodes_searched, quiescence_nodes, cutoffs, tt_hits,
