@@ -237,12 +237,20 @@ class ChessVisionApp(tk.Tk):
 
         # Stop Button
         self.btn_stop = ttk.Button(btn_frame, text="停止 (Stop)", command=self.stop_analysis, state="disabled")
-        self.btn_stop.pack(side="left", fill="x", expand=True, padx=(5, 0))
+        self.btn_stop.pack(side="left", fill="x", expand=True, padx=(5, 5))
+
+        # New Game Button
+        self.btn_new_game = ttk.Button(btn_frame, text="新遊戲 (New Game)", command=self.new_game)
+        self.btn_new_game.pack(side="left", fill="x", expand=True, padx=(5, 0))
 
         # 2. Info Frame
         info_frame = ttk.LabelFrame(self, text="分析結果 (Analysis)", padding=10)
         info_frame.pack(fill="x", padx=10, pady=5)
         
+        # Status Label (Warming Up / Ready)
+        self.lbl_status = ttk.Label(info_frame, text="狀態 (Status): 等待熱機... (Warming Up...)", font=("Arial", 10, "italic"), foreground="red")
+        self.lbl_status.pack(anchor="w", pady=(0, 5))
+
         self.lbl_score = ttk.Label(info_frame, text="評分 (Score): --", font=("Arial", 12, "bold"))
         self.lbl_score.pack(anchor="w")
         
@@ -266,11 +274,27 @@ class ChessVisionApp(tk.Tk):
         if not self.analyzing:
             print("[INFO] Warming up engine...")
             self.warming_up = True
-            # Search startpos for depth 2
-            self.engine.send_command("position startpos")
+            # Use Kiwipete position to avoid book hits and force search
+            kiwipete = "r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1"
+            self.engine.send_command(f"position fen {kiwipete}")
             self.engine.send_command("go depth 2")
 
+    def new_game(self):
+        """Resets the engine's transposition table."""
+        if self.analyzing:
+            messagebox.showwarning("Warning", "請先停止當前分析 (Please stop analysis first)")
+            return
+        
+        self.engine.send_command("ucinewgame")
+        self.lbl_pv.config(text="變例 (PV): --")
+        self.lbl_score.config(text="評分 (Score): --")
+        self.lbl_bestmove.config(text="最佳著法 (Best Move): --")
+        messagebox.showinfo("Info", "新遊戲已開始 (New Game Started) - 置換表已清除 (Hash Cleared)")
+
     def start_analysis_thread(self):
+        if self.warming_up:
+             messagebox.showwarning("Warning", "引擎正在熱機中，請稍候... (Engine Warming Up)")
+             return
         if self.analyzing:
             return
         
@@ -379,9 +403,8 @@ class ChessVisionApp(tk.Tk):
             except:
                 time_limit = 10000
 
-            # FORCE CLEAR STATE to prevent hallucinations from previous analyses
-            self.engine.send_command("ucinewgame")
-            time.sleep(0.05) # Brief pause to ensure processing
+            # Removed automatic ucinewgame to preserve TT across moves
+            # self.engine.send_command("ucinewgame")
             
             self.engine.send_command(f"position fen {fen_final}")
             self.engine.send_command(f"go movetime {time_limit}")
@@ -415,6 +438,7 @@ class ChessVisionApp(tk.Tk):
                 elif msg["type"] == "bestmove":
                     if self.warming_up:
                         self.warming_up = False
+                        self.lbl_status.config(text="狀態 (Status): 準備就緒 (Ready)", foreground="green")
                         print("[INFO] Warmup complete.")
                         continue
 
