@@ -30,6 +30,9 @@ MAX_PLY = 128 # Updated to match constant.py and search.py consistency
 search_thread = None
 global_search_context = None
 
+# Global counter for TT generation
+global_tt_generation = 0
+
 def run_search(board_state, max_depth, time_config, transposition_table, killer_moves, history_table, pv_table):
     """
     Wrapper function to run the search in a separate thread.
@@ -46,7 +49,7 @@ def uci_loop():
     引擎的主 UCI 循環。
     監聽並回應來自 GUI 的 UCI 命令。
     """
-    global search_thread, global_search_context
+    global search_thread, global_search_context, global_tt_generation
 
     # Initialize engine components before the loop starts / 在循環開始前初始化引擎組件
     transposition_table = create_transposition_table(TT_SIZE_MB)
@@ -73,6 +76,7 @@ def uci_loop():
         log_info(f"Opening book loaded from {book_path}")
 
     board_state = None
+    game_history = []  # List to track Zobrist keys for repetition detection
 
     while True:
         try:
@@ -97,17 +101,26 @@ def uci_loop():
             killer_moves.fill(0)
             history_table.fill(0)
             pv_table.fill(0)
+            game_history = []
+            global_tt_generation = 0 # Reset generation on new game
         elif command == "position":
             # --- Parse position command / 解析 position 命令 ---
+            game_history = [] # Reset history for new position command sequence
+            
             if "startpos" in tokens:
                 fen = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
                 piece_bbs, occupancy_bbs, game_state = parse_fen(fen)
                 board_state = (piece_bbs, occupancy_bbs, game_state)
+                # Add initial state key to history
+                game_history.append(game_state[4])
+                
             elif "fen" in tokens:
                 fen_start_index = tokens.index("fen") + 1
                 fen = " ".join(tokens[fen_start_index:])
                 piece_bbs, occupancy_bbs, game_state = parse_fen(fen)
                 board_state = (piece_bbs, occupancy_bbs, game_state)
+                # Add initial state key to history
+                game_history.append(game_state[4])
             
             # Handle 'moves' / 處理 'moves'
             if "moves" in tokens:
@@ -123,6 +136,8 @@ def uci_loop():
                             # make_move modifies in-place but returns info. 
                             # make_move 會就地修改，但返回 info。
                             make_move(p_bbs, o_bbs, g_state, legal_move)
+                            # Append new key to history
+                            game_history.append(g_state[4])
                             found_move = True
                             break
                     if not found_move:
@@ -179,10 +194,17 @@ def uci_loop():
             # Create a new context for this search / 為此搜尋創建新的上下文
             global_search_context = SearchContext(transposition_table, killer_moves, pv_table, history_table)
             
+            # Update TT Generation
+            global_tt_generation = (global_tt_generation + 1) % 256
+            
+            # Copy history list to avoid thread safety issues if main thread modifies it (though in UCI it waits)
+            current_game_history = list(game_history)
+
             # Start Search Thread / 啟動搜尋線程
             def search_worker():
                 best_move, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _ = iterative_deepening_search(
-                    board_state[0], board_state[1], board_state[2], max_depth, time_config, global_search_context
+                    board_state[0], board_state[1], board_state[2], max_depth, time_config, global_search_context,
+                    game_history_list=current_game_history, tt_generation=global_tt_generation
                 )
                 print(f"bestmove {move_to_uci(best_move)}")
 

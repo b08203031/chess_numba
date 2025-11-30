@@ -15,6 +15,7 @@ tt_entry_dtype = np.dtype([
     ('score', np.int16),      # Evaluation score / 評估分數
     ('depth', np.uint8),      # Search depth / 搜尋深度
     ('flag', np.uint8),       # Node type flag (Exact, Alpha, Beta) / 節點類型標誌
+    ('generation', np.uint8), # Generation ID for aging / 用於老化的世代 ID
     ('best_move', np.uint16)  # Best move found at this node / 此節點找到的最佳移動
 ])
 
@@ -54,6 +55,7 @@ def clear_transposition_table(tt):
         tt[i]['score'] = np.int16(0)
         tt[i]['depth'] = np.uint8(0)
         tt[i]['flag'] = np.uint8(0)
+        tt[i]['generation'] = np.uint8(0)
         tt[i]['best_move'] = np.uint16(0)
 
 @nb.njit(cache=True)
@@ -76,7 +78,7 @@ def probe_tt(tt, zobrist_key):
         return _EMPTY_TT_ENTRY
 
 @nb.njit(cache=True)
-def store_tt(tt, zobrist_key, depth, score, flag, best_move):
+def store_tt(tt, zobrist_key, depth, score, flag, best_move, current_generation):
     """
     使用深度優先替換策略將項目存儲在置換表中。
     
@@ -87,22 +89,23 @@ def store_tt(tt, zobrist_key, depth, score, flag, best_move):
         score (int): 評估分數。
         flag (int): 節點標誌（EXACT, ALPHA, BETA）。
         best_move (int): 最佳移動。
+        current_generation (int): 當前搜尋世代。
     """
     index = zobrist_key % len(tt)
     existing_entry = tt[index]
 
     # Replacement Strategy / 替換策略:
-    # 1. If the key matches (update same position), replace if new depth is >= existing depth.
-    #    This ensures we always have the freshest data for the current search path.
-    # 2. If the key is different (collision), replace if new depth is >= existing depth.
-    #    (Standard Depth-Preferred).
-    # 3. Tie-breaker: If depths are equal, we currently replace (favoring new).
+    # 1. If the key matches (update same position), replace if new depth is >= existing depth OR existing entry is old.
+    # 2. If the key is different (collision), replace if new depth is >= existing depth OR existing entry is old.
+    # Simply put: If existing entry is from an old generation, we always replace it (it's effectively empty/stale).
     
     replace = False
-    if zobrist_key == existing_entry['key']:
-        if depth >= existing_entry['depth']:
-            replace = True
+    
+    if existing_entry['generation'] != current_generation:
+        # Existing entry is old, replace it!
+        replace = True
     else:
+        # Entry is from current generation, apply standard depth check
         if depth >= existing_entry['depth']:
             replace = True
 
@@ -111,4 +114,5 @@ def store_tt(tt, zobrist_key, depth, score, flag, best_move):
         tt[index]['depth'] = np.uint8(depth)
         tt[index]['score'] = np.int16(score)
         tt[index]['flag'] = np.uint8(flag)
+        tt[index]['generation'] = np.uint8(current_generation)
         tt[index]['best_move'] = np.uint16(best_move)

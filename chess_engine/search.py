@@ -240,20 +240,46 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                         null_move_cutoffs, futility_pruned, razoring_used, rfp_pruned, lmp_pruned, probcut_pruned, qs_delta_pruned, qs_see_pruned,
                         iid_searches, singular_extensions)
 
+    # --- Repetition Detection ---
+    zobrist_key = game_state[4]
+    
+    # Store current key in path stack
+    search_context.ply_path_stack[ply] = zobrist_key
+    
+    repetition_count = 0
+    
+    # Check against Game History
+    for i in range(search_context.game_history_count):
+        if search_context.game_history[i] == zobrist_key:
+            repetition_count += 1
+            
+    # Check against Current Search Path (from root to ply-1)
+    for i in range(ply):
+        if search_context.ply_path_stack[i] == zobrist_key:
+            repetition_count += 1
+            
+    # Avoid 2nd repetition
+    # Crucial fix: Do not prune at the root (ply 0). If we are at the root, we must search for a move.
+    if ply > 0 and repetition_count >= 1:
+        search_context.pv_table[ply, :].fill(NO_MOVE)
+        return (np.int32(0), NO_MOVE, nodes_searched, quiescence_nodes, cutoffs, tt_hits,
+                null_move_cutoffs, futility_pruned, razoring_used, rfp_pruned, lmp_pruned, probcut_pruned, qs_delta_pruned, qs_see_pruned,
+                iid_searches, singular_extensions)
+
     if ply >= MAX_PLY:
         search_context.pv_table[ply, :].fill(NO_MOVE)
         return (evaluate_position(piece_bbs, occupancy_bbs, game_state, lazy=False), NO_MOVE, nodes_searched, quiescence_nodes, cutoffs, tt_hits,
                 null_move_cutoffs, futility_pruned, razoring_used, rfp_pruned, lmp_pruned, probcut_pruned, qs_delta_pruned, qs_see_pruned,
                 iid_searches, singular_extensions)
-
+    
     original_alpha = alpha
-    zobrist_key = game_state[4]
+    
+    # --- Initialization ---
+    moves_generated = False
+    moves = np.empty(0, dtype=np.uint16)
 
     tt_move = NO_MOVE
     tt_entry = probe_tt(search_context.transposition_table, zobrist_key)
-
-    moves_generated = False
-    moves = np.empty(0, dtype=np.uint16)
 
     if tt_entry['flag'] != TT_FLAG_NONE and tt_entry['depth'] >= depth:
         
@@ -531,14 +557,27 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
     tt_score = max_eval
     if tt_score > MATE_IN_MAX_PLY: tt_score += ply
     elif tt_score < -MATE_IN_MAX_PLY: tt_score -= ply
-    store_tt(search_context.transposition_table, zobrist_key, depth, tt_score, final_flag, best_move)
+    store_tt(search_context.transposition_table, zobrist_key, depth, tt_score, final_flag, best_move, search_context.tt_generation)
 
     return (max_eval, best_move, nodes_searched, quiescence_nodes, cutoffs, tt_hits,
             null_move_cutoffs, futility_pruned, razoring_used, rfp_pruned, lmp_pruned, probcut_pruned, qs_delta_pruned, qs_see_pruned,
             iid_searches, singular_extensions)
 
-def iterative_deepening_search(piece_bbs, occupancy_bbs, game_state, max_depth, time_config, search_context):
+def iterative_deepening_search(piece_bbs, occupancy_bbs, game_state, max_depth, time_config, search_context, game_history_list=None, tt_generation=0):
     start_time = time.time()
+
+    # --- Setup Game History ---
+    if game_history_list is not None:
+        count = len(game_history_list)
+        limit = min(count, 1024)
+        for i in range(limit):
+            search_context.game_history[i] = game_history_list[i]
+        search_context.game_history_count = limit
+    else:
+        search_context.game_history_count = 0
+        
+    # --- Setup TT Generation ---
+    search_context.tt_generation = tt_generation
 
     maximum_time_ms = time_config.get('maximum_time', 0)
     optimum_time_ms = time_config.get('optimum_time', 0)

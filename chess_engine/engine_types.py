@@ -2,6 +2,7 @@
 import numba
 import numpy as np
 from chess_engine.transposition_table import numba_tt_entry_type
+from chess_engine.constants import MAX_PLY
 
 """
 此模組定義了西洋棋引擎中使用的 Numba 類型和類別。
@@ -35,6 +36,10 @@ search_context_spec = [
     ('nodes_searched', numba.uint64),
     ('end_time', numba.float64),
     ('stop_flag', numba.boolean[:]),
+    ('game_history', numba.uint64[::1]),  # Array of Zobrist keys for game history
+    ('game_history_count', numba.int32),  # Valid number of entries in game_history
+    ('ply_path_stack', numba.uint64[::1]), # Stack of Zobrist keys for current search path
+    ('tt_generation', numba.uint8), # Current generation for TT aging
 ]
 
 @jitclass(search_context_spec)
@@ -50,6 +55,10 @@ class SearchContext:
         nodes_searched (numba.uint64): 已搜尋的節點總數。
         end_time (numba.float64): 搜尋應結束的目標時間戳。
         stop_flag (numba.boolean[:]): 用於信號通知搜尋停止的標誌陣列（作為引用傳遞）。
+        game_history (numba.uint64[::1]): 遊戲歷史記錄的 Zobrist 鍵列表。
+        game_history_count (numba.int32): game_history 的有效條目數量。
+        ply_path_stack (numba.uint64[::1]): 當前搜尋路徑的 Zobrist 鍵堆疊。
+        tt_generation (numba.uint8): 當前 TT 世代。
     """
     def __init__(self, transposition_table, killer_moves, pv_table, history_table):
         """
@@ -69,5 +78,11 @@ class SearchContext:
         self.end_time = 0.0
         # 使用陣列來包裝布林值，以便可以作為引用傳遞並在外部修改
         self.stop_flag = np.array([False], dtype=np.bool_)
+        
+        # Repetition Detection and TT Aging
+        self.game_history = np.zeros(1024, dtype=np.uint64) # Max 1024 moves in history
+        self.game_history_count = 0
+        self.ply_path_stack = np.zeros(MAX_PLY, dtype=np.uint64)
+        self.tt_generation = 0
 
 search_context_type = SearchContext.class_type.instance_type
