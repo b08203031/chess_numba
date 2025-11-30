@@ -23,7 +23,7 @@ from chess_engine.constants import (
     ENABLE_PROBCUT, PROBCUT_R, PROBCUT_R_PRIME, PROBCUT_MARGIN,
     ENABLE_NMP, ENABLE_RAZORING, ENABLE_FP, ENABLE_RFP, ENABLE_LMR, ENABLE_IID,
     ENABLE_SINGULAR_EXTENSIONS, MIN_SINGULAR_DEPTH, SINGULAR_EXTENSION_MARGIN,
-    STOP_SEARCH_FLAG, PAWN_PUSH_RANK_BONUS, PAWN_PUSH_ATTACK_BONUS
+    STOP_SEARCH_FLAG, PAWN_PUSH_RANK_BONUS, PAWN_PUSH_ATTACK_BONUS, MAX_HISTORY
 )
 from chess_engine.bitboard_utils import find_piece_type_on_square, KING_ATTACK_ZONES
 from chess_engine.debug_utils import log_info
@@ -57,6 +57,20 @@ def _quicksort_recursive(moves, scores, low, high):
         pi = _partition(moves, scores, low, high)
         _quicksort_recursive(moves, scores, low, pi - 1)
         _quicksort_recursive(moves, scores, pi + 1, high)
+
+@numba.njit(cache=True, boundscheck=False, fastmath=True)
+def update_history(history_table, piece_type, to_square, bonus):
+    """
+    Updates the history table using the gravity formula:
+    history += bonus - history * abs(bonus) / MAX_HISTORY
+    This automatically prevents overflow and scales updates.
+    """
+    current_value = history_table[piece_type, to_square]
+    clamped_bonus = min(max(bonus, -MAX_HISTORY), MAX_HISTORY)
+    
+    # Gravity formula
+    new_value = current_value + clamped_bonus - (current_value * abs(clamped_bonus)) // MAX_HISTORY
+    history_table[piece_type, to_square] = new_value
 
 @numba.njit(cache=True, boundscheck=False, fastmath=True)
 def score_moves(piece_bbs, occupancy_bbs, game_state, moves, tt_move, killer_moves_at_ply, history_table):
@@ -140,39 +154,52 @@ def quiescence_search(piece_bbs, occupancy_bbs, game_state, alpha, beta, ply, se
                 search_context.stop_flag[0] = True
                 return np.int32(0), q_nodes, delta_pruned, see_pruned
 
-    if ply >= MAX_QUIESCENCE_DEPTH:
-        return evaluate_position(piece_bbs, occupancy_bbs, game_state, lazy=False), q_nodes, delta_pruned, see_pruned
+    is_currently_in_check = is_in_check(piece_bbs, occupancy_bbs, game_state)
 
-    stand_pat = evaluate_position(piece_bbs, occupancy_bbs, game_state, lazy=False)
-    if stand_pat >= beta:
-        return beta, q_nodes, delta_pruned, see_pruned
-    alpha = max(alpha, stand_pat)
+    if is_currently_in_check:
+        # If in check, we must evade. No stand_pat (can't stand pat in check).
+        # We must generate ALL legal moves (evasions).
+        moves = generate_legal_moves(piece_bbs, occupancy_bbs, game_state)
+        if len(moves) == 0:
+            # Checkmate
+            return np.int32(-MATE_SCORE + ply), q_nodes, delta_pruned, see_pruned
+    else:
+        # If not in check, we can stand pat (static evaluation)
+        if ply >= MAX_QUIESCENCE_DEPTH:
+            return evaluate_position(piece_bbs, occupancy_bbs, game_state, lazy=False), q_nodes, delta_pruned, see_pruned
 
-    capture_moves = generate_captures(piece_bbs, occupancy_bbs, game_state)
-    if len(capture_moves) == 0:
-        return stand_pat, q_nodes, delta_pruned, see_pruned
+        stand_pat = evaluate_position(piece_bbs, occupancy_bbs, game_state, lazy=False)
+        if stand_pat >= beta:
+            return beta, q_nodes, delta_pruned, see_pruned
+        alpha = max(alpha, stand_pat)
 
-    for move in capture_moves:
-        if ENABLE_DELTA_PRUNING:
-            is_promotion = get_special_move_flag(move) == SPECIAL_MOVE_FLAG_PROMOTION
-            promotion_gain = MG_MATERIAL_VALUES[4] - MG_MATERIAL_VALUES[0] if is_promotion else 0
-            victim_type = find_piece_type_on_square(piece_bbs, get_to_square(move))
-            victim_value = MG_MATERIAL_VALUES[victim_type % 6] if victim_type != -1 else 0
-            potential_gain = victim_value + promotion_gain
-            
-            if stand_pat + potential_gain + DELTA_PRUNING_MARGIN < alpha:
-                unmake_info = make_move(piece_bbs, occupancy_bbs, game_state, move)
-                is_check = is_in_check(piece_bbs, occupancy_bbs, game_state)
-                unmake_move(piece_bbs, occupancy_bbs, game_state, move, unmake_info)
-                if not is_check:
-                    delta_pruned += 1
+        moves = generate_captures(piece_bbs, occupancy_bbs, game_state)
+        if len(moves) == 0:
+            return stand_pat, q_nodes, delta_pruned, see_pruned
+
+    for move in moves:
+        if not is_currently_in_check:
+            if ENABLE_DELTA_PRUNING:
+                is_promotion = get_special_move_flag(move) == SPECIAL_MOVE_FLAG_PROMOTION
+                promotion_gain = MG_MATERIAL_VALUES[4] - MG_MATERIAL_VALUES[0] if is_promotion else 0
+                victim_type = find_piece_type_on_square(piece_bbs, get_to_square(move))
+                victim_value = MG_MATERIAL_VALUES[victim_type % 6] if victim_type != -1 else 0
+                potential_gain = victim_value + promotion_gain
+                
+                if stand_pat + potential_gain + DELTA_PRUNING_MARGIN < alpha:
+                    unmake_info = make_move(piece_bbs, occupancy_bbs, game_state, move)
+                    is_check = is_in_check(piece_bbs, occupancy_bbs, game_state)
+                    unmake_move(piece_bbs, occupancy_bbs, game_state, move, unmake_info)
+                    if not is_check:
+                        delta_pruned += 1
+                        continue
+
+        if not is_currently_in_check:
+            if ENABLE_SEE_IN_QUIESCENCE:
+                side_to_move = game_state[0]
+                if see(piece_bbs, occupancy_bbs, side_to_move, get_from_square(move), get_to_square(move)) < SEE_THRESHOLD:
+                    see_pruned += 1
                     continue
-
-        if ENABLE_SEE_IN_QUIESCENCE:
-            side_to_move = game_state[0]
-            if see(piece_bbs, occupancy_bbs, side_to_move, get_from_square(move), get_to_square(move)) < SEE_THRESHOLD:
-                see_pruned += 1
-                continue
 
         unmake_info = make_move(piece_bbs, occupancy_bbs, game_state, move)
         score, child_q_nodes, child_delta_pruned, child_see_pruned = quiescence_search(
@@ -447,6 +474,10 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
     
     best_move, max_eval = NO_MOVE, -INFINITY
     quiet_move_counter, move_count = 0, 0
+    
+    # Track tried quiet moves for history malus
+    quiet_moves_tried = np.empty(len(moves), dtype=np.uint16)
+    quiet_moves_tried_count = 0
 
     for i in range(len(moves)):
         best_idx = i
@@ -479,6 +510,10 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
 
         if is_quiet_move:
             quiet_move_counter += 1
+            # Add to tried list for potential malus
+            quiet_moves_tried[quiet_moves_tried_count] = move
+            quiet_moves_tried_count += 1
+            
             if ENABLE_LMP and not is_currently_in_check:
                 if quiet_move_counter >= LMP_MOVE_COUNT[depth]:
                     lmp_pruned += 1
@@ -543,7 +578,16 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
             if is_quiet_move:
                 bonus = depth * depth
                 aggressor_type = find_piece_type_on_square(piece_bbs, get_from_square(move))
-                search_context.history_table[aggressor_type, get_to_square(move)] += bonus
+                
+                # Apply Gravity Bonus to the cutoff move
+                update_history(search_context.history_table, aggressor_type, get_to_square(move), bonus)
+                
+                # Apply History Malus to all previous quiet moves that failed low
+                for q_idx in range(quiet_moves_tried_count - 1): # Exclude the current move (last one added)
+                    bad_move = quiet_moves_tried[q_idx]
+                    bad_aggressor = find_piece_type_on_square(piece_bbs, get_from_square(bad_move))
+                    update_history(search_context.history_table, bad_aggressor, get_to_square(bad_move), -bonus)
+
                 if move != search_context.killer_moves[ply * 2]:
                     search_context.killer_moves[ply * 2 + 1] = search_context.killer_moves[ply * 2]
                     search_context.killer_moves[ply * 2] = move
@@ -565,6 +609,10 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
 
 def iterative_deepening_search(piece_bbs, occupancy_bbs, game_state, max_depth, time_config, search_context, game_history_list=None, tt_generation=0):
     start_time = time.time()
+    
+    # --- Decay History Table ---
+    # Divide history values by 2 to prioritize recent successful moves and reduce impact of old history
+    search_context.history_table[:] = search_context.history_table[:] // 2
 
     # --- Setup Game History ---
     if game_history_list is not None:
