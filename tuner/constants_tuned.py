@@ -1,4 +1,5 @@
 # chess_engine/constants.py
+#所有的參數
 
 import numpy as np
 
