@@ -308,29 +308,37 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
     tt_move = NO_MOVE
     tt_entry = probe_tt(search_context.transposition_table, zobrist_key)
 
-    if tt_entry['flag'] != TT_FLAG_NONE and tt_entry['depth'] >= depth:
-        
-        # With corrected 64-bit Zobrist keys, collisions are virtually impossible.
-        # We trust the TT move directly without expensive legal generation.
-        tt_hits += 1
-        tt_score = np.int32(tt_entry['score'])
-        if tt_score > MATE_IN_MAX_PLY: tt_score -= ply
-        elif tt_score < -MATE_IN_MAX_PLY: tt_score += ply
-
-        if tt_entry['flag'] == TT_FLAG_EXACT:
-            search_context.pv_table[ply, :].fill(NO_MOVE)
-            return (tt_score, tt_entry['best_move'], nodes_searched, quiescence_nodes, cutoffs, tt_hits,
-                    null_move_cutoffs, futility_pruned, razoring_used, rfp_pruned, lmp_pruned, probcut_pruned, qs_delta_pruned, qs_see_pruned,
-                    iid_searches, singular_extensions)
-        elif tt_entry['flag'] == TT_FLAG_ALPHA: beta = min(beta, tt_score)
-        elif tt_entry['flag'] == TT_FLAG_BETA: alpha = max(alpha, tt_score)
-
-        if alpha >= beta:
-            search_context.pv_table[ply, :].fill(NO_MOVE)
-            return (tt_score, tt_entry['best_move'], nodes_searched, quiescence_nodes, cutoffs, tt_hits,
-                    null_move_cutoffs, futility_pruned, razoring_used, rfp_pruned, lmp_pruned, probcut_pruned, qs_delta_pruned, qs_see_pruned,
-                    iid_searches, singular_extensions)
+    # 1. ALWAYS retrieve the best move if available (Critical for Move Ordering)
+    if tt_entry['flag'] != TT_FLAG_NONE:
         tt_move = tt_entry['best_move']
+
+        # 2. ONLY perform a Score Cutoff (Return) if:
+        #    a. We are NOT at the Root Node (ply > 0)
+        #    b. The stored depth is sufficient
+        #    c. The score bounds (Alpha/Beta) are valid for a cutoff
+        if ply > 0 and tt_entry['depth'] >= depth:
+            tt_hits += 1
+            tt_score = np.int32(tt_entry['score'])
+
+            # Adjust mate scores relative to the current ply
+            if tt_score > MATE_IN_MAX_PLY: tt_score -= ply
+            elif tt_score < -MATE_IN_MAX_PLY: tt_score += ply
+
+            should_cutoff = False
+            if tt_entry['flag'] == TT_FLAG_EXACT:
+                should_cutoff = True
+            elif tt_entry['flag'] == TT_FLAG_ALPHA and tt_score <= alpha:
+                should_cutoff = True
+                beta = min(beta, tt_score) # Technically not needed for return, but good for consistency
+            elif tt_entry['flag'] == TT_FLAG_BETA and tt_score >= beta:
+                should_cutoff = True
+                alpha = max(alpha, tt_score)
+
+            if should_cutoff:
+                search_context.pv_table[ply, :].fill(NO_MOVE)
+                return (tt_score, tt_entry['best_move'], nodes_searched, quiescence_nodes, cutoffs, tt_hits,
+                        null_move_cutoffs, futility_pruned, razoring_used, rfp_pruned, lmp_pruned, probcut_pruned, qs_delta_pruned, qs_see_pruned,
+                        iid_searches, singular_extensions)
 
     if ENABLE_IID and depth >= 8 and tt_move == NO_MOVE:
         iid_searches += 1
