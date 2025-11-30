@@ -36,6 +36,22 @@ def run_search_test():
     """
     Runs a search test from a given position and prints statistics.
     """
+
+    # 1. Warm-up (triggers JIT compilation)
+    print("--- WARMING UP (Compiling JIT functions) ---")
+    fen_start = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
+    p_bbs, o_bbs, g_state = parse_fen(fen_start)
+    tt = create_transposition_table(16)
+    killer_moves = np.zeros(256, dtype=np.uint16)
+    history_table = np.zeros((12, 64), dtype=np.int32)
+    pv_table = np.zeros((128, 128), dtype=np.uint16)
+    ctx = SearchContext(tt, killer_moves, pv_table, history_table)
+    
+    # Run a quick search
+    iterative_deepening_search(p_bbs, o_bbs, g_state, 2, {'optimum_time': 0, 'maximum_time': 0}, ctx)
+    print("--- WARM-UP COMPLETE ---\n")
+
+    # 2. Actual Search Test
     fen = "r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - "
     depth = 10
     time_limit = 3000
@@ -51,6 +67,8 @@ def run_search_test():
     
     # Clear TT before each search
     clear_transposition_table(transposition_table)
+    ctx.killer_moves.fill(0)
+    ctx.history_table.fill(0)
 
     start_time = time.time()
     

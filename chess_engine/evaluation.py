@@ -689,7 +689,7 @@ def evaluate_position(piece_bbs, occupancy_bbs, game_state, lazy: bool = False):
     mg_score += mg_coord
     eg_score += eg_coord
 
-    # --- 6. 加入棋子機動性分數 ---
+    # --- 6. 加入棋子機動性分數 --- (暫時移除機動性評估以加快速度)
     mg_mobility, eg_mobility = evaluate_mobility(piece_bbs, occupancy_bbs)
     mg_score += mg_mobility
     eg_score += eg_mobility

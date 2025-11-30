@@ -347,7 +347,7 @@ PAWN_PUSH_RANK_BONUS = 2000
 PAWN_PUSH_ATTACK_BONUS = 3000
 
 # History Heuristic Constants
-MAX_HISTORY = 16384 # Max value for history table to prevent overflow and saturation
+MAX_HISTORY = 3500 # Max value for history table to prevent overflow and saturation
 
 # Special value to indicate that the search was stopped due to timeout
 # 特殊值，表示搜尋因超時而停止
@@ -410,7 +410,7 @@ PROBCUT_R_PRIME = 4
 PROBCUT_MARGIN = 150 # centipawns
 
 # Delta Pruning
-DELTA_PRUNING_MARGIN = 500
+DELTA_PRUNING_MARGIN = 300
 
 # --- Static Exchange Evaluation (SEE) Threshold / SEE 閾值 ---
 SEE_THRESHOLD = -50  # centipawns
