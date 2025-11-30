@@ -32,8 +32,6 @@ search_context_spec = [
     ('killer_moves', numba.uint16[::1]),
     ('pv_table', numba.uint16[:, :]),
     ('history_table', numba.int32[:, :]),
-    ('repetition_table', numba.uint64[::1]),
-    ('repetition_index', numba.uint16),
     ('nodes_searched', numba.uint64),
     ('end_time', numba.float64),
     ('stop_flag', numba.boolean[:]),
@@ -49,8 +47,6 @@ class SearchContext:
         killer_moves (numba.uint16[::1]): 殺手步表。
         pv_table (numba.uint16[:, :]): 主要變例（PV）表。
         history_table (numba.int32[:, :]): 歷史啟發表。
-        repetition_table (numba.uint64[::1]): 用於檢測重複局面的 Zobrist 鍵值歷史記錄。
-        repetition_index (numba.uint16): 當前 repetition_table 的索引。
         nodes_searched (numba.uint64): 已搜尋的節點總數。
         end_time (numba.float64): 搜尋應結束的目標時間戳。
         stop_flag (numba.boolean[:]): 用於信號通知搜尋停止的標誌陣列（作為引用傳遞）。
@@ -69,9 +65,6 @@ class SearchContext:
         self.killer_moves = killer_moves
         self.pv_table = pv_table
         self.history_table = history_table
-        # Allocate a sufficiently large array for game history + search depth
-        self.repetition_table = np.zeros(1024, dtype=np.uint64)
-        self.repetition_index = np.uint16(0)
         self.nodes_searched = np.uint64(0)
         self.end_time = 0.0
         # 使用陣列來包裝布林值，以便可以作為引用傳遞並在外部修改
