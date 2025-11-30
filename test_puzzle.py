@@ -765,6 +765,24 @@ def run_puzzle_test():
     """
     Runs a search test for each puzzle and prints statistics.
     """
+    from chess_engine.engine_types import SearchContext
+
+
+    # 1. Warm-up (triggers JIT compilation)
+    print("--- WARMING UP (Compiling JIT functions) ---")
+    fen_start = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
+    p_bbs, o_bbs, g_state = parse_fen(fen_start)
+    tt = create_transposition_table(16)
+    killer_moves = np.zeros(256, dtype=np.uint16)
+    history_table = np.zeros((12, 64), dtype=np.int32)
+    pv_table = np.zeros((128, 128), dtype=np.uint16)
+    ctx = SearchContext(tt, killer_moves, pv_table, history_table)
+    
+    # Run a quick search
+    iterative_deepening_search(p_bbs, o_bbs, g_state, 2, {'optimum_time': 0, 'maximum_time': 0}, ctx)
+    print("--- WARM-UP COMPLETE ---\n")
+
+
     depth = 20  # Set a high depth, will be stopped by time
     time_limit_ms = 3000
 
@@ -779,7 +797,7 @@ def run_puzzle_test():
 
     script_start_time = time.time()
 
-    from chess_engine.engine_types import SearchContext
+    
 
     for i, puzzle in enumerate(puzzles):
         print("New game started. Caches and stats cleared.")
@@ -793,7 +811,10 @@ def run_puzzle_test():
         pv_table = np.zeros((MAX_PLY, MAX_PLY), dtype=np.uint16)
         history_table = np.zeros((12, 64), dtype=np.int32) # Note: history_table size is 12x64 in search.py
         
+        # Clear TT before each search
         clear_transposition_table(transposition_table)
+        ctx.killer_moves.fill(0)
+        ctx.history_table.fill(0)
         
         search_context = SearchContext(transposition_table, killer_moves, pv_table, history_table)
 
