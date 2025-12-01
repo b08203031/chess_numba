@@ -18,13 +18,7 @@ from chess_engine.move import move_to_uci
 
 # PGN from the task
 PGN_TEXT = """
-1. d4 d5 2. c4 e6 3. Nf3 Nf6 4. Nc3 Be7 5. Bf4 O-O 6. e3 b6 7. cxd5 Nxd5 8. Nxd5
-Qxd5 9. Be2 Qa5+ 10. Nd2 Ba6 11. O-O c5 12. Nc4 Bxc4 13. Bxc4 cxd4 14. Qf3 Nd7
-15. Qb7 Rad8 16. exd4 Nf6 17. Bxe6 fxe6 18. Qxe7 Rfe8 19. Qb7 Rxd4 20. Be3 Rd7
-21. Qc6 Qd5 22. Qa4 Rc8 23. h3 Rc4 24. Qb3 Rc6 25. Qa3 Kf7 26. Rac1 Rxc1 27.
-Rxc1 Qb5 28. Bf4 Qe2 29. Bg3 Ne4 30. Kh2 Nxg3 31. Qxg3 Qxb2 32. Rc3 Qd2 33. Rf3+
-Kg8 34. Qb8+ Rd8 35. Qxa7 Qd6+ 36. Rg3 g6 37. Qa6 Rf8 38. Qe2 Rf5 39. a4 Rf4 40.
-Qc2 Rd4 41. Qc8+ Kg7 42. Qb7+ Kg8 1/2-1/2
+1. e4 e5 2. Nf3 Nc6 3. Nc3 Nf6 4. Nxe5 Nxe5 5. d4 Nc6 6. d5 Nb4 7. a3 Na6 8. e5 Qe7 9. Qe2 Ng8 10. b4 g6 11. Bf4 Bh6 12. Bg3 c6 13. d6 Qe6 14. Qe4 b5 15. Rd1 Qf5 16. Qxf5 gxf5 17. f4 f6 18. e6 dxe6 19. Be2 Kd7 20. O-O Bg7 21. Nxb5 cxb5 22. Bxb5+ Kd8 23. Bc6 Rb8 24. b5 Nc5 25. Bf2 Ne4 26. Bxa7 Rb7 27. Bxb7 Bxb7 28. d7 Bd5 29. c4 Ne7 30. Rfe1 Kxd7 31. b6 Kc8 32. cxd5 Nxd5 33. Rxd5 exd5 34. Rc1+ Kb7 35. Rc7+ Ka6 36. Rxg7 Rd8 37. Rc7 Nd6 38. Kf2 h6 39. a4 d4 40. Ke2 Ne4 41. b7 d3+ 42. Kd1 Kxa7 43. Rc8 Kxb7 44. Rxd8 Kc7 45. Rd4 Kb6 46. Kc1 d2+ 47. Kc2 Ka5 48. h4 h5 49. Kd1 Ka6 50. Rxe4 fxe4 51. Kxd2 f5 52. Ke3 Kb6
 """
 
 def main():

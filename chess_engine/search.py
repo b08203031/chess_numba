@@ -157,6 +157,9 @@ def quiescence_search(piece_bbs, occupancy_bbs, game_state, alpha, beta, ply, se
     is_currently_in_check = is_in_check(piece_bbs, occupancy_bbs, game_state)
 
     if is_currently_in_check:
+        if ply >= MAX_PLY:
+            return evaluate_position(piece_bbs, occupancy_bbs, game_state, lazy=False), q_nodes, delta_pruned, see_pruned
+
         # If in check, we must evade. No stand_pat (can't stand pat in check).
         # We must generate ALL legal moves (evasions).
         moves = generate_legal_moves(piece_bbs, occupancy_bbs, game_state)
@@ -267,6 +270,11 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                         null_move_cutoffs, futility_pruned, razoring_used, rfp_pruned, lmp_pruned, probcut_pruned, qs_delta_pruned, qs_see_pruned,
                         iid_searches, singular_extensions)
 
+    if ply >= MAX_PLY:
+        return (evaluate_position(piece_bbs, occupancy_bbs, game_state, lazy=False), NO_MOVE, nodes_searched, quiescence_nodes, cutoffs, tt_hits,
+                null_move_cutoffs, futility_pruned, razoring_used, rfp_pruned, lmp_pruned, probcut_pruned, qs_delta_pruned, qs_see_pruned,
+                iid_searches, singular_extensions)
+
     # --- Repetition Detection ---
     zobrist_key = game_state[4]
     
@@ -292,13 +300,10 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
         return (np.int32(0), NO_MOVE, nodes_searched, quiescence_nodes, cutoffs, tt_hits,
                 null_move_cutoffs, futility_pruned, razoring_used, rfp_pruned, lmp_pruned, probcut_pruned, qs_delta_pruned, qs_see_pruned,
                 iid_searches, singular_extensions)
-
-    if ply >= MAX_PLY:
-        search_context.pv_table[ply, :].fill(NO_MOVE)
-        return (evaluate_position(piece_bbs, occupancy_bbs, game_state, lazy=False), NO_MOVE, nodes_searched, quiescence_nodes, cutoffs, tt_hits,
-                null_move_cutoffs, futility_pruned, razoring_used, rfp_pruned, lmp_pruned, probcut_pruned, qs_delta_pruned, qs_see_pruned,
-                iid_searches, singular_extensions)
     
+    # Initialize PV for this ply to avoid ghost moves from previous searches
+    search_context.pv_table[ply, ply] = NO_MOVE
+
     original_alpha = alpha
     
     # --- Initialization ---
@@ -574,10 +579,14 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
         if evaluation > max_eval:
             max_eval, best_move = evaluation, move
             search_context.pv_table[ply, ply] = move
-            i, j = ply + 1, ply + 1
-            while j < MAX_PLY and search_context.pv_table[ply + 1, j] != NO_MOVE:
-                search_context.pv_table[ply, i] = search_context.pv_table[ply + 1, j]
-                i += 1; j += 1
+            
+            i = ply + 1
+            if ply + 1 < MAX_PLY:
+                j = ply + 1
+                while j < MAX_PLY and search_context.pv_table[ply + 1, j] != NO_MOVE:
+                    search_context.pv_table[ply, i] = search_context.pv_table[ply + 1, j]
+                    i += 1; j += 1
+            
             if i < MAX_PLY: search_context.pv_table[ply, i] = NO_MOVE
 
         alpha = max(alpha, evaluation)
@@ -692,7 +701,14 @@ def iterative_deepening_search(piece_bbs, occupancy_bbs, game_state, max_depth, 
              best_move_from_last_depth = tt_entry['best_move']
         
         elapsed_time_ms = (time.time() - start_time) * 1000
-        pv_moves = [move_to_uci(search_context.pv_table[0, i]) for i in range(MAX_PLY) if search_context.pv_table[0, i] != NO_MOVE]
+        
+        pv_moves = []
+        for i in range(MAX_PLY):
+            m = search_context.pv_table[0, i]
+            if m == NO_MOVE:
+                break
+            pv_moves.append(move_to_uci(m))
+        
         pv_string = " ".join(pv_moves)
         uci_score_string = format_score_for_uci(score)
 
