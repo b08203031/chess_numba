@@ -300,14 +300,14 @@ CONNECTED_PASSED_PAWN_BONUS = np.array([40, 80], dtype=np.int32) # MG, EG
 # Attack units for each piece type. Order: P, N, B, R, Q
 # 每個棋子類型的攻擊單位。順序：兵、馬、象、車、后
 # Updated: Aggressive weights for R and Q
-KING_SAFETY_ATTACK_UNITS = np.array([1, 3, 4, 7, 11], dtype=np.int32) # P, N, B, R, Q
+KING_SAFETY_ATTACK_UNITS = np.array([1, 4, 4, 9, 15], dtype=np.int32) # P, N, B, R, Q
 
 # A non-linear table where the index is the sum of attack units, and the value is the penalty.
 # The penalty grows exponentially, rewarding multi-piece attacks.
 # 一個非線性表格，索引是攻擊單位的總和，值是懲罰分數。懲罰呈指數增長，獎勵多子協同攻擊。
 # Updated: Steeper, quadratic-plus growth curve
 KING_SAFETY_TABLE = np.array([
-    min(int((i**2) / 2.5), 1000) for i in range(100)
+    min(int(i**2) / 2, 1000) for i in range(100)
 ], dtype=np.int32)
 
 # --- Phase 3: King Tropism / 王的向性 ---
@@ -330,6 +330,13 @@ PAWN_STORM_PENALTY_BY_RANK = np.array([0, 0, 80, 50, 30, 10, 5, 0], dtype=np.int
 SCALING_WEIGHTS = np.array([0, 4, 4, 6, 10], dtype=np.int32) # N, B, R, Q - for scaling factor / 用於縮放因子的權重
 MAX_SCALING_MATERIAL = (2*4 + 2*4 + 2*6 + 1*10) # Sum of all weights for one side / 一方所有權重的總和
 
+PAWN_SHIELD_MISSING_PENALTY = 60
+PAWN_SHIELD_INTACT_BONUS = 20
+PAWN_SHIELD_ADVANCED_BONUS = 10
+PAWN_SHIELD_PUSHED_PENALTY = 20
+KING_OPEN_FILE_PENALTY = 50
+KING_SEMI_OPEN_FILE_PENALTY = 25
+
 EG_SAFETY_SCALE = 0.5 # Scale down endgame king safety impact / 縮減殘局王的安全影響
 
 # =============================================================================
@@ -345,6 +352,9 @@ NO_MOVE = np.uint16(0)
 # Move Ordering Bonuses
 PAWN_PUSH_RANK_BONUS = 2000
 PAWN_PUSH_ATTACK_BONUS = 3000
+KING_TROPISM_BONUS = 2500 # Bonus for improving king tropism
+KING_ATTACK_BONUS = 2000 # Bonus for quiet moves attacking the opponent's King zone
+ROOK_QUEEN_BATTERY_BONUS = 5000 # Bonus for Rook moving to same file/rank as Queen
 
 # History Heuristic Constants
 MAX_HISTORY = 2048 # Max value for history table to prevent overflow and saturation

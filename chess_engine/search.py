@@ -23,7 +23,8 @@ from chess_engine.constants import (
     ENABLE_PROBCUT, PROBCUT_R, PROBCUT_R_PRIME, PROBCUT_MARGIN,
     ENABLE_NMP, ENABLE_RAZORING, ENABLE_FP, ENABLE_RFP, ENABLE_LMR, ENABLE_IID,
     ENABLE_SINGULAR_EXTENSIONS, MIN_SINGULAR_DEPTH, SINGULAR_EXTENSION_MARGIN,
-    STOP_SEARCH_FLAG, PAWN_PUSH_RANK_BONUS, PAWN_PUSH_ATTACK_BONUS, MAX_HISTORY
+    STOP_SEARCH_FLAG, PAWN_PUSH_RANK_BONUS, PAWN_PUSH_ATTACK_BONUS, MAX_HISTORY,
+    KING_TROPISM_BONUS
 )
 from chess_engine.bitboard_utils import find_piece_type_on_square, KING_ATTACK_ZONES
 from chess_engine.debug_utils import log_info
@@ -117,10 +118,29 @@ def score_moves(piece_bbs, occupancy_bbs, game_state, moves, tt_move, killer_mov
                         if is_advanced_pawn:
                             score += PAWN_PUSH_RANK_BONUS
                             
-                        # King Attack Bonus
-                        if opponent_king_sq != -1:
-                             if (KING_ATTACK_ZONES[opponent_king_sq] & BB_SQUARES[to_square]) != 0:
+                    # --- King Attack Bonus (All Pieces) ---
+                    # Encourages moves that place pieces near the opponent's king
+                    if opponent_king_sq != -1:
+                            if (KING_ATTACK_ZONES[opponent_king_sq] & BB_SQUARES[to_square]) != 0:
                                 score += PAWN_PUSH_ATTACK_BONUS
+
+                            # --- King Tropism Bonus ---
+                            # Reward moves that decrease distance to the opponent's king
+                            k_file = opponent_king_sq % 8
+                            k_rank = opponent_king_sq // 8
+                            
+                            from_sq = get_from_square(move)
+                            from_file = from_sq % 8
+                            from_rank = from_sq // 8
+                            
+                            to_file = to_square % 8
+                            to_rank = to_square // 8
+                            
+                            dist_before = abs(from_file - k_file) + abs(from_rank - k_rank)
+                            dist_after = abs(to_file - k_file) + abs(to_rank - k_rank)
+                            
+                            if dist_after < dist_before:
+                                score += KING_TROPISM_BONUS
 
         scores[i] = score
     return scores
@@ -556,6 +576,29 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
             evaluation = -evaluation
         else:
             lmr = LMR_REDUCTION if ENABLE_LMR and depth >= LMR_MIN_DEPTH and is_quiet_move and quiet_move_counter >= LMR_MIN_QUIET_MOVE_INDEX else 0
+            
+            # Reduce LMR for moves that improve King Tropism
+            if lmr > 0:
+                side_to_move = game_state[0]
+                opponent_king_bb = piece_bbs[11] if side_to_move == 0 else piece_bbs[5]
+                if opponent_king_bb != 0:
+                    opponent_king_sq = get_lsb_index(opponent_king_bb)
+                    k_file = opponent_king_sq % 8
+                    k_rank = opponent_king_sq // 8
+                    
+                    from_sq = get_from_square(move)
+                    from_file = from_sq % 8
+                    from_rank = from_sq // 8
+                    
+                    to_file = to_sq % 8
+                    to_rank = to_sq // 8
+                    
+                    dist_before = abs(from_file - k_file) + abs(from_rank - k_rank)
+                    dist_after = abs(to_file - k_file) + abs(to_rank - k_rank)
+                    
+                    if dist_after < dist_before:
+                        lmr = 0
+
             evaluation, _, child_nodes, child_q_nodes, child_cutoffs, child_tt_hits, child_nmc, child_fp, child_ru, child_rfp, child_lmp, child_pcp, child_qdp, child_qsp, child_iid, child_se = _search(
                 piece_bbs, occupancy_bbs, game_state, search_depth - lmr, -alpha - 1, -alpha, search_context, ply + 1, NO_MOVE)
             evaluation = -evaluation

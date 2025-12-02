@@ -237,23 +237,23 @@ def _evaluate_pawn_shield_for_color(king_sq, friendly_pawns, enemy_pawns, color)
         pawns_on_file = friendly_pawns & file_mask
 
         if not pawns_on_file:
-            score -= 20
+            score -= PAWN_SHIELD_MISSING_PENALTY # Pawn shield missing
         else:
             pawn_sq = get_lsb_index(pawns_on_file)
             pawn_rank = pawn_sq // 8
             
             if pawn_rank == original_rank:
-                score += 10
+                score += PAWN_SHIELD_INTACT_BONUS # Intact shield bonus increased
             elif pawn_rank == one_step_rank:
-                score += 5
+                score += PAWN_SHIELD_ADVANCED_BONUS # Advanced shield bonus increased
             else:
-                score -= 10
+                score -= PAWN_SHIELD_PUSHED_PENALTY # Pushed shield penalty increased
 
         if not (friendly_pawns & file_mask):
             if not (enemy_pawns & file_mask):
-                score -= 20
+                score -= KING_OPEN_FILE_PENALTY # Open file penalty increased from 20
             else:
-                score -= 10
+                score -= KING_SEMI_OPEN_FILE_PENALTY # Semi-open file penalty increased from 10
 
     return score
 
