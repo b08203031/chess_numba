@@ -24,11 +24,13 @@ from chess_engine.constants import (
     ENABLE_NMP, ENABLE_RAZORING, ENABLE_FP, ENABLE_RFP, ENABLE_LMR, ENABLE_IID,
     ENABLE_SINGULAR_EXTENSIONS, MIN_SINGULAR_DEPTH, SINGULAR_EXTENSION_MARGIN,
     STOP_SEARCH_FLAG, PAWN_PUSH_RANK_BONUS, PAWN_PUSH_ATTACK_BONUS, MAX_HISTORY,
-    KING_TROPISM_BONUS
+    KING_TROPISM_BONUS, SCORE_TT_MOVE, SCORE_GOOD_CAPTURE_BONUS, SCORE_KILLER_1,
+    SCORE_KILLER_2, SCORE_COUNTER_MOVE, SCORE_BAD_CAPTURE_PENALTY, ENABLE_SEE_PRUNING,
+    SEE_QUIET_MARGIN
 )
 from chess_engine.bitboard_utils import find_piece_type_on_square, KING_ATTACK_ZONES
 from chess_engine.debug_utils import log_info
-from chess_engine.see import see
+from chess_engine.see import see, see_ge
 from chess_engine.transposition_table import (
     probe_tt, store_tt, numba_tt_entry_type,
     TT_FLAG_NONE, TT_FLAG_EXACT, TT_FLAG_ALPHA, TT_FLAG_BETA
@@ -87,22 +89,27 @@ def score_moves(piece_bbs, occupancy_bbs, game_state, moves, tt_move, killer_mov
         move = moves[i]
         score = 0
         if move == tt_move:
-            score = 100_000
+            score = SCORE_TT_MOVE
         else:
             to_square = get_to_square(move)
+            from_square = get_from_square(move)
             is_capture = (opponent_pieces_bb & BB_SQUARES[to_square]) != 0
             if is_capture:
-                aggressor_type = find_piece_type_on_square(piece_bbs, get_from_square(move))
+                aggressor_type = find_piece_type_on_square(piece_bbs, from_square)
                 victim_type = find_piece_type_on_square(piece_bbs, to_square)
                 if victim_type != -1:
-                    score = 10_000 + (MG_MATERIAL_VALUES[victim_type % 6] - MG_MATERIAL_VALUES[aggressor_type % 6])
+                    base_score = MG_MATERIAL_VALUES[victim_type % 6] - MG_MATERIAL_VALUES[aggressor_type % 6]
+                    if see_ge(piece_bbs, occupancy_bbs, side_to_move, from_square, to_square, 0):
+                        score = SCORE_GOOD_CAPTURE_BONUS + base_score
+                    else:
+                        score = SCORE_BAD_CAPTURE_PENALTY + base_score
             else:
                 if move == killer_moves_at_ply[0]:
-                    score = 5_000
+                    score = SCORE_KILLER_1
                 elif move == killer_moves_at_ply[1]:
-                    score = 4_000
+                    score = SCORE_KILLER_2
                 else:
-                    aggressor_type = find_piece_type_on_square(piece_bbs, get_from_square(move))
+                    aggressor_type = find_piece_type_on_square(piece_bbs, from_square)
                     score = history_table[aggressor_type, to_square]
                     
                     # --- Pawn Push Bonuses ---
@@ -220,7 +227,8 @@ def quiescence_search(piece_bbs, occupancy_bbs, game_state, alpha, beta, ply, se
         if not is_currently_in_check:
             if ENABLE_SEE_IN_QUIESCENCE:
                 side_to_move = game_state[0]
-                if see(piece_bbs, occupancy_bbs, side_to_move, get_from_square(move), get_to_square(move)) < SEE_THRESHOLD:
+                # Use see_ge for faster cutoff. If SEE < SEE_THRESHOLD, prune.
+                if not see_ge(piece_bbs, occupancy_bbs, side_to_move, get_from_square(move), get_to_square(move), SEE_THRESHOLD):
                     see_pruned += 1
                     continue
 
@@ -552,6 +560,15 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                     lmp_pruned += 1
                     unmake_move(piece_bbs, occupancy_bbs, game_state, move, unmake_info)
                     break
+
+            # SEE Pruning for Quiet Moves (History Guard)
+            # If a quiet move loses material (very negative SEE), prune it.
+            # Stockfish uses depth-dependent threshold.
+            if ENABLE_SEE_PRUNING and depth <= 8:
+                 if not see_ge(piece_bbs, occupancy_bbs, game_state[0], from_sq, to_sq, -SEE_QUIET_MARGIN * depth):
+                      futility_pruned += 1 # Count as general pruning
+                      unmake_move(piece_bbs, occupancy_bbs, game_state, move, unmake_info)
+                      continue
 
         if ENABLE_FP and is_quiet_move and not is_currently_in_check and static_score != -INFINITY:
             margin = 0

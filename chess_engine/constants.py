@@ -350,6 +350,13 @@ MATE_IN_MAX_PLY = MATE_SCORE - MAX_PLY
 NO_MOVE = np.uint16(0)
 
 # Move Ordering Bonuses
+SCORE_TT_MOVE = 100000
+SCORE_GOOD_CAPTURE_BONUS = 20000
+SCORE_KILLER_1 = 15000
+SCORE_KILLER_2 = 14000
+SCORE_COUNTER_MOVE = 10000
+SCORE_BAD_CAPTURE_PENALTY = -5000
+
 PAWN_PUSH_RANK_BONUS = 2000
 PAWN_PUSH_ATTACK_BONUS = 3000
 KING_TROPISM_BONUS = 2500 # Bonus for improving king tropism
@@ -374,6 +381,7 @@ ENABLE_PROBCUT = True       # ProbCut
 ENABLE_DELTA_PRUNING = True # Delta Pruning in Quiescence Search
 ENABLE_IID = True           # Internal Iterative Deepening
 ENABLE_SINGULAR_EXTENSIONS = True # Singular Extensions
+ENABLE_SEE_PRUNING = True   # SEE Pruning in Search (Quiet Moves)
 
 
 # IID and Singular Extension Parameters
@@ -424,7 +432,8 @@ DELTA_PRUNING_MARGIN = 300
 
 # --- Static Exchange Evaluation (SEE) Threshold / SEE 閾值 ---
 SEE_THRESHOLD = -50  # centipawns
-ENABLE_SEE_IN_QUIESCENCE = False # Master switch to enable/disable SEE in quiescence search / 啟用/禁用靜態搜尋中 SEE 的總開關
+ENABLE_SEE_IN_QUIESCENCE = True # Master switch to enable/disable SEE in quiescence search / 啟用/禁用靜態搜尋中 SEE 的總開關
+SEE_QUIET_MARGIN = 50 # Base margin for quiet move SEE pruning (-50 * depth)
 
 # =============================================================================
 # --- Bitboard Utilities Constants / 位元棋盤工具常量 ---
