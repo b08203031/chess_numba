@@ -15,7 +15,7 @@ else:
     STOCKFISH_PATH = "./stockfish/src/stockfish"
     MY_ENGINE_CMD = ["python3", "-u", "main.py"]
 
-STOCKFISH_TIME_MS = 100
+STOCKFISH_TIME_MS = 1
 MY_ENGINE_TIME_MS = 3000
 
 def run_match():

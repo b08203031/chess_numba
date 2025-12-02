@@ -25,7 +25,7 @@ def run_debug():
     print("--- WARM-UP COMPLETE ---\n")
 
     # 2. Actual Benchmark
-    fen = "5bk1/P4p1p/1N1r2p1/4n3/1RPpP1n1/Q4NPq/2B1PP1P/2BR2K1 b - - 0 1"
+    fen = "8/6pk/5p2/p1bN3p/P4P2/1bN4P/1Pr3P1/1R5K w - - 2 39"
     print(f"Analyzing FEN: {fen}")
 
     # Clear TT for fair test
