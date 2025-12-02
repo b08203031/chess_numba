@@ -26,7 +26,7 @@ from chess_engine.constants import (
     STOP_SEARCH_FLAG, PAWN_PUSH_RANK_BONUS, PAWN_PUSH_ATTACK_BONUS, MAX_HISTORY,
     KING_TROPISM_BONUS, SCORE_TT_MOVE, SCORE_GOOD_CAPTURE_BONUS, SCORE_KILLER_1,
     SCORE_KILLER_2, SCORE_COUNTER_MOVE, SCORE_BAD_CAPTURE_PENALTY, ENABLE_SEE_PRUNING,
-    SEE_QUIET_MARGIN
+    SEE_QUIET_MARGIN, SEE_CAPTURE_MARGIN, SEE_QS_FUTILITY_MARGIN
 )
 from chess_engine.bitboard_utils import find_piece_type_on_square, KING_ATTACK_ZONES
 from chess_engine.debug_utils import log_info
@@ -203,16 +203,21 @@ def quiescence_search(piece_bbs, occupancy_bbs, game_state, alpha, beta, ply, se
             return beta, q_nodes, delta_pruned, see_pruned
         alpha = max(alpha, stand_pat)
 
+        futility_base = stand_pat + SEE_QS_FUTILITY_MARGIN
+
         moves = generate_captures(piece_bbs, occupancy_bbs, game_state)
         if len(moves) == 0:
             return stand_pat, q_nodes, delta_pruned, see_pruned
 
     for move in moves:
+        to_sq = get_to_square(move)
+        victim_type = find_piece_type_on_square(piece_bbs, to_sq)
+        is_promotion = get_special_move_flag(move) == SPECIAL_MOVE_FLAG_PROMOTION
+
         if not is_currently_in_check:
+            # 1. Delta Pruning
             if ENABLE_DELTA_PRUNING:
-                is_promotion = get_special_move_flag(move) == SPECIAL_MOVE_FLAG_PROMOTION
                 promotion_gain = MG_MATERIAL_VALUES[4] - MG_MATERIAL_VALUES[0] if is_promotion else 0
-                victim_type = find_piece_type_on_square(piece_bbs, get_to_square(move))
                 victim_value = MG_MATERIAL_VALUES[victim_type % 6] if victim_type != -1 else 0
                 potential_gain = victim_value + promotion_gain
                 
@@ -224,11 +229,24 @@ def quiescence_search(piece_bbs, occupancy_bbs, game_state, alpha, beta, ply, se
                         delta_pruned += 1
                         continue
 
-        if not is_currently_in_check:
+            side_to_move = game_state[0]
+            from_sq = get_from_square(move)
+
+            # 2. Futility Pruning for Captures in QS
+            # If static eval + value of piece we are going to capture is much lower than alpha
+            if not is_promotion and futility_base > -INFINITY: # Ensure futility_base is valid
+                 value_estimate = futility_base + (MG_MATERIAL_VALUES[victim_type % 6] if victim_type != -1 else 0)
+                 if value_estimate <= alpha:
+                      # Try pruning based on SEE: if SEE < alpha - futility_base, prune
+                      if not see_ge(piece_bbs, occupancy_bbs, side_to_move, from_sq, to_sq, alpha - futility_base):
+                           # Best value update is tricky in recursive struct, assume skip
+                           see_pruned += 1
+                           continue
+
+            # 3. Bad Capture Pruning (General)
             if ENABLE_SEE_IN_QUIESCENCE:
-                side_to_move = game_state[0]
                 # Use see_ge for faster cutoff. If SEE < SEE_THRESHOLD, prune.
-                if not see_ge(piece_bbs, occupancy_bbs, side_to_move, get_from_square(move), get_to_square(move), SEE_THRESHOLD):
+                if not see_ge(piece_bbs, occupancy_bbs, side_to_move, from_sq, to_sq, SEE_THRESHOLD):
                     see_pruned += 1
                     continue
 
@@ -540,6 +558,20 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
         is_promotion = get_special_move_flag(move) == SPECIAL_MOVE_FLAG_PROMOTION
         is_pseudo_quiet = not is_capture and not is_promotion
 
+        # --- Pruning at shallow depth (Captures) ---
+        if ENABLE_SEE_PRUNING and not is_pseudo_quiet and not is_currently_in_check and depth < 6:
+             # Prune bad captures using SEE
+             # Threshold: -154 * depth (approx)
+             # NOTE: Checking `gives_check` before pruning is expensive (requires make/unmake or specialized logic).
+             # Stockfish checks `givesCheck` first. Here `is_giving_check_after_move` is computed AFTER make_move.
+             # We can do a preliminary SEE check. If it's REALLY bad, we prune even if it gives check?
+             # Stockfish: `if (capture || givesCheck) ... if (!pos.see_ge(move, -154 * depth ...))`
+             # So yes, it prunes checks too if SEE is bad enough.
+             # We use -SEE_CAPTURE_MARGIN * depth
+             if not see_ge(piece_bbs, occupancy_bbs, game_state[0], from_sq, to_sq, -SEE_CAPTURE_MARGIN * depth):
+                  qs_see_pruned += 1
+                  continue
+
         # --- Make the move ---
         unmake_info = make_move(piece_bbs, occupancy_bbs, game_state, move)
         
@@ -563,9 +595,9 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
 
             # SEE Pruning for Quiet Moves (History Guard)
             # If a quiet move loses material (very negative SEE), prune it.
-            # Stockfish uses depth-dependent threshold.
+            # Stockfish uses depth-dependent threshold: -27 * depth * depth
             if ENABLE_SEE_PRUNING and depth <= 8:
-                 if not see_ge(piece_bbs, occupancy_bbs, game_state[0], from_sq, to_sq, -SEE_QUIET_MARGIN * depth):
+                 if not see_ge(piece_bbs, occupancy_bbs, game_state[0], from_sq, to_sq, -SEE_QUIET_MARGIN * depth * depth):
                       futility_pruned += 1 # Count as general pruning
                       unmake_move(piece_bbs, occupancy_bbs, game_state, move, unmake_info)
                       continue
