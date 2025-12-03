@@ -572,6 +572,16 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                   qs_see_pruned += 1
                   continue
 
+        # SEE Pruning for Quiet Moves (History Guard)
+        # If a quiet move loses material (very negative SEE), prune it.
+        # This MUST be done BEFORE make_move to have the correct board state for SEE.
+        # Stockfish uses depth-dependent threshold: -27 * depth * depth
+        if ENABLE_SEE_PRUNING and is_pseudo_quiet and depth <= 8:
+             # Use the PRE-MOVE board state.
+             if not see_ge(piece_bbs, occupancy_bbs, game_state[0], from_sq, to_sq, -SEE_QUIET_MARGIN * depth * depth):
+                  futility_pruned += 1 # Count as general pruning
+                  continue
+
         # --- Make the move ---
         unmake_info = make_move(piece_bbs, occupancy_bbs, game_state, move)
         
@@ -592,15 +602,6 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                     lmp_pruned += 1
                     unmake_move(piece_bbs, occupancy_bbs, game_state, move, unmake_info)
                     break
-
-            # SEE Pruning for Quiet Moves (History Guard)
-            # If a quiet move loses material (very negative SEE), prune it.
-            # Stockfish uses depth-dependent threshold: -27 * depth * depth
-            if ENABLE_SEE_PRUNING and depth <= 8:
-                 if not see_ge(piece_bbs, occupancy_bbs, game_state[0], from_sq, to_sq, -SEE_QUIET_MARGIN * depth * depth):
-                      futility_pruned += 1 # Count as general pruning
-                      unmake_move(piece_bbs, occupancy_bbs, game_state, move, unmake_info)
-                      continue
 
         if ENABLE_FP and is_quiet_move and not is_currently_in_check and static_score != -INFINITY:
             margin = 0
