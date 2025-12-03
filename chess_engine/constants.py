@@ -340,6 +340,30 @@ KING_SEMI_OPEN_FILE_PENALTY = 25
 EG_SAFETY_SCALE = 0.5 # Scale down endgame king safety impact / 縮減殘局王的安全影響
 
 # =============================================================================
+# --- Threat Evaluation Constants / 威脅評估常量 ---
+# =============================================================================
+# Derived from Stockfish 11 but simplified and scaled.
+
+# Threat By Safe Pawn: Friendly pawn attacks enemy piece (N, B, R, Q).
+# 兵的威脅：己方兵攻擊敵方棋子（N, B, R, Q）。
+THREAT_SAFE_PAWN = np.array([60, 60], dtype=np.int32) # MG, EG
+
+# Minor Attacking Major: Knight/Bishop attacking Rook/Queen.
+# 輕子攻擊重子：馬/象攻擊車/后。
+THREAT_MINOR_ON_MAJOR = np.array([25, 15], dtype=np.int32) # MG, EG
+
+# Rook Attacking Queen: Rook attacking Queen.
+# 車捉后：車攻擊后。
+THREAT_ROOK_ON_QUEEN = np.array([20, 10], dtype=np.int32) # MG, EG
+
+# Hanging Pieces: Enemy piece is attacked and undefended.
+# 懸掛子：敵方棋子被攻擊且未被防守。
+# This is a bonus for the ATTACKER.
+# 這是給攻擊者的獎勵。
+THREAT_HANGING = np.array([35, 20], dtype=np.int32) # MG, EG
+
+
+# =============================================================================
 # --- Search Constants / 搜尋常量 ---
 # =============================================================================
 
@@ -467,3 +491,8 @@ DE_BRUIJN_INDEX = np.array([
 # =============================================================================
 
 TT_SIZE_MB = 256
+
+# --- Backward Pawns / 後兵 ---
+# Penalty for a backward pawn.
+# 後兵的懲罰。
+BACKWARD_PAWN_PENALTY = np.array([10, 25], dtype=np.int32) # MG, EG
