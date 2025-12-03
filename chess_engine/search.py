@@ -24,7 +24,8 @@ from chess_engine.constants import (
     ENABLE_NMP, ENABLE_RAZORING, ENABLE_FP, ENABLE_RFP, ENABLE_LMR, ENABLE_IID,
     ENABLE_SINGULAR_EXTENSIONS, MIN_SINGULAR_DEPTH, SINGULAR_EXTENSION_MARGIN,
     STOP_SEARCH_FLAG, PAWN_PUSH_RANK_BONUS, PAWN_PUSH_ATTACK_BONUS, MAX_HISTORY,
-    KING_TROPISM_BONUS
+    KING_TROPISM_BONUS, SCORE_TT_MOVE, SCORE_GOOD_CAPTURE_BONUS, SCORE_KILLER_1,
+    SCORE_KILLER_2, SCORE_COUNTER_MOVE, SCORE_BAD_CAPTURE_PENALTY
 )
 from chess_engine.bitboard_utils import find_piece_type_on_square, KING_ATTACK_ZONES
 from chess_engine.debug_utils import log_info
@@ -74,7 +75,7 @@ def update_history(history_table, piece_type, to_square, bonus):
     history_table[piece_type, to_square] = new_value
 
 @numba.njit(cache=True, boundscheck=False, fastmath=True)
-def score_moves(piece_bbs, occupancy_bbs, game_state, moves, tt_move, killer_moves_at_ply, history_table):
+def score_moves(piece_bbs, occupancy_bbs, game_state, moves, tt_move, killer_moves_at_ply, history_table, counter_move):
     scores = np.zeros(len(moves), dtype=np.int32)
     side_to_move = game_state[0]
     opponent_pieces_bb = occupancy_bbs[1] if side_to_move == 0 else occupancy_bbs[0]
@@ -87,20 +88,32 @@ def score_moves(piece_bbs, occupancy_bbs, game_state, moves, tt_move, killer_mov
         move = moves[i]
         score = 0
         if move == tt_move:
-            score = 100_000
+            score = SCORE_TT_MOVE
         else:
             to_square = get_to_square(move)
             is_capture = (opponent_pieces_bb & BB_SQUARES[to_square]) != 0
             if is_capture:
-                aggressor_type = find_piece_type_on_square(piece_bbs, get_from_square(move))
+                # Use SEE to distinguish Good vs Bad captures
+                from_sq = get_from_square(move)
+                see_value = see(piece_bbs, occupancy_bbs, side_to_move, from_sq, to_square)
+                
                 victim_type = find_piece_type_on_square(piece_bbs, to_square)
+                aggressor_type = find_piece_type_on_square(piece_bbs, from_sq)
+                mvv_lva = 0
                 if victim_type != -1:
-                    score = 10_000 + (MG_MATERIAL_VALUES[victim_type % 6] - MG_MATERIAL_VALUES[aggressor_type % 6])
+                    mvv_lva = (MG_MATERIAL_VALUES[victim_type % 6] - MG_MATERIAL_VALUES[aggressor_type % 6])
+
+                if see_value >= 0:
+                    score = SCORE_GOOD_CAPTURE_BONUS + mvv_lva + see_value
+                else:
+                    score = SCORE_BAD_CAPTURE_PENALTY + see_value # Penalize bad captures
             else:
                 if move == killer_moves_at_ply[0]:
-                    score = 5_000
+                    score = SCORE_KILLER_1
                 elif move == killer_moves_at_ply[1]:
-                    score = 4_000
+                    score = SCORE_KILLER_2
+                elif move == counter_move:
+                    score = SCORE_COUNTER_MOVE
                 else:
                     aggressor_type = find_piece_type_on_square(piece_bbs, get_from_square(move))
                     score = history_table[aggressor_type, to_square]
@@ -199,6 +212,38 @@ def quiescence_search(piece_bbs, occupancy_bbs, game_state, alpha, beta, ply, se
         moves = generate_captures(piece_bbs, occupancy_bbs, game_state)
         if len(moves) == 0:
             return stand_pat, q_nodes, delta_pruned, see_pruned
+
+    # --- Sort moves in QSearch ---
+    # Use score_moves to sort captures (SEE >= 0 first).
+    # We pass NO_MOVE for counter_move and reuse killer_moves/history though they apply less to captures.
+    # We need to handle 'ply' bounds for killer_moves access if ply >= MAX_PLY (though QSearch usually called with valid ply).
+    # search_context.killer_moves is size MAX_PLY*2.
+    # QSearch can go beyond MAX_PLY if not careful, but we checked ply >= MAX_QUIESCENCE_DEPTH (5) 
+    # but actual ply can be larger if called from deep search.
+    # _search limits ply < MAX_PLY. So ply passed to quiescence_search from _search is < MAX_PLY.
+    # Recursive calls increment ply. We should check bounds or use dummy.
+    
+    # Safe access to killers:
+    safe_ply = min(ply, MAX_PLY - 1)
+    
+    # Use score_moves to sort. 
+    # Note: score_moves is heavy? For captures it calculates SEE.
+    # This is beneficial for Alpha-Beta pruning in QSearch.
+    scores = score_moves(
+        piece_bbs, occupancy_bbs, game_state, moves, 
+        NO_MOVE, # No TT move in QSearch loop usually (unless we probed TT above)
+        search_context.killer_moves[safe_ply*2:safe_ply*2+2], 
+        search_context.history_table, 
+        NO_MOVE # No counter move
+    )
+    
+    # Sort moves based on scores
+    for i in range(len(moves)):
+        best_idx = i
+        for j in range(i + 1, len(moves)):
+            if scores[j] > scores[best_idx]: best_idx = j
+        moves[i], moves[best_idx] = moves[best_idx], moves[i]
+        scores[i], scores[best_idx] = scores[best_idx], scores[i]
 
     for move in moves:
         if not is_currently_in_check:
@@ -445,6 +490,8 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
         original_state_for_null = game_state.copy()
         make_null_move(game_state)
         
+        # NOTE: Passing a large value or special flag for previous move might be needed if NMP impacts move ordering logic of sub-search. 
+        # For now we pass NO_MOVE as we don't have a "previous move" for null move.
         (null_move_score, _, child_nodes, child_q_nodes, child_cutoffs, child_tt_hits,
          child_nmc, child_fp, child_ru, child_rfp, child_lmp, child_pcp,
          child_qdp, child_qsp, child_iid, child_se) = _search(
@@ -503,7 +550,17 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
         else:
             return (np.int32(0), NO_MOVE, nodes_searched, quiescence_nodes, cutoffs, tt_hits, null_move_cutoffs, futility_pruned, razoring_used, rfp_pruned, lmp_pruned, probcut_pruned, qs_delta_pruned, qs_see_pruned, iid_searches, singular_extensions)
 
-    scores = score_moves(piece_bbs, occupancy_bbs, game_state, moves, tt_move, search_context.killer_moves[ply*2:ply*2+2], search_context.history_table)
+    # --- Move Ordering ---
+    # Retrieve Counter Move if available
+    counter_move = NO_MOVE
+    if ply > 0:
+        prev_move = search_context.move_stack[ply - 1]
+        if prev_move != NO_MOVE:
+            prev_from = get_from_square(prev_move)
+            prev_to = get_to_square(prev_move)
+            counter_move = search_context.counter_moves[prev_from, prev_to]
+
+    scores = score_moves(piece_bbs, occupancy_bbs, game_state, moves, tt_move, search_context.killer_moves[ply*2:ply*2+2], search_context.history_table, counter_move)
     
     best_move, max_eval = NO_MOVE, -INFINITY
     quiet_move_counter, move_count = 0, 0
@@ -534,6 +591,7 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
 
         # --- Make the move ---
         unmake_info = make_move(piece_bbs, occupancy_bbs, game_state, move)
+        search_context.move_stack[ply] = move # Record move in stack
         
         # --- Post-move checks ---
         is_giving_check_after_move = is_in_check(piece_bbs, occupancy_bbs, game_state)
@@ -641,6 +699,14 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                 
                 # Apply Gravity Bonus to the cutoff move
                 update_history(search_context.history_table, aggressor_type, get_to_square(move), bonus)
+
+                # --- Update Counter Move ---
+                if ply > 0:
+                    prev_move_played = search_context.move_stack[ply - 1]
+                    if prev_move_played != NO_MOVE:
+                        p_from = get_from_square(prev_move_played)
+                        p_to = get_to_square(prev_move_played)
+                        search_context.counter_moves[p_from, p_to] = move
                 
                 # Apply History Malus to all previous quiet moves that failed low
                 for q_idx in range(quiet_moves_tried_count - 1): # Exclude the current move (last one added)
@@ -705,6 +771,14 @@ def iterative_deepening_search(piece_bbs, occupancy_bbs, game_state, max_depth, 
     total_iid, total_se = (np.uint64(v) for v in [0]*2)
     last_completed_depth = 0
     best_move_from_last_depth = NO_MOVE
+
+    # Clear Counter Moves at start of search? Stockfish doesn't seem to reset them per search, 
+    # but usually they are part of thread data. We can keep them or clear them.
+    # Clearing them ensures no pollution from previous moves in different game contexts if not handled by generations.
+    # However, for the same game, it might be useful. 
+    # Let's clear them to be safe and consistent with "new search".
+    search_context.counter_moves.fill(0)
+    search_context.move_stack.fill(NO_MOVE)
 
     for current_depth in range(1, max_depth + 1):
         alpha, beta = (-INFINITY, INFINITY) if current_depth <= 1 else (last_score - ASPIRATION_WINDOW_SIZE, last_score + ASPIRATION_WINDOW_SIZE)

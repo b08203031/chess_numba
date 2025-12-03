@@ -254,7 +254,7 @@ BISHOP_PAIR_BONUS = np.array([10, 20], dtype=np.int32) # MG, EG
 ROOK_ON_SEMI_OPEN_FILE_BONUS = np.array([15, 10], dtype=np.int32) # MG, EG
 ROOK_ON_OPEN_FILE_BONUS = np.array([25, 15], dtype=np.int32) # MG, EG
 
-
+ROOK_ON_SEVENTH_BONUS = np.array([20, 50], dtype=np.int32) # MG, EG
 # =============================================================================
 # --- Pawn Structure Constants / 兵型結構常量 ---
 # =============================================================================
@@ -350,6 +350,13 @@ MATE_IN_MAX_PLY = MATE_SCORE - MAX_PLY
 NO_MOVE = np.uint16(0)
 
 # Move Ordering Bonuses
+SCORE_TT_MOVE = 100000
+SCORE_GOOD_CAPTURE_BONUS = 20000
+SCORE_KILLER_1 = 15000
+SCORE_KILLER_2 = 14000
+SCORE_COUNTER_MOVE = 10000
+SCORE_BAD_CAPTURE_PENALTY = -5000
+
 PAWN_PUSH_RANK_BONUS = 2000
 PAWN_PUSH_ATTACK_BONUS = 3000
 KING_TROPISM_BONUS = 2500 # Bonus for improving king tropism
@@ -434,6 +441,9 @@ BB_SQUARES = np.array([np.uint64(1) << i for i in range(64)], dtype=np.uint64)
 """
 位元棋盤陣列，其中每個位元棋盤在對應的方格索引處設置了一個位元。
 """
+
+# Rank Masks / 橫排掩碼
+RANK_MASKS = np.array([np.uint64(0xFF) << np.uint64(i * 8) for i in range(8)], dtype=np.uint64)
 
 # De Bruijn sequence for fast bit scanning / 用於快速位掃描的 De Bruijn 序列
 DE_BRUIJN_SEQUENCE = np.uint64(0x03f79d71b4cb0a89)
