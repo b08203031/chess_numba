@@ -215,6 +215,26 @@ def evaluate_piece_coordination(piece_bbs):
                     # Semi-open file for Black / 黑方半開放線
                     mg_score -= ROOK_ON_SEMI_OPEN_FILE_BONUS[0]
                     eg_score -= ROOK_ON_SEMI_OPEN_FILE_BONUS[1]
+    
+    # --- 3. Rooks on 7th Rank / 車在第 7 橫排 ---
+    # White Rooks on Rank 7 (Index 6)
+    white_rooks_on_7th = white_rooks & RANK_MASKS[6]
+    if white_rooks_on_7th:
+        # Check if Black King is on Rank 8 (Index 7)
+        # Note: We can also award bonus if there are pawns on rank 7, but King on 8th is classic.
+        # Simple implementation: Just bonus for Rook on 7th.
+        # Ideally, we should check if it confines the king or attacks pawns.
+        # Simplified: Bonus if on 7th.
+        count = count_bits(white_rooks_on_7th)
+        mg_score += ROOK_ON_SEVENTH_BONUS[0] * count
+        eg_score += ROOK_ON_SEVENTH_BONUS[1] * count
+
+    # Black Rooks on Rank 2 (Index 1) - Relative 7th for Black
+    black_rooks_on_7th = black_rooks & RANK_MASKS[1]
+    if black_rooks_on_7th:
+        count = count_bits(black_rooks_on_7th)
+        mg_score -= ROOK_ON_SEVENTH_BONUS[0] * count
+        eg_score -= ROOK_ON_SEVENTH_BONUS[1] * count
 
     return mg_score, eg_score
 
@@ -274,19 +294,19 @@ def _evaluate_king_attackers(king_sq, color, piece_bbs, occupancy_bbs):
 
     # Pawns - Find all enemy pawns that attack any square in the king zone
     # 兵 - 尋找所有攻擊國王區域內任何方格的敵兵
-    pawn_attack_sources_bb = np.uint64(0)
-    temp_king_zone = king_zone
-    while temp_king_zone:
-        zone_sq = get_lsb_index(temp_king_zone)
-        # PAWN_ATTACKS[color_of_king, zone_sq] gives squares from which enemy pawns would attack zone_sq
-        pawn_attack_sources_bb |= PAWN_ATTACKS[color, zone_sq]
-        temp_king_zone &= temp_king_zone - np.uint64(1)
+    # pawn_attack_sources_bb = np.uint64(0)
+    # temp_king_zone = king_zone
+    # while temp_king_zone:
+    #     zone_sq = get_lsb_index(temp_king_zone)
+    #     # PAWN_ATTACKS[color_of_king, zone_sq] gives squares from which enemy pawns would attack zone_sq
+    #     pawn_attack_sources_bb |= PAWN_ATTACKS[color, zone_sq]
+    #     temp_king_zone &= temp_king_zone - np.uint64(1)
 
-    actual_pawn_attackers = pawn_attack_sources_bb & en_p
-    if actual_pawn_attackers:
-        num_pawn_attackers = count_bits(actual_pawn_attackers)
-        total_attack_units += num_pawn_attackers * KING_SAFETY_ATTACK_UNITS[0]
-        attacker_count += num_pawn_attackers
+    # actual_pawn_attackers = pawn_attack_sources_bb & en_p
+    # if actual_pawn_attackers:
+    #     num_pawn_attackers = count_bits(actual_pawn_attackers)
+    #     total_attack_units += num_pawn_attackers * KING_SAFETY_ATTACK_UNITS[0]
+    #     attacker_count += num_pawn_attackers
 
     # Knights
     temp_bb = en_n
@@ -330,7 +350,7 @@ def _evaluate_king_attackers(king_sq, color, piece_bbs, occupancy_bbs):
     # Only apply penalty if there are multiple attackers, to avoid penalizing single-piece harassment.
     # 僅在有多個攻擊者時才施加懲罰，以避免懲罰單個棋子的騷擾。
     if attacker_count < 2:
-        return np.int32(0)
+       return np.int32(0)
 
     # The score from the table is a penalty, so it should be negative.
     return -KING_SAFETY_TABLE[min(total_attack_units, len(KING_SAFETY_TABLE) - 1)]

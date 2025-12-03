@@ -40,6 +40,8 @@ search_context_spec = [
     ('game_history_count', numba.int32),  # Valid number of entries in game_history
     ('ply_path_stack', numba.uint64[::1]), # Stack of Zobrist keys for current search path
     ('tt_generation', numba.uint8), # Current generation for TT aging
+    ('counter_moves', numba.uint16[:, :]), # Counter moves table [64][64]
+    ('move_stack', numba.uint16[::1]), # Stack of moves for current search path
 ]
 
 @jitclass(search_context_spec)
@@ -59,6 +61,8 @@ class SearchContext:
         game_history_count (numba.int32): game_history 的有效條目數量。
         ply_path_stack (numba.uint64[::1]): 當前搜尋路徑的 Zobrist 鍵堆疊。
         tt_generation (numba.uint8): 當前 TT 世代。
+        counter_moves (numba.uint16[:, :]): 反制走法表，索引為 [prev_src][prev_dst]。
+        move_stack (numba.uint16[::1]): 當前搜尋路徑的走法堆疊，用於查找上一手棋。
     """
     def __init__(self, transposition_table, killer_moves, pv_table, history_table):
         """
@@ -84,5 +88,9 @@ class SearchContext:
         self.game_history_count = 0
         self.ply_path_stack = np.zeros(MAX_PLY, dtype=np.uint64)
         self.tt_generation = 0
+        
+        # Counter Moves and Move Stack
+        self.counter_moves = np.zeros((64, 64), dtype=np.uint16)
+        self.move_stack = np.zeros(MAX_PLY, dtype=np.uint16)
 
 search_context_type = SearchContext.class_type.instance_type
