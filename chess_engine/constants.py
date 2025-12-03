@@ -467,3 +467,8 @@ DE_BRUIJN_INDEX = np.array([
 # =============================================================================
 
 TT_SIZE_MB = 256
+
+# --- Backward Pawns / 後兵 ---
+# Penalty for a backward pawn.
+# 後兵的懲罰。
+BACKWARD_PAWN_PENALTY = np.array([10, 25], dtype=np.int32) # MG, EG

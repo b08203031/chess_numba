@@ -45,6 +45,27 @@ ADJACENT_FILES_MASKS = np.array([
     FILE_MASKS[6],  # File H
 ], dtype=np.uint64)
 
+# Precomputed masks for forward ranks (relative to white)
+# White pawn at rank r: forward mask includes ranks > r
+# Black pawn at rank r: forward mask includes ranks < r (relative to board)
+WHITE_FORWARD_RANKS = np.zeros(64, dtype=np.uint64)
+BLACK_FORWARD_RANKS = np.zeros(64, dtype=np.uint64)
+
+for sq in range(64):
+    rank = sq // 8
+    # White forward: ranks > rank
+    mask = np.uint64(0)
+    for r in range(rank + 1, 8):
+        mask |= RANK_MASKS[r]
+    WHITE_FORWARD_RANKS[sq] = mask
+
+    # Black forward: ranks < rank
+    mask = np.uint64(0)
+    for r in range(0, rank):
+        mask |= RANK_MASKS[r]
+    BLACK_FORWARD_RANKS[sq] = mask
+
+
 def _create_passed_pawn_masks():
     """
     預計算通路兵掩碼。通路兵是指前方沒有敵方兵阻擋（包括相鄰直線）。
@@ -81,7 +102,7 @@ WHITE_PASSED_PAWN_MASKS, BLACK_PASSED_PAWN_MASKS = _create_passed_pawn_masks()
 @numba.njit(numba.types.UniTuple(numba.int32, 2)(piece_bbs_signature), cache=True, boundscheck=False, fastmath=True)
 def evaluate_pawn_structure(piece_bbs):
     """
-    評估雙方的兵型結構（通路兵、孤兵、重疊兵）。
+    評估雙方的兵型結構（通路兵、孤兵、重疊兵、後兵、連結兵）。
     
     Args:
         piece_bbs (np.ndarray): 12 個棋子的位元棋盤。
@@ -94,33 +115,121 @@ def evaluate_pawn_structure(piece_bbs):
     
     white_pawns = piece_bbs[0]
     black_pawns = piece_bbs[6]
+    white_king_sq = get_lsb_index(piece_bbs[5])
+    black_king_sq = get_lsb_index(piece_bbs[11])
 
-    # --- 1. Passed Pawns / 通路兵 ---
-    # A pawn is passed if there are no opponent pawns in front of it on its
-    # own file or on adjacent files.
-    # 如果兵的前方（本線及相鄰線）沒有敵方兵，則為通路兵。
-    
-    # White passed pawns
+    # --- 1. Iterate White Pawns ---
     temp_wp = white_pawns
     while temp_wp:
         sq = get_lsb_index(temp_wp)
+        rank = sq // 8
+        file_idx = sq % 8
+
+        # A. Passed Pawn Logic
         if not (WHITE_PASSED_PAWN_MASKS[sq] & black_pawns):
-            rank = sq // 8
             mg_score += PASSED_PAWN_BONUS[rank][0]
             eg_score += PASSED_PAWN_BONUS[rank][1]
+
+            # Connected Passed Pawn Bonus
+            # Check if there is a friendly pawn on adjacent files (rank +/- 1 or same)
+            # Simplified: just adjacent files mask & white_pawns
+            if (ADJACENT_FILES_MASKS[file_idx] & white_pawns):
+                 mg_score += CONNECTED_PASSED_PAWN_BONUS[0]
+                 eg_score += CONNECTED_PASSED_PAWN_BONUS[1]
+
+            # King Proximity Logic (Stockfish-like)
+            if rank > 3: # Only consider advanced passed pawns for proximity logic to save time/noise
+                block_sq = sq + 8 # Square in front
+                if block_sq < 64:
+                    dist_friendly = MANHATTAN_DISTANCE[white_king_sq, block_sq]
+                    dist_enemy = MANHATTAN_DISTANCE[black_king_sq, block_sq]
+                    # Bonus if friendly king is closer, penalty if enemy is closer
+                    # Weight: 5 * Enemy - 2 * Friendly
+                    proximity_bonus = (dist_enemy * 5 - dist_friendly * 2) * rank # Scale by rank
+                    # Limit the impact
+                    proximity_bonus = max(-150, min(150, proximity_bonus))
+                    eg_score += proximity_bonus
+
+        # B. Backward Pawn Logic
+        # Definition: No friendly pawn on adjacent files is at the same rank or ahead (supporting).
+        # And the stop square (sq + 8) is controlled by an enemy pawn.
+        else: # Not passed (optimization: backward pawns usually aren't passed, though technically possible)
+             # Check adjacent friendly pawns support
+             # Friendly pawns on adjacent files AND (rank >= current rank)
+             # Using precomputed masks would be faster but for now:
+             adjacent_pawns = ADJACENT_FILES_MASKS[file_idx] & white_pawns
+             # Check if any adjacent pawn is on rank >= current rank
+             # Mask for ranks >= current rank
+             # We can use ~BLACK_FORWARD_RANKS[sq] which gives ranks >= rank?
+             # Actually, simpler:
+             # WHITE_FORWARD_RANKS[sq] gives ranks > rank.
+             # We need ranks >= rank. So WHITE_FORWARD_RANKS[sq] | rank_mask[rank].
+
+             support_mask = WHITE_FORWARD_RANKS[sq] | RANK_MASKS[rank]
+             has_support = (adjacent_pawns & support_mask) != 0
+
+             if not has_support:
+                 # Check if stop square is attacked by enemy pawn
+                 # Stop square for white is sq + 8
+                 stop_sq = sq + 8
+                 if stop_sq < 64:
+                     # Check if black pawns attack stop_sq
+                     # PAWN_ATTACKS[1][stop_sq] gives squares occupied by Black pawns that attack stop_sq.
+                     if (PAWN_ATTACKS[1][stop_sq] & black_pawns):
+                         mg_score -= BACKWARD_PAWN_PENALTY[0]
+                         eg_score -= BACKWARD_PAWN_PENALTY[1]
+
         temp_wp &= temp_wp - np.uint64(1)
 
-    # Black passed pawns
+    # --- 2. Iterate Black Pawns ---
     temp_bp = black_pawns
     while temp_bp:
         sq = get_lsb_index(temp_bp)
+        rank = sq // 8 # 0-7
+        relative_rank = 7 - rank
+        file_idx = sq % 8
+
+        # A. Passed Pawn Logic
         if not (BLACK_PASSED_PAWN_MASKS[sq] & white_pawns):
-            rank = 7 - (sq // 8) # Rank from Black's perspective
-            mg_score -= PASSED_PAWN_BONUS[rank][0]
-            eg_score -= PASSED_PAWN_BONUS[rank][1]
+            mg_score -= PASSED_PAWN_BONUS[relative_rank][0]
+            eg_score -= PASSED_PAWN_BONUS[relative_rank][1]
+
+            # Connected Passed Pawn Bonus
+            if (ADJACENT_FILES_MASKS[file_idx] & black_pawns):
+                 mg_score -= CONNECTED_PASSED_PAWN_BONUS[0]
+                 eg_score -= CONNECTED_PASSED_PAWN_BONUS[1]
+
+            # King Proximity Logic
+            if relative_rank > 3:
+                block_sq = sq - 8
+                if block_sq >= 0:
+                    dist_friendly = MANHATTAN_DISTANCE[black_king_sq, block_sq]
+                    dist_enemy = MANHATTAN_DISTANCE[white_king_sq, block_sq]
+
+                    proximity_bonus = (dist_enemy * 5 - dist_friendly * 2) * relative_rank
+                    proximity_bonus = max(-150, min(150, proximity_bonus))
+                    eg_score -= proximity_bonus
+
+        # B. Backward Pawn Logic
+        else:
+             # Support: Friendly pawns on adjacent files and rank <= current rank (since black moves down)
+             # BLACK_FORWARD_RANKS[sq] gives ranks < rank.
+             support_mask = BLACK_FORWARD_RANKS[sq] | RANK_MASKS[rank]
+             adjacent_pawns = ADJACENT_FILES_MASKS[file_idx] & black_pawns
+             has_support = (adjacent_pawns & support_mask) != 0
+
+             if not has_support:
+                 stop_sq = sq - 8
+                 if stop_sq >= 0:
+                     # Check if white pawns attack stop_sq
+                     # PAWN_ATTACKS[0][stop_sq] gives squares occupied by White pawns that attack stop_sq.
+                     if (PAWN_ATTACKS[0][stop_sq] & white_pawns):
+                         mg_score += BACKWARD_PAWN_PENALTY[0]
+                         eg_score += BACKWARD_PAWN_PENALTY[1]
+
         temp_bp &= temp_bp - np.uint64(1)
 
-    # --- 2. Isolated and Doubled Pawns / 孤兵與重疊兵 ---
+    # --- 3. Isolated and Doubled Pawns / 孤兵與重疊兵 ---
     # Iterate through each file to check for pawn formations.
     for f in range(8):
         file_mask = FILE_MASKS[f]
