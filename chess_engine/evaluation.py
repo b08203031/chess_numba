@@ -9,8 +9,11 @@ from chess_engine.zobrist import get_lsb_index
 from chess_engine.engine_types import piece_bbs_signature, occupancy_bbs_signature, game_state_signature
 from chess_engine.bitboard_utils import count_bits, KING_ATTACK_ZONES, FILE_MASKS
 from chess_engine.move_generator import (
-    get_bishop_attacks, get_rook_attacks, get_queen_attacks, KNIGHT_ATTACKS, PAWN_ATTACKS
+    get_bishop_attacks, get_rook_attacks, get_queen_attacks, KNIGHT_ATTACKS, PAWN_ATTACKS, KING_ATTACKS
 )
+
+NOT_A_FILE = ~np.uint64(0x0101010101010101)
+NOT_H_FILE = ~np.uint64(0x8080808080808080)
 
 # --- Pre-computed Manhattan Distance Table / 預計算曼哈頓距離表 ---
 def _create_manhattan_distance_table():
@@ -97,6 +100,90 @@ def _create_passed_pawn_masks():
     return white_masks, black_masks
 
 WHITE_PASSED_PAWN_MASKS, BLACK_PASSED_PAWN_MASKS = _create_passed_pawn_masks()
+
+
+@numba.njit(numba.types.UniTuple(numba.uint64, 2)(piece_bbs_signature, numba.uint64), cache=True, boundscheck=False, fastmath=True)
+def _compute_all_attacks(piece_bbs, all_pieces_occupancy):
+    """
+    Computes the combined attack bitboards for White and Black pieces.
+    Returns: (white_attacks_bb, black_attacks_bb)
+    """
+    (wp_bb, wn_bb, wb_bb, wr_bb, wq_bb, wk_bb,
+     bp_bb, bn_bb, bb_bb, br_bb, bq_bb, bk_bb) = piece_bbs
+
+    # --- White Attacks ---
+    white_attacks = np.uint64(0)
+
+    # Pawns (using precomputed PAWN_ATTACKS reverse lookup, we need forward here?)
+    # Wait, PAWN_ATTACKS in move_generator was derived from:
+    # PAWN_ATTACKS[WHITE, sq] = ((bb_sq & NOT_A_FILE) >> 9) | ((bb_sq & NOT_H_FILE) >> 7)
+    # This is "Attacks From SQ" if bb_sq is the pawn.
+    # So we can iterate white pawns.
+    # Optimization: Use bulk operations if possible, but numba loop is fine.
+    # Bulk pawn attacks:
+    # White captures: (wp_bb & NOT_A_FILE) << 7 | (wp_bb & NOT_H_FILE) << 9
+    white_attacks |= ((wp_bb & NOT_A_FILE) << np.uint64(7))
+    white_attacks |= ((wp_bb & NOT_H_FILE) << np.uint64(9))
+
+    # Knights
+    temp_bb = wn_bb
+    while temp_bb:
+        sq = get_lsb_index(temp_bb)
+        white_attacks |= KNIGHT_ATTACKS[sq]
+        temp_bb &= temp_bb - np.uint64(1)
+
+    # Bishops & Queens (Diagonal)
+    temp_bb = wb_bb | wq_bb
+    while temp_bb:
+        sq = get_lsb_index(temp_bb)
+        white_attacks |= get_bishop_attacks(sq, all_pieces_occupancy)
+        temp_bb &= temp_bb - np.uint64(1)
+
+    # Rooks & Queens (Orthogonal)
+    temp_bb = wr_bb | wq_bb
+    while temp_bb:
+        sq = get_lsb_index(temp_bb)
+        white_attacks |= get_rook_attacks(sq, all_pieces_occupancy)
+        temp_bb &= temp_bb - np.uint64(1)
+
+    # King
+    if wk_bb:
+        white_attacks |= KING_ATTACKS[get_lsb_index(wk_bb)]
+
+    # --- Black Attacks ---
+    black_attacks = np.uint64(0)
+
+    # Pawns
+    # Black captures: (bp_bb & NOT_H_FILE) >> 7 | (bp_bb & NOT_A_FILE) >> 9
+    black_attacks |= ((bp_bb & NOT_H_FILE) >> np.uint64(7))
+    black_attacks |= ((bp_bb & NOT_A_FILE) >> np.uint64(9))
+
+    # Knights
+    temp_bb = bn_bb
+    while temp_bb:
+        sq = get_lsb_index(temp_bb)
+        black_attacks |= KNIGHT_ATTACKS[sq]
+        temp_bb &= temp_bb - np.uint64(1)
+
+    # Bishops & Queens
+    temp_bb = bb_bb | bq_bb
+    while temp_bb:
+        sq = get_lsb_index(temp_bb)
+        black_attacks |= get_bishop_attacks(sq, all_pieces_occupancy)
+        temp_bb &= temp_bb - np.uint64(1)
+
+    # Rooks & Queens
+    temp_bb = br_bb | bq_bb
+    while temp_bb:
+        sq = get_lsb_index(temp_bb)
+        black_attacks |= get_rook_attacks(sq, all_pieces_occupancy)
+        temp_bb &= temp_bb - np.uint64(1)
+
+    # King
+    if bk_bb:
+        black_attacks |= KING_ATTACKS[get_lsb_index(bk_bb)]
+
+    return white_attacks, black_attacks
 
 
 @numba.njit(numba.types.UniTuple(numba.int32, 2)(piece_bbs_signature), cache=True, boundscheck=False, fastmath=True)
@@ -386,8 +473,8 @@ def _evaluate_pawn_shield_for_color(king_sq, friendly_pawns, enemy_pawns, color)
 
     return score
 
-@numba.njit(numba.int32(numba.int32, numba.int32, piece_bbs_signature, occupancy_bbs_signature), cache=True, boundscheck=False, fastmath=True)
-def _evaluate_king_attackers(king_sq, color, piece_bbs, occupancy_bbs):
+@numba.njit(numba.int32(numba.int32, numba.int32, piece_bbs_signature, occupancy_bbs_signature, numba.uint64, numba.uint64), cache=True, boundscheck=False, fastmath=True)
+def _evaluate_king_attackers(king_sq, color, piece_bbs, occupancy_bbs, enemy_attacks_bb, friendly_attacks_bb):
     """
     (Phase 2) Calculates the threat score based on pieces attacking the king zone using a non-linear model.
     (階段 2) 根據攻擊國王區域的棋子，使用非線性模型計算威脅分數。
@@ -456,9 +543,38 @@ def _evaluate_king_attackers(king_sq, color, piece_bbs, occupancy_bbs):
             attacker_count += 1
         temp_bb &= temp_bb - np.uint64(1)
 
+    # --- Weak Squares Logic (Stockfish 11) ---
+    # Weak Square: A square in King Zone attacked by enemy but not defended by friendly pieces.
+    # Note: Stockfish uses `~attackedBy2[Us]` which implies defended by at least 2 pieces? No, `~attackedBy2` means "not defended twice".
+    # And `(~attackedBy[Us] | king | queen)`.
+    # Let's simplify: Weak = Attacked by Enemy AND Not Defended by Friendly (or only King).
+    # `friendly_attacks_bb` includes King attacks.
+    # So `weak_squares` = (king_zone & enemy_attacks_bb) & ~friendly_attacks_bb.
+    # But wait, `friendly_attacks_bb` includes King's own defense. The King defends its own zone.
+    # If we want "Weak", it means King is the ONLY defender, or no defender.
+    # If King defends it, it's technically defended.
+    # But if King is the only defender and it's attacked by e.g. Rook, it's unsafe.
+    # Let's define Weak Square as: Attacked by Enemy AND Not Defended by Friendly *except King*.
+    # So we need `friendly_attacks_without_king`.
+    # For now, let's use the provided `friendly_attacks_bb` which includes King.
+    # If a square is attacked by enemy and NOT defended by anyone (undefended hole), it's very weak.
+
+    # Let's count "Undefended Holes" in King Zone.
+    undefended_in_zone = (king_zone & enemy_attacks_bb) & ~friendly_attacks_bb
+    weak_count = count_bits(undefended_in_zone)
+
+    # Penalty for weak squares (e.g. 20cp per square)
+    weak_penalty = weak_count * 20
+    total_attack_units += weak_penalty # Add to "units" to scale non-linearly? Or add separately?
+    # SF11 adds to `kingDanger`.
+    # My `KING_SAFETY_TABLE` maps units to score.
+    # Adding to units makes sense because multiple weak squares amplify the danger.
+
     # Only apply penalty if there are multiple attackers, to avoid penalizing single-piece harassment.
+    # However, if there are weak squares (holes), even a single attacker is dangerous.
     # 僅在有多個攻擊者時才施加懲罰，以避免懲罰單個棋子的騷擾。
-    if attacker_count < 2:
+    # 但是，如果存在弱格（漏洞），即使是單個攻擊者也很危險。
+    if attacker_count < 2 and weak_count == 0:
        return np.int32(0)
 
     # The score from the table is a penalty, so it should be negative.
@@ -524,8 +640,8 @@ def _evaluate_pawn_storm(king_sq, color, piece_bbs):
 
     return penalty
 
-@numba.njit(numba.types.UniTuple(numba.int32, 2)(piece_bbs_signature, occupancy_bbs_signature), cache=True, boundscheck=False, fastmath=True)
-def evaluate_king_safety(piece_bbs, occupancy_bbs):
+@numba.njit(numba.types.UniTuple(numba.int32, 2)(piece_bbs_signature, occupancy_bbs_signature, numba.uint64, numba.uint64), cache=True, boundscheck=False, fastmath=True)
+def evaluate_king_safety(piece_bbs, occupancy_bbs, white_attacks, black_attacks):
     """
     Refactored King Safety evaluation based on Chess Programming Wiki.
     重構的國王安全評估，基於 Chess Programming Wiki。
@@ -538,12 +654,12 @@ def evaluate_king_safety(piece_bbs, occupancy_bbs):
 
     # --- Calculate raw scores for each component / 計算每個組件的原始分數 ---
     white_shield = _evaluate_pawn_shield_for_color(white_king_sq, wp_bb, bp_bb, 0)
-    white_attackers = _evaluate_king_attackers(white_king_sq, 0, piece_bbs, occupancy_bbs)
+    white_attackers = _evaluate_king_attackers(white_king_sq, 0, piece_bbs, occupancy_bbs, black_attacks, white_attacks)
     white_tropism = _evaluate_king_tropism(white_king_sq, 0, piece_bbs)
     white_pawn_storm = _evaluate_pawn_storm(white_king_sq, 0, piece_bbs)
 
     black_shield = _evaluate_pawn_shield_for_color(black_king_sq, bp_bb, wp_bb, 1)
-    black_attackers = _evaluate_king_attackers(black_king_sq, 1, piece_bbs, occupancy_bbs)
+    black_attackers = _evaluate_king_attackers(black_king_sq, 1, piece_bbs, occupancy_bbs, white_attacks, black_attacks)
     black_tropism = _evaluate_king_tropism(black_king_sq, 1, piece_bbs)
     black_pawn_storm = _evaluate_pawn_storm(black_king_sq, 1, piece_bbs)
 
@@ -803,8 +919,11 @@ def evaluate_position(piece_bbs, occupancy_bbs, game_state, lazy: bool = False):
         final_score = (mg_score * phase + eg_score * (MAX_PHASE - phase)) // MAX_PHASE
         return np.int32(final_score) if side_to_move == 0 else np.int32(-final_score)
 
+    # --- Compute Full Attack Bitboards (Optimization for King Safety) ---
+    white_attacks, black_attacks = _compute_all_attacks(piece_bbs, occupancy_bbs[2])
+
     # --- 3. (Full Evaluation) 加入國王安全分數 ---
-    mg_king_safety, eg_king_safety = evaluate_king_safety(piece_bbs, occupancy_bbs)
+    mg_king_safety, eg_king_safety = evaluate_king_safety(piece_bbs, occupancy_bbs, white_attacks, black_attacks)
     mg_score += mg_king_safety
     eg_score += eg_king_safety
 
