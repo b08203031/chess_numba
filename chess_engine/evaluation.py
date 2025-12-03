@@ -700,6 +700,7 @@ def evaluate_king_safety(piece_bbs, occupancy_bbs, white_attacks, black_attacks)
 def evaluate_mobility(piece_bbs, occupancy_bbs):
     """
     評估雙方棋子的機動性。
+    實作「安全機動性 (Safe Mobility)」：排除被敵方兵攻擊的格子以及被己方王/后阻擋的格子。
     
     Args:
         piece_bbs (np.ndarray): 12 個棋子的位元棋盤。
@@ -715,12 +716,32 @@ def evaluate_mobility(piece_bbs, occupancy_bbs):
     black_occupancy = occupancy_bbs[1]
     all_pieces_occupancy = occupancy_bbs[2]
 
+    # --- 1. Compute Pawn Attacks (Forbidden Zones) ---
+    # White pawns attack (captured by Black)
+    white_pawn_attacks = ((piece_bbs[0] & NOT_A_FILE) << np.uint64(7)) | \
+                         ((piece_bbs[0] & NOT_H_FILE) << np.uint64(9))
+
+    # Black pawns attack (captured by White)
+    black_pawn_attacks = ((piece_bbs[6] & NOT_H_FILE) >> np.uint64(7)) | \
+                         ((piece_bbs[6] & NOT_A_FILE) >> np.uint64(9))
+
+    # --- 2. Define Mobility Area (Safe Squares) ---
+    # Safe squares are those NOT occupied by own King/Queen and NOT attacked by enemy pawns.
+    # Note: ~own_occupancy is applied during move generation, but we add King/Queen to forbidden
+    # to explicitly exclude them from the mobility area definition if they weren't already blocked.
+
+    white_forbidden = black_pawn_attacks | piece_bbs[5] | piece_bbs[4]
+    black_forbidden = white_pawn_attacks | piece_bbs[11] | piece_bbs[10]
+
+    white_safe_mask = ~white_forbidden
+    black_safe_mask = ~black_forbidden
+
     # --- White Mobility / 白方機動性 ---
     # Knights
     temp_bb = piece_bbs[1]
     while temp_bb:
         sq = get_lsb_index(temp_bb)
-        moves = count_bits(KNIGHT_ATTACKS[sq] & ~white_occupancy)
+        moves = count_bits(KNIGHT_ATTACKS[sq] & ~white_occupancy & white_safe_mask)
         mg_score += (moves - KNIGHT_MOBILITY_BASE_MOVES) * KNIGHT_MOBILITY_WEIGHT[0]
         eg_score += (moves - KNIGHT_MOBILITY_BASE_MOVES) * KNIGHT_MOBILITY_WEIGHT[1]
         temp_bb &= temp_bb - np.uint64(1)
@@ -729,7 +750,7 @@ def evaluate_mobility(piece_bbs, occupancy_bbs):
     temp_bb = piece_bbs[2]
     while temp_bb:
         sq = get_lsb_index(temp_bb)
-        moves = count_bits(get_bishop_attacks(sq, all_pieces_occupancy) & ~white_occupancy)
+        moves = count_bits(get_bishop_attacks(sq, all_pieces_occupancy) & ~white_occupancy & white_safe_mask)
         mg_score += (moves - BISHOP_MOBILITY_BASE_MOVES) * BISHOP_MOBILITY_WEIGHT[0]
         eg_score += (moves - BISHOP_MOBILITY_BASE_MOVES) * BISHOP_MOBILITY_WEIGHT[1]
         temp_bb &= temp_bb - np.uint64(1)
@@ -738,7 +759,7 @@ def evaluate_mobility(piece_bbs, occupancy_bbs):
     temp_bb = piece_bbs[3]
     while temp_bb:
         sq = get_lsb_index(temp_bb)
-        moves = count_bits(get_rook_attacks(sq, all_pieces_occupancy) & ~white_occupancy)
+        moves = count_bits(get_rook_attacks(sq, all_pieces_occupancy) & ~white_occupancy & white_safe_mask)
         mg_score += (moves - ROOK_MOBILITY_BASE_MOVES) * ROOK_MOBILITY_WEIGHT[0]
         eg_score += (moves - ROOK_MOBILITY_BASE_MOVES) * ROOK_MOBILITY_WEIGHT[1]
         temp_bb &= temp_bb - np.uint64(1)
@@ -747,7 +768,7 @@ def evaluate_mobility(piece_bbs, occupancy_bbs):
     temp_bb = piece_bbs[4]
     while temp_bb:
         sq = get_lsb_index(temp_bb)
-        moves = count_bits(get_queen_attacks(sq, all_pieces_occupancy) & ~white_occupancy)
+        moves = count_bits(get_queen_attacks(sq, all_pieces_occupancy) & ~white_occupancy & white_safe_mask)
         mg_score += (moves - QUEEN_MOBILITY_BASE_MOVES) * QUEEN_MOBILITY_WEIGHT[0]
         eg_score += (moves - QUEEN_MOBILITY_BASE_MOVES) * QUEEN_MOBILITY_WEIGHT[1]
         temp_bb &= temp_bb - np.uint64(1)
@@ -758,7 +779,7 @@ def evaluate_mobility(piece_bbs, occupancy_bbs):
     temp_bb = piece_bbs[7]
     while temp_bb:
         sq = get_lsb_index(temp_bb)
-        moves = count_bits(KNIGHT_ATTACKS[sq] & ~black_occupancy)
+        moves = count_bits(KNIGHT_ATTACKS[sq] & ~black_occupancy & black_safe_mask)
         mg_score -= (moves - KNIGHT_MOBILITY_BASE_MOVES) * KNIGHT_MOBILITY_WEIGHT[0]
         eg_score -= (moves - KNIGHT_MOBILITY_BASE_MOVES) * KNIGHT_MOBILITY_WEIGHT[1]
         temp_bb &= temp_bb - np.uint64(1)
@@ -767,7 +788,7 @@ def evaluate_mobility(piece_bbs, occupancy_bbs):
     temp_bb = piece_bbs[8]
     while temp_bb:
         sq = get_lsb_index(temp_bb)
-        moves = count_bits(get_bishop_attacks(sq, all_pieces_occupancy) & ~black_occupancy)
+        moves = count_bits(get_bishop_attacks(sq, all_pieces_occupancy) & ~black_occupancy & black_safe_mask)
         mg_score -= (moves - BISHOP_MOBILITY_BASE_MOVES) * BISHOP_MOBILITY_WEIGHT[0]
         eg_score -= (moves - BISHOP_MOBILITY_BASE_MOVES) * BISHOP_MOBILITY_WEIGHT[1]
         temp_bb &= temp_bb - np.uint64(1)
@@ -776,7 +797,7 @@ def evaluate_mobility(piece_bbs, occupancy_bbs):
     temp_bb = piece_bbs[9]
     while temp_bb:
         sq = get_lsb_index(temp_bb)
-        moves = count_bits(get_rook_attacks(sq, all_pieces_occupancy) & ~black_occupancy)
+        moves = count_bits(get_rook_attacks(sq, all_pieces_occupancy) & ~black_occupancy & black_safe_mask)
         mg_score -= (moves - ROOK_MOBILITY_BASE_MOVES) * ROOK_MOBILITY_WEIGHT[0]
         eg_score -= (moves - ROOK_MOBILITY_BASE_MOVES) * ROOK_MOBILITY_WEIGHT[1]
         temp_bb &= temp_bb - np.uint64(1)
@@ -785,7 +806,7 @@ def evaluate_mobility(piece_bbs, occupancy_bbs):
     temp_bb = piece_bbs[10]
     while temp_bb:
         sq = get_lsb_index(temp_bb)
-        moves = count_bits(get_queen_attacks(sq, all_pieces_occupancy) & ~black_occupancy)
+        moves = count_bits(get_queen_attacks(sq, all_pieces_occupancy) & ~black_occupancy & black_safe_mask)
         mg_score -= (moves - QUEEN_MOBILITY_BASE_MOVES) * QUEEN_MOBILITY_WEIGHT[0]
         eg_score -= (moves - QUEEN_MOBILITY_BASE_MOVES) * QUEEN_MOBILITY_WEIGHT[1]
         temp_bb &= temp_bb - np.uint64(1)
@@ -937,7 +958,8 @@ def evaluate_position(piece_bbs, occupancy_bbs, game_state, lazy: bool = False):
     mg_score += mg_coord
     eg_score += eg_coord
 
-    # --- 6. 加入棋子機動性分數 --- (暫時移除機動性評估以加快速度)
+    # --- 6. 加入棋子機動性分數 ---
+    # Re-enabled with Safe Mobility logic
     mg_mobility, eg_mobility = evaluate_mobility(piece_bbs, occupancy_bbs)
     mg_score += mg_mobility
     eg_score += eg_mobility
