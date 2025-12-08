@@ -46,6 +46,51 @@ def _init_file_masks():
 
 FILE_MASKS = _init_file_masks()
 
+def _init_between_bb():
+    """
+    預計算兩點之間的連線（Ray）。
+    如果兩點不在同一條線（橫、直、斜）上，則為 0。
+    不包含端點。
+    """
+    table = np.zeros((64, 64), dtype=np.uint64)
+    for sq1 in range(64):
+        for sq2 in range(64):
+            if sq1 == sq2:
+                continue
+
+            # 檢查是否共線
+            r1, f1 = sq1 // 8, sq1 % 8
+            r2, f2 = sq2 // 8, sq2 % 8
+
+            dr = r2 - r1
+            df = f2 - f1
+
+            # 判斷方向
+            step_r, step_f = 0, 0
+
+            if dr == 0: # 同 Rank
+                step_f = 1 if df > 0 else -1
+            elif df == 0: # 同 File
+                step_r = 1 if dr > 0 else -1
+            elif abs(dr) == abs(df): # 同 Diagonal
+                step_r = 1 if dr > 0 else -1
+                step_f = 1 if df > 0 else -1
+            else:
+                continue # 不共線
+
+            # 生成 Ray
+            bb = np.uint64(0)
+            curr_r, curr_f = r1 + step_r, f1 + step_f
+            while curr_r != r2 or curr_f != f2:
+                bb |= BB_SQUARES[curr_r * 8 + curr_f]
+                curr_r += step_r
+                curr_f += step_f
+
+            table[sq1][sq2] = bb
+    return table
+
+BETWEEN_BB = _init_between_bb()
+
 @nb.njit(nb.int8(piece_bbs_signature, nb.uint8), cache=True)
 def find_piece_type_on_square(piece_bbs, square):
     """
@@ -81,3 +126,7 @@ def count_bits(bb: np.uint64) -> np.int32:
     bb = (bb & np.uint64(0x3333333333333333)) + ((bb >> np.uint64(2)) & np.uint64(0x3333333333333333))
     bb = (bb + (bb >> np.uint64(4))) & np.uint64(0x0F0F0F0F0F0F0F0F)
     return np.int32((bb * np.uint64(0x0101010101010101)) >> np.uint64(56))
+
+@nb.njit(nb.uint64(nb.uint8, nb.uint8), cache=True)
+def get_between_bb(sq1, sq2):
+    return BETWEEN_BB[sq1, sq2]
