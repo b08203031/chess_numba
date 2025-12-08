@@ -18,7 +18,6 @@ from chess_engine.constants import BB_SQUARES, MG_MATERIAL_VALUES
 from chess_engine.move_generator import (
     get_bishop_attacks,
     get_rook_attacks,
-    get_queen_attacks,
     KNIGHT_ATTACKS,
     KING_ATTACKS,
     PAWN_ATTACKS,
@@ -26,53 +25,53 @@ from chess_engine.move_generator import (
 from chess_engine.zobrist import get_lsb_index
 from chess_engine.bitboard_utils import find_piece_type_on_square
 
+@numba.njit(cache=True)
+def _check_on_line(sq1, sq2, sq3):
+    """
+    Check if sq1, sq2, and sq3 are collinear (on the same rank, file, or diagonal).
+    """
+    r1, f1 = sq1 // 8, sq1 % 8
+    r2, f2 = sq2 // 8, sq2 % 8
+    r3, f3 = sq3 // 8, sq3 % 8
 
-@numba.njit(
-    numba.types.Tuple((numba.uint64, numba.uint64))(
-        numba.uint8,
-        piece_bbs_signature,
-        numba.uint64,
-    ),
-    cache=True,
-)
+    # Check Rank
+    if r1 == r2 == r3: return True
+    # Check File
+    if f1 == f2 == f3: return True
+    # Check Diagonal (dy/dx == 1 or -1)
+    if (r1 - f1) == (r2 - f2) == (r3 - f3): return True # Anti-diagonal
+    if (r1 + f1) == (r2 + f2) == (r3 + f3): return True # Main diagonal
+
+    return False
+
+@numba.njit(cache=True)
 def _get_attackers_to_square(square, piece_bbs, occupancy):
     """
     獲取所有攻擊給定方格的位元棋盤。
-    此函數設計用於 SEE（靜態交換評估），並在動態佔用位元棋盤上操作。
-
-    Args:
-        square (int): 目標方格。
-        piece_bbs (np.ndarray): 棋子位元棋盤。
-        occupancy (np.uint64): 當前模擬的佔用位元棋盤。
-
-    Returns:
-        tuple: (white_attackers, black_attackers) 兩個位元棋盤。
     """
-    # Note: Pawn attacks don't depend on occupancy
-    # 注意：兵的攻擊不依賴於佔用位元棋盤（因為是固定的偏移量）
     white_attackers = PAWN_ATTACKS[BLACK][square] & piece_bbs[PAWN]
     black_attackers = PAWN_ATTACKS[WHITE][square] & piece_bbs[PAWN + 6]
 
-    # Knights / 騎士
+    # Knights
     knight_attack_bb = KNIGHT_ATTACKS[square]
     white_attackers |= knight_attack_bb & piece_bbs[KNIGHT]
     black_attackers |= knight_attack_bb & piece_bbs[KNIGHT + 6]
 
-    # Bishops and Queens (Diagonals) / 主教和后（斜線）
+    # Bishops and Queens (Diagonals)
     bishop_queen_bb = piece_bbs[BISHOP] | piece_bbs[QUEEN]
     black_bishop_queen_bb = piece_bbs[BISHOP + 6] | piece_bbs[QUEEN + 6]
     bishop_attacks_bb = get_bishop_attacks(square, occupancy)
     white_attackers |= bishop_attacks_bb & bishop_queen_bb
     black_attackers |= bishop_attacks_bb & black_bishop_queen_bb
 
-    # Rooks and Queens (Files/Ranks) / 車和后（直線/橫線）
+    # Rooks and Queens (Files/Ranks)
     rook_queen_bb = piece_bbs[ROOK] | piece_bbs[QUEEN]
     black_rook_queen_bb = piece_bbs[ROOK + 6] | piece_bbs[QUEEN + 6]
     rook_attacks_bb = get_rook_attacks(square, occupancy)
     white_attackers |= rook_attacks_bb & rook_queen_bb
     black_attackers |= rook_attacks_bb & black_rook_queen_bb
 
-    # Kings / 王
+    # Kings
     king_attack_bb = KING_ATTACKS[square]
     white_attackers |= king_attack_bb & piece_bbs[KING]
     black_attackers |= king_attack_bb & piece_bbs[KING + 6]
@@ -80,163 +79,181 @@ def _get_attackers_to_square(square, piece_bbs, occupancy):
     return white_attackers, black_attackers
 
 
-@numba.njit(
-    numba.int32(
-        piece_bbs_signature,
-        occupancy_bbs_signature,
-        numba.uint8,
-        numba.uint8,
-        numba.uint8,
-    ),
-    cache=True,
-)
-def see(piece_bbs, occupancy_bbs, side_to_move, from_sq, to_sq):
+@numba.njit(cache=True)
+def see(piece_bbs, occupancy_bbs, side_to_move, from_sq, to_sq, threshold=-32000):
     """
-    靜態交換評估 (SEE)。
-    這是一個輕量級、基於位元棋盤的實現，避免了複製棋盤狀態和昂貴的 make_move 調用。
-    它在臨時的佔用位元棋盤上模擬吃子，並動態發現 X-Ray 攻擊。
-
-    Args:
-        piece_bbs (np.ndarray): 棋子位元棋盤。
-        occupancy_bbs (np.ndarray): 佔用位元棋盤。
-        side_to_move (int): 當前行棋方。
-        from_sq (int): 起始方格。
-        to_sq (int): 目標方格。
-
-    Returns:
-        int: 交換後的材質增益（分）。
+    Static Exchange Evaluation (SEE).
     """
+
+    # Cast inputs to known integer types to prevent type inference issues
+    current_side = np.int32(side_to_move)
+    from_sq_i = np.int32(from_sq)
+    to_sq_i = np.int32(to_sq)
+
+    # --- Initial Setup ---
+    victim_piece_type = find_piece_type_on_square(piece_bbs, to_sq_i)
+    moved_piece_type = find_piece_type_on_square(piece_bbs, from_sq_i)
+
+    occupancy = occupancy_bbs[2]
+    from_sq_bb = BB_SQUARES[from_sq_i]
+    to_sq_bb = BB_SQUARES[to_sq_i]
+
+    # --- En Passant Handling ---
+    # If victim is empty and attacker is Pawn moving diagonally, it's En Passant.
+    is_en_passant = False
+    if victim_piece_type == -1:
+        if moved_piece_type == PAWN or moved_piece_type == PAWN + 6: # Check generic pawn type (0 or 6) is handled by %6
+            # Check diagonal move
+            if (from_sq_i % 8) != (to_sq_i % 8):
+                # En Passant confirmed (assuming pseudo-legal input)
+                is_en_passant = True
+                victim_piece_type = PAWN # Victim is a pawn
+
+                # Adjust Occupancy for EP:
+                # 1. Remove from_sq (handled later)
+                # 2. Add to_sq (handled later)
+                # 3. Remove captured pawn square
+                if current_side == WHITE:
+                    cap_sq = to_sq_i - 8
+                else:
+                    cap_sq = to_sq_i + 8
+
+                occupancy ^= BB_SQUARES[cap_sq]
+
+    if victim_piece_type == -1 and not is_en_passant:
+        # Not a capture
+        return np.int32(0)
+
+    # Initial value calculation
+
     gain = np.zeros(32, dtype=np.int32)
     depth = 0
 
-    # Initial victim piece type and value / 初始受害者棋子類型和價值
-    victim_piece_type = find_piece_type_on_square(piece_bbs, to_sq)
-    # Handle en-passant, where the victim is on a different square
-    # 處理吃過路兵，受害者在不同的方格
-    if victim_piece_type == -1:
-        # This is not a direct capture. The current `see` implementation cannot
-        # evaluate threats from quiet moves and lacks the context to properly
-        # identify en passant captures. Returning 0 is the only safe option.
-        # 這不是直接吃子。目前的 `see` 實現無法評估安靜移動的威脅，
-        # 也缺乏正確識別吃過路兵的上下文。返回 0 是唯一安全的選擇。
-        return np.int32(0)
     gain[depth] = MG_MATERIAL_VALUES[victim_piece_type % 6]
 
-    moved_piece_type = find_piece_type_on_square(piece_bbs, from_sq)
-    previous_aggressor_value = MG_MATERIAL_VALUES[moved_piece_type % 6]
+    attacker_value = MG_MATERIAL_VALUES[moved_piece_type % 6]
 
-    # --- Lightweight Simulation Setup / 輕量級模擬設置 ---
-    current_side = side_to_move
-    occupancy = occupancy_bbs[2]
-    from_sq_bb = BB_SQUARES[from_sq]
+    # Update Occupancy for the first move
+    occupancy ^= from_sq_bb
+    if is_en_passant:
+        occupancy |= to_sq_bb # Attacker lands on empty square
 
-    # Get all initial attackers to the target square / 獲取所有初始攻擊者
+    # Get all attackers
     white_attackers, black_attackers = _get_attackers_to_square(
-        to_sq, piece_bbs, occupancy
+        np.uint8(to_sq_i), piece_bbs, occupancy
     )
     all_attackers = white_attackers | black_attackers
-
-    # Remove the initial attacker from the occupancy and attacker sets
-    # 從佔用和攻擊者集合中移除初始攻擊者（即移動的棋子）
-    occupancy ^= from_sq_bb
     
-    # --- Handle X-Ray Attacks (First Move) ---
-    # We must check for X-Ray attacks revealed by the first move
-    bishop_attacks_bb = get_bishop_attacks(to_sq, occupancy)
-    new_w_bishops = bishop_attacks_bb & (piece_bbs[BISHOP] | piece_bbs[QUEEN]) & occupancy
-    new_b_bishops = bishop_attacks_bb & (piece_bbs[BISHOP + 6] | piece_bbs[QUEEN + 6]) & occupancy
-    
-    revealed_attackers = (new_w_bishops | new_b_bishops) & ~all_attackers
-    
-    if revealed_attackers:
-        all_attackers |= revealed_attackers
-        white_attackers |= new_w_bishops
-        black_attackers |= new_b_bishops
-
-    rook_attacks_bb = get_rook_attacks(to_sq, occupancy)
-    new_w_rooks = rook_attacks_bb & (piece_bbs[ROOK] | piece_bbs[QUEEN]) & occupancy
-    new_b_rooks = rook_attacks_bb & (piece_bbs[ROOK + 6] | piece_bbs[QUEEN + 6]) & occupancy
-    
-    revealed_attackers = (new_w_rooks | new_b_rooks) & ~all_attackers
-    
-    if revealed_attackers:
-        all_attackers |= revealed_attackers
-        white_attackers |= new_w_rooks
-        black_attackers |= new_b_rooks
-
+    # Remove the initial attacker (the one that just moved) from available attackers
     all_attackers &= ~from_sq_bb
+    
+    # --- Correctly Handle X-Ray after the first move (the initial capture) ---
+    # The piece moving from 'from_sq' might reveal an attack from behind.
+    bishop_attacks_bb = get_bishop_attacks(np.uint8(to_sq_i), occupancy)
+    new_bishops = bishop_attacks_bb & (piece_bbs[BISHOP] | piece_bbs[QUEEN] | piece_bbs[BISHOP+6] | piece_bbs[QUEEN+6])
+    
+    rook_attacks_bb = get_rook_attacks(np.uint8(to_sq_i), occupancy)
+    new_rooks = rook_attacks_bb & (piece_bbs[ROOK] | piece_bbs[QUEEN] | piece_bbs[ROOK+6] | piece_bbs[QUEEN+6])
+    
+    potential_xray = (new_bishops | new_rooks) & ~all_attackers
+    if potential_xray:
+        all_attackers |= potential_xray
+        white_attackers |= (potential_xray & (piece_bbs[BISHOP] | piece_bbs[ROOK] | piece_bbs[QUEEN]))
+        black_attackers |= (potential_xray & (piece_bbs[BISHOP+6] | piece_bbs[ROOK+6] | piece_bbs[QUEEN+6]))
 
     while True:
         depth += 1
-        # Safety break for very long capture sequences / 防止過長的吃子序列
-        if depth >= 32:
-            break
+        if depth >= 31: break
             
-        current_side = 1 - current_side  # Switch sides / 交換方
+        current_side = 1 - current_side
 
         attackers_for_side = black_attackers if current_side == BLACK else white_attackers
-        attackers_for_side &= all_attackers
+        attackers_for_side &= all_attackers # Filter out removed ones
 
         if not attackers_for_side:
             break
 
-        # --- Find the least valuable attacker / 尋找價值最低的攻擊者 ---
+        # --- Find least valuable attacker that is LEGAL (not pinned) ---
         aggressor_sq = -1
         aggressor_piece_type = -1
+        aggressor_sq_bb = np.uint64(0)
 
-        # Find the piece type with the lowest value among the attackers
-        # 在攻擊者中尋找價值最低的棋子類型（P -> N -> B -> R -> Q -> K）
+        # Determine King Square for Pin Check
+        my_king_bb = piece_bbs[KING] if current_side == WHITE else piece_bbs[KING + 6]
+        king_sq = get_lsb_index(my_king_bb) if my_king_bb else -1
+
+        # Iterate piece types P->N->B->R->Q->K
+        found = False
         for piece_type in range(PAWN, KING + 1):
             pt_idx = piece_type + (6 if current_side == BLACK else 0)
             piece_attackers = piece_bbs[pt_idx] & attackers_for_side
-            if piece_attackers:
-                aggressor_sq = get_lsb_index(piece_attackers)
-                aggressor_piece_type = piece_type
-                break
+
+            while piece_attackers:
+                sq = get_lsb_index(piece_attackers)
+                sq_bb = BB_SQUARES[sq]
+
+                # --- Pin Detection ---
+                # Check if 'sq' is pinned.
+                is_pinned = False
+                if king_sq != -1:
+                    if _check_on_line(king_sq, sq, to_sq_i):
+                        pass
+                    else:
+                        occ_without_agg = occupancy ^ sq_bb
+
+                        # Explicit casting to ensure integer indexing
+                        offset = 6 - 6 * current_side
+                        enemy_b_q = piece_bbs[BISHOP + offset] | piece_bbs[QUEEN + offset]
+                        enemy_r_q = piece_bbs[ROOK + offset] | piece_bbs[QUEEN + offset]
+
+                        if (get_bishop_attacks(king_sq, occ_without_agg) & enemy_b_q):
+                            is_pinned = True
+                        elif not is_pinned and (get_rook_attacks(king_sq, occ_without_agg) & enemy_r_q):
+                            is_pinned = True
+
+                if not is_pinned:
+                    aggressor_sq = sq
+                    aggressor_sq_bb = sq_bb
+                    aggressor_piece_type = piece_type
+                    found = True
+                    break # Break inner while
+
+                piece_attackers ^= sq_bb
+
+            if found:
+                break # Break outer for
         
         if aggressor_sq == -1:
             break
             
-        aggressor_sq_bb = BB_SQUARES[aggressor_sq]
-
-        # --- Update Gain Array / 更新增益陣列 ---
-        # gain[depth] = value_captured - gain[depth - 1]
-        gain[depth] = previous_aggressor_value - gain[depth - 1]
-
-        previous_aggressor_value = MG_MATERIAL_VALUES[aggressor_piece_type]
-
-        # --- Update Simulation State / 更新模擬狀態 ---
+        # Update Gain
+        gain[depth] = attacker_value - gain[depth - 1]
+        
+        # Prepare for next iteration
+        attacker_value = MG_MATERIAL_VALUES[aggressor_piece_type]
+        
+        # Update Occupancy
         occupancy ^= aggressor_sq_bb
+        
+        # X-Ray Discovery
+        bishop_attacks_bb = get_bishop_attacks(np.uint8(to_sq_i), occupancy)
+        new_bishops = bishop_attacks_bb & (piece_bbs[BISHOP] | piece_bbs[QUEEN] | piece_bbs[BISHOP+6] | piece_bbs[QUEEN+6])
+        
+        rook_attacks_bb = get_rook_attacks(np.uint8(to_sq_i), occupancy)
+        new_rooks = rook_attacks_bb & (piece_bbs[ROOK] | piece_bbs[QUEEN] | piece_bbs[ROOK+6] | piece_bbs[QUEEN+6])
+        
+        potential_xray = (new_bishops | new_rooks) & ~all_attackers
+        if potential_xray:
+            all_attackers |= potential_xray
+            white_attackers |= (potential_xray & (piece_bbs[BISHOP] | piece_bbs[ROOK] | piece_bbs[QUEEN]))
+            black_attackers |= (potential_xray & (piece_bbs[BISHOP+6] | piece_bbs[ROOK+6] | piece_bbs[QUEEN+6]))
 
-        # --- Handle X-Ray Attacks / 處理 X-Ray 攻擊 ---
-        bishop_attacks_bb = get_bishop_attacks(to_sq, occupancy)
-        new_w_bishops = bishop_attacks_bb & (piece_bbs[BISHOP] | piece_bbs[QUEEN]) & occupancy
-        new_b_bishops = bishop_attacks_bb & (piece_bbs[BISHOP + 6] | piece_bbs[QUEEN + 6]) & occupancy
-        
-        revealed_attackers = (new_w_bishops | new_b_bishops) & ~all_attackers
-        
-        if revealed_attackers:
-            all_attackers |= revealed_attackers
-            white_attackers |= new_w_bishops
-            black_attackers |= new_b_bishops
-
-        rook_attacks_bb = get_rook_attacks(to_sq, occupancy)
-        new_w_rooks = rook_attacks_bb & (piece_bbs[ROOK] | piece_bbs[QUEEN]) & occupancy
-        new_b_rooks = rook_attacks_bb & (piece_bbs[ROOK + 6] | piece_bbs[QUEEN + 6]) & occupancy
-        
-        revealed_attackers = (new_w_rooks | new_b_rooks) & ~all_attackers
-        
-        if revealed_attackers:
-            all_attackers |= revealed_attackers
-            white_attackers |= new_w_rooks
-            black_attackers |= new_b_rooks
-        
         all_attackers &= ~aggressor_sq_bb
 
 
-    # --- Minimax Calculation / 極大極小值計算 ---
+    # Propagate scores
     while depth > 1:
         depth -= 1
-        gain[depth - 1] = -max(-gain[depth - 1], gain[depth])
+        gain[depth-1] = -max(-gain[depth-1], gain[depth])
 
     return gain[0]

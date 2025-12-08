@@ -25,7 +25,8 @@ from chess_engine.constants import (
     ENABLE_SINGULAR_EXTENSIONS, MIN_SINGULAR_DEPTH, SINGULAR_EXTENSION_MARGIN,
     STOP_SEARCH_FLAG, PAWN_PUSH_RANK_BONUS, PAWN_PUSH_ATTACK_BONUS, MAX_HISTORY,
     KING_TROPISM_BONUS, SCORE_TT_MOVE, SCORE_GOOD_CAPTURE_BONUS, SCORE_KILLER_1,
-    SCORE_KILLER_2, SCORE_COUNTER_MOVE, SCORE_BAD_CAPTURE_PENALTY
+    SCORE_KILLER_2, SCORE_COUNTER_MOVE, SCORE_BAD_CAPTURE_PENALTY,
+    ENABLE_SEE_PRUNING, SEE_PRUNING_DEPTH, SEE_PRUNING_MARGIN
 )
 from chess_engine.bitboard_utils import find_piece_type_on_square, KING_ATTACK_ZONES
 from chess_engine.debug_utils import log_info
@@ -601,6 +602,21 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
 
         if is_quiet_move:
             quiet_move_counter += 1
+
+            # --- SEE Pruning ---
+            if ENABLE_SEE_PRUNING and depth <= SEE_PRUNING_DEPTH:
+                side_to_move = game_state[0]
+                # Margin scales with depth: deeper search allows more negative SEE
+                # We use a relaxed margin: SEE_PRUNING_MARGIN * depth
+                # e.g., -100 * 8 = -800 at depth 8.
+                # Or constant? Stockfish uses -depth * something.
+                # Antares Plan: -100 * depth (relaxed).
+                see_margin = SEE_PRUNING_MARGIN * depth
+                if see(piece_bbs, occupancy_bbs, side_to_move, get_from_square(move), get_to_square(move), see_margin) < see_margin:
+                    qs_see_pruned += 1 # Count as QS pruned for now or add new counter
+                    unmake_move(piece_bbs, occupancy_bbs, game_state, move, unmake_info)
+                    continue
+
             # Add to tried list for potential malus
             quiet_moves_tried[quiet_moves_tried_count] = move
             quiet_moves_tried_count += 1
