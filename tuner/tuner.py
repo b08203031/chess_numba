@@ -4,8 +4,8 @@ import numba
 import time
 import os
 import argparse
-from parameters import ParameterManager
-from tunable_eval import evaluate_position_tunable
+from tuner.parameters import ParameterManager
+from tuner.tunable_eval import evaluate_position_tunable
 
 # --- Cost Function (Numba Optimized) ---
 
@@ -70,7 +70,21 @@ class SPSAOptimizer:
         Standard SPSA implementation.
         """
         theta = self.best_theta.copy()
-        
+
+        # --- 新增：定義要調整的範圍 (Mask) ---
+        # 預設全部鎖定 (全部為 0)
+        mask = np.zeros_like(theta)
+
+        # 開放你想調整的參數索引
+        # 例如：只調整 MG_MATERIAL (索引 0~5)
+        # 你可以去 parameters.py 或直接 print 出來確認索引範圍
+        # 參考：
+        # IDX_MG_MATERIAL = 0 (長度 6)
+        # IDX_PST_MG = 12 (長度 384)
+
+        mask[0:] = 1    # 開放 MG Material
+        # mask[12:396] = 1 # 開放 PST MG (12 + 384 = 396)
+
         # Determine fixed/variable indices (Optional: if we wanted to freeze some params)
         # For now, tune all float values in theta.
         
@@ -84,8 +98,10 @@ class SPSAOptimizer:
             ck = c / (k ** gamma)
             
             # Perturbation vector (Bernoulli +/- 1)
-            delta = np.random.randint(0, 2, size=theta.shape) * 2 - 1
-            
+            raw_delta = np.random.randint(0, 2, size=theta.shape) * 2 - 1
+            # 乘上 Mask：不想調的地方變成 0，想調的地方保持 -1 或 1
+            delta = raw_delta * mask
+
             # Two measurements
             theta_plus = theta + ck * delta
             theta_minus = theta - ck * delta
@@ -130,9 +146,9 @@ class SPSAOptimizer:
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--iter", type=int, default=1000, help="Number of SPSA iterations")
-    parser.add_argument("--alpha", type=float, default=20.0, help="Learning rate scaling (a)")
-    parser.add_argument("--c", type=float, default=1.0, help="Perturbation scaling (c)")
+    parser.add_argument("--iter", type=int, default=5000, help="Number of SPSA iterations")
+    parser.add_argument("--alpha", type=float, default=20000.0, help="Learning rate scaling (a)")
+    parser.add_argument("--c", type=float, default=5.0, help="Perturbation scaling (c)")
     args = parser.parse_args()
 
     pm = ParameterManager()
