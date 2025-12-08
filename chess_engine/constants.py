@@ -269,10 +269,10 @@ PASSED_PAWN_BONUS = np.array([
     [  0,   0], # Rank 1
     [ 10,  20], # Rank 2
     [ 20,  40], # Rank 3
-    [ 35,  80], # Rank 4
-    [ 50, 120], # Rank 5
-    [ 80, 200], # Rank 6
-    [150, 350], # Rank 7
+    [ 35, 100], # Rank 4
+    [ 50, 150], # Rank 5
+    [ 80, 250], # Rank 6
+    [150, 400], # Rank 7
     [  0,   0]  # Rank 8
 ], dtype=np.int32)
 
@@ -300,7 +300,7 @@ CONNECTED_PASSED_PAWN_BONUS = np.array([40, 80], dtype=np.int32) # MG, EG
 # Attack units for each piece type. Order: P, N, B, R, Q
 # 每個棋子類型的攻擊單位。順序：兵、馬、象、車、后
 # Updated: Aggressive weights for R and Q
-KING_SAFETY_ATTACK_UNITS = np.array([1, 4, 4, 9, 15], dtype=np.int32) # P, N, B, R, Q
+KING_SAFETY_ATTACK_UNITS = np.array([2, 5, 5, 10, 16], dtype=np.int32) # P, N, B, R, Q
 
 # A non-linear table where the index is the sum of attack units, and the value is the penalty.
 # The penalty grows exponentially, rewarding multi-piece attacks.
@@ -424,14 +424,14 @@ NULL_MOVE_REDUCTION = 2
 MAX_QUIESCENCE_DEPTH = 5
 
 # Razoring
-RAZORING_MARGIN = 350 # Increased from 250
+RAZORING_MARGIN = 900 # Relaxed from 550
 
 # Futility Pruning
-FP_MARGIN_D1 = 150 # Increased from 100
-FP_MARGIN_D2 = 350 # Increased from 250
+FP_MARGIN_D1 = 500 # Relaxed from 300
+FP_MARGIN_D2 = 900 # Relaxed from 600
 
 # Reverse Futility Pruning
-RFP_MARGIN_D1 = 100
+RFP_MARGIN_D1 = 300 # Relaxed from 250
 
 # Late Move Reductions (LMR)
 LMR_MIN_DEPTH = 4           # Minimum depth to apply LMR / 應用 LMR 的最小深度
@@ -440,9 +440,9 @@ LMR_REDUCTION = 1           # Depth reduction for LMR / LMR 的深度減少值
 
 # Late Move Pruning (LMP) - Prune moves after a certain number of quiet moves have been searched
 # 晚期移動剪枝（LMP） - 在搜尋了一定數量的寧靜步後剪枝
-# Updated: Relaxed constraints to search more moves (12 + 12*depth)
+# Updated: Relaxed constraints to search even more moves (20 + 20*depth)
 LMP_MOVE_COUNT = np.array([
-    0 if d == 0 else 12 + 12 * d for d in range(MAX_PLY)
+    0 if d == 0 else 20 + 20 * d for d in range(MAX_PLY)
 ], dtype=np.int32)
 
 
@@ -452,10 +452,10 @@ PROBCUT_R_PRIME = 4
 PROBCUT_MARGIN = 150 # centipawns
 
 # Delta Pruning
-DELTA_PRUNING_MARGIN = 300
+DELTA_PRUNING_MARGIN = 1200
 
 # --- Static Exchange Evaluation (SEE) Threshold / SEE 閾值 ---
-SEE_THRESHOLD = -50  # centipawns
+SEE_THRESHOLD = -100  # centipawns (Relaxed from -50)
 ENABLE_SEE_IN_QUIESCENCE = False # Master switch to enable/disable SEE in quiescence search / 啟用/禁用靜態搜尋中 SEE 的總開關
 
 # =============================================================================
