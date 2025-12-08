@@ -360,7 +360,7 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
             
     # Avoid 2nd repetition
     # Crucial fix: Do not prune at the root (ply 0). If we are at the root, we must search for a move.
-    if ply > 0 and repetition_count >= 1:
+    if ply > 0 and repetition_count >= 2:
         search_context.pv_table[ply, :].fill(NO_MOVE)
         return (np.int32(0), NO_MOVE, nodes_searched, quiescence_nodes, cutoffs, tt_hits,
                 null_move_cutoffs, futility_pruned, razoring_used, rfp_pruned, lmp_pruned, probcut_pruned, qs_delta_pruned, qs_see_pruned,

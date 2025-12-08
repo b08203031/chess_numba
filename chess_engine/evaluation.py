@@ -19,7 +19,7 @@ NOT_H_FILE = ~np.uint64(0x8080808080808080)
 def _create_manhattan_distance_table():
     """
     Pre-computes a 64x64 lookup table for the manhattan distance between any two squares.
-    Distance = max(abs(rank1 - rank2), abs(file1 - file2)).
+    Distance = abs(rank1 - rank2) + abs(file1 - file2).
     預計算任意兩個方格之間的曼哈頓距離。
     """
     table = np.zeros((64, 64), dtype=np.int32)
@@ -31,6 +31,22 @@ def _create_manhattan_distance_table():
     return table
 
 MANHATTAN_DISTANCE = _create_manhattan_distance_table()
+
+def _create_chebyshev_distance_table():
+    """
+    Pre-computes a 64x64 lookup table for the Chebyshev distance (King distance) between any two squares.
+    Distance = max(abs(rank1 - rank2), abs(file1 - file2)).
+    預計算任意兩個方格之間的切比雪夫距離（國王距離）。
+    """
+    table = np.zeros((64, 64), dtype=np.int32)
+    for sq1 in range(64):
+        rank1, file1 = sq1 // 8, sq1 % 8
+        for sq2 in range(64):
+            rank2, file2 = sq2 // 8, sq2 % 8
+            table[sq1, sq2] = max(abs(rank1 - rank2), abs(file1 - file2))
+    return table
+
+CHEBYSHEV_DISTANCE = _create_chebyshev_distance_table()
 
 
 # --- Pre-computed Masks for Pawn Structure Evaluation / 兵型評估的預計算掩碼 ---
@@ -224,12 +240,32 @@ def evaluate_pawn_structure(piece_bbs):
                  mg_score += CONNECTED_PASSED_PAWN_BONUS[0]
                  eg_score += CONNECTED_PASSED_PAWN_BONUS[1]
 
-            # King Proximity Logic (Stockfish-like)
-            if rank > 3: # Only consider advanced passed pawns for proximity logic to save time/noise
-                block_sq = sq + 8 # Square in front
-                if block_sq < 64:
-                    dist_friendly = MANHATTAN_DISTANCE[white_king_sq, block_sq]
-                    dist_enemy = MANHATTAN_DISTANCE[black_king_sq, block_sq]
+            # King Proximity Logic & Blocked Check
+            # If the passed pawn is blocked by the enemy King, reduce the bonus drastically
+            block_sq = sq + 8
+            if block_sq < 64:
+                dist_friendly = CHEBYSHEV_DISTANCE[white_king_sq, block_sq]
+                dist_enemy = CHEBYSHEV_DISTANCE[black_king_sq, block_sq]
+
+                # Rule 1: Pawn Blocked by Enemy King
+                # If enemy King is on the stop square or directly blocking
+                # For white pawn, stop sq is sq+8.
+                # If enemy king is ON sq+8, distance is 0.
+                is_blocked_by_king = (dist_enemy <= 1) and (dist_friendly > dist_enemy)
+                
+                if is_blocked_by_king:
+                     # Reduce the passed pawn bonus significantly if blocked by King and undefended/unsupported
+                     # Remove most of the bonus we just added
+                     # e.g., reduce by 90%
+                     penalty = np.int32(PASSED_PAWN_BONUS[rank][1] * 0.9)
+                     eg_score -= penalty
+                     mg_score -= np.int32(PASSED_PAWN_BONUS[rank][0] * 0.9)
+
+                # Rule 2: Unstoppable Pawn (Simple Logic)
+                # If Friendly King is closer or supports, and Enemy King is far
+                # (TODO: Full Rule of the Square is complex with turn logic, this is a proxy)
+                
+                if rank > 3: # Only consider advanced passed pawns for proximity logic to save time/noise
                     # Bonus if friendly king is closer, penalty if enemy is closer
                     # Weight: 5 * Enemy - 2 * Friendly
                     proximity_bonus = (dist_enemy * 5 - dist_friendly * 2) * rank # Scale by rank
@@ -286,13 +322,21 @@ def evaluate_pawn_structure(piece_bbs):
                  mg_score -= CONNECTED_PASSED_PAWN_BONUS[0]
                  eg_score -= CONNECTED_PASSED_PAWN_BONUS[1]
 
-            # King Proximity Logic
-            if relative_rank > 3:
-                block_sq = sq - 8
-                if block_sq >= 0:
-                    dist_friendly = MANHATTAN_DISTANCE[black_king_sq, block_sq]
-                    dist_enemy = MANHATTAN_DISTANCE[white_king_sq, block_sq]
+            # King Proximity Logic & Blocked Check
+            block_sq = sq - 8
+            if block_sq >= 0:
+                dist_friendly = CHEBYSHEV_DISTANCE[black_king_sq, block_sq]
+                dist_enemy = CHEBYSHEV_DISTANCE[white_king_sq, block_sq]
 
+                # Rule 1: Pawn Blocked by Enemy King
+                is_blocked_by_king = (dist_enemy <= 1) and (dist_friendly > dist_enemy)
+                
+                if is_blocked_by_king:
+                     penalty = np.int32(PASSED_PAWN_BONUS[relative_rank][1] * 0.9)
+                     eg_score += penalty # Add penalty because we subtracted bonus earlier (for black)
+                     mg_score += np.int32(PASSED_PAWN_BONUS[relative_rank][0] * 0.9)
+
+                if relative_rank > 3:
                     proximity_bonus = (dist_enemy * 5 - dist_friendly * 2) * relative_rank
                     proximity_bonus = max(-150, min(150, proximity_bonus))
                     eg_score -= proximity_bonus
@@ -975,10 +1019,10 @@ def evaluate_threats(piece_bbs, occupancy_bbs, white_attacks, black_attacks):
     return mg_score, eg_score
 
 
-@numba.njit(numba.int32(piece_bbs_signature), cache=True, boundscheck=False, fastmath=True)
-def _evaluate_king_pawn_endgame(piece_bbs):
+@numba.njit(numba.int32(piece_bbs_signature, numba.uint64), cache=True, boundscheck=False, fastmath=True)
+def _evaluate_king_pawn_endgame(piece_bbs, side_to_move):
     """
-    專門為王兵殘局設計的評估函數。
+    專門為王兵殘局設計的評估函數。包含不可阻擋通路兵的檢測（方形法則）。
     """
     score = np.int32(0)
 
@@ -993,6 +1037,26 @@ def _evaluate_king_pawn_endgame(piece_bbs):
     while temp_wp:
         sq = get_lsb_index(temp_wp)
         score += EG_MATERIAL_VALUES[0] + PST_EG[0][sq]
+        
+        # Unstoppable Pawn Logic (White)
+        # Check if passed
+        if not (WHITE_PASSED_PAWN_MASKS[sq] & black_pawns):
+            rank = sq // 8
+            steps_to_promote = 7 - rank
+            if rank == 1: steps_to_promote = 5 # Double push correction (approx)
+            
+            # Enemy King Distance
+            promotion_sq = (sq % 8) + 56
+            king_dist = CHEBYSHEV_DISTANCE[black_king_sq, promotion_sq]
+            
+            adjusted_pawn_steps = steps_to_promote
+            if side_to_move == 0: # White to move
+                adjusted_pawn_steps -= 1
+            
+            # If King is too far -> Unstoppable
+            if king_dist > adjusted_pawn_steps:
+                 score += 800 # Queen value approx
+            
         temp_wp &= temp_wp - np.uint64(1)
 
     # Black pawns
@@ -1000,6 +1064,23 @@ def _evaluate_king_pawn_endgame(piece_bbs):
     while temp_bp:
         sq = get_lsb_index(temp_bp)
         score -= (EG_MATERIAL_VALUES[0] + PST_EG[0][sq ^ 56])
+        
+        # Unstoppable Pawn Logic (Black)
+        if not (BLACK_PASSED_PAWN_MASKS[sq] & white_pawns):
+            rank = sq // 8
+            steps_to_promote = rank
+            if rank == 6: steps_to_promote = 5
+            
+            promotion_sq = (sq % 8)
+            king_dist = CHEBYSHEV_DISTANCE[white_king_sq, promotion_sq]
+            
+            adjusted_pawn_steps = steps_to_promote
+            if side_to_move == 1: # Black to move
+                adjusted_pawn_steps -= 1
+                
+            if king_dist > adjusted_pawn_steps:
+                score -= 800
+
         temp_bp &= temp_bp - np.uint64(1)
 
     # King position
@@ -1054,7 +1135,7 @@ def evaluate_position(piece_bbs, occupancy_bbs, game_state, lazy: bool = False):
         piece_bbs[7] | piece_bbs[8] | piece_bbs[9] | piece_bbs[10]
     )
     if all_pieces_except_pawns_and_kings == 0:
-        score = _evaluate_king_pawn_endgame(piece_bbs)
+        score = _evaluate_king_pawn_endgame(piece_bbs, game_state[0])
         return score if game_state[0] == 0 else -score
     side_to_move = game_state[0]
 

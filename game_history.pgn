@@ -1,0 +1,10 @@
+[Event "Engine Match"]
+[Site "?"]
+[Date "????.??.??"]
+[Round "?"]
+[White "MyEngine"]
+[Black "Stockfish"]
+[Result "0-1"]
+
+1. d4 d5 2. Nf3 Bf5 3. Bf4 a6 4. Nc3 e6 5. Ne5 h5 6. e3 g5 7. Bg3 h4 8. Nxf7 Kxf7 9. Be5 Nf6 10. Bd3 Nbd7 11. Bxf5 exf5 12. Qd3 Kg6 13. O-O Qe7 14. Nxd5 Nxd5 15. Bxh8 Re8 16. c4 N5f6 17. f4 g4 18. Bxf6 Nxf6 19. Rfe1 Qd7 20. Qb3 c5 21. d5 b5 22. Rad1 Re4 23. Qa3 Rxc4 24. Qxa6 Bd6 25. b3 Rc2 26. a4 c4 27. Qxb5 Qxb5 28. axb5 cxb3 29. g3 Ne4 30. gxh4 Kh5 31. b6 b2 32. Rf1 Nc3 33. b7 Nxd1 34. b8=B Bxb8 35. Kh1 Nxe3 36. Re1 Kxh4 37. Kg1 Nxd5 38. Kf1 Ba7 39. Rb1 Nxf4 40. Ke1 Nd5 41. Kd1 Ne3+ 42. Ke1 Bd4 43. Rd1 Bc3+ 44. Rd2 Rxd2 45. h3 b1=Q# 0-1
+
