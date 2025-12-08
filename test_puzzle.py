@@ -866,7 +866,14 @@ def run_puzzle_test():
         print(f"theme: {puzzle['theme']}")
         print("")
 
-        if engine_move == puzzle['solution']:
+        is_correct = False
+        if isinstance(puzzle['solution'], list):
+            if engine_move in puzzle['solution']:
+                is_correct = True
+        elif engine_move == puzzle['solution']:
+            is_correct = True
+
+        if is_correct:
             passed_tests += 1
             print(f"Test PASSED: The engine found the correct move ({engine_move}).")
         else:
@@ -908,6 +915,12 @@ def run_puzzle_test():
             print(f"  Correct Answer: {fp['solution']}")
             print(f"  Engine's Answer: {fp['engine_move']}")
             print("-" * 20)
+
+        # Save failed puzzles to JSON for analysis
+        import json
+        with open("failed_puzzles.json", "w") as f:
+            json.dump(failed_puzzles, f, indent=4)
+        print("Failed puzzles saved to failed_puzzles.json")
 
 
 if __name__ == "__main__":
