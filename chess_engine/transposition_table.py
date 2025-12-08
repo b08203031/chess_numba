@@ -9,19 +9,14 @@ TT_FLAG_EXACT = 1  # Exact score (score is between alpha and beta) / 精確分�
 TT_FLAG_ALPHA = 2  # Upper bound (score <= alpha), an ALL-node / 上界（分數 <= alpha），所有節點（ALL-node）
 TT_FLAG_BETA = 3   # Lower bound (score >= beta), a CUT-node / 下界（分數 >= beta），截斷節點（CUT-node）
 
-# TT Bucketing Constants
-TT_CLUSTER_SIZE = 4 # 4 entries per cluster to reduce collisions
-
 # 2. Define the data type (dtype) for a transposition table entry / 定義置換表項目的數據類型
-# Size: 8 (key) + 2 (score) + 2 (move) + 1 (depth) + 1 (flag) + 1 (gen) + 1 (pad) = 16 bytes
 tt_entry_dtype = np.dtype([
     ('key', np.uint64),       # Zobrist hash key / Zobrist 哈希鍵值
     ('score', np.int16),      # Evaluation score / 評估分數
-    ('best_move', np.uint16), # Best move found at this node / 此節點找到的最佳移動
     ('depth', np.uint8),      # Search depth / 搜尋深度
     ('flag', np.uint8),       # Node type flag (Exact, Alpha, Beta) / 節點類型標誌
     ('generation', np.uint8), # Generation ID for aging / 用於老化的世代 ID
-    ('pad', np.uint8)         # Padding for alignment (unused)
+    ('best_move', np.uint16)  # Best move found at this node / 此節點找到的最佳移動
 ])
 
 # Convert the NumPy dtype to a Numba-compatible type / 將 NumPy dtype 轉換為 Numba 兼容類型
@@ -35,7 +30,6 @@ _EMPTY_TT_ENTRY['flag'] = TT_FLAG_NONE
 def create_transposition_table(size_mb):
     """
     根據指定的 MB 大小初始化置換表。
-    Ensure total entries is a multiple of TT_CLUSTER_SIZE.
     
     Args:
         size_mb (int): 置換表的大小（MB）。
@@ -43,12 +37,8 @@ def create_transposition_table(size_mb):
     Returns:
         np.ndarray: 置換表陣列。
     """
-    entry_size_bytes = tt_entry_dtype.itemsize # 16 bytes
+    entry_size_bytes = tt_entry_dtype.itemsize
     num_entries = (size_mb * 1024 * 1024) // entry_size_bytes
-
-    # Align to cluster size
-    num_entries = (num_entries // TT_CLUSTER_SIZE) * TT_CLUSTER_SIZE
-
     transposition_table = np.zeros(num_entries, dtype=tt_entry_dtype)
     return transposition_table
 
@@ -63,25 +53,15 @@ def clear_transposition_table(tt):
     for i in range(len(tt)):
         tt[i]['key'] = np.uint64(0)
         tt[i]['score'] = np.int16(0)
-        tt[i]['best_move'] = np.uint16(0)
         tt[i]['depth'] = np.uint8(0)
         tt[i]['flag'] = np.uint8(0)
         tt[i]['generation'] = np.uint8(0)
-
-@nb.njit(cache=True)
-def relative_age(entry_gen, current_gen):
-    """
-    Calculate the age of an entry relative to the current generation.
-    Handles wrapping logic (0-255).
-    """
-    diff = (int(current_gen) - int(entry_gen)) & 0xFF
-    return diff
+        tt[i]['best_move'] = np.uint16(0)
 
 @nb.njit(cache=True)
 def probe_tt(tt, zobrist_key):
     """
-    在置換表中查找項目。
-    Uses Bucket System (Cluster of 4).
+    在置換表中查找項目。如果鍵值匹配，則返回該項目。
     
     Args:
         tt (np.ndarray): 置換表。
@@ -90,23 +70,17 @@ def probe_tt(tt, zobrist_key):
     Returns:
         tuple: 置換表項目。如果未命中，則返回空項目。
     """
-    num_clusters = len(tt) // TT_CLUSTER_SIZE
-    cluster_idx = (zobrist_key % num_clusters) * TT_CLUSTER_SIZE
-
-    # Check all 4 entries in the cluster
-    for i in range(TT_CLUSTER_SIZE):
-        entry = tt[cluster_idx + i]
-        if entry['key'] == zobrist_key:
-            return entry
-
-    return _EMPTY_TT_ENTRY
+    index = zobrist_key % len(tt)
+    entry = tt[index]
+    if entry['key'] == zobrist_key:
+        return entry
+    else:
+        return _EMPTY_TT_ENTRY
 
 @nb.njit(cache=True)
 def store_tt(tt, zobrist_key, depth, score, flag, best_move, current_generation):
     """
-    Store an entry in the transposition table.
-    Uses Bucket System (Cluster of 4).
-    Prioritizes preserving deep search results over new shallow results to prevent 'Amnesia'.
+    使用深度優先替換策略將項目存儲在置換表中。
     
     Args:
         tt (np.ndarray): 置換表。
@@ -117,69 +91,28 @@ def store_tt(tt, zobrist_key, depth, score, flag, best_move, current_generation)
         best_move (int): 最佳移動。
         current_generation (int): 當前搜尋世代。
     """
-    num_clusters = len(tt) // TT_CLUSTER_SIZE
-    cluster_idx = (zobrist_key % num_clusters) * TT_CLUSTER_SIZE
+    index = zobrist_key % len(tt)
+    existing_entry = tt[index]
 
-    target_idx = -1
-    found_existing = False
-
-    # Phase 1: Try to find exact match
-    for i in range(TT_CLUSTER_SIZE):
-        if tt[cluster_idx + i]['key'] == zobrist_key:
-            target_idx = i
-            found_existing = True
-            break
-
-    # Phase 2: If no match, find best replacement candidate (Victim)
-    if target_idx == -1:
-        best_replace_val = 10000 # Large initial value
-        victim_idx = 0
-
-        for i in range(TT_CLUSTER_SIZE):
-            entry = tt[cluster_idx + i]
-
-            # If empty, use it immediately
-            if entry['key'] == 0:
-                victim_idx = i
-                break
-
-            age = relative_age(entry['generation'], current_generation)
-            # Replacement Score: High Depth = Valuable. High Age = Disposable.
-            # Value = Depth - (Age * 2)
-            # We want to replace the entry with MIN Value.
-            replace_val = int(entry['depth']) - (age * 2)
-
-            if replace_val < best_replace_val:
-                best_replace_val = replace_val
-                victim_idx = i
-
-        target_idx = victim_idx
-
-    # Phase 3: Write data to target_idx
+    # Replacement Strategy / 替換策略:
+    # 1. If the key matches (update same position), replace if new depth is >= existing depth OR existing entry is old.
+    # 2. If the key is different (collision), replace if new depth is >= existing depth OR existing entry is old.
+    # Simply put: If existing entry is from an old generation, we always replace it (it's effectively empty/stale).
     
-    entry = tt[cluster_idx + target_idx]
-    should_replace = False
+    replace = False
     
-    if not found_existing:
-        # It's a collision replacement (victim) or empty slot -> Always write
-        should_replace = True
+    if existing_entry['generation'] != current_generation:
+        # Existing entry is old, replace it!
+        replace = True
     else:
-        # Same key update (found_existing == True)
-        # CRITICAL FIX: Only replace if the new depth is better or equal.
-        # Do NOT replace just because it's a new generation (Age > 0), as this causes "Amnesia"
-        # of deep search results when visited by shallow searches in new frames.
+        # Entry is from current generation, apply standard depth check
+        if depth >= existing_entry['depth']:
+            replace = True
 
-        if depth >= entry['depth']:
-            should_replace = True
-        elif flag == TT_FLAG_EXACT and entry['flag'] != TT_FLAG_EXACT:
-             # Prefer Exact score if depths are close?
-             # Safety: Stick to depth. If depth is lower, we trust the deeper search more.
-             pass
-
-    if should_replace:
-        tt[cluster_idx + target_idx]['key'] = zobrist_key
-        tt[cluster_idx + target_idx]['depth'] = np.uint8(depth)
-        tt[cluster_idx + target_idx]['score'] = np.int16(score)
-        tt[cluster_idx + target_idx]['flag'] = np.uint8(flag)
-        tt[cluster_idx + target_idx]['generation'] = np.uint8(current_generation)
-        tt[cluster_idx + target_idx]['best_move'] = np.uint16(best_move)
+    if replace:
+        tt[index]['key'] = zobrist_key
+        tt[index]['depth'] = np.uint8(depth)
+        tt[index]['score'] = np.int16(score)
+        tt[index]['flag'] = np.uint8(flag)
+        tt[index]['generation'] = np.uint8(current_generation)
+        tt[index]['best_move'] = np.uint16(best_move)
