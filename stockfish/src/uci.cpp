@@ -162,6 +162,18 @@ void UCIEngine::loop() {
 
             engine.save_network(files);
         }
+        else if (token == "see")
+        {
+            std::string moveStr;
+            is >> moveStr;
+            Move m = to_move(engine.pos, moveStr);
+            if (m != Move::none()) {
+                int value = engine.pos.see(m);
+                sync_cout << "see " << moveStr << " value " << value << sync_endl;
+            } else {
+                sync_cout << "see error: invalid move" << sync_endl;
+            }
+        }
         else if (token == "--help" || token == "help" || token == "--license" || token == "license")
             sync_cout
               << "\nStockfish is a powerful chess engine for playing and analyzing."
