@@ -188,13 +188,6 @@ def see(piece_bbs, occupancy_bbs, side_to_move, from_sq, to_sq):
     occupied &= ~current_attacker_sq_bb
 
     # Initial Attackers
-    # We need attackers for BOTH sides initially to handle the loop correctly?
-    # No, we only need attackers for the side whose turn it is.
-    # But for optimization (incremental updates), we need to track both or update both?
-    # Actually, simpler to maintain one 'attackers' bitboard containing ALL attackers,
-    # and filter by side when selecting LVA.
-    # Stockfish maintains `attackers` as ALL attackers to `to_sq`.
-
     attackers = get_all_attackers(to_sq, occupied, piece_bbs, 0) | \
                 get_all_attackers(to_sq, occupied, piece_bbs, 1)
 
@@ -207,29 +200,18 @@ def see(piece_bbs, occupancy_bbs, side_to_move, from_sq, to_sq):
         # Value of the piece that just captured (the previous attacker)
         scores[depth] = current_attacker_val - scores[depth - 1]
 
-        # Stop if score is already positive for the side that just moved? No, we simulate full.
-
         # Filter attackers by current_side
-        # To do this efficiently, we need side masks or just use piece_bbs intersection inside LVA
 
         # --- Pin Check Logic (Simplified Ray-Trace) ---
         valid_attacker_found = False
         next_attacker_val = 0
         next_attacker_bb = np.uint64(0)
 
-        # Only check LVA for current side
-        # Attackers bitboard contains both sides.
-        # get_least_valuable_attacker filters by side_mask internally (checking piece_bbs offset)
-
         while True:
-            # Note: attackers bitboard includes pieces that might have been captured (removed from occupied).
-            # So we must ensure we intersect with 'occupied' (or just update attackers correctly).
-            # Stockfish updates attackers &= occupied at start of loop.
             attackers &= occupied
 
             val, bb, type_idx = get_least_valuable_attacker(attackers, piece_bbs, current_side)
             if bb == 0:
-                # No more attackers for this side
                 break
 
             # Check Pin: If attacker is removed, is King in check?
@@ -239,9 +221,6 @@ def see(piece_bbs, occupancy_bbs, side_to_move, from_sq, to_sq):
             king_sq = get_lsb_index(piece_bbs[king_idx])
 
             is_pinned = False
-
-            # Optimization: Only check if attacker is on a ray with King?
-            # Using get_sliding_attacks from King square.
 
             opp_offset = 0 if current_side == 1 else 6
             opp_sliders_diag = piece_bbs[2 + opp_offset] | piece_bbs[4 + opp_offset]
@@ -260,29 +239,20 @@ def see(piece_bbs, occupancy_bbs, side_to_move, from_sq, to_sq):
                 next_attacker_bb = bb
                 break
             else:
-                # This attacker is pinned, remove from candidates and try next
                 attackers &= ~bb
 
         if not valid_attacker_found:
             break
 
-        # Valid attacker found
         current_attacker_val = next_attacker_val
         current_attacker_sq_bb = next_attacker_bb
 
-        # Make the move on simulation board
         occupied &= ~current_attacker_sq_bb
 
         # Add X-Ray attackers
-        # Stockfish: attackers |= attacks_bb(to, occupied) & (B|R|Q)
-        # Only from relevant sliders!
-        # Both sides? Yes, X-rays can reveal friendly or enemy attackers.
-
         sliders_all_diag = piece_bbs[2] | piece_bbs[4] | piece_bbs[8] | piece_bbs[10]
         sliders_all_orth = piece_bbs[3] | piece_bbs[4] | piece_bbs[9] | piece_bbs[10]
 
-        # Only update if the removed piece was blocking something?
-        # Calling get_sliding_attacks is safe.
         if sliders_all_diag:
             attackers |= (get_sliding_attacks(to_sq, occupied, True) & sliders_all_diag)
         if sliders_all_orth:
@@ -292,13 +262,26 @@ def see(piece_bbs, occupancy_bbs, side_to_move, from_sq, to_sq):
         if depth >= 32: break
 
     # Propagate scores back (Minimax)
-    while depth > 1:
+    # Start from end of chain.
+    # scores[i] is the gain for side moving at i.
+    # They choose max(scores[i], -scores[i+1]).
+    # We update scores[i] in place.
+    # Root node (0) is FORCED.
+    # So we stop loop at 1.
+
+    while depth > 2:
         depth -= 1
-        # Backpropagation: Side at depth-1 wants to MAXIMIZE their gain.
-        # But scores[depth] is the gain for the OPPONENT (side at depth).
-        # The opponent chooses the best option for themselves: max(-gain_from_prev, new_gain).
-        # This simplifies to min(current_gain, -next_gain) for the current player?
-        # Standard formula: gain[i] = -max(-gain[i], gain[i+1])
-        scores[depth-1] = -max(-scores[depth-1], scores[depth])
+        scores[depth-1] = max(scores[depth-1], -scores[depth])
+
+    if depth == 2:
+        # At depth 1 (Opponent's first choice).
+        # Opponent compares scores[1] (Stop) vs -scores[2] (Continue).
+        # scores[1] is already updated from loop if depth was > 2.
+        # Opponent outcome is scores[1].
+        # Our outcome is scores[0] - scores[1].
+        # Wait, if scores[1] is opponent's GAIN.
+        # scores[0] is OUR gain from first capture.
+        # Total = scores[0] - scores[1].
+        return scores[0] - scores[1]
 
     return scores[0]
