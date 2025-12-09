@@ -99,6 +99,7 @@ class Engine {
     int get_hashfull(int maxAge = 0) const;
 
     std::string                            fen() const;
+    friend class UCIEngine;
     // Allow UCI to access Position for debugging
     friend class UCIEngine;
     void                                   flip();

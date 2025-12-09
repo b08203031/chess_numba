@@ -1050,91 +1050,43 @@ void Position::undo_null_move() {
 int Position::see(Move m) const {
     assert(m.is_ok());
 
-    // Only deal with normal moves, assume others return 0 (or simple capture value?)
-    // Stockfish's see_ge assumes non-normal moves (CASTLING, EP, PROMOTION) pass trivial checks.
-    // For exact SEE, we should probably handle EP and Promotion correctly or return approximation.
-    // Stockfish PROMOTION: handled as PieceValue[promotion] - PieceValue[Pawn].
-    // EN_PASSANT: Handled as capture.
-    // But see_ge simplifies non-NORMAL. Let's stick to see_ge logic for structure but return value.
+    if (m.type_of() != NORMAL) {
+        if (m.type_of() == EN_PASSANT) {
+             // Fallback for simplicity matching see_ge shortcut if we can't easily calc
+             // But we want exact values.
+             // Handled below.
+        } else if (m.type_of() == CASTLING) {
+             return 0;
+        }
+    }
+
     Square from = m.from_sq(), to = m.to_sq();
 
     int swap = PieceValue[piece_on(to)];
     if (m.type_of() == EN_PASSANT) {
-        swap = PawnValue; // We capture a pawn
+        swap = PawnValue;
     } else if (m.type_of() == PROMOTION) {
-        // Promotion: we gain (QueenValue - PawnValue) immediately?
-        // Standard SEE for promotion:
-        // Initial Gain = Value(Captured) + Value(Promoted) - Value(Pawn)
-        // Then opponent captures Promoted Piece (QueenValue).
-
-        // Let's model it:
-        // Move P(from) to Q(to).
-        // Gain 1: Captured Piece.
-        // Gain 2: Promotion Bonus (Q - P).
-        // Risk: Q can be captured.
-
-        // PieceValue[piece_on(to)] is the capture.
-        // The piece "moving" is effectively a Queen (value-wise) on 'to'.
-        // But the cost was a Pawn.
-
-        // Let's adjust initial swap value to include promotion bonus.
         PieceType promo = m.promotion_type();
         swap += PieceValue[promo] - PawnValue;
-    } else if (m.type_of() == CASTLING) {
-        return 0; // Castling is quiet
     }
 
-    // We need to simulate the sequence.
-    // Standard SEE algorithm:
-    // gain[d] = captured_piece_value
-    // next_piece_value = attacker_value
-    // gain[d+1] = attacker_value - gain[d]
-    // ...
-    // Final score = gain[0] - gain[1] + gain[2] ...? No.
-    // Minimax: gain[d] = max(0, gain[d] - gain[d+1])?
-
-    // Let's copy Stockfish logic but store gains.
-    // Stockfish `see_ge` does `swap = PieceValue[attacker] - swap` which is `gain[d+1]`.
-
-    assert(color_of(piece_on(from)) == sideToMove);
-    Bitboard occupied  = pieces() ^ from ^ to;
-    Color    stm       = sideToMove;
-    Bitboard attackers = attackers_to(to, occupied);
-    Bitboard stmAttackers, bb;
-
-    // Initial attack
-    // gain[0] = Value(Victim)
-    // gain[1] = Value(Attacker) - gain[0]
-    // ...
-
-    // Re-implementing strictly based on see_ge logic but tracking the list
-
-    // Initial Gain (if we stop immediately) is just 0? No, we haven't moved yet.
-    // If we make the move `m`, the immediate gain is `PieceValue[victim]`.
-    // Then opponent can capture us.
-
-    // Using an array to store the "value of piece on square" at each step might be clearer
     int values[32];
     int d = 0;
     values[0] = swap;
-    // For EP, attacker is Pawn.
-    // For Promotion, attacker is effectively the Promoted Piece value?
-    // Wait, values[1] is the value of the piece *on the board* after the move.
-    // If promotion, P -> Q. The piece on 'to' is Q.
-    // So if opponent captures back, they get Q value.
-    // So values[1] should be Q value.
+
     if (m.type_of() == PROMOTION) {
         values[1] = PieceValue[m.promotion_type()];
     } else {
         values[1] = PieceValue[piece_on(from)];
     }
 
-    // For EP, the pawn on 'to' (ep square) is empty initially, but we set swap = PawnValue.
-    // The attacker (Pawn) moves to 'to'.
-    // If captured back, opponent gets PawnValue.
-    // So values[1] = PawnValue. (Default `piece_on(from)` is correct).
-
     d = 1;
+
+    assert(color_of(piece_on(from)) == sideToMove);
+    Bitboard occupied  = pieces() ^ from ^ to;
+    Color    stm       = sideToMove;
+    Bitboard attackers = attackers_to(to, occupied);
+    Bitboard stmAttackers, bb;
 
     while (true)
     {
@@ -1152,7 +1104,6 @@ int Position::see(Move m) const {
         }
 
         d++;
-        // Find LVA
         if ((bb = stmAttackers & pieces(PAWN)))
         {
             values[d] = PawnValue;
@@ -1186,87 +1137,17 @@ int Position::see(Move m) const {
         else  // KING
         {
             if (attackers & ~pieces(stm)) {
-               // If King captures but is attacked, he cannot capture.
-               // So this option is invalid? Or infinite loss?
-               // Standard SEE handles King as valid LVA if safe.
-               // Stockfish see_ge logic: returns early.
-               // If opponent still has attackers, King capture is bad.
-               // We stop before adding King value?
-               // If we are here, stm (King side) is capturing.
-               // If there are opponent attackers, stm loses King.
-               // So gain is -Infinity.
-               // But usually we just stop.
                break;
             }
-            values[d] = 0; // King value doesn't matter as it won't be captured
-            // But we should stop here.
-            // If King captures and no attackers, sequence ends.
-            // We increment d, store value, and loop (which will break next time).
+            values[d] = 0;
         }
     }
 
-    // Minimax back
-    // values[0] = victim
-    // values[1] = attacker1
-    // values[2] = attacker2
-    // ...
-    // gain[k] = values[k] - gain[k+1]
-
-    // Start from last piece added (which was capturing).
-    // The "gain" for the side that MOVED that piece is `values[d-1]`.
-    // Wait, SEE calculation:
-    // list: V, A1, A2, A3...
-    // score = V
-    // score = A1 - score
-    // score = A2 - score ...
-
-    // Stockfish see_ge:
-    // swap = V - threshold
-    // swap = A1 - swap = A1 - (V - th) = A1 - V + th.
-    // If swap < 0 (A1 - V < -th -> V - A1 > th) return true.
-    // This logic is optimized for threshold.
-
-    // Standard SEE:
-    // gain[d] = value_of_piece_captured_at_d
-    // At step d, side wants to capture if (Value(Captured) - Result(d+1)) >= 0
-
-    // Let's use the array `values` [Victim, Attacker1, Attacker2...]
-    // Depth `d` is the number of pieces involved (Victim + Attackers).
-    // The last piece moved was `values[d]`.
-
-    // Minimax:
-    // current_gain = 0 (if we stop after the last move)
-    // for i = d-1 down to 1:
-    //    current_gain = max(0, values[i] - current_gain)
-    // return values[0] - current_gain
-
-    // Let's verify:
-    // 1. QxP (undefended). List: [P, Q]. d=1.
-    //    i=1: gain = max(0, Q - 0) = Q? No.
-    //    If Q takes P, side A gets P. Side B gets nothing.
-    //    Wait, `values` array is [100, 900].
-    //    Result should be 100.
-    //    Algorithm:
-    //      acc = 0
-    //      i=1: acc = max(0, 900 - 0) = 900? No.
-    //    Standard SEE constructs:
-    //    gain[0] = 100
-    //    gain[1] = 900 - 100 = 800
-    //    gain[2] = ...
-    //    Then propagates.
-
-    // Let's use the `swap` accumulation array.
     int gains[32];
     gains[0] = values[0];
     for (int i=1; i<=d; ++i) {
         gains[i] = values[i] - gains[i-1];
     }
-    // gains[i] represents the score for the side moving at step i, relative to the state at i-1.
-
-    // Propagate:
-    // gain[d] is the score for the side that just moved.
-    // gain[d-1] = -max(-gain[d-1], gain[d])? No.
-    // Standard: gain[i-1] = -max(-gain[i-1], gain[i])
 
     for (int i=d-1; i>=1; --i) {
         gains[i-1] = -std::max(-gains[i-1], gains[i]);
