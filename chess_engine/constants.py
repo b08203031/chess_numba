@@ -456,7 +456,7 @@ DELTA_PRUNING_MARGIN = 1200
 
 # --- Static Exchange Evaluation (SEE) Threshold / SEE 閾值 ---
 SEE_THRESHOLD = -100  # centipawns (Relaxed from -50)
-ENABLE_SEE_IN_QUIESCENCE = False # Master switch to enable/disable SEE in quiescence search / 啟用/禁用靜態搜尋中 SEE 的總開關
+ENABLE_SEE_IN_QUIESCENCE = True # Master switch to enable/disable SEE in quiescence search / 啟用/禁用靜態搜尋中 SEE 的總開關
 
 # =============================================================================
 # --- Bitboard Utilities Constants / 位元棋盤工具常量 ---

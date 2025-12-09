@@ -99,6 +99,9 @@ class Engine {
     int get_hashfull(int maxAge = 0) const;
 
     std::string                            fen() const;
+    friend class UCIEngine;
+    // Allow UCI to access Position for debugging
+    friend class UCIEngine;
     void                                   flip();
     std::string                            visualize() const;
     std::vector<std::pair<size_t, size_t>> get_bound_thread_count_by_numa_node() const;

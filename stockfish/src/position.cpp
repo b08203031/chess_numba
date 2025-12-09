@@ -1046,6 +1046,116 @@ void Position::undo_null_move() {
 }
 
 
+// Exact SEE (Static Exchange Evaluation) score
+int Position::see(Move m) const {
+    assert(m.is_ok());
+
+    if (m.type_of() != NORMAL) {
+        if (m.type_of() == EN_PASSANT) {
+             // Fallback for simplicity matching see_ge shortcut if we can't easily calc
+             // But we want exact values.
+             // Handled below.
+        } else if (m.type_of() == CASTLING) {
+             return 0;
+        }
+    }
+
+    Square from = m.from_sq(), to = m.to_sq();
+
+    int swap = PieceValue[piece_on(to)];
+    if (m.type_of() == EN_PASSANT) {
+        swap = PawnValue;
+    } else if (m.type_of() == PROMOTION) {
+        PieceType promo = m.promotion_type();
+        swap += PieceValue[promo] - PawnValue;
+    }
+
+    int values[32];
+    int d = 0;
+    values[0] = swap;
+
+    if (m.type_of() == PROMOTION) {
+        values[1] = PieceValue[m.promotion_type()];
+    } else {
+        values[1] = PieceValue[piece_on(from)];
+    }
+
+    d = 1;
+
+    assert(color_of(piece_on(from)) == sideToMove);
+    Bitboard occupied  = pieces() ^ from ^ to;
+    Color    stm       = sideToMove;
+    Bitboard attackers = attackers_to(to, occupied);
+    Bitboard stmAttackers, bb;
+
+    while (true)
+    {
+        stm = ~stm;
+        attackers &= occupied;
+
+        if (!(stmAttackers = attackers & pieces(stm)))
+            break;
+
+        if (pinners(~stm) & occupied)
+        {
+            stmAttackers &= ~blockers_for_king(stm);
+            if (!stmAttackers)
+                break;
+        }
+
+        d++;
+        if ((bb = stmAttackers & pieces(PAWN)))
+        {
+            values[d] = PawnValue;
+            occupied ^= least_significant_square_bb(bb);
+            attackers |= attacks_bb<BISHOP>(to, occupied) & pieces(BISHOP, QUEEN);
+        }
+        else if ((bb = stmAttackers & pieces(KNIGHT)))
+        {
+            values[d] = KnightValue;
+            occupied ^= least_significant_square_bb(bb);
+        }
+        else if ((bb = stmAttackers & pieces(BISHOP)))
+        {
+            values[d] = BishopValue;
+            occupied ^= least_significant_square_bb(bb);
+            attackers |= attacks_bb<BISHOP>(to, occupied) & pieces(BISHOP, QUEEN);
+        }
+        else if ((bb = stmAttackers & pieces(ROOK)))
+        {
+            values[d] = RookValue;
+            occupied ^= least_significant_square_bb(bb);
+            attackers |= attacks_bb<ROOK>(to, occupied) & pieces(ROOK, QUEEN);
+        }
+        else if ((bb = stmAttackers & pieces(QUEEN)))
+        {
+            values[d] = QueenValue;
+            occupied ^= least_significant_square_bb(bb);
+            attackers |= (attacks_bb<BISHOP>(to, occupied) & pieces(BISHOP, QUEEN))
+                       | (attacks_bb<ROOK>(to, occupied) & pieces(ROOK, QUEEN));
+        }
+        else  // KING
+        {
+            if (attackers & ~pieces(stm)) {
+               break;
+            }
+            values[d] = 0;
+        }
+    }
+
+    int gains[32];
+    gains[0] = values[0];
+    for (int i=1; i<=d; ++i) {
+        gains[i] = values[i] - gains[i-1];
+    }
+
+    for (int i=d-1; i>=1; --i) {
+        gains[i-1] = -std::max(-gains[i-1], gains[i]);
+    }
+
+    return gains[0];
+}
+
 // Tests if the SEE (Static Exchange Evaluation)
 // value of move is greater or equal to the given threshold. We'll use an
 // algorithm similar to alpha-beta pruning with a null window.

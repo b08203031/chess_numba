@@ -1,9 +1,21 @@
 [
     {
+        "name": "Lichess Puzzle 006eO",
+        "fen": "8/8/2p5/1p1p1k2/3P4/1PP1pK2/8/8 w - - 4 65",
+        "solution": "b3b4",
+        "engine_move": "f3e3"
+    },
+    {
+        "name": "Lichess Puzzle 006of",
+        "fen": "r2qr2k/1pp2Qp1/1b4np/pP2P3/P4n2/B1N2N1P/5PP1/R3R1K1 b - - 0 20",
+        "solution": "d8d3",
+        "engine_move": "f4d3"
+    },
+    {
         "name": "Lichess Puzzle 0078T",
         "fen": "rk5r/1b3R2/pp2p2q/4P2p/B6B/4p2P/PP4P1/5Q1K w - - 0 28",
         "solution": "f7b7",
-        "engine_move": "a4c2"
+        "engine_move": "f1d3"
     },
     {
         "name": "Lichess Puzzle 004d8",
