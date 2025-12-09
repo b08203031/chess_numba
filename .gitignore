@@ -6,3 +6,7 @@ __pycache__/
 
 # Other
 .DS_Store
+stockfish/src/*.o
+stockfish/src/.depend
+stockfish/src/nn-*.nnue
+stockfish/src/stockfish
