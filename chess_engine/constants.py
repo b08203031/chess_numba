@@ -396,7 +396,7 @@ KING_ATTACK_BONUS = 2000 # Bonus for quiet moves attacking the opponent's King z
 ROOK_QUEEN_BATTERY_BONUS = 5000 # Bonus for Rook moving to same file/rank as Queen
 
 # History Heuristic Constants
-MAX_HISTORY = 2048 # Max value for history table to prevent overflow and saturation
+MAX_HISTORY = 16384 # Max value for history table to prevent overflow and saturation
 
 # Special value to indicate that the search was stopped due to timeout
 # 特殊值，表示搜尋因超時而停止
@@ -436,6 +436,8 @@ RAZORING_MARGIN = 900 # Relaxed from 550
 # Futility Pruning
 FP_MARGIN_D1 = 500 # Relaxed from 300
 FP_MARGIN_D2 = 900 # Relaxed from 600
+FP_BASE = 200
+FP_MULTIPLIER = 120
 
 # Reverse Futility Pruning
 RFP_MARGIN_D1 = 300 # Relaxed from 250
