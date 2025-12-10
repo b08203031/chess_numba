@@ -94,15 +94,19 @@ def score_moves(piece_bbs, occupancy_bbs, game_state, moves, tt_move, killer_mov
             is_capture = (opponent_pieces_bb & BB_SQUARES[to_square]) != 0
             if is_capture:
                 # Use SEE to distinguish Good vs Bad captures
-                from_sq = get_from_square(move)
-                # Optimization: Use see_ge(0) instead of full see()
-                is_good_capture = see_ge(piece_bbs, occupancy_bbs, side_to_move, from_sq, to_square, 0)
-                
                 victim_type = find_piece_type_on_square(piece_bbs, to_square)
-                aggressor_type = find_piece_type_on_square(piece_bbs, from_sq)
+                victim_val = 0
+                if victim_type != -1:
+                    victim_val = MG_MATERIAL_VALUES[victim_type % 6]
+
+                # Dynamic Threshold: -Value / 9 (Approx match to Stockfish's -Value/18 with P=208)
+                threshold = -victim_val // 9
+                is_good_capture = see_ge(piece_bbs, occupancy_bbs, side_to_move, move, threshold)
+
+                aggressor_type = find_piece_type_on_square(piece_bbs, get_from_square(move))
                 mvv_lva = 0
                 if victim_type != -1:
-                    mvv_lva = (MG_MATERIAL_VALUES[victim_type % 6] - MG_MATERIAL_VALUES[aggressor_type % 6])
+                    mvv_lva = (victim_val - MG_MATERIAL_VALUES[aggressor_type % 6])
 
                 if is_good_capture:
                     score = SCORE_GOOD_CAPTURE_BONUS + mvv_lva
@@ -277,7 +281,7 @@ def quiescence_search(piece_bbs, occupancy_bbs, game_state, alpha, beta, ply, se
                 # If SEE >= 0, then SEE >= -100 is always True.
                 if score_val < SCORE_GOOD_CAPTURE_BONUS:
                     side_to_move = game_state[0]
-                    if not see_ge(piece_bbs, occupancy_bbs, side_to_move, get_from_square(move), get_to_square(move), SEE_THRESHOLD):
+                    if not see_ge(piece_bbs, occupancy_bbs, side_to_move, move, SEE_THRESHOLD):
                         see_pruned += 1
                         continue
 

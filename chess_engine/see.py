@@ -7,6 +7,11 @@ from chess_engine.constants import (
 )
 from chess_engine.engine_types import piece_bbs_signature, occupancy_bbs_signature
 from chess_engine.bitboard_utils import find_piece_type_on_square
+from chess_engine.move import (
+    get_from_square, get_to_square, get_special_move_flag, get_promotion_piece,
+    SPECIAL_MOVE_FLAG_PROMOTION, SPECIAL_MOVE_FLAG_EN_PASSANT, SPECIAL_MOVE_FLAG_CASTLING,
+    PROMO_KNIGHT, PROMO_BISHOP, PROMO_ROOK, PROMO_QUEEN
+)
 import numba.types as nbt
 
 # Piece Values for SEE (based on Stockfish's internal values for SEE)
@@ -32,6 +37,7 @@ ORTHOGONAL_DIRECTIONS = np.array([-8, -1, 1, 8], dtype=np.int32)
 @numba.njit(cache=True)
 def get_step_attacks(square, offsets):
     attacks = np.uint64(0)
+    square = int(square)
     sq_rank = square // 8
     sq_file = square % 8
     for off in offsets:
@@ -41,7 +47,7 @@ def get_step_attacks(square, offsets):
             tf = target % 8
             # Check for wrap-around
             if abs(tr - sq_rank) <= 2 and abs(tf - sq_file) <= 2:
-                attacks |= BB_SQUARES[target]
+                attacks |= BB_SQUARES[int(target)]
     return attacks
 
 @numba.njit(cache=True)
@@ -50,6 +56,7 @@ def get_sliding_attacks(square, occupied, is_diagonal):
     # to avoid complex dependencies. Stockfish uses Magic Bitboards.
     # We will use a simplified loop for Numba.
     attacks = np.uint64(0)
+    square = int(square)
 
     if is_diagonal:
         directions = DIAGONAL_DIRECTIONS
@@ -72,8 +79,8 @@ def get_sliding_attacks(square, occupied, is_diagonal):
             if not (0 <= curr < 64):
                 break
 
-            attacks |= BB_SQUARES[curr]
-            if (occupied & BB_SQUARES[curr]) != 0:
+            attacks |= BB_SQUARES[int(curr)]
+            if (occupied & BB_SQUARES[int(curr)]) != 0:
                 break
     return attacks
 
@@ -244,20 +251,25 @@ def get_lva_and_remove(attackers, piece_bbs, side_mask):
             return PIECE_VALUES[i], sq_bb, i
     return 0, np.uint64(0), -1
 
-@numba.njit(nbt.int32(piece_bbs_signature, occupancy_bbs_signature, nbt.int64, nbt.int64, nbt.int64), cache=True)
-def see(piece_bbs, occupancy_bbs, side_to_move, from_sq, to_sq):
+@numba.njit(nbt.int32(piece_bbs_signature, occupancy_bbs_signature, nbt.int64, nbt.uint16), cache=True)
+def see(piece_bbs, occupancy_bbs, side_to_move, move):
     """
     Static Exchange Evaluation (SEE).
     Mimics Stockfish's logic:
     - Stack based Swap algorithm
     - Pinned pieces DO NOT attack/capture (Strict definition)
     - En Passant handling
+    - Promotion handling
     """
+    # Decode Move
+    from_sq = get_from_square(move)
+    to_sq = get_to_square(move)
+    special_flag = get_special_move_flag(move)
+
+    if special_flag == SPECIAL_MOVE_FLAG_CASTLING:
+        return 0
 
     # 1. Identify Initial Victim and Attacker
-
-    # Optimization: Check piece type by looking at specific bitboards based on side
-    # But for 'from_sq', we know side_to_move.
 
     # Initial Attacker Type
     attacker_type = -1
@@ -281,8 +293,7 @@ def see(piece_bbs, occupancy_bbs, side_to_move, from_sq, to_sq):
     # Value of initial capture
     if victim_type == -1:
         # En Passant?
-        if attacker_type == PAWN and abs((from_sq % 8) - (to_sq % 8)) == 1:
-             # Attacker is pawn, diagonal move, empty target -> EP
+        if special_flag == SPECIAL_MOVE_FLAG_EN_PASSANT:
              value = PIECE_VALUES[PAWN]
         else:
              value = 0 # Empty square, not EP (e.g. Quiet move)
@@ -295,7 +306,14 @@ def see(piece_bbs, occupancy_bbs, side_to_move, from_sq, to_sq):
     scores = np.zeros(32, dtype=np.int32)
     scores[0] = value
 
-    attacker_value = PIECE_VALUES[attacker_type]
+    if special_flag == SPECIAL_MOVE_FLAG_PROMOTION:
+        promo_piece = get_promotion_piece(move)
+        # 0=Knight...
+        pt = promo_piece + 1 # KNIGHT(1)..QUEEN(4)
+        scores[0] += PIECE_VALUES[pt] - PIECE_VALUES[PAWN]
+        attacker_value = PIECE_VALUES[pt]
+    else:
+        attacker_value = PIECE_VALUES[attacker_type]
 
     # Setup Occupied Bitboard
     occupied = occupancy_bbs[2]
@@ -394,13 +412,20 @@ def see(piece_bbs, occupancy_bbs, side_to_move, from_sq, to_sq):
     return scores[0]
 
 
-@numba.njit(nbt.boolean(piece_bbs_signature, occupancy_bbs_signature, nbt.int64, nbt.int64, nbt.int64, nbt.int32), cache=True)
-def see_ge(piece_bbs, occupancy_bbs, side_to_move, from_sq, to_sq, threshold):
+@numba.njit(nbt.boolean(piece_bbs_signature, occupancy_bbs_signature, nbt.int64, nbt.uint16, nbt.int32), cache=True)
+def see_ge(piece_bbs, occupancy_bbs, side_to_move, move, threshold):
     """
     SEE >= Threshold.
     Optimized to exit early.
     """
     # Identical setup to see()
+
+    from_sq = get_from_square(move)
+    to_sq = get_to_square(move)
+    special_flag = get_special_move_flag(move)
+
+    if special_flag == SPECIAL_MOVE_FLAG_CASTLING:
+        return 0 >= threshold # 0 >= threshold
 
     attacker_type = -1
     offset = 0 if side_to_move == WHITE else 6
@@ -418,12 +443,20 @@ def see_ge(piece_bbs, occupancy_bbs, side_to_move, from_sq, to_sq, threshold):
             break
 
     if victim_type == -1:
-        if attacker_type == PAWN and abs((from_sq % 8) - (to_sq % 8)) == 1:
+        if special_flag == SPECIAL_MOVE_FLAG_EN_PASSANT:
              value = PIECE_VALUES[PAWN]
         else:
              value = 0
     else:
         value = PIECE_VALUES[victim_type]
+
+    attacker_val = PIECE_VALUES[attacker_type]
+
+    if special_flag == SPECIAL_MOVE_FLAG_PROMOTION:
+        promo_piece = get_promotion_piece(move)
+        pt = promo_piece + 1
+        value += PIECE_VALUES[pt] - PIECE_VALUES[PAWN]
+        attacker_val = PIECE_VALUES[pt]
 
     # Swap Algorithm with Balance
     # score = victim - threshold
@@ -436,7 +469,6 @@ def see_ge(piece_bbs, occupancy_bbs, side_to_move, from_sq, to_sq, threshold):
 
     # Next: Opponent captures us.
     # balance = attacker_val - balance
-    attacker_val = PIECE_VALUES[attacker_type]
     balance = attacker_val - balance
 
     if balance <= 0:

@@ -462,7 +462,8 @@ PROBCUT_MARGIN = 150 # centipawns
 DELTA_PRUNING_MARGIN = 1200
 
 # --- Static Exchange Evaluation (SEE) Threshold / SEE 閾值 ---
-SEE_THRESHOLD = -100  # centipawns (Relaxed from -50)
+# Stockfish uses -75 with P=208 (~0.36P). Our P=100, so -35 (~0.35P).
+SEE_THRESHOLD = -35  # centipawns
 ENABLE_SEE_IN_QUIESCENCE = True # Master switch to enable/disable SEE in quiescence search / 啟用/禁用靜態搜尋中 SEE 的總開關
 
 # =============================================================================
