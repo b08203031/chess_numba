@@ -29,7 +29,7 @@ from chess_engine.constants import (
 )
 from chess_engine.bitboard_utils import find_piece_type_on_square, KING_ATTACK_ZONES
 from chess_engine.debug_utils import log_info
-from chess_engine.see import see
+from chess_engine.see import see, see_ge
 from chess_engine.transposition_table import (
     probe_tt, store_tt, numba_tt_entry_type,
     TT_FLAG_NONE, TT_FLAG_EXACT, TT_FLAG_ALPHA, TT_FLAG_BETA
@@ -95,7 +95,8 @@ def score_moves(piece_bbs, occupancy_bbs, game_state, moves, tt_move, killer_mov
             if is_capture:
                 # Use SEE to distinguish Good vs Bad captures
                 from_sq = get_from_square(move)
-                see_value = see(piece_bbs, occupancy_bbs, side_to_move, from_sq, to_square)
+                # Optimization: Use see_ge(0) instead of full see()
+                is_good_capture = see_ge(piece_bbs, occupancy_bbs, side_to_move, from_sq, to_square, 0)
                 
                 victim_type = find_piece_type_on_square(piece_bbs, to_square)
                 aggressor_type = find_piece_type_on_square(piece_bbs, from_sq)
@@ -103,10 +104,12 @@ def score_moves(piece_bbs, occupancy_bbs, game_state, moves, tt_move, killer_mov
                 if victim_type != -1:
                     mvv_lva = (MG_MATERIAL_VALUES[victim_type % 6] - MG_MATERIAL_VALUES[aggressor_type % 6])
 
-                if see_value >= 0:
-                    score = SCORE_GOOD_CAPTURE_BONUS + mvv_lva + see_value
+                if is_good_capture:
+                    score = SCORE_GOOD_CAPTURE_BONUS + mvv_lva
                 else:
-                    score = SCORE_BAD_CAPTURE_PENALTY + see_value # Penalize bad captures
+                    # Penalize bad captures. We could calculate exact see for sorting bad captures,
+                    # but using MVV_LVA is acceptable for now to save performance.
+                    score = SCORE_BAD_CAPTURE_PENALTY + mvv_lva
             else:
                 if move == killer_moves_at_ply[0]:
                     score = SCORE_KILLER_1
@@ -245,7 +248,10 @@ def quiescence_search(piece_bbs, occupancy_bbs, game_state, alpha, beta, ply, se
         moves[i], moves[best_idx] = moves[best_idx], moves[i]
         scores[i], scores[best_idx] = scores[best_idx], scores[i]
 
-    for move in moves:
+    for i in range(len(moves)):
+        move = moves[i]
+        score_val = scores[i]
+        
         if not is_currently_in_check:
             if ENABLE_DELTA_PRUNING:
                 is_promotion = get_special_move_flag(move) == SPECIAL_MOVE_FLAG_PROMOTION
@@ -264,10 +270,16 @@ def quiescence_search(piece_bbs, occupancy_bbs, game_state, alpha, beta, ply, se
 
         if not is_currently_in_check:
             if ENABLE_SEE_IN_QUIESCENCE:
-                side_to_move = game_state[0]
-                if see(piece_bbs, occupancy_bbs, side_to_move, get_from_square(move), get_to_square(move)) < SEE_THRESHOLD:
-                    see_pruned += 1
-                    continue
+                # Optimization: If score indicates Good Capture (SEE >= 0), skip see check.
+                # Only check SEE if it was classified as Bad Capture (or if logic changes).
+                # Good Capture Score >= SCORE_GOOD_CAPTURE_BONUS (20000).
+                # SEE_THRESHOLD is -100.
+                # If SEE >= 0, then SEE >= -100 is always True.
+                if score_val < SCORE_GOOD_CAPTURE_BONUS:
+                    side_to_move = game_state[0]
+                    if not see_ge(piece_bbs, occupancy_bbs, side_to_move, get_from_square(move), get_to_square(move), SEE_THRESHOLD):
+                        see_pruned += 1
+                        continue
 
         unmake_info = make_move(piece_bbs, occupancy_bbs, game_state, move)
         score, child_q_nodes, child_delta_pruned, child_see_pruned = quiescence_search(
