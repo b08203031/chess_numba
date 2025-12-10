@@ -783,8 +783,8 @@ def run_puzzle_test():
     print("--- WARM-UP COMPLETE ---\n")
 
 
-    depth = 20  # Set a high depth, will be stopped by time
-    time_limit_ms = 3000
+    depth = 30  # Set a high depth, will be stopped by time
+    time_limit_ms = 30000
 
     total_tests = len(puzzles)
     passed_tests = 0
