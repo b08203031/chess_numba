@@ -30,6 +30,12 @@
         "engine_move": "d3e4"
     },
     {
+        "name": "Lichess Puzzle 005f3",
+        "fen": "r5k1/2p1pp2/pp4p1/1q5r/5P2/2QP2R1/PP6/1K4R1 w - - 1 33",
+        "solution": "g3g6",
+        "engine_move": "b1a1"
+    },
+    {
         "name": "Lichess Puzzle 005yO",
         "fen": "r1r2k2/ppq3bQ/4p2p/4n3/3p4/2P5/PBB2PPP/4R1K1 w - - 3 25",
         "solution": "b2a3",
