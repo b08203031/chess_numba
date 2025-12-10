@@ -96,7 +96,7 @@ def score_moves(piece_bbs, occupancy_bbs, game_state, moves, tt_move, killer_mov
                 # Use SEE to distinguish Good vs Bad captures
                 from_sq = get_from_square(move)
                 # Optimization: Use see_ge(0) instead of full see()
-                is_good_capture = see_ge(piece_bbs, occupancy_bbs, side_to_move, from_sq, to_square, 0)
+                is_good_capture = see_ge(piece_bbs, occupancy_bbs, side_to_move, move, 0)
                 
                 victim_type = find_piece_type_on_square(piece_bbs, to_square)
                 aggressor_type = find_piece_type_on_square(piece_bbs, from_sq)
@@ -277,7 +277,7 @@ def quiescence_search(piece_bbs, occupancy_bbs, game_state, alpha, beta, ply, se
                 # If SEE >= 0, then SEE >= -100 is always True.
                 if score_val < SCORE_GOOD_CAPTURE_BONUS:
                     side_to_move = game_state[0]
-                    if not see_ge(piece_bbs, occupancy_bbs, side_to_move, get_from_square(move), get_to_square(move), SEE_THRESHOLD):
+                    if not see_ge(piece_bbs, occupancy_bbs, side_to_move, move, SEE_THRESHOLD):
                         see_pruned += 1
                         continue
 
