@@ -42,6 +42,7 @@ search_context_spec = [
     ('tt_generation', numba.uint8), # Current generation for TT aging
     ('counter_moves', numba.uint16[:, :]), # Counter moves table [64][64]
     ('move_stack', numba.uint16[::1]), # Stack of moves for current search path
+    ('static_eval_stack', numba.int32[::1]), # Stack of static evaluations for improving heuristic
 ]
 
 @jitclass(search_context_spec)
@@ -63,6 +64,7 @@ class SearchContext:
         tt_generation (numba.uint8): 當前 TT 世代。
         counter_moves (numba.uint16[:, :]): 反制走法表，索引為 [prev_src][prev_dst]。
         move_stack (numba.uint16[::1]): 當前搜尋路徑的走法堆疊，用於查找上一手棋。
+        static_eval_stack (numba.int32[::1]): 靜態評估值堆疊，用於判斷 Improving。
     """
     def __init__(self, transposition_table, killer_moves, pv_table, history_table):
         """
@@ -92,5 +94,6 @@ class SearchContext:
         # Counter Moves and Move Stack
         self.counter_moves = np.zeros((64, 64), dtype=np.uint16)
         self.move_stack = np.zeros(MAX_PLY, dtype=np.uint16)
+        self.static_eval_stack = np.zeros(MAX_PLY, dtype=np.int32)
 
 search_context_type = SearchContext.class_type.instance_type

@@ -508,3 +508,5 @@ BACKWARD_PAWN_PENALTY = np.array([10, 25], dtype=np.int32) # MG, EG
 # File constants
 NOT_A_FILE = ~np.uint64(0x0101010101010101)
 NOT_H_FILE = ~np.uint64(0x8080808080808080)
+
+NMP_STATIC_MARGIN = 500  # Margin for NMP static eval verification

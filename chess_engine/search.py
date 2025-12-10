@@ -25,7 +25,7 @@ from chess_engine.constants import (
     ENABLE_SINGULAR_EXTENSIONS, MIN_SINGULAR_DEPTH, SINGULAR_EXTENSION_MARGIN,
     STOP_SEARCH_FLAG, PAWN_PUSH_RANK_BONUS, PAWN_PUSH_ATTACK_BONUS, MAX_HISTORY,
     KING_TROPISM_BONUS, SCORE_TT_MOVE, SCORE_GOOD_CAPTURE_BONUS, SCORE_KILLER_1,
-    SCORE_KILLER_2, SCORE_COUNTER_MOVE, SCORE_BAD_CAPTURE_PENALTY
+    SCORE_KILLER_2, SCORE_COUNTER_MOVE, SCORE_BAD_CAPTURE_PENALTY, NMP_STATIC_MARGIN
 )
 from chess_engine.bitboard_utils import find_piece_type_on_square, KING_ATTACK_ZONES
 from chess_engine.debug_utils import log_info
@@ -498,7 +498,20 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                 null_move_cutoffs, futility_pruned, razoring_used, rfp_pruned, lmp_pruned, probcut_pruned, qs_delta_pruned, qs_see_pruned,
                 iid_searches, singular_extensions)
 
-    if ENABLE_NMP and depth >= 3 and not is_currently_in_check and has_sufficient_material(piece_bbs, game_state[0]):
+    # --- Static Evaluation & Improving Flag ---
+    static_score = -INFINITY
+    improving = False
+
+    if not is_currently_in_check:
+        static_score = evaluate_position(piece_bbs, occupancy_bbs, game_state, lazy=True)
+        search_context.static_eval_stack[ply] = static_score
+
+        if ply >= 2 and static_score > search_context.static_eval_stack[ply - 2]:
+            improving = True
+    else:
+        search_context.static_eval_stack[ply] = -INFINITY
+
+    if ENABLE_NMP and depth >= 3 and not is_currently_in_check and has_sufficient_material(piece_bbs, game_state[0]) and static_score >= beta - NMP_STATIC_MARGIN:
         original_state_for_null = game_state.copy()
         make_null_move(game_state)
         
@@ -531,13 +544,7 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                     null_move_cutoffs, futility_pruned, razoring_used, rfp_pruned, lmp_pruned, probcut_pruned, qs_delta_pruned, qs_see_pruned,
                     iid_searches, singular_extensions)
 
-    if not moves_generated:
-        moves = generate_legal_moves(piece_bbs, occupancy_bbs, game_state)
-
-    static_score = -INFINITY
     if depth <= 2 and not is_currently_in_check:
-        static_score = evaluate_position(piece_bbs, occupancy_bbs, game_state, lazy=True)
-
         if ENABLE_RFP and depth == 1 and static_score - RFP_MARGIN_D1 >= beta:
             rfp_pruned += 1
             return (np.int32(beta), NO_MOVE, nodes_searched, quiescence_nodes, cutoffs, tt_hits,
@@ -554,6 +561,9 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                 return (np.int32(alpha), NO_MOVE, nodes_searched, quiescence_nodes, cutoffs, tt_hits,
                         null_move_cutoffs, futility_pruned, razoring_used, rfp_pruned, lmp_pruned, probcut_pruned, qs_delta_pruned, qs_see_pruned,
                         iid_searches, singular_extensions)
+
+    if not moves_generated:
+        moves = generate_legal_moves(piece_bbs, occupancy_bbs, game_state)
 
     if len(moves) == 0:
         search_context.pv_table[ply, :].fill(NO_MOVE)
@@ -618,7 +628,11 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
             quiet_moves_tried_count += 1
             
             if ENABLE_LMP and not is_currently_in_check:
-                if quiet_move_counter >= LMP_MOVE_COUNT[depth]:
+                limit = LMP_MOVE_COUNT[depth]
+                if not improving: limit = limit // 2
+                limit = max(limit, 2)
+
+                if quiet_move_counter >= limit:
                     lmp_pruned += 1
                     unmake_move(piece_bbs, occupancy_bbs, game_state, move, unmake_info)
                     break
@@ -645,8 +659,18 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                 piece_bbs, occupancy_bbs, game_state, search_depth, -beta, -alpha, search_context, ply + 1, NO_MOVE)
             evaluation = -evaluation
         else:
-            lmr = LMR_REDUCTION if ENABLE_LMR and depth >= LMR_MIN_DEPTH and is_quiet_move and quiet_move_counter >= LMR_MIN_QUIET_MOVE_INDEX else 0
-            
+            lmr = 0
+            if ENABLE_LMR and depth >= LMR_MIN_DEPTH and is_quiet_move and quiet_move_counter >= LMR_MIN_QUIET_MOVE_INDEX:
+                lmr = LMR_REDUCTION
+                if not improving: lmr += 1
+
+                aggressor = find_piece_type_on_square(piece_bbs, get_from_square(move))
+                hist = search_context.history_table[aggressor, get_to_square(move)]
+                if hist > 1000: lmr -= 1
+                elif hist < -1000: lmr += 1
+
+                lmr = max(0, lmr)
+
             # Reduce LMR for moves that improve King Tropism
             if lmr > 0:
                 side_to_move = game_state[0]
