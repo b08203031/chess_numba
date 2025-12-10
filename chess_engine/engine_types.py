@@ -42,6 +42,10 @@ search_context_spec = [
     ('tt_generation', numba.uint8), # Current generation for TT aging
     ('counter_moves', numba.uint16[:, :]), # Counter moves table [64][64]
     ('move_stack', numba.uint16[::1]), # Stack of moves for current search path
+    # New Pruning Stats
+    ('see_pruned_captures', numba.uint64),
+    ('see_pruned_quiets', numba.uint64),
+    ('history_pruned', numba.uint64),
 ]
 
 @jitclass(search_context_spec)
@@ -63,6 +67,9 @@ class SearchContext:
         tt_generation (numba.uint8): 當前 TT 世代。
         counter_moves (numba.uint16[:, :]): 反制走法表，索引為 [prev_src][prev_dst]。
         move_stack (numba.uint16[::1]): 當前搜尋路徑的走法堆疊，用於查找上一手棋。
+        see_pruned_captures (numba.uint64): 因 SEE 被剪枝的捕捉次數。
+        see_pruned_quiets (numba.uint64): 因 SEE 被剪枝的靜止步次數。
+        history_pruned (numba.uint64): 因歷史分數被剪枝的次數。
     """
     def __init__(self, transposition_table, killer_moves, pv_table, history_table):
         """
@@ -92,5 +99,10 @@ class SearchContext:
         # Counter Moves and Move Stack
         self.counter_moves = np.zeros((64, 64), dtype=np.uint16)
         self.move_stack = np.zeros(MAX_PLY, dtype=np.uint16)
+
+        # Initialize new stats
+        self.see_pruned_captures = np.uint64(0)
+        self.see_pruned_quiets = np.uint64(0)
+        self.history_pruned = np.uint64(0)
 
 search_context_type = SearchContext.class_type.instance_type

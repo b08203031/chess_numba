@@ -25,7 +25,9 @@ from chess_engine.constants import (
     ENABLE_SINGULAR_EXTENSIONS, MIN_SINGULAR_DEPTH, SINGULAR_EXTENSION_MARGIN,
     STOP_SEARCH_FLAG, PAWN_PUSH_RANK_BONUS, PAWN_PUSH_ATTACK_BONUS, MAX_HISTORY,
     KING_TROPISM_BONUS, SCORE_TT_MOVE, SCORE_GOOD_CAPTURE_BONUS, SCORE_KILLER_1,
-    SCORE_KILLER_2, SCORE_COUNTER_MOVE, SCORE_BAD_CAPTURE_PENALTY
+    SCORE_KILLER_2, SCORE_COUNTER_MOVE, SCORE_BAD_CAPTURE_PENALTY,
+    ENABLE_SHALLOW_SEE_PRUNING, ENABLE_HISTORY_PRUNING, PRUNING_SHALLOW_DEPTH,
+    PRUNING_CAPTURE_SEE_MARGIN, PRUNING_QUIET_SEE_MARGIN, PRUNING_HISTORY_THRESHOLD
 )
 from chess_engine.bitboard_utils import find_piece_type_on_square, KING_ATTACK_ZONES
 from chess_engine.debug_utils import log_info
@@ -165,10 +167,6 @@ quiescence_search_return_type = numba.types.Tuple([
     numba.int32, numba.uint64, numba.uint64, numba.uint64
 ])
 
-# @numba.njit(quiescence_search_return_type(
-#     piece_bbs_signature, occupancy_bbs_signature, game_state_signature,
-#     numba.int32, numba.int32, numba.int32, search_context_type
-# ), cache=True)
 @numba.njit(cache=True)
 def quiescence_search(piece_bbs, occupancy_bbs, game_state, alpha, beta, ply, search_context):
     q_nodes = np.uint64(1)
@@ -218,20 +216,10 @@ def quiescence_search(piece_bbs, occupancy_bbs, game_state, alpha, beta, ply, se
 
     # --- Sort moves in QSearch ---
     # Use score_moves to sort captures (SEE >= 0 first).
-    # We pass NO_MOVE for counter_move and reuse killer_moves/history though they apply less to captures.
-    # We need to handle 'ply' bounds for killer_moves access if ply >= MAX_PLY (though QSearch usually called with valid ply).
-    # search_context.killer_moves is size MAX_PLY*2.
-    # QSearch can go beyond MAX_PLY if not careful, but we checked ply >= MAX_QUIESCENCE_DEPTH (5) 
-    # but actual ply can be larger if called from deep search.
-    # _search limits ply < MAX_PLY. So ply passed to quiescence_search from _search is < MAX_PLY.
-    # Recursive calls increment ply. We should check bounds or use dummy.
     
     # Safe access to killers:
     safe_ply = min(ply, MAX_PLY - 1)
     
-    # Use score_moves to sort. 
-    # Note: score_moves is heavy? For captures it calculates SEE.
-    # This is beneficial for Alpha-Beta pruning in QSearch.
     scores = score_moves(
         piece_bbs, occupancy_bbs, game_state, moves, 
         NO_MOVE, # No TT move in QSearch loop usually (unless we probed TT above)
@@ -271,10 +259,6 @@ def quiescence_search(piece_bbs, occupancy_bbs, game_state, alpha, beta, ply, se
         if not is_currently_in_check:
             if ENABLE_SEE_IN_QUIESCENCE:
                 # Optimization: If score indicates Good Capture (SEE >= 0), skip see check.
-                # Only check SEE if it was classified as Bad Capture (or if logic changes).
-                # Good Capture Score >= SCORE_GOOD_CAPTURE_BONUS (20000).
-                # SEE_THRESHOLD is -100.
-                # If SEE >= 0, then SEE >= -100 is always True.
                 if score_val < SCORE_GOOD_CAPTURE_BONUS:
                     side_to_move = game_state[0]
                     if not see_ge(piece_bbs, occupancy_bbs, side_to_move, get_from_square(move), get_to_square(move), SEE_THRESHOLD):
@@ -307,10 +291,6 @@ search_return_type = numba.types.Tuple([
     numba.uint64, numba.uint64, numba.uint64, numba.uint64
 ])
 
-# @numba.njit(search_return_type(
-#     piece_bbs_signature, occupancy_bbs_signature, game_state_signature,
-#     numba.int32, numba.int32, numba.int32, search_context_type, numba.int32, numba.uint16
-# ), cache=True)
 @numba.njit(cache=True)
 def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_context, ply, excluded_move: np.uint16 = NO_MOVE):
     nodes_searched = np.uint64(1)
@@ -371,7 +351,6 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
             repetition_count += 1
             
     # Avoid 2nd repetition
-    # Crucial fix: Do not prune at the root (ply 0). If we are at the root, we must search for a move.
     if ply > 0 and repetition_count >= 2:
         search_context.pv_table[ply, :].fill(NO_MOVE)
         return (np.int32(0), NO_MOVE, nodes_searched, quiescence_nodes, cutoffs, tt_hits,
@@ -395,9 +374,6 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
         tt_move = tt_entry['best_move']
 
         # 2. ONLY perform a Score Cutoff (Return) if:
-        #    a. We are NOT at the Root Node (ply > 0)
-        #    b. The stored depth is sufficient
-        #    c. The score bounds (Alpha/Beta) are valid for a cutoff
         if ply > 0 and tt_entry['depth'] >= depth:
             tt_hits += 1
             tt_score = np.int32(tt_entry['score'])
@@ -502,8 +478,6 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
         original_state_for_null = game_state.copy()
         make_null_move(game_state)
         
-        # NOTE: Passing a large value or special flag for previous move might be needed if NMP impacts move ordering logic of sub-search. 
-        # For now we pass NO_MOVE as we don't have a "previous move" for null move.
         (null_move_score, _, child_nodes, child_q_nodes, child_cutoffs, child_tt_hits,
          child_nmc, child_fp, child_ru, child_rfp, child_lmp, child_pcp,
          child_qdp, child_qsp, child_iid, child_se) = _search(
@@ -595,11 +569,42 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
         opponent_pieces_bb = occupancy_bbs[1] if game_state[0] == 0 else occupancy_bbs[0]
         
         # --- Pre-move checks for extensions and move type ---
+        # Fixed: Explicitly extract squares for use in pre-move pruning blocks
         from_sq = get_from_square(move)
         to_sq = get_to_square(move)
         is_capture = (opponent_pieces_bb & BB_SQUARES[to_sq]) != 0
         is_promotion = get_special_move_flag(move) == SPECIAL_MOVE_FLAG_PROMOTION
         is_pseudo_quiet = not is_capture and not is_promotion
+
+        # --- NEW: Shallow Depth Pruning (Stockfish Step 14) ---
+        if ENABLE_SHALLOW_SEE_PRUNING and depth <= PRUNING_SHALLOW_DEPTH and not is_currently_in_check:
+             # Can't use is_giving_check_after_move here as it requires make_move.
+             side_to_move = game_state[0]
+
+             if is_capture:
+                 # Capture Pruning
+                 # Threshold: -200 * depth
+                 threshold = PRUNING_CAPTURE_SEE_MARGIN * depth
+                 if not see_ge(piece_bbs, occupancy_bbs, side_to_move, from_sq, to_sq, threshold):
+                     search_context.see_pruned_captures += 1
+                     continue
+             elif is_pseudo_quiet:
+                 # Quiet Move Pruning
+
+                 # History Pruning
+                 if ENABLE_HISTORY_PRUNING:
+                     aggressor_type = find_piece_type_on_square(piece_bbs, from_sq)
+                     history_score = search_context.history_table[aggressor_type, to_sq]
+                     if history_score < PRUNING_HISTORY_THRESHOLD:
+                         search_context.history_pruned += 1
+                         continue
+
+                 # Quiet SEE Pruning (e.g. moving into attack)
+                 # Threshold: -100 * depth * depth
+                 threshold = PRUNING_QUIET_SEE_MARGIN * depth * depth
+                 if not see_ge(piece_bbs, occupancy_bbs, side_to_move, from_sq, to_sq, threshold):
+                     search_context.see_pruned_quiets += 1
+                     continue
 
         # --- Make the move ---
         unmake_info = make_move(piece_bbs, occupancy_bbs, game_state, move)
