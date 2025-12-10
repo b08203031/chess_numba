@@ -3,7 +3,8 @@ import numba
 import numpy as np
 from chess_engine.constants import (
     BB_SQUARES, DE_BRUIJN_SEQUENCE, DE_BRUIJN_INDEX,
-    WHITE, BLACK, PAWN, KNIGHT, BISHOP, ROOK, QUEEN, KING
+    WHITE, BLACK, PAWN, KNIGHT, BISHOP, ROOK, QUEEN, KING,
+    MG_MATERIAL_VALUES
 )
 from chess_engine.engine_types import piece_bbs_signature, occupancy_bbs_signature
 from chess_engine.bitboard_utils import find_piece_type_on_square
@@ -11,8 +12,10 @@ import numba.types as nbt
 
 # Piece Values for SEE (based on Stockfish's internal values for SEE)
 # P=100, N=320, B=330, R=500, Q=900, K=20000
-# Note: King is given a very high value to prevent it from being "captured" in simulation logic
-PIECE_VALUES = np.array([100, 320, 330, 500, 900, 20000], dtype=np.int32)
+# Note: King is given a very high value to prevent it from being "captured" in simulation logic.
+# We use local definition to ensure it matches exactly the SEE assumption (King value high)
+
+PIECE_VALUES = MG_MATERIAL_VALUES
 
 @numba.njit(nbt.int32(nbt.uint64), cache=True)
 def get_lsb_index(bitboard):

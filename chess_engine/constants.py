@@ -419,6 +419,15 @@ ENABLE_SINGULAR_EXTENSIONS = True # Singular Extensions
 MIN_SINGULAR_DEPTH = 6
 SINGULAR_EXTENSION_MARGIN = 150 # centipawns
 
+# NEW: Pruning Switches (based on Stockfish Analysis)
+ENABLE_SHALLOW_SEE_PRUNING = True  # Enable SEE pruning for captures/quiets at shallow depth
+ENABLE_HISTORY_PRUNING = True      # Enable pruning based on History Score
+
+# NEW: Pruning Parameters (Loose/Relaxed initially)
+PRUNING_SHALLOW_DEPTH = 8         # Prune moves only if depth is below this
+PRUNING_CAPTURE_SEE_MARGIN = -250 # SEE < -200 * depth will be pruned
+PRUNING_QUIET_SEE_MARGIN = -200   # SEE < -100 * depth^2 will be pruned
+PRUNING_HISTORY_THRESHOLD = -1500 # Prune if history < -1500. NOTE: MAX_HISTORY is 2048, so -1500 is ~73% of max penalty.
 
 # Master switches for existing pruning techniques / 現有剪枝技術的總開關
 ENABLE_NMP = True           # Null Move Pruning
@@ -436,6 +445,8 @@ RAZORING_MARGIN = 900 # Relaxed from 550
 # Futility Pruning
 FP_MARGIN_D1 = 500 # Relaxed from 300
 FP_MARGIN_D2 = 900 # Relaxed from 600
+FP_BASE = 300
+FP_MULTIPLIER = 250
 
 # Reverse Futility Pruning
 RFP_MARGIN_D1 = 300 # Relaxed from 250
@@ -508,3 +519,5 @@ BACKWARD_PAWN_PENALTY = np.array([10, 25], dtype=np.int32) # MG, EG
 # File constants
 NOT_A_FILE = ~np.uint64(0x0101010101010101)
 NOT_H_FILE = ~np.uint64(0x8080808080808080)
+
+NMP_STATIC_MARGIN = 600

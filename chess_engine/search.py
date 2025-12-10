@@ -1,6 +1,7 @@
 # chess_engine/search.py
 import time
 import numba
+import math
 import numpy as np
 import threading
 
@@ -18,14 +19,16 @@ from chess_engine.constants import (
     BB_SQUARES, MG_MATERIAL_VALUES, INFINITY, MAX_QUIESCENCE_DEPTH, ASPIRATION_WINDOW_SIZE,
     NULL_MOVE_REDUCTION, MAX_PLY, LMR_MIN_DEPTH, LMR_MIN_QUIET_MOVE_INDEX, LMR_REDUCTION, SEE_THRESHOLD,
     ENABLE_SEE_IN_QUIESCENCE, MATE_SCORE, MATE_IN_MAX_PLY, NO_MOVE,
-    RAZORING_MARGIN, FP_MARGIN_D1, FP_MARGIN_D2, RFP_MARGIN_D1,
+    RAZORING_MARGIN, FP_MARGIN_D1, FP_MARGIN_D2, FP_BASE, FP_MULTIPLIER, RFP_MARGIN_D1,
     ENABLE_DELTA_PRUNING, DELTA_PRUNING_MARGIN, LMP_MOVE_COUNT, ENABLE_LMP,
     ENABLE_PROBCUT, PROBCUT_R, PROBCUT_R_PRIME, PROBCUT_MARGIN,
     ENABLE_NMP, ENABLE_RAZORING, ENABLE_FP, ENABLE_RFP, ENABLE_LMR, ENABLE_IID,
     ENABLE_SINGULAR_EXTENSIONS, MIN_SINGULAR_DEPTH, SINGULAR_EXTENSION_MARGIN,
     STOP_SEARCH_FLAG, PAWN_PUSH_RANK_BONUS, PAWN_PUSH_ATTACK_BONUS, MAX_HISTORY,
     KING_TROPISM_BONUS, SCORE_TT_MOVE, SCORE_GOOD_CAPTURE_BONUS, SCORE_KILLER_1,
-    SCORE_KILLER_2, SCORE_COUNTER_MOVE, SCORE_BAD_CAPTURE_PENALTY
+    SCORE_KILLER_2, SCORE_COUNTER_MOVE, SCORE_BAD_CAPTURE_PENALTY, NMP_STATIC_MARGIN,
+    ENABLE_SHALLOW_SEE_PRUNING, ENABLE_HISTORY_PRUNING, PRUNING_SHALLOW_DEPTH,
+    PRUNING_CAPTURE_SEE_MARGIN, PRUNING_QUIET_SEE_MARGIN, PRUNING_HISTORY_THRESHOLD
 )
 from chess_engine.bitboard_utils import find_piece_type_on_square, KING_ATTACK_ZONES
 from chess_engine.debug_utils import log_info
@@ -73,6 +76,34 @@ def update_history(history_table, piece_type, to_square, bonus):
     # Gravity formula
     new_value = current_value + clamped_bonus - (current_value * abs(clamped_bonus)) // MAX_HISTORY
     history_table[piece_type, to_square] = new_value
+
+@numba.njit(cache=True, boundscheck=False, fastmath=True)
+def get_lmr_reduction(depth, move_count, history_score):
+    """
+    Calculates LMR reduction based on depth, move_count and history score.
+    Structure similar to Stockfish but with looser parameters.
+    """
+    # 1. Base Reduction: 1 + log(depth) * log(move_count) / 2.5
+    # Use max(1, ...) to avoid log(0) issues, though depth >= 2 usually.
+    if depth < 2 or move_count < 2:
+        return 0
+
+    ld = math.log(float(depth))
+    lmc = math.log(float(move_count))
+
+    reduction = 1.0 + (ld * lmc) / 3.5
+
+    # 2. History Adjustment
+    # history_score is in [-MAX_HISTORY, MAX_HISTORY] (e.g. 16384)
+    # If history is good (>0), reduce reduction (search deeper).
+    # If history is bad (<0), increase reduction (search shallower).
+    # Scale: +/- 1.0 reduction for max history.
+    history_adjustment = history_score / float(MAX_HISTORY)
+
+    reduction -= history_adjustment
+
+    # Clamp and cast
+    return max(0, int(reduction))
 
 @numba.njit(cache=True, boundscheck=False, fastmath=True)
 def score_moves(piece_bbs, occupancy_bbs, game_state, moves, tt_move, killer_moves_at_ply, history_table, counter_move):
@@ -498,46 +529,61 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                 null_move_cutoffs, futility_pruned, razoring_used, rfp_pruned, lmp_pruned, probcut_pruned, qs_delta_pruned, qs_see_pruned,
                 iid_searches, singular_extensions)
 
-    if ENABLE_NMP and depth >= 3 and not is_currently_in_check and has_sufficient_material(piece_bbs, game_state[0]):
-        original_state_for_null = game_state.copy()
-        make_null_move(game_state)
-        
-        # NOTE: Passing a large value or special flag for previous move might be needed if NMP impacts move ordering logic of sub-search. 
-        # For now we pass NO_MOVE as we don't have a "previous move" for null move.
-        (null_move_score, _, child_nodes, child_q_nodes, child_cutoffs, child_tt_hits,
-         child_nmc, child_fp, child_ru, child_rfp, child_lmp, child_pcp,
-         child_qdp, child_qsp, child_iid, child_se) = _search(
-            piece_bbs, occupancy_bbs, game_state, depth - 1 - NULL_MOVE_REDUCTION,
-            -beta, -beta + 1, search_context, ply + 1, NO_MOVE
-        )
-
-        game_state[:] = original_state_for_null
-        null_move_score = -null_move_score
-
-        if search_context.stop_flag[0]:
-            return (np.int32(0), NO_MOVE, nodes_searched, quiescence_nodes, cutoffs, tt_hits,
-                    null_move_cutoffs, futility_pruned, razoring_used, rfp_pruned, lmp_pruned, probcut_pruned, qs_delta_pruned, qs_see_pruned,
-                    iid_searches, singular_extensions)
-
-        nodes_searched += child_nodes; quiescence_nodes += child_q_nodes; cutoffs += child_cutoffs; tt_hits += child_tt_hits
-        null_move_cutoffs += child_nmc; futility_pruned += child_fp; razoring_used += child_ru; rfp_pruned += child_rfp
-        lmp_pruned += child_lmp; probcut_pruned += child_pcp; qs_delta_pruned += child_qdp; qs_see_pruned += child_qsp
-        iid_searches += child_iid; singular_extensions += child_se
-
-        if null_move_score >= beta:
-            null_move_cutoffs += 1
-            search_context.pv_table[ply, :].fill(NO_MOVE)
-            return (np.int32(beta), NO_MOVE, nodes_searched, quiescence_nodes, cutoffs, tt_hits,
-                    null_move_cutoffs, futility_pruned, razoring_used, rfp_pruned, lmp_pruned, probcut_pruned, qs_delta_pruned, qs_see_pruned,
-                    iid_searches, singular_extensions)
-
-    if not moves_generated:
-        moves = generate_legal_moves(piece_bbs, occupancy_bbs, game_state)
-
+    # --- Static Evaluation & Improving Flag ---
     static_score = -INFINITY
-    if depth <= 2 and not is_currently_in_check:
-        static_score = evaluate_position(piece_bbs, occupancy_bbs, game_state, lazy=True)
+    improving = False
 
+    if not is_currently_in_check:
+        static_score = evaluate_position(piece_bbs, occupancy_bbs, game_state, lazy=True)
+        search_context.static_eval_stack[ply] = static_score
+
+        if ply >= 2 and static_score > search_context.static_eval_stack[ply - 2]:
+            improving = True
+    else:
+        search_context.static_eval_stack[ply] = -INFINITY
+
+    # --- Null Move Pruning ---
+    # Update: Dynamic Reduction and Safety Check
+    if ENABLE_NMP and depth >= 3 and not is_currently_in_check and has_sufficient_material(piece_bbs, game_state[0]) and static_score >= beta - NMP_STATIC_MARGIN:
+        # Static Eval Safety Check (Stockfish logic: static_eval >= beta - margin)
+        # Margin roughly 19*depth + 418 in SF. We use a simpler loose margin.
+        # Ensure position is not too bad to skip move.
+        static_eval_for_nmp = evaluate_position(piece_bbs, occupancy_bbs, game_state, lazy=True)
+
+        if static_eval_for_nmp >= beta:
+            original_state_for_null = game_state.copy()
+            make_null_move(game_state)
+            
+            # NOTE: Passing a large value or special flag for previous move might be needed if NMP impacts move ordering logic of sub-search. 
+            # For now we pass NO_MOVE as we don't have a "previous move" for null move.
+            (null_move_score, _, child_nodes, child_q_nodes, child_cutoffs, child_tt_hits,
+            child_nmc, child_fp, child_ru, child_rfp, child_lmp, child_pcp,
+            child_qdp, child_qsp, child_iid, child_se) = _search(
+                piece_bbs, occupancy_bbs, game_state, depth - 1 - NULL_MOVE_REDUCTION,
+                -beta, -beta + 1, search_context, ply + 1, NO_MOVE
+            )
+
+            game_state[:] = original_state_for_null
+            null_move_score = -null_move_score
+
+            if search_context.stop_flag[0]:
+                return (np.int32(0), NO_MOVE, nodes_searched, quiescence_nodes, cutoffs, tt_hits,
+                        null_move_cutoffs, futility_pruned, razoring_used, rfp_pruned, lmp_pruned, probcut_pruned, qs_delta_pruned, qs_see_pruned,
+                        iid_searches, singular_extensions)
+
+            nodes_searched += child_nodes; quiescence_nodes += child_q_nodes; cutoffs += child_cutoffs; tt_hits += child_tt_hits
+            null_move_cutoffs += child_nmc; futility_pruned += child_fp; razoring_used += child_ru; rfp_pruned += child_rfp
+            lmp_pruned += child_lmp; probcut_pruned += child_pcp; qs_delta_pruned += child_qdp; qs_see_pruned += child_qsp
+            iid_searches += child_iid; singular_extensions += child_se
+
+            if null_move_score >= beta:
+                null_move_cutoffs += 1
+                search_context.pv_table[ply, :].fill(NO_MOVE)
+                return (np.int32(beta), NO_MOVE, nodes_searched, quiescence_nodes, cutoffs, tt_hits,
+                        null_move_cutoffs, futility_pruned, razoring_used, rfp_pruned, lmp_pruned, probcut_pruned, qs_delta_pruned, qs_see_pruned,
+                        iid_searches, singular_extensions)
+
+    if depth <= 2 and not is_currently_in_check:
         if ENABLE_RFP and depth == 1 and static_score - RFP_MARGIN_D1 >= beta:
             rfp_pruned += 1
             return (np.int32(beta), NO_MOVE, nodes_searched, quiescence_nodes, cutoffs, tt_hits,
@@ -554,6 +600,9 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                 return (np.int32(alpha), NO_MOVE, nodes_searched, quiescence_nodes, cutoffs, tt_hits,
                         null_move_cutoffs, futility_pruned, razoring_used, rfp_pruned, lmp_pruned, probcut_pruned, qs_delta_pruned, qs_see_pruned,
                         iid_searches, singular_extensions)
+
+    if not moves_generated:
+        moves = generate_legal_moves(piece_bbs, occupancy_bbs, game_state)
 
     if len(moves) == 0:
         search_context.pv_table[ply, :].fill(NO_MOVE)
@@ -600,7 +649,37 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
         is_capture = (opponent_pieces_bb & BB_SQUARES[to_sq]) != 0
         is_promotion = get_special_move_flag(move) == SPECIAL_MOVE_FLAG_PROMOTION
         is_pseudo_quiet = not is_capture and not is_promotion
+        
+        # --- NEW: Shallow Depth Pruning (Stockfish Step 14) ---
+        if ENABLE_SHALLOW_SEE_PRUNING and depth <= PRUNING_SHALLOW_DEPTH and not is_currently_in_check:
+             # Can't use is_giving_check_after_move here as it requires make_move.
+             side_to_move = game_state[0]
 
+             if is_capture:
+                 # Capture Pruning
+                 # Threshold: -200 * depth
+                 threshold = PRUNING_CAPTURE_SEE_MARGIN * depth
+                 if not see_ge(piece_bbs, occupancy_bbs, side_to_move, from_sq, to_sq, threshold):
+                     search_context.see_pruned_captures += 1
+                     continue
+             elif is_pseudo_quiet:
+                 # Quiet Move Pruning
+
+                 # History Pruning
+                 if ENABLE_HISTORY_PRUNING:
+                     aggressor_type = find_piece_type_on_square(piece_bbs, from_sq)
+                     history_score = search_context.history_table[aggressor_type, to_sq]
+                     if history_score < PRUNING_HISTORY_THRESHOLD:
+                         search_context.history_pruned += 1
+                         continue
+
+                 # Quiet SEE Pruning (e.g. moving into attack)
+                 # Threshold: -100 * depth * depth
+                 threshold = PRUNING_QUIET_SEE_MARGIN * depth * depth
+                 if not see_ge(piece_bbs, occupancy_bbs, side_to_move, from_sq, to_sq, threshold):
+                     search_context.see_pruned_quiets += 1
+                     continue
+                 
         # --- Make the move ---
         unmake_info = make_move(piece_bbs, occupancy_bbs, game_state, move)
         search_context.move_stack[ply] = move # Record move in stack
@@ -618,15 +697,18 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
             quiet_moves_tried_count += 1
             
             if ENABLE_LMP and not is_currently_in_check:
-                if quiet_move_counter >= LMP_MOVE_COUNT[depth]:
+                limit = LMP_MOVE_COUNT[depth]
+                if not improving: limit = limit // 2
+                limit = max(limit, 2)
+
+                if quiet_move_counter >= limit:
                     lmp_pruned += 1
                     unmake_move(piece_bbs, occupancy_bbs, game_state, move, unmake_info)
                     break
 
         if ENABLE_FP and is_quiet_move and not is_currently_in_check and static_score != -INFINITY:
-            margin = 0
-            if depth == 1: margin = FP_MARGIN_D1
-            elif depth == 2: margin = FP_MARGIN_D2
+            # Dynamic Futility Margin: FP_BASE + FP_MULTIPLIER * depth
+            margin = FP_BASE + FP_MULTIPLIER * depth
 
             if margin > 0 and static_score + margin < alpha:
                 futility_pruned += 1
@@ -645,10 +727,16 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                 piece_bbs, occupancy_bbs, game_state, search_depth, -beta, -alpha, search_context, ply + 1, NO_MOVE)
             evaluation = -evaluation
         else:
-            lmr = LMR_REDUCTION if ENABLE_LMR and depth >= LMR_MIN_DEPTH and is_quiet_move and quiet_move_counter >= LMR_MIN_QUIET_MOVE_INDEX else 0
-            
-            # Reduce LMR for moves that improve King Tropism
-            if lmr > 0:
+            # Dynamic LMR Logic
+            lmr = 0
+            if ENABLE_LMR and depth >= LMR_MIN_DEPTH and is_quiet_move and quiet_move_counter >= LMR_MIN_QUIET_MOVE_INDEX:
+                # Get History Score for adjustment
+                aggressor_type = find_piece_type_on_square(piece_bbs, from_sq)
+                history_score = search_context.history_table[aggressor_type, to_sq]
+
+                lmr = get_lmr_reduction(depth, move_count, history_score)
+
+                # Reduce LMR for moves that improve King Tropism (Logic kept from previous version)
                 side_to_move = game_state[0]
                 opponent_king_bb = piece_bbs[11] if side_to_move == 0 else piece_bbs[5]
                 if opponent_king_bb != 0:
@@ -656,7 +744,6 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                     k_file = opponent_king_sq % 8
                     k_rank = opponent_king_sq // 8
                     
-                    from_sq = get_from_square(move)
                     from_file = from_sq % 8
                     from_rank = from_sq // 8
                     
@@ -667,7 +754,7 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                     dist_after = abs(to_file - k_file) + abs(to_rank - k_rank)
                     
                     if dist_after < dist_before:
-                        lmr = 0
+                        lmr = lmr = max(0, lmr - 1) # Reduce reduction by 1 instead of setting to 0 completely
 
             evaluation, _, child_nodes, child_q_nodes, child_cutoffs, child_tt_hits, child_nmc, child_fp, child_ru, child_rfp, child_lmp, child_pcp, child_qdp, child_qsp, child_iid, child_se = _search(
                 piece_bbs, occupancy_bbs, game_state, search_depth - lmr, -alpha - 1, -alpha, search_context, ply + 1, NO_MOVE)
