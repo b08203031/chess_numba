@@ -91,7 +91,7 @@ def get_lmr_reduction(depth, move_count, history_score):
     ld = math.log(float(depth))
     lmc = math.log(float(move_count))
 
-    reduction = 1.0 + (ld * lmc) / 3.5
+    reduction = 1.0 + (ld * lmc) / 3.0
 
     # 2. History Adjustment
     # history_score is in [-MAX_HISTORY, MAX_HISTORY] (e.g. 16384)
