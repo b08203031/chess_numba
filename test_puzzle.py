@@ -44,6 +44,20 @@ puzzles = [
             "theme": "defensiveMove endgame equality oneMove pawnEndgame"
         },
         {
+            "name": "Lichess Puzzle 005qG",
+            "fen": "8/8/1p1k1p1p/3np3/2B2p2/PP1K1PP1/7P/8 w - - 0 37",
+            "solution": "c4d5",
+            "rating": "2244",
+            "theme": "crushing defensiveMove endgame long"
+        },
+        {
+            "name": "Lichess Puzzle 005yO",
+            "fen": "r1r2k2/ppq3bQ/4p2p/4n3/3p4/2P5/PBB2PPP/4R1K1 w - - 3 25",
+            "solution": "b2a3",
+            "rating": "2793",
+            "theme": "advantage exposedKing middlegame quietMove veryLong"
+        },
+        {
             "name": "Lichess Puzzle 006of",
             "fen": "r2qr2k/1pp2Qp1/1b4np/pP2P3/P4n2/B1N2N1P/5PP1/R3R1K1 b - - 0 20",
             "solution": "d8d3",
@@ -80,13 +94,6 @@ puzzles = [
             "theme": "crushing endgame long rookEndgame"
         },
         {
-            "name": "Lichess Puzzle 005qG",
-            "fen": "8/8/1p1k1p1p/3np3/2B2p2/PP1K1PP1/7P/8 w - - 0 37",
-            "solution": "c4d5",
-            "rating": "2244",
-            "theme": "crushing defensiveMove endgame long"
-        },
-        {
             "name": "Lichess Puzzle 004sY",
             "fen": "8/2k3n1/K2p2p1/2pP2Pp/2P4P/7B/8/8 b - - 1 57",
             "solution": "c7d8",
@@ -114,13 +121,6 @@ puzzles = [
             "solution": "c6b4",
             "rating": "1842",
             "theme": "long mate mateIn3 middlegame queensideAttack sacrifice"
-        },
-        {
-            "name": "Lichess Puzzle 005yO",
-            "fen": "r1r2k2/ppq3bQ/4p2p/4n3/3p4/2P5/PBB2PPP/4R1K1 w - - 3 25",
-            "solution": "b2a3",
-            "rating": "2793",
-            "theme": "advantage exposedKing middlegame quietMove veryLong"
         },
         {
             "name": "Lichess Puzzle 0068D",
@@ -784,7 +784,7 @@ def run_puzzle_test():
 
 
     depth = 30  # Set a high depth, will be stopped by time
-    time_limit_ms = 30000
+    time_limit_ms = 3000
 
     total_tests = len(puzzles)
     passed_tests = 0

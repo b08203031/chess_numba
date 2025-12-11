@@ -16,7 +16,7 @@ else:
     MY_ENGINE_CMD = ["python3", "-u", "main.py"]
 
 STOCKFISH_TIME_MS = 1
-MY_ENGINE_TIME_MS = 3000
+MY_ENGINE_TIME_MS = 10000
 
 def run_match():
     # Initialize engines
