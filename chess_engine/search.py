@@ -24,14 +24,14 @@ from chess_engine.constants import (
     ENABLE_PROBCUT, PROBCUT_R, PROBCUT_R_PRIME, PROBCUT_MARGIN,
     ENABLE_NMP, ENABLE_RAZORING, ENABLE_FP, ENABLE_RFP, ENABLE_LMR, ENABLE_IID,
     ENABLE_SINGULAR_EXTENSIONS, MIN_SINGULAR_DEPTH, SINGULAR_EXTENSION_MARGIN,
-    STOP_SEARCH_FLAG, PAWN_PUSH_RANK_BONUS, PAWN_PUSH_ATTACK_BONUS, MAX_HISTORY,
-    KING_TROPISM_BONUS, SCORE_TT_MOVE, SCORE_GOOD_CAPTURE_BONUS, SCORE_KILLER_1,
+    STOP_SEARCH_FLAG, MAX_HISTORY,
+    SCORE_TT_MOVE, SCORE_GOOD_CAPTURE_BONUS, SCORE_KILLER_1,
     SCORE_KILLER_2, SCORE_COUNTER_MOVE, SCORE_BAD_CAPTURE_PENALTY, NMP_STATIC_MARGIN,
     ENABLE_SHALLOW_SEE_PRUNING, ENABLE_HISTORY_PRUNING, PRUNING_SHALLOW_DEPTH,
     PRUNING_CAPTURE_SEE_MARGIN, PRUNING_QUIET_SEE_MARGIN, PRUNING_HISTORY_THRESHOLD,
     WHITE, BLACK
 )
-from chess_engine.bitboard_utils import find_piece_type_on_square, KING_ATTACK_ZONES
+from chess_engine.bitboard_utils import find_piece_type_on_square
 from chess_engine.debug_utils import log_info
 from chess_engine.see import see, see_ge, get_pinned_pieces
 from chess_engine.transposition_table import (
@@ -116,10 +116,6 @@ def score_moves(piece_bbs, occupancy_bbs, game_state, moves, tt_move, killer_mov
     pinned_white = get_pinned_pieces(piece_bbs, occupancy_bbs, WHITE)
     pinned_black = get_pinned_pieces(piece_bbs, occupancy_bbs, BLACK)
     
-    # Determine opponent king square for attack bonus
-    opponent_king_bb = piece_bbs[11] if side_to_move == 0 else piece_bbs[5]
-    opponent_king_sq = get_lsb_index(opponent_king_bb) if opponent_king_bb != 0 else -1
-    
     for i in range(len(moves)):
         move = moves[i]
         score = 0
@@ -156,43 +152,6 @@ def score_moves(piece_bbs, occupancy_bbs, game_state, moves, tt_move, killer_mov
                 else:
                     aggressor_type = find_piece_type_on_square(piece_bbs, get_from_square(move))
                     score = history_table[aggressor_type, to_square]
-                    
-                    # --- Pawn Push Bonuses ---
-                    if aggressor_type == 0 or aggressor_type == 6: # PAWN (White=0, Black=6)
-                        # Rank Bonus (Rank 6/7)
-                        rank = to_square // 8
-                        is_advanced_pawn = False
-                        if side_to_move == 0: # White
-                            if rank >= 5: is_advanced_pawn = True 
-                        else: # Black
-                            if rank <= 2: is_advanced_pawn = True
-                        
-                        if is_advanced_pawn:
-                            score += PAWN_PUSH_RANK_BONUS
-                            
-                    # --- King Attack Bonus (All Pieces) ---
-                    # Encourages moves that place pieces near the opponent's king
-                    if opponent_king_sq != -1:
-                            if (KING_ATTACK_ZONES[opponent_king_sq] & BB_SQUARES[to_square]) != 0:
-                                score += PAWN_PUSH_ATTACK_BONUS
-
-                            # --- King Tropism Bonus ---
-                            # Reward moves that decrease distance to the opponent's king
-                            k_file = opponent_king_sq % 8
-                            k_rank = opponent_king_sq // 8
-                            
-                            from_sq = get_from_square(move)
-                            from_file = from_sq % 8
-                            from_rank = from_sq // 8
-                            
-                            to_file = to_square % 8
-                            to_rank = to_square // 8
-                            
-                            dist_before = abs(from_file - k_file) + abs(from_rank - k_rank)
-                            dist_after = abs(to_file - k_file) + abs(to_rank - k_rank)
-                            
-                            if dist_after < dist_before:
-                                score += KING_TROPISM_BONUS
 
         scores[i] = score
     return scores
