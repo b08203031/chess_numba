@@ -8,6 +8,7 @@ import os
 import time
 import chess
 import traceback
+import re
 
 # --- Configuration & Constants ---
 UNICODE_PIECES = {
@@ -19,6 +20,65 @@ UNICODE_PIECES = {
 BOARD_COLORS = [ "#B58863", "#F0D9B5"]  # Light, Dark squares (Wood theme)
 HIGHLIGHT_COLOR = "#FFFF00" # Yellow for best move
 LAST_MOVE_COLOR = "#BBCB2B" # Greenish for last move
+
+def sanitize_fen_input(text, field_type):
+    """
+    Sanitizes user input for FEN fields to prevent UCI command injection.
+    """
+    # Security: Remove any potential control characters and validate format
+    stripped = text.strip()
+    
+    if field_type == 'castling':
+        # Castling rights: only K, Q, k, q, or -
+        if stripped == "-":
+            return "-"
+            
+        if re.match(r"^[KQkq]+$", stripped):
+            if len(stripped) <= 4:
+                return stripped
+        return "-"
+
+    elif field_type == 'ep':
+        # En Passant: [a-h][36] or -
+        if stripped == "-":
+            return "-"
+        
+        if re.match(r"^[a-h][36]$", stripped):
+            return stripped
+        return "-"
+            
+    return "-"
+
+class ToolTip(object):
+    """
+    Creates a tooltip for a given widget.
+    """
+    def __init__(self, widget, text='widget info'):
+        self.widget = widget
+        self.text = text
+        self.widget.bind("<Enter>", self.enter)
+        self.widget.bind("<Leave>", self.close)
+        self.tw = None
+
+    def enter(self, event=None):
+        x = y = 0
+        x = self.widget.winfo_rootx() + 25
+        y = self.widget.winfo_rooty() + 20
+        
+        # creates a toplevel window
+        self.tw = tk.Toplevel(self.widget)
+        # Leaves only the label and removes the app window
+        self.tw.wm_overrideredirect(True)
+        self.tw.wm_geometry("+%d+%d" % (x, y))
+        label = tk.Label(self.tw, text=self.text, justify='left',
+                       background='#ffffe0', relief='solid', borderwidth=1,
+                       font=("Segoe UI", "9", "normal"))
+        label.pack(ipadx=5, ipady=2)
+
+    def close(self, event=None):
+        if self.tw:
+            self.tw.destroy()
+            self.tw = None
 
 class EngineProcess:
     """
@@ -206,25 +266,33 @@ class ChessVisionApp(tk.Tk):
 
         # Auto Detect Checkbox
         self.auto_detect_var = tk.BooleanVar(value=True)
-        ttk.Checkbutton(control_frame, text="自動偵測權利 (Auto-detect Rights)", variable=self.auto_detect_var).grid(row=row_idx, column=0, columnspan=2, sticky="w", pady=5)
+        chk_auto = ttk.Checkbutton(control_frame, text="自動偵測權利 (Auto-detect Rights)", variable=self.auto_detect_var)
+        chk_auto.grid(row=row_idx, column=0, columnspan=2, sticky="w", pady=5)
+        ToolTip(chk_auto, "嘗試自動判斷王車易位權 (Try to infer castling rights)")
         row_idx += 1
 
         # Castling Rights (New Feature)
         ttk.Label(control_frame, text="王車易位 (Castling Rights):").grid(row=row_idx, column=0, sticky="w")
         self.castling_var = tk.StringVar(value="KQkq")
-        ttk.Entry(control_frame, textvariable=self.castling_var, width=10).grid(row=row_idx, column=1, sticky="w")
+        entry_castling = ttk.Entry(control_frame, textvariable=self.castling_var, width=10)
+        entry_castling.grid(row=row_idx, column=1, sticky="w")
+        ToolTip(entry_castling, "FEN 格式 (例如: KQkq, -, K, q)\nFEN format (e.g. KQkq, -, K, q)")
         row_idx += 1
 
         # En Passant (New Feature)
         ttk.Label(control_frame, text="吃過路兵 (En Passant):").grid(row=row_idx, column=0, sticky="w")
         self.ep_var = tk.StringVar(value="-")
-        ttk.Entry(control_frame, textvariable=self.ep_var, width=5).grid(row=row_idx, column=1, sticky="w")
+        entry_ep = ttk.Entry(control_frame, textvariable=self.ep_var, width=5)
+        entry_ep.grid(row=row_idx, column=1, sticky="w")
+        ToolTip(entry_ep, "過路兵目標格 (例如: e3, -)\nTarget square (e.g. e3, -)")
         row_idx += 1
 
         # Time Limit
         ttk.Label(control_frame, text="思考時間 (Time Limit ms):").grid(row=row_idx, column=0, sticky="w")
         self.time_var = tk.StringVar(value="10000")
-        ttk.Entry(control_frame, textvariable=self.time_var, width=10).grid(row=row_idx, column=1, sticky="w")
+        entry_time = ttk.Entry(control_frame, textvariable=self.time_var, width=10)
+        entry_time.grid(row=row_idx, column=1, sticky="w")
+        ToolTip(entry_time, "毫秒 (1000 = 1秒)\nMilliseconds (1000 = 1s)")
         row_idx += 1
 
         # Buttons Frame
@@ -234,14 +302,22 @@ class ChessVisionApp(tk.Tk):
         # Start Button
         self.btn_analyze = ttk.Button(btn_frame, text="開始分析 (Start)", command=self.start_analysis_thread)
         self.btn_analyze.pack(side="left", fill="x", expand=True, padx=(0, 5))
+        ToolTip(self.btn_analyze, "快速鍵 (Shortcut): Enter")
 
         # Stop Button
         self.btn_stop = ttk.Button(btn_frame, text="停止 (Stop)", command=self.stop_analysis, state="disabled")
         self.btn_stop.pack(side="left", fill="x", expand=True, padx=(5, 5))
+        ToolTip(self.btn_stop, "快速鍵 (Shortcut): Esc")
 
         # New Game Button
         self.btn_new_game = ttk.Button(btn_frame, text="新遊戲 (New Game)", command=self.new_game)
         self.btn_new_game.pack(side="left", fill="x", expand=True, padx=(5, 0))
+        ToolTip(self.btn_new_game, "快速鍵 (Shortcut): Ctrl+N")
+
+        # Shortcuts
+        self.bind('<Return>', lambda e: self.start_analysis_thread())
+        self.bind('<Escape>', lambda e: self.stop_analysis())
+        self.bind('<Control-n>', lambda e: self.new_game())
 
         # 2. Info Frame
         info_frame = ttk.LabelFrame(self, text="分析結果 (Analysis)", padding=10)
@@ -385,10 +461,16 @@ class ChessVisionApp(tk.Tk):
                     print(f"Auto-detect rights failed: {e}")
             else:
                 # Use User Input
-                user_rights = self.castling_var.get().strip()
-                if not user_rights: user_rights = "-"
-                user_ep = self.ep_var.get().strip()
-                if not user_ep: user_ep = "-"
+                user_rights_raw = self.castling_var.get()
+                user_ep_raw = self.ep_var.get()
+
+                # Security: Sanitize input to prevent UCI Command Injection
+                user_rights = sanitize_fen_input(user_rights_raw, 'castling')
+                user_ep = sanitize_fen_input(user_ep_raw, 'ep')
+
+                # Update UI to reflect sanitized values if they changed significantly (optional, but good for feedback)
+                # Note: We are in a thread, so use self.after if we wanted to update UI. 
+                # For now, we just use the sanitized values for the engine.
 
                 parts = fen_raw.split()
                 parts[2] = user_rights
