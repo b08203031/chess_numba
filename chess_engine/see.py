@@ -247,14 +247,16 @@ def get_lva_and_remove(attackers, piece_bbs, side_mask):
             return PIECE_VALUES[i], sq_bb, i
     return 0, np.uint64(0), -1
 
-@numba.njit(nbt.int32(piece_bbs_signature, occupancy_bbs_signature, nbt.int64, nbt.int64, nbt.int64), cache=True)
-def see(piece_bbs, occupancy_bbs, side_to_move, from_sq, to_sq):
+@numba.njit(nbt.int32(piece_bbs_signature, occupancy_bbs_signature, nbt.int64, nbt.int64, nbt.int64, nbt.uint64, nbt.uint64), cache=True)
+def see(piece_bbs, occupancy_bbs, side_to_move, from_sq, to_sq, pinned_white, pinned_black):
     """
     Static Exchange Evaluation (SEE).
     Mimics Stockfish's logic:
     - Stack based Swap algorithm
     - Pinned pieces DO NOT attack/capture (Strict definition)
     - En Passant handling
+    
+    Updated: Accepts pre-calculated pinned_white and pinned_black bitboards.
     """
 
     # 1. Identify Initial Victim and Attacker
@@ -306,9 +308,9 @@ def see(piece_bbs, occupancy_bbs, side_to_move, from_sq, to_sq):
     # Remove the initial attacker from occupied
     occupied &= ~BB_SQUARES[from_sq]
 
-    # Calculate Pinned Pieces once
-    pinned_white = get_pinned_pieces(piece_bbs, occupancy_bbs, WHITE)
-    pinned_black = get_pinned_pieces(piece_bbs, occupancy_bbs, BLACK)
+    # Pinned pieces are now passed as arguments!
+    # pinned_white = get_pinned_pieces(piece_bbs, occupancy_bbs, WHITE)
+    # pinned_black = get_pinned_pieces(piece_bbs, occupancy_bbs, BLACK)
 
     # Find all attackers to `to_sq`
     attackers = get_attackers_for_see(to_sq, occupied, piece_bbs, WHITE) | \
@@ -397,11 +399,12 @@ def see(piece_bbs, occupancy_bbs, side_to_move, from_sq, to_sq):
     return scores[0]
 
 
-@numba.njit(nbt.boolean(piece_bbs_signature, occupancy_bbs_signature, nbt.int64, nbt.int64, nbt.int64, nbt.int32), cache=True)
-def see_ge(piece_bbs, occupancy_bbs, side_to_move, from_sq, to_sq, threshold):
+@numba.njit(nbt.boolean(piece_bbs_signature, occupancy_bbs_signature, nbt.int64, nbt.int64, nbt.int64, nbt.int32, nbt.uint64, nbt.uint64), cache=True)
+def see_ge(piece_bbs, occupancy_bbs, side_to_move, from_sq, to_sq, threshold, pinned_white, pinned_black):
     """
     SEE >= Threshold.
     Optimized to exit early.
+    Updated: Accepts pre-calculated pinned_white and pinned_black bitboards.
     """
     # Identical setup to see()
 
@@ -448,8 +451,9 @@ def see_ge(piece_bbs, occupancy_bbs, side_to_move, from_sq, to_sq, threshold):
     occupied = occupancy_bbs[2]
     occupied &= ~BB_SQUARES[from_sq]
 
-    pinned_white = get_pinned_pieces(piece_bbs, occupancy_bbs, WHITE)
-    pinned_black = get_pinned_pieces(piece_bbs, occupancy_bbs, BLACK)
+    # Pinned pieces are now passed as arguments!
+    # pinned_white = get_pinned_pieces(piece_bbs, occupancy_bbs, WHITE)
+    # pinned_black = get_pinned_pieces(piece_bbs, occupancy_bbs, BLACK)
 
     attackers = get_attackers_for_see(to_sq, occupied, piece_bbs, WHITE) | \
                 get_attackers_for_see(to_sq, occupied, piece_bbs, BLACK)
