@@ -82,8 +82,16 @@ class Engine:
             if line.startswith("bestmove"):
                 break
 
-    def get_move(self, fen, time_limit_ms):
-        self.send_command(f"position fen {fen}")
+    def get_move(self, moves_history, time_limit_ms, start_fen=None):
+        if start_fen:
+            cmd = f"position fen {start_fen}"
+        else:
+            cmd = "position startpos"
+
+        if moves_history:
+            cmd += " moves " + " ".join(moves_history)
+
+        self.send_command(cmd)
         self.send_command(f"go movetime {time_limit_ms}")
 
         best_move = None
@@ -134,7 +142,8 @@ def play_game(white_engine, black_engine, time_limit_ms, game_number):
             mover = black_engine
 
         try:
-            move = mover.get_move(board.fen(), time_limit_ms)
+            moves_history = [m.uci() for m in board.move_stack]
+            move = mover.get_move(moves_history, time_limit_ms)
         except Exception as e:
             print(f"Error getting move from {mover.name}: {e}")
             break
@@ -164,12 +173,45 @@ def play_game(white_engine, black_engine, time_limit_ms, game_number):
 
     return result, pgn_game
 
-def calculate_elo_diff(percentage):
-    if percentage <= 0:
-        return -float('inf')
-    if percentage >= 1:
-        return float('inf')
-    return -400 * math.log10(1 / percentage - 1)
+def calculate_elo_statistics(wins, draws, losses):
+    """
+    計算 Elo 分差與 95% 信賴區間的誤差。
+    """
+    total_games = wins + draws + losses
+    if total_games == 0:
+        return 0.0, 0.0
+
+    # 1. 計算得分率 (Score Rate, p)
+    score = wins + 0.5 * draws
+    p = score / total_games
+
+    # 處理邊界情況
+    if p <= 0:
+        return -float('inf'), 0.0
+    if p >= 1:
+        return float('inf'), 0.0
+
+    # 2. 計算 Elo 分差
+    elo_diff = -400 * math.log10(1 / p - 1)
+
+    # 3. 計算標準誤 (Standard Error, SE)
+    # E[x^2] = (wins * 1^2 + draws * 0.5^2 + losses * 0^2) / N
+    mean_sq = (wins * 1.0 + draws * 0.25) / total_games
+    variance = mean_sq - (p ** 2)
+    
+    # 確保變異數非負 (浮點誤差可能導致極小負值)
+    if variance < 0: variance = 0
+    
+    sigma = math.sqrt(variance)
+    se = sigma / math.sqrt(total_games)
+
+    # 4. 計算誤差範圍 (95% CI)
+    z_score = 1.96
+    # Gradient approximation: d(Elo)/dp
+    gradient = 400 / (math.log(10) * p * (1 - p))
+    error_margin = z_score * se * gradient
+
+    return elo_diff, error_margin
 
 def run_tournament(engine1_path, engine2_path, games_count, time_ms):
     engine1_name = "Engine_A"
@@ -187,7 +229,9 @@ def run_tournament(engine1_path, engine2_path, games_count, time_ms):
         e2.warm_up()
 
         scores = {engine1_name: 0.0, engine2_name: 0.0}
-        results = {"1-0": 0, "0-1": 0, "1/2-1/2": 0}
+        
+        # 追蹤 Engine 1 的詳細戰績以計算 Elo 誤差
+        e1_stats = {"wins": 0, "draws": 0, "losses": 0}
 
         pgn_file = "tournament_results.pgn"
         # Clear existing PGN file
@@ -208,14 +252,24 @@ def run_tournament(engine1_path, engine2_path, games_count, time_ms):
 
             if result == "1-0":
                 scores[white.name] += 1.0
-                results["1-0"] += 1
+                # 更新 Engine 1 戰績
+                if white.name == engine1_name:
+                    e1_stats["wins"] += 1
+                else:
+                    e1_stats["losses"] += 1
+                    
             elif result == "0-1":
                 scores[black.name] += 1.0
-                results["0-1"] += 1
+                # 更新 Engine 1 戰績
+                if black.name == engine1_name:
+                    e1_stats["wins"] += 1
+                else:
+                    e1_stats["losses"] += 1
             else:
                 scores[white.name] += 0.5
                 scores[black.name] += 0.5
-                results["1/2-1/2"] += 1
+                # 更新 Engine 1 戰績
+                e1_stats["draws"] += 1
 
             # Print intermediate stats
             print(f"After {i} games:")
@@ -226,16 +280,17 @@ def run_tournament(engine1_path, engine2_path, games_count, time_ms):
         # Final Stats
         print("\n=== Tournament Finished ===")
         print(f"Total Games: {games_count}")
-        print(f"Final Score {engine1_name}: {scores[engine1_name]}")
+        print(f"Final Score {engine1_name}: {scores[engine1_name]} ({e1_stats['wins']}W - {e1_stats['draws']}D - {e1_stats['losses']}L)")
         print(f"Final Score {engine2_name}: {scores[engine2_name]}")
 
-        percentage_e1 = scores[engine1_name] / games_count
-        elo_diff = calculate_elo_diff(percentage_e1)
+        # 計算 Elo 與誤差
+        elo_diff, error_margin = calculate_elo_statistics(e1_stats["wins"], e1_stats["draws"], e1_stats["losses"])
 
-        if abs(elo_diff) == float('inf'):
-             print(f"ELO Difference: > +/- 800")
+        if math.isinf(elo_diff):
+             print(f"ELO Difference: > +/- 800 (Perfect score or zero score)")
         else:
-             print(f"Estimated ELO Difference ({engine1_name} vs {engine2_name}): {elo_diff:+.2f}")
+             print(f"Estimated ELO Difference ({engine1_name} - {engine2_name}): {elo_diff:+.2f} [+/- {error_margin:.2f}]")
+             print(f"95% Confidence Interval: {elo_diff - error_margin:+.2f} to {elo_diff + error_margin:+.2f}")
 
         print(f"PGN saved to {pgn_file}")
 
@@ -248,8 +303,8 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Run a tournament between two versions of the engine.")
     parser.add_argument("engine1", help="Path to the first engine's main.py")
     parser.add_argument("engine2", help="Path to the second engine's main.py")
-    parser.add_argument("--games", type=int, default=20, help="Number of games to play")
-    parser.add_argument("--time", type=int, default=1000, help="Time per move in ms")
+    parser.add_argument("--games", type=int, default=200, help="Number of games to play")
+    parser.add_argument("--time", type=int, default=100, help="Time per move in ms")
 
     args = parser.parse_args()
 
