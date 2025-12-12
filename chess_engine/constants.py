@@ -275,11 +275,11 @@ PASSED_PAWN_BONUS = np.array([
     # MG, EG
     [  0,   0], # Rank 1
     [ 10,  20], # Rank 2
-    [ 20,  40], # Rank 3
-    [ 35, 100], # Rank 4
-    [ 50, 150], # Rank 5
-    [ 80, 250], # Rank 6
-    [150, 400], # Rank 7
+    [ 20,  30], # Rank 3
+    [ 35,  50], # Rank 4
+    [ 50,  80], # Rank 5
+    [ 80, 150], # Rank 6
+    [150, 250], # Rank 7
     [  0,   0]  # Rank 8
 ], dtype=np.int32)
 

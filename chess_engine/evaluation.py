@@ -524,6 +524,11 @@ def _evaluate_king_attackers(king_sq, color, piece_bbs, occupancy_bbs, enemy_att
     (階段 2) 根據攻擊國王區域的棋子，使用非線性模型計算威脅分數。
     """
     king_zone = KING_ATTACK_ZONES[king_sq]
+
+    # Optimization: If no enemy piece attacks the king zone, we can skip individual piece checks.
+    if not (enemy_attacks_bb & king_zone):
+        return np.int32(0)
+
     total_attack_units = np.int32(0)
     attacker_count = np.int32(0)
 
