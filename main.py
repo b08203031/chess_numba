@@ -117,6 +117,13 @@ def uci_loop():
                     board_state = (piece_bbs, occupancy_bbs, game_state)
                     # Add initial state key to history
                     game_history.append(game_state[4])
+                
+                elif "kiwipete" in tokens:
+                    fen = "r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - "
+                    piece_bbs, occupancy_bbs, game_state = parse_fen(fen)
+                    board_state = (piece_bbs, occupancy_bbs, game_state)
+                    # Add initial state key to history
+                    game_history.append(game_state[4])
                     
                 elif "fen" in tokens:
                     fen_start_index = tokens.index("fen") + 1
