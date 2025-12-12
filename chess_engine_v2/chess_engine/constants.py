@@ -275,11 +275,11 @@ PASSED_PAWN_BONUS = np.array([
     # MG, EG
     [  0,   0], # Rank 1
     [ 10,  20], # Rank 2
-    [ 20,  30], # Rank 3
-    [ 35,  50], # Rank 4
-    [ 50,  80], # Rank 5
-    [ 80, 150], # Rank 6
-    [150, 250], # Rank 7
+    [ 20,  40], # Rank 3
+    [ 35, 100], # Rank 4
+    [ 50, 150], # Rank 5
+    [ 80, 250], # Rank 6
+    [150, 400], # Rank 7
     [  0,   0]  # Rank 8
 ], dtype=np.int32)
 
@@ -425,8 +425,8 @@ ENABLE_HISTORY_PRUNING = True      # Enable pruning based on History Score
 
 # NEW: Pruning Parameters (Loose/Relaxed initially)
 PRUNING_SHALLOW_DEPTH = 8         # Prune moves only if depth is below this
-PRUNING_CAPTURE_SEE_MARGIN = -250 # SEE < -200 * depth will be pruned
-PRUNING_QUIET_SEE_MARGIN = -200   # SEE < -100 * depth^2 will be pruned
+PRUNING_CAPTURE_SEE_MARGIN = -200 # SEE < -200 * depth will be pruned
+PRUNING_QUIET_SEE_MARGIN = -100   # SEE < -100 * depth^2 will be pruned
 PRUNING_HISTORY_THRESHOLD = -1500 # Prune if history < -1500. NOTE: MAX_HISTORY is 2048, so -1500 is ~73% of max penalty.
 
 # Master switches for existing pruning techniques / 現有剪枝技術的總開關
@@ -440,16 +440,16 @@ NULL_MOVE_REDUCTION = 2
 MAX_QUIESCENCE_DEPTH = 5
 
 # Razoring
-RAZORING_MARGIN = 900 # Relaxed from 550
+RAZORING_MARGIN = 700 # Relaxed from 550
 
 # Futility Pruning
-FP_MARGIN_D1 = 500 # Relaxed from 300
-FP_MARGIN_D2 = 900 # Relaxed from 600
-FP_BASE = 300
-FP_MULTIPLIER = 250
+FP_MARGIN_D1 = 400 # Relaxed from 300
+FP_MARGIN_D2 = 700 # Relaxed from 600
+FP_BASE = 200
+FP_MULTIPLIER = 200
 
 # Reverse Futility Pruning
-RFP_MARGIN_D1 = 300 # Relaxed from 250
+RFP_MARGIN_D1 = 250 # Relaxed from 250
 
 # Late Move Reductions (LMR)
 LMR_MIN_DEPTH = 4           # Minimum depth to apply LMR / 應用 LMR 的最小深度
@@ -460,7 +460,7 @@ LMR_REDUCTION = 1           # Depth reduction for LMR / LMR 的深度減少值
 # 晚期移動剪枝（LMP） - 在搜尋了一定數量的寧靜步後剪枝
 # Updated: Relaxed constraints to search even more moves (20 + 20*depth)
 LMP_MOVE_COUNT = np.array([
-    0 if d == 0 else 20 + 20 * d for d in range(MAX_PLY)
+    0 if d == 0 else 12 + 12 * d for d in range(MAX_PLY)
 ], dtype=np.int32)
 
 
