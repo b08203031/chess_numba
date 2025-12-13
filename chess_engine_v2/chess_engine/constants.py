@@ -389,6 +389,10 @@ SCORE_KILLER_2 = 14000
 SCORE_COUNTER_MOVE = 10000
 SCORE_BAD_CAPTURE_PENALTY = -5000
 
+# Contempt Factor: Score penalty for draws when the engine is winning.
+# This encourages the engine to prefer winning lines over draws.
+CONTEMPT = 20 # centipawns
+
 PAWN_PUSH_RANK_BONUS = 2000
 PAWN_PUSH_ATTACK_BONUS = 3000
 KING_TROPISM_BONUS = 2500 # Bonus for improving king tropism

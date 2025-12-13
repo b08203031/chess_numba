@@ -557,9 +557,18 @@ def _evaluate_king_attackers(king_sq, color, piece_bbs, occupancy_bbs, enemy_att
     temp_bb = en_n
     while temp_bb:
         sq = get_lsb_index(temp_bb)
-        if KNIGHT_ATTACKS[sq] & king_zone:
-            total_attack_units += KING_SAFETY_ATTACK_UNITS[1]
+        # KNIGHT_ATTACKS[sq] gives squares from which enemy knights would attack sq
+        knight_attacks_in_zone = KNIGHT_ATTACKS[sq] & king_zone
+        knight_attack_units = KING_SAFETY_ATTACK_UNITS[1]
+        if knight_attacks_in_zone:
+            total_attack_units += knight_attack_units
             attacker_count += 1
+
+            # Check for weak squares attacked by this knight
+            undefended_in_zone = knight_attacks_in_zone & ~friendly_attacks_bb
+            weak_count = count_bits(undefended_in_zone)
+            total_attack_units += weak_count * knight_attack_units # Each weak square adds more units
+
         temp_bb &= temp_bb - np.uint64(1)
 
     # Bishops
@@ -567,9 +576,16 @@ def _evaluate_king_attackers(king_sq, color, piece_bbs, occupancy_bbs, enemy_att
     while temp_bb:
         sq = get_lsb_index(temp_bb)
         attacks = get_bishop_attacks(sq, all_pieces_occupancy & ~BB_SQUARES[sq])
-        if attacks & king_zone:
-            total_attack_units += KING_SAFETY_ATTACK_UNITS[2]
+        attacks_in_zone = attacks & king_zone
+        bishop_attack_units = KING_SAFETY_ATTACK_UNITS[2]
+        if attacks_in_zone:
+            total_attack_units += bishop_attack_units
             attacker_count += 1
+
+            # Check for weak squares attacked by this bishop
+            undefended_in_zone = attacks_in_zone & ~friendly_attacks_bb
+            weak_count = count_bits(undefended_in_zone)
+            total_attack_units += weak_count * bishop_attack_units # Each weak square adds more units
         temp_bb &= temp_bb - np.uint64(1)
 
     # Rooks
@@ -577,9 +593,17 @@ def _evaluate_king_attackers(king_sq, color, piece_bbs, occupancy_bbs, enemy_att
     while temp_bb:
         sq = get_lsb_index(temp_bb)
         attacks = get_rook_attacks(sq, all_pieces_occupancy & ~BB_SQUARES[sq])
-        if attacks & king_zone:
-            total_attack_units += KING_SAFETY_ATTACK_UNITS[3]
+        attack_in_zone = attacks & king_zone
+        rook_attack_units = KING_SAFETY_ATTACK_UNITS[3]
+        if attack_in_zone:
+            total_attack_units += rook_attack_units
             attacker_count += 1
+
+            # Check for weak squares attacked by this rook
+            undefended_in_zone = attack_in_zone & ~friendly_attacks_bb
+            weak_count = count_bits(undefended_in_zone)
+            total_attack_units += weak_count * rook_attack_units # Each weak square adds more units
+
         temp_bb &= temp_bb - np.uint64(1)
 
     # Queens
@@ -587,11 +611,22 @@ def _evaluate_king_attackers(king_sq, color, piece_bbs, occupancy_bbs, enemy_att
     while temp_bb:
         sq = get_lsb_index(temp_bb)
         attacks = get_queen_attacks(sq, all_pieces_occupancy & ~BB_SQUARES[sq])
-        if attacks & king_zone:
-            total_attack_units += KING_SAFETY_ATTACK_UNITS[4]
+        attack_in_zone = attacks & king_zone
+        queen_attack_units = KING_SAFETY_ATTACK_UNITS[4]
+        if attack_in_zone:
+            total_attack_units += queen_attack_units
             attacker_count += 1
+
+            # Check for weak squares attacked by this queen
+            undefended_in_zone = attack_in_zone & ~friendly_attacks_bb
+            weak_count = count_bits(undefended_in_zone)
+            total_attack_units += weak_count * queen_attack_units # Each weak square adds more units
+
         temp_bb &= temp_bb - np.uint64(1)
 
+    if attacker_count < 2 and weak_count == 0:
+       return np.int32(0)
+    
     # --- Weak Squares Logic (Stockfish 11) ---
     # Weak Square: A square in King Zone attacked by enemy but not defended by friendly pieces.
     # Note: Stockfish uses `~attackedBy2[Us]` which implies defended by at least 2 pieces? No, `~attackedBy2` means "not defended twice".
@@ -608,23 +643,9 @@ def _evaluate_king_attackers(king_sq, color, piece_bbs, occupancy_bbs, enemy_att
     # For now, let's use the provided `friendly_attacks_bb` which includes King.
     # If a square is attacked by enemy and NOT defended by anyone (undefended hole), it's very weak.
 
-    # Let's count "Undefended Holes" in King Zone.
-    undefended_in_zone = (king_zone & enemy_attacks_bb) & ~friendly_attacks_bb
-    weak_count = count_bits(undefended_in_zone)
-
-    # Penalty for weak squares (e.g. 20cp per square)
-    weak_penalty = weak_count * 20
-    total_attack_units += weak_penalty # Add to "units" to scale non-linearly? Or add separately?
     # SF11 adds to `kingDanger`.
     # My `KING_SAFETY_TABLE` maps units to score.
     # Adding to units makes sense because multiple weak squares amplify the danger.
-
-    # Only apply penalty if there are multiple attackers, to avoid penalizing single-piece harassment.
-    # However, if there are weak squares (holes), even a single attacker is dangerous.
-    # 僅在有多個攻擊者時才施加懲罰，以避免懲罰單個棋子的騷擾。
-    # 但是，如果存在弱格（漏洞），即使是單個攻擊者也很危險。
-    if attacker_count < 2 and weak_count == 0:
-       return np.int32(0)
 
     # The score from the table is a penalty, so it should be negative.
     return -KING_SAFETY_TABLE[min(total_attack_units, len(KING_SAFETY_TABLE) - 1)]

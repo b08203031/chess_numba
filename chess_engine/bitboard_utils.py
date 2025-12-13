@@ -5,8 +5,8 @@ from chess_engine.engine_types import piece_bbs_signature
 
 def _init_king_attack_zones():
     """
-    預計算棋盤上每個方格的 5x5 王的攻擊區域。
-    5x5 區域以王為中心。
+    預計算棋盤上每個方格的 3x3 王的攻擊區域再加上前面一排 1x3 的區域。
+    3x3 區域以王為中心。
 
     Returns:
         np.array: 大小為 64 的 uint64 陣列，每個元素代表對應方格的王周圍的攻擊區域位元棋盤。
@@ -16,8 +16,8 @@ def _init_king_attack_zones():
         zone_bb = np.uint64(0)
         rank, file = sq // 8, sq % 8
 
-        for r in range(rank - 2, rank + 3):
-            for f in range(file - 2, file + 3):
+        for r in range(rank - 1, rank + 3):
+            for f in range(file - 1, file + 2):
                 if 0 <= r < 8 and 0 <= f < 8:
                     target_sq = r * 8 + f
                     zone_bb |= BB_SQUARES[target_sq]
