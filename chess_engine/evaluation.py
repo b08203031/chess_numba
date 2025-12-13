@@ -118,11 +118,11 @@ def _create_passed_pawn_masks():
 WHITE_PASSED_PAWN_MASKS, BLACK_PASSED_PAWN_MASKS = _create_passed_pawn_masks()
 
 
-@numba.njit(numba.types.UniTuple(numba.uint64, 2)(piece_bbs_signature, numba.uint64), cache=True, boundscheck=False, fastmath=True)
+@numba.njit(numba.types.UniTuple(numba.uint64, 4)(piece_bbs_signature, numba.uint64), cache=True, boundscheck=False, fastmath=True)
 def _compute_all_attacks(piece_bbs, all_pieces_occupancy):
     """
     Computes the combined attack bitboards for White and Black pieces.
-    Returns: (white_attacks_bb, black_attacks_bb)
+    Returns: (white_attacks_bb, black_attacks_bb, white_pawn_attacks, black_pawn_attacks)
     """
     (wp_bb, wn_bb, wb_bb, wr_bb, wq_bb, wk_bb,
      bp_bb, bn_bb, bb_bb, br_bb, bq_bb, bk_bb) = piece_bbs
@@ -138,8 +138,8 @@ def _compute_all_attacks(piece_bbs, all_pieces_occupancy):
     # Optimization: Use bulk operations if possible, but numba loop is fine.
     # Bulk pawn attacks:
     # White captures: (wp_bb & NOT_A_FILE) << 7 | (wp_bb & NOT_H_FILE) << 9
-    white_attacks |= ((wp_bb & NOT_A_FILE) << np.uint64(7))
-    white_attacks |= ((wp_bb & NOT_H_FILE) << np.uint64(9))
+    white_pawn_attacks = ((wp_bb & NOT_A_FILE) << np.uint64(7)) | ((wp_bb & NOT_H_FILE) << np.uint64(9))
+    white_attacks |= white_pawn_attacks
 
     # Knights
     temp_bb = wn_bb
@@ -171,8 +171,8 @@ def _compute_all_attacks(piece_bbs, all_pieces_occupancy):
 
     # Pawns
     # Black captures: (bp_bb & NOT_H_FILE) >> 7 | (bp_bb & NOT_A_FILE) >> 9
-    black_attacks |= ((bp_bb & NOT_H_FILE) >> np.uint64(7))
-    black_attacks |= ((bp_bb & NOT_A_FILE) >> np.uint64(9))
+    black_pawn_attacks = ((bp_bb & NOT_H_FILE) >> np.uint64(7)) | ((bp_bb & NOT_A_FILE) >> np.uint64(9))
+    black_attacks |= black_pawn_attacks
 
     # Knights
     temp_bb = bn_bb
@@ -199,7 +199,7 @@ def _compute_all_attacks(piece_bbs, all_pieces_occupancy):
     if bk_bb:
         black_attacks |= KING_ATTACKS[get_lsb_index(bk_bb)]
 
-    return white_attacks, black_attacks
+    return white_attacks, black_attacks, white_pawn_attacks, black_pawn_attacks
 
 
 @numba.njit(numba.types.UniTuple(numba.int32, 2)(piece_bbs_signature), cache=True, boundscheck=False, fastmath=True)
@@ -758,8 +758,8 @@ def evaluate_king_safety(piece_bbs, occupancy_bbs, white_attacks, black_attacks)
     return mg_safety_score, eg_safety_score
 
 
-@numba.njit(numba.types.UniTuple(numba.int32, 2)(piece_bbs_signature, occupancy_bbs_signature), cache=True, boundscheck=False, fastmath=True)
-def evaluate_mobility(piece_bbs, occupancy_bbs):
+@numba.njit(numba.types.UniTuple(numba.int32, 2)(piece_bbs_signature, occupancy_bbs_signature, numba.uint64, numba.uint64), cache=True, boundscheck=False, fastmath=True)
+def evaluate_mobility(piece_bbs, occupancy_bbs, white_pawn_attacks, black_pawn_attacks):
     """
     評估雙方棋子的機動性。
     實作「安全機動性 (Safe Mobility)」：排除被敵方兵攻擊的格子以及被己方王/后阻擋的格子。
@@ -767,6 +767,8 @@ def evaluate_mobility(piece_bbs, occupancy_bbs):
     Args:
         piece_bbs (np.ndarray): 12 個棋子的位元棋盤。
         occupancy_bbs (np.ndarray): 佔用位元棋盤。
+        white_pawn_attacks (np.uint64): 白方兵攻擊的格子。
+        black_pawn_attacks (np.uint64): 黑方兵攻擊的格子。
         
     Returns:
         tuple: (mg_score, eg_score) 從白方視角。
@@ -779,13 +781,7 @@ def evaluate_mobility(piece_bbs, occupancy_bbs):
     all_pieces_occupancy = occupancy_bbs[2]
 
     # --- 1. Compute Pawn Attacks (Forbidden Zones) ---
-    # White pawns attack (captured by Black)
-    white_pawn_attacks = ((piece_bbs[0] & NOT_A_FILE) << np.uint64(7)) | \
-                         ((piece_bbs[0] & NOT_H_FILE) << np.uint64(9))
-
-    # Black pawns attack (captured by White)
-    black_pawn_attacks = ((piece_bbs[6] & NOT_H_FILE) >> np.uint64(7)) | \
-                         ((piece_bbs[6] & NOT_A_FILE) >> np.uint64(9))
+    # (Passed from caller)
 
     # --- 2. Define Mobility Area (Safe Squares) ---
     # Safe squares are those NOT occupied by own King/Queen and NOT attacked by enemy pawns.
@@ -876,8 +872,8 @@ def evaluate_mobility(piece_bbs, occupancy_bbs):
     return mg_score, eg_score
 
 
-@numba.njit(numba.types.UniTuple(numba.int32, 2)(piece_bbs_signature, occupancy_bbs_signature, numba.uint64, numba.uint64), cache=True, boundscheck=False, fastmath=True)
-def evaluate_threats(piece_bbs, occupancy_bbs, white_attacks, black_attacks):
+@numba.njit(numba.types.UniTuple(numba.int32, 2)(piece_bbs_signature, occupancy_bbs_signature, numba.uint64, numba.uint64, numba.uint64, numba.uint64), cache=True, boundscheck=False, fastmath=True)
+def evaluate_threats(piece_bbs, occupancy_bbs, white_attacks, black_attacks, white_pawn_attacks, black_pawn_attacks):
     """
     評估局面的威脅（Threats）。
     包括：安全兵威脅、以小博大（輕子攻重子）、車捉后、懸掛子。
@@ -887,6 +883,8 @@ def evaluate_threats(piece_bbs, occupancy_bbs, white_attacks, black_attacks):
         occupancy_bbs: 佔用位元棋盤。
         white_attacks: 白方所有棋子的攻擊位元板。
         black_attacks: 黑方所有棋子的攻擊位元板。
+        white_pawn_attacks: 白方兵攻擊的格子。
+        black_pawn_attacks: 黑方兵攻擊的格子。
 
     Returns:
         (mg_score, eg_score): 威脅評估分數（從白方視角）。
@@ -903,11 +901,6 @@ def evaluate_threats(piece_bbs, occupancy_bbs, white_attacks, black_attacks):
     # Safe Pawn: A pawn that attacks an enemy piece (N, B, R, Q).
     # We implicitly assume attacking pawns are "safe" or the trade is good.
     # Note: We do NOT count pawn attacking pawn here (that's structure/capture).
-
-    white_pawn_attacks = ((wp_bb & NOT_A_FILE) << np.uint64(7)) | \
-                         ((wp_bb & NOT_H_FILE) << np.uint64(9))
-    black_pawn_attacks = ((bp_bb & NOT_H_FILE) >> np.uint64(7)) | \
-                         ((bp_bb & NOT_A_FILE) >> np.uint64(9))
 
     black_non_pawns = bn_bb | bb_bb | br_bb | bq_bb
     white_non_pawns = wn_bb | wb_bb | wr_bb | wq_bb
@@ -1201,7 +1194,7 @@ def evaluate_position(piece_bbs, occupancy_bbs, game_state, lazy: bool = False):
         return np.int32(final_score) if side_to_move == 0 else np.int32(-final_score)
 
     # --- Compute Full Attack Bitboards (Optimization for King Safety) ---
-    white_attacks, black_attacks = _compute_all_attacks(piece_bbs, occupancy_bbs[2])
+    white_attacks, black_attacks, white_pawn_attacks, black_pawn_attacks = _compute_all_attacks(piece_bbs, occupancy_bbs[2])
 
     # --- 3. (Full Evaluation) 加入國王安全分數 ---
     mg_king_safety, eg_king_safety = evaluate_king_safety(piece_bbs, occupancy_bbs, white_attacks, black_attacks)
@@ -1220,12 +1213,12 @@ def evaluate_position(piece_bbs, occupancy_bbs, game_state, lazy: bool = False):
 
     # --- 6. 加入棋子機動性分數 ---
     # Re-enabled with Safe Mobility logic
-    mg_mobility, eg_mobility = evaluate_mobility(piece_bbs, occupancy_bbs)
+    mg_mobility, eg_mobility = evaluate_mobility(piece_bbs, occupancy_bbs, white_pawn_attacks, black_pawn_attacks)
     mg_score += mg_mobility
     eg_score += eg_mobility
 
     # --- 7. Join Threat Evaluation / 加入威脅評估 ---
-    mg_threats, eg_threats = evaluate_threats(piece_bbs, occupancy_bbs, white_attacks, black_attacks)
+    mg_threats, eg_threats = evaluate_threats(piece_bbs, occupancy_bbs, white_attacks, black_attacks, white_pawn_attacks, black_pawn_attacks)
     mg_score += mg_threats
     eg_score += eg_threats
 
