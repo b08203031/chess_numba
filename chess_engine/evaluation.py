@@ -523,6 +523,7 @@ def _evaluate_king_attackers(king_sq, color, piece_bbs, occupancy_bbs, enemy_att
 
     total_attack_units = np.int32(0)
     attacker_count = np.int32(0)
+    weak_count = np.int32(0)
 
     enemy_start_idx = 6 if color == 0 else 0
     (en_p, en_n, en_b, en_r, en_q, _) = piece_bbs[enemy_start_idx : enemy_start_idx + 6]
@@ -551,15 +552,14 @@ def _evaluate_king_attackers(king_sq, color, piece_bbs, occupancy_bbs, enemy_att
         sq = get_lsb_index(temp_bb)
         # KNIGHT_ATTACKS[sq] gives squares from which enemy knights would attack sq
         knight_attacks_in_zone = KNIGHT_ATTACKS[sq] & king_zone
-        knight_attack_units = KING_SAFETY_ATTACK_UNITS[1]
         if knight_attacks_in_zone:
-            total_attack_units += knight_attack_units
+            total_attack_units += KING_SAFETY_ATTACK_UNITS[1]
             attacker_count += 1
 
             # Check for weak squares attacked by this knight
             undefended_in_zone = knight_attacks_in_zone & ~friendly_attacks_bb
-            weak_count = count_bits(undefended_in_zone)
-            total_attack_units += weak_count * knight_attack_units # Each weak square adds more units
+            weak_count += count_bits(undefended_in_zone)
+            total_attack_units += weak_count * KING_SAFETY_WEAK_UNITS[1] # Each weak square adds more units
 
         temp_bb &= temp_bb - np.uint64(1)
 
@@ -569,15 +569,14 @@ def _evaluate_king_attackers(king_sq, color, piece_bbs, occupancy_bbs, enemy_att
         sq = get_lsb_index(temp_bb)
         attacks = get_bishop_attacks(sq, all_pieces_occupancy & ~BB_SQUARES[sq])
         attacks_in_zone = attacks & king_zone
-        bishop_attack_units = KING_SAFETY_ATTACK_UNITS[2]
         if attacks_in_zone:
-            total_attack_units += bishop_attack_units
+            total_attack_units += KING_SAFETY_ATTACK_UNITS[2]
             attacker_count += 1
 
             # Check for weak squares attacked by this bishop
             undefended_in_zone = attacks_in_zone & ~friendly_attacks_bb
-            weak_count = count_bits(undefended_in_zone)
-            total_attack_units += weak_count * bishop_attack_units # Each weak square adds more units
+            weak_count += count_bits(undefended_in_zone)
+            total_attack_units += weak_count * KING_SAFETY_WEAK_UNITS[2] # Each weak square adds more units
         temp_bb &= temp_bb - np.uint64(1)
 
     # Rooks
@@ -586,15 +585,14 @@ def _evaluate_king_attackers(king_sq, color, piece_bbs, occupancy_bbs, enemy_att
         sq = get_lsb_index(temp_bb)
         attacks = get_rook_attacks(sq, all_pieces_occupancy & ~BB_SQUARES[sq])
         attack_in_zone = attacks & king_zone
-        rook_attack_units = KING_SAFETY_ATTACK_UNITS[3]
         if attack_in_zone:
-            total_attack_units += rook_attack_units
+            total_attack_units += KING_SAFETY_ATTACK_UNITS[3]
             attacker_count += 1
 
             # Check for weak squares attacked by this rook
             undefended_in_zone = attack_in_zone & ~friendly_attacks_bb
-            weak_count = count_bits(undefended_in_zone)
-            total_attack_units += weak_count * rook_attack_units # Each weak square adds more units
+            weak_count += count_bits(undefended_in_zone)
+            total_attack_units += weak_count * KING_SAFETY_WEAK_UNITS[3] # Each weak square adds more units
 
         temp_bb &= temp_bb - np.uint64(1)
 
@@ -604,15 +602,14 @@ def _evaluate_king_attackers(king_sq, color, piece_bbs, occupancy_bbs, enemy_att
         sq = get_lsb_index(temp_bb)
         attacks = get_queen_attacks(sq, all_pieces_occupancy & ~BB_SQUARES[sq])
         attack_in_zone = attacks & king_zone
-        queen_attack_units = KING_SAFETY_ATTACK_UNITS[4]
         if attack_in_zone:
-            total_attack_units += queen_attack_units
+            total_attack_units += KING_SAFETY_ATTACK_UNITS[4]
             attacker_count += 1
 
             # Check for weak squares attacked by this queen
             undefended_in_zone = attack_in_zone & ~friendly_attacks_bb
-            weak_count = count_bits(undefended_in_zone)
-            total_attack_units += weak_count * queen_attack_units # Each weak square adds more units
+            weak_count += count_bits(undefended_in_zone)
+            total_attack_units += weak_count * KING_SAFETY_WEAK_UNITS[4] # Each weak square adds more units
 
         temp_bb &= temp_bb - np.uint64(1)
 
