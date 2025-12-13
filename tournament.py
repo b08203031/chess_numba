@@ -303,7 +303,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Run a tournament between two versions of the engine.")
     parser.add_argument("engine1", help="Path to the first engine's main.py")
     parser.add_argument("engine2", help="Path to the second engine's main.py")
-    parser.add_argument("--games", type=int, default=200, help="Number of games to play")
+    parser.add_argument("--games", type=int, default=20, help="Number of games to play")
     parser.add_argument("--time", type=int, default=100, help="Time per move in ms")
 
     args = parser.parse_args()
