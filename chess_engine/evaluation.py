@@ -228,15 +228,26 @@ def evaluate_pawn_structure(piece_bbs):
         rank = sq // 8
         file_idx = sq % 8
 
+        adjacent_pawns = ADJACENT_FILES_MASKS[file_idx] & white_pawns
+
+        # Isolated Pawn
+        if not adjacent_pawns:
+            mg_score += ISOLATED_PAWN_PENALTY[0]
+            eg_score += ISOLATED_PAWN_PENALTY[1]
+
+        # Doubled Pawn
+        # Check if there is a friendly pawn ahead on the same file
+        if (WHITE_FORWARD_RANKS[sq] & white_pawns & FILE_MASKS[file_idx]):
+             mg_score += DOUBLED_PAWN_PENALTY[0]
+             eg_score += DOUBLED_PAWN_PENALTY[1]
+
         # A. Passed Pawn Logic
         if not (WHITE_PASSED_PAWN_MASKS[sq] & black_pawns):
             mg_score += PASSED_PAWN_BONUS[rank][0]
             eg_score += PASSED_PAWN_BONUS[rank][1]
 
             # Connected Passed Pawn Bonus
-            # Check if there is a friendly pawn on adjacent files (rank +/- 1 or same)
-            # Simplified: just adjacent files mask & white_pawns
-            if (ADJACENT_FILES_MASKS[file_idx] & white_pawns):
+            if adjacent_pawns:
                  mg_score += CONNECTED_PASSED_PAWN_BONUS[0]
                  eg_score += CONNECTED_PASSED_PAWN_BONUS[1]
 
@@ -280,7 +291,7 @@ def evaluate_pawn_structure(piece_bbs):
              # Check adjacent friendly pawns support
              # Friendly pawns on adjacent files AND (rank >= current rank)
              # Using precomputed masks would be faster but for now:
-             adjacent_pawns = ADJACENT_FILES_MASKS[file_idx] & white_pawns
+             
              # Check if any adjacent pawn is on rank >= current rank
              # Mask for ranks >= current rank
              # We can use ~BLACK_FORWARD_RANKS[sq] which gives ranks >= rank?
@@ -312,13 +323,26 @@ def evaluate_pawn_structure(piece_bbs):
         relative_rank = 7 - rank
         file_idx = sq % 8
 
+        adjacent_pawns = ADJACENT_FILES_MASKS[file_idx] & black_pawns
+
+        # Isolated Pawn
+        if not adjacent_pawns:
+            mg_score -= ISOLATED_PAWN_PENALTY[0]
+            eg_score -= ISOLATED_PAWN_PENALTY[1]
+
+        # Doubled Pawn
+        # Check if there is a friendly pawn ahead (towards rank 0) on the same file
+        if (BLACK_FORWARD_RANKS[sq] & black_pawns & FILE_MASKS[file_idx]):
+             mg_score -= DOUBLED_PAWN_PENALTY[0]
+             eg_score -= DOUBLED_PAWN_PENALTY[1]
+
         # A. Passed Pawn Logic
         if not (BLACK_PASSED_PAWN_MASKS[sq] & white_pawns):
             mg_score -= PASSED_PAWN_BONUS[relative_rank][0]
             eg_score -= PASSED_PAWN_BONUS[relative_rank][1]
 
             # Connected Passed Pawn Bonus
-            if (ADJACENT_FILES_MASKS[file_idx] & black_pawns):
+            if adjacent_pawns:
                  mg_score -= CONNECTED_PASSED_PAWN_BONUS[0]
                  eg_score -= CONNECTED_PASSED_PAWN_BONUS[1]
 
@@ -346,7 +370,6 @@ def evaluate_pawn_structure(piece_bbs):
              # Support: Friendly pawns on adjacent files and rank <= current rank (since black moves down)
              # BLACK_FORWARD_RANKS[sq] gives ranks < rank.
              support_mask = BLACK_FORWARD_RANKS[sq] | RANK_MASKS[rank]
-             adjacent_pawns = ADJACENT_FILES_MASKS[file_idx] & black_pawns
              has_support = (adjacent_pawns & support_mask) != 0
 
              if not has_support:
@@ -359,37 +382,6 @@ def evaluate_pawn_structure(piece_bbs):
                          eg_score += BACKWARD_PAWN_PENALTY[1]
 
         temp_bp &= temp_bp - np.uint64(1)
-
-    # --- 3. Isolated and Doubled Pawns / 孤兵與重疊兵 ---
-    # Iterate through each file to check for pawn formations.
-    for f in range(8):
-        file_mask = FILE_MASKS[f]
-        adjacent_mask = ADJACENT_FILES_MASKS[f]
-
-        white_pawns_on_file = count_bits(white_pawns & file_mask)
-        black_pawns_on_file = count_bits(black_pawns & file_mask)
-
-        # White pawns
-        if white_pawns_on_file > 0:
-            # Isolated
-            if not (white_pawns & adjacent_mask):
-                mg_score += ISOLATED_PAWN_PENALTY[0] * white_pawns_on_file
-                eg_score += ISOLATED_PAWN_PENALTY[1] * white_pawns_on_file
-            # Doubled
-            if white_pawns_on_file > 1:
-                mg_score += DOUBLED_PAWN_PENALTY[0] * (white_pawns_on_file - 1)
-                eg_score += DOUBLED_PAWN_PENALTY[1] * (white_pawns_on_file - 1)
-
-        # Black pawns
-        if black_pawns_on_file > 0:
-            # Isolated
-            if not (black_pawns & adjacent_mask):
-                mg_score -= ISOLATED_PAWN_PENALTY[0] * black_pawns_on_file
-                eg_score -= ISOLATED_PAWN_PENALTY[1] * black_pawns_on_file
-            # Doubled
-            if black_pawns_on_file > 1:
-                mg_score -= DOUBLED_PAWN_PENALTY[0] * (black_pawns_on_file - 1)
-                eg_score -= DOUBLED_PAWN_PENALTY[1] * (black_pawns_on_file - 1)
 
     return mg_score, eg_score
 
@@ -557,9 +549,18 @@ def _evaluate_king_attackers(king_sq, color, piece_bbs, occupancy_bbs, enemy_att
     temp_bb = en_n
     while temp_bb:
         sq = get_lsb_index(temp_bb)
-        if KNIGHT_ATTACKS[sq] & king_zone:
-            total_attack_units += KING_SAFETY_ATTACK_UNITS[1]
+        # KNIGHT_ATTACKS[sq] gives squares from which enemy knights would attack sq
+        knight_attacks_in_zone = KNIGHT_ATTACKS[sq] & king_zone
+        knight_attack_units = KING_SAFETY_ATTACK_UNITS[1]
+        if knight_attacks_in_zone:
+            total_attack_units += knight_attack_units
             attacker_count += 1
+
+            # Check for weak squares attacked by this knight
+            undefended_in_zone = knight_attacks_in_zone & ~friendly_attacks_bb
+            weak_count = count_bits(undefended_in_zone)
+            total_attack_units += weak_count * knight_attack_units # Each weak square adds more units
+
         temp_bb &= temp_bb - np.uint64(1)
 
     # Bishops
@@ -567,9 +568,16 @@ def _evaluate_king_attackers(king_sq, color, piece_bbs, occupancy_bbs, enemy_att
     while temp_bb:
         sq = get_lsb_index(temp_bb)
         attacks = get_bishop_attacks(sq, all_pieces_occupancy & ~BB_SQUARES[sq])
-        if attacks & king_zone:
-            total_attack_units += KING_SAFETY_ATTACK_UNITS[2]
+        attacks_in_zone = attacks & king_zone
+        bishop_attack_units = KING_SAFETY_ATTACK_UNITS[2]
+        if attacks_in_zone:
+            total_attack_units += bishop_attack_units
             attacker_count += 1
+
+            # Check for weak squares attacked by this bishop
+            undefended_in_zone = attacks_in_zone & ~friendly_attacks_bb
+            weak_count = count_bits(undefended_in_zone)
+            total_attack_units += weak_count * bishop_attack_units # Each weak square adds more units
         temp_bb &= temp_bb - np.uint64(1)
 
     # Rooks
@@ -577,9 +585,17 @@ def _evaluate_king_attackers(king_sq, color, piece_bbs, occupancy_bbs, enemy_att
     while temp_bb:
         sq = get_lsb_index(temp_bb)
         attacks = get_rook_attacks(sq, all_pieces_occupancy & ~BB_SQUARES[sq])
-        if attacks & king_zone:
-            total_attack_units += KING_SAFETY_ATTACK_UNITS[3]
+        attack_in_zone = attacks & king_zone
+        rook_attack_units = KING_SAFETY_ATTACK_UNITS[3]
+        if attack_in_zone:
+            total_attack_units += rook_attack_units
             attacker_count += 1
+
+            # Check for weak squares attacked by this rook
+            undefended_in_zone = attack_in_zone & ~friendly_attacks_bb
+            weak_count = count_bits(undefended_in_zone)
+            total_attack_units += weak_count * rook_attack_units # Each weak square adds more units
+
         temp_bb &= temp_bb - np.uint64(1)
 
     # Queens
@@ -587,11 +603,22 @@ def _evaluate_king_attackers(king_sq, color, piece_bbs, occupancy_bbs, enemy_att
     while temp_bb:
         sq = get_lsb_index(temp_bb)
         attacks = get_queen_attacks(sq, all_pieces_occupancy & ~BB_SQUARES[sq])
-        if attacks & king_zone:
-            total_attack_units += KING_SAFETY_ATTACK_UNITS[4]
+        attack_in_zone = attacks & king_zone
+        queen_attack_units = KING_SAFETY_ATTACK_UNITS[4]
+        if attack_in_zone:
+            total_attack_units += queen_attack_units
             attacker_count += 1
+
+            # Check for weak squares attacked by this queen
+            undefended_in_zone = attack_in_zone & ~friendly_attacks_bb
+            weak_count = count_bits(undefended_in_zone)
+            total_attack_units += weak_count * queen_attack_units # Each weak square adds more units
+
         temp_bb &= temp_bb - np.uint64(1)
 
+    if attacker_count < 2 and weak_count == 0:
+       return np.int32(0)
+    
     # --- Weak Squares Logic (Stockfish 11) ---
     # Weak Square: A square in King Zone attacked by enemy but not defended by friendly pieces.
     # Note: Stockfish uses `~attackedBy2[Us]` which implies defended by at least 2 pieces? No, `~attackedBy2` means "not defended twice".
@@ -608,23 +635,9 @@ def _evaluate_king_attackers(king_sq, color, piece_bbs, occupancy_bbs, enemy_att
     # For now, let's use the provided `friendly_attacks_bb` which includes King.
     # If a square is attacked by enemy and NOT defended by anyone (undefended hole), it's very weak.
 
-    # Let's count "Undefended Holes" in King Zone.
-    undefended_in_zone = (king_zone & enemy_attacks_bb) & ~friendly_attacks_bb
-    weak_count = count_bits(undefended_in_zone)
-
-    # Penalty for weak squares (e.g. 20cp per square)
-    weak_penalty = weak_count * 20
-    total_attack_units += weak_penalty # Add to "units" to scale non-linearly? Or add separately?
     # SF11 adds to `kingDanger`.
     # My `KING_SAFETY_TABLE` maps units to score.
     # Adding to units makes sense because multiple weak squares amplify the danger.
-
-    # Only apply penalty if there are multiple attackers, to avoid penalizing single-piece harassment.
-    # However, if there are weak squares (holes), even a single attacker is dangerous.
-    # 僅在有多個攻擊者時才施加懲罰，以避免懲罰單個棋子的騷擾。
-    # 但是，如果存在弱格（漏洞），即使是單個攻擊者也很危險。
-    if attacker_count < 2 and weak_count == 0:
-       return np.int32(0)
 
     # The score from the table is a penalty, so it should be negative.
     return -KING_SAFETY_TABLE[min(total_attack_units, len(KING_SAFETY_TABLE) - 1)]
@@ -1211,34 +1224,19 @@ def evaluate_position(piece_bbs, occupancy_bbs, game_state, lazy: bool = False):
     mg_score += mg_mobility
     eg_score += eg_mobility
 
-    # --- 7. 根據遊戲階段進行插值計算 ---
-    final_score = (mg_score * phase + eg_score * (MAX_PHASE - phase)) // MAX_PHASE
-
-    # --- 8. Join Threat Evaluation / 加入威脅評估 ---
+    # --- 7. Join Threat Evaluation / 加入威脅評估 ---
     mg_threats, eg_threats = evaluate_threats(piece_bbs, occupancy_bbs, white_attacks, black_attacks)
     mg_score += mg_threats
     eg_score += eg_threats
 
-    # --- 9. 根據遊戲階段進行插值計算 (Update phase calc again if needed, but linear interpolate is done above) ---
-    # Wait, simple interpolation was done at step 7.
-    # We should add threats BEFORE step 7 or re-calculate final score.
-    # Current code flow:
-    # 3. King Safety -> mg/eg
-    # 4. Pawn Structure -> mg/eg
-    # 5. Coordination -> mg/eg
-    # 6. Mobility -> mg/eg
-    # 7. Interpolation: final_score = (mg * phase + eg * (MAX - phase)) // MAX
-    #
-    # So I should insert threats before step 7.
-
-    # --- 8. (Optional) Initiative Bonus / 主動權獎勵 ---
-    # Re-calculating final score to include threats
+    # --- 8. 根據遊戲階段進行插值計算 ---
     final_score = (mg_score * phase + eg_score * (MAX_PHASE - phase)) // MAX_PHASE
 
+    # --- 9. (Optional) Initiative Bonus / 主動權獎勵 ---
     if phase > INITIATIVE_PHASE_THRESHOLD:
         final_score += INITIATIVE_BONUS
 
-    # --- 9. 從當前執棋方的角度返回最終分數 ---
+    # --- 10. 從當前執棋方的角度返回最終分數 ---
     if side_to_move == 0:  # 白方回合
         return np.int32(final_score)
     else:  # 黑方回合

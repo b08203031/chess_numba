@@ -389,6 +389,10 @@ SCORE_KILLER_2 = 14000
 SCORE_COUNTER_MOVE = 10000
 SCORE_BAD_CAPTURE_PENALTY = -5000
 
+# Contempt Factor: Score penalty for draws when the engine is winning.
+# This encourages the engine to prefer winning lines over draws.
+CONTEMPT = 20 # centipawns
+
 PAWN_PUSH_RANK_BONUS = 2000
 PAWN_PUSH_ATTACK_BONUS = 3000
 KING_TROPISM_BONUS = 2500 # Bonus for improving king tropism
@@ -425,8 +429,8 @@ ENABLE_HISTORY_PRUNING = True      # Enable pruning based on History Score
 
 # NEW: Pruning Parameters (Loose/Relaxed initially)
 PRUNING_SHALLOW_DEPTH = 8         # Prune moves only if depth is below this
-PRUNING_CAPTURE_SEE_MARGIN = -250 # SEE < -200 * depth will be pruned
-PRUNING_QUIET_SEE_MARGIN = -200   # SEE < -100 * depth^2 will be pruned
+PRUNING_CAPTURE_SEE_MARGIN = -200 # SEE < -200 * depth will be pruned
+PRUNING_QUIET_SEE_MARGIN = -100   # SEE < -100 * depth^2 will be pruned
 PRUNING_HISTORY_THRESHOLD = -1500 # Prune if history < -1500. NOTE: MAX_HISTORY is 2048, so -1500 is ~73% of max penalty.
 
 # Master switches for existing pruning techniques / 現有剪枝技術的總開關
@@ -440,16 +444,16 @@ NULL_MOVE_REDUCTION = 2
 MAX_QUIESCENCE_DEPTH = 5
 
 # Razoring
-RAZORING_MARGIN = 900 # Relaxed from 550
+RAZORING_MARGIN = 700 # Relaxed from 550
 
 # Futility Pruning
-FP_MARGIN_D1 = 500 # Relaxed from 300
-FP_MARGIN_D2 = 900 # Relaxed from 600
-FP_BASE = 300
-FP_MULTIPLIER = 250
+FP_MARGIN_D1 = 400 # Relaxed from 300
+FP_MARGIN_D2 = 700 # Relaxed from 600
+FP_BASE = 200
+FP_MULTIPLIER = 200
 
 # Reverse Futility Pruning
-RFP_MARGIN_D1 = 300 # Relaxed from 250
+RFP_MARGIN_D1 = 250 # Relaxed from 250
 
 # Late Move Reductions (LMR)
 LMR_MIN_DEPTH = 4           # Minimum depth to apply LMR / 應用 LMR 的最小深度
