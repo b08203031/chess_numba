@@ -567,7 +567,7 @@ def _evaluate_king_attackers(king_sq, color, piece_bbs, occupancy_bbs, enemy_att
     temp_bb = en_b
     while temp_bb:
         sq = get_lsb_index(temp_bb)
-        attacks = get_bishop_attacks(sq, all_pieces_occupancy & ~BB_SQUARES[sq])
+        attacks = get_bishop_attacks(sq, all_pieces_occupancy)
         attacks_in_zone = attacks & king_zone
         if attacks_in_zone:
             total_attack_units += KING_SAFETY_ATTACK_UNITS[2]
@@ -583,7 +583,7 @@ def _evaluate_king_attackers(king_sq, color, piece_bbs, occupancy_bbs, enemy_att
     temp_bb = en_r
     while temp_bb:
         sq = get_lsb_index(temp_bb)
-        attacks = get_rook_attacks(sq, all_pieces_occupancy & ~BB_SQUARES[sq])
+        attacks = get_rook_attacks(sq, all_pieces_occupancy)
         attack_in_zone = attacks & king_zone
         if attack_in_zone:
             total_attack_units += KING_SAFETY_ATTACK_UNITS[3]
@@ -600,7 +600,7 @@ def _evaluate_king_attackers(king_sq, color, piece_bbs, occupancy_bbs, enemy_att
     temp_bb = en_q
     while temp_bb:
         sq = get_lsb_index(temp_bb)
-        attacks = get_queen_attacks(sq, all_pieces_occupancy & ~BB_SQUARES[sq])
+        attacks = get_queen_attacks(sq, all_pieces_occupancy)
         attack_in_zone = attacks & king_zone
         if attack_in_zone:
             total_attack_units += KING_SAFETY_ATTACK_UNITS[4]

@@ -5,7 +5,7 @@ import numpy as np
 from chess_engine.fen_parser import parse_fen
 from chess_engine.evaluation import _evaluate_pawn_shield_for_color, _evaluate_king_attackers, _evaluate_king_tropism, _evaluate_pawn_storm, evaluate_king_safety
 from chess_engine.zobrist import get_lsb_index
-from chess_engine.constants import KING_SAFETY_TABLE, KING_TROPISM_MAX_DISTANCE, KING_TROPISM_WEIGHTS, PAWN_STORM_PENALTY
+from chess_engine.constants import KING_SAFETY_TABLE, KING_TROPISM_MAX_DISTANCE, KING_TROPISM_WEIGHTS, PAWN_STORM_PENALTY_BY_RANK
 from chess_engine.evaluation import MANHATTAN_DISTANCE
 
 class TestPawnShieldEvaluation(unittest.TestCase):
@@ -67,8 +67,8 @@ class TestKingAttackerEvaluation(unittest.TestCase):
         piece_bbs, occupancy_bbs, _ = parse_fen(fen)
         wk_sq = get_lsb_index(piece_bbs[5])
         bk_sq = get_lsb_index(piece_bbs[11])
-        white_penalty = _evaluate_king_attackers(wk_sq, 0, piece_bbs, occupancy_bbs)
-        black_penalty = _evaluate_king_attackers(bk_sq, 1, piece_bbs, occupancy_bbs)
+        white_penalty = _evaluate_king_attackers(wk_sq, 0, piece_bbs, occupancy_bbs, np.uint64(0), np.uint64(0))
+        black_penalty = _evaluate_king_attackers(bk_sq, 1, piece_bbs, occupancy_bbs, np.uint64(0), np.uint64(0))
         self.assertEqual(white_penalty, 0)
         self.assertEqual(black_penalty, 0)
     def test_one_attacker(self):
@@ -76,30 +76,47 @@ class TestKingAttackerEvaluation(unittest.TestCase):
         fen = "rnbq1rk1/pppppppp/8/8/8/5n2/PPPPPPPP/RNBQ1RK1 w - - 0 1"
         piece_bbs, occupancy_bbs, _ = parse_fen(fen)
         wk_sq = get_lsb_index(piece_bbs[5])
-        white_penalty = _evaluate_king_attackers(wk_sq, 0, piece_bbs, occupancy_bbs)
+        # Need to provide dummy attack bitboards as they are now required args
+        white_penalty = _evaluate_king_attackers(wk_sq, 0, piece_bbs, occupancy_bbs, np.uint64(0), np.uint64(0))
         self.assertEqual(white_penalty, 0)
     def test_two_knights_attacking(self):
         """測試兩個騎士攻擊。"""
         fen = "rnbq1rk1/pppppppp/8/8/8/5n1n/PPPPPPPP/RNBQ1RK1 w - - 0 1"
         piece_bbs, occupancy_bbs, _ = parse_fen(fen)
         wk_sq = get_lsb_index(piece_bbs[5])
+        # We need to ensure 'enemy_attacks_bb' passed to function includes the knights' attacks on the king zone
+        # The function checks: if not (enemy_attacks_bb & king_zone): return 0
+        # So we must mock or compute the attacks.
+        from chess_engine.evaluation import _compute_all_attacks
+        w_attacks, b_attacks, _, _ = _compute_all_attacks(piece_bbs, occupancy_bbs[2])
+        
         expected_penalty = -KING_SAFETY_TABLE[4]
-        white_penalty = _evaluate_king_attackers(wk_sq, 0, piece_bbs, occupancy_bbs)
+        # _evaluate_king_attackers(king_sq, color, piece_bbs, occupancy_bbs, enemy_attacks_bb, friendly_attacks_bb)
+        white_penalty = _evaluate_king_attackers(wk_sq, 0, piece_bbs, occupancy_bbs, b_attacks, w_attacks)
         self.assertEqual(white_penalty, expected_penalty)
+
     def test_queen_and_rook_attacking_corrected(self):
         """測試后和車同時攻擊。"""
         fen = "rnb1k1r1/pppppppp/8/8/6qr/8/PPPPPPPP/RNBQ1RK1 w q - 0 1"
         piece_bbs, occupancy_bbs, _ = parse_fen(fen)
         wk_sq = get_lsb_index(piece_bbs[5])
+        
+        from chess_engine.evaluation import _compute_all_attacks
+        w_attacks, b_attacks, _, _ = _compute_all_attacks(piece_bbs, occupancy_bbs[2])
+
         expected_penalty = -KING_SAFETY_TABLE[8]
-        white_penalty = _evaluate_king_attackers(wk_sq, 0, piece_bbs, occupancy_bbs)
+        white_penalty = _evaluate_king_attackers(wk_sq, 0, piece_bbs, occupancy_bbs, b_attacks, w_attacks)
         self.assertEqual(white_penalty, expected_penalty)
+
     def test_slider_attack_blocked_outside_zone(self):
         """測試遠程攻擊被阻擋的情況。"""
         fen = "rnbq1rk1/pppppp1p/8/8/8/8/PPPPPPPP/RNBQ1RK1 w - - 0 1"
         piece_bbs, occupancy_bbs, _ = parse_fen(fen)
         wk_sq = get_lsb_index(piece_bbs[5])
-        white_penalty = _evaluate_king_attackers(wk_sq, 0, piece_bbs, occupancy_bbs)
+        from chess_engine.evaluation import _compute_all_attacks
+        w_attacks, b_attacks, _, _ = _compute_all_attacks(piece_bbs, occupancy_bbs[2])
+        
+        white_penalty = _evaluate_king_attackers(wk_sq, 0, piece_bbs, occupancy_bbs, b_attacks, w_attacks)
         self.assertEqual(white_penalty, 0)
 
 class TestKingTropismEvaluation(unittest.TestCase):
@@ -135,9 +152,20 @@ class TestAdvancedKingSafety(unittest.TestCase):
         piece_bbs, _, _ = parse_fen(fen)
         wk_sq = get_lsb_index(piece_bbs[5])
 
-        # Expected: 1 pawn in zone * penalty
-        # 預期：1 個區域內的兵 * 懲罰
-        expected_penalty = 1 * PAWN_STORM_PENALTY
+        # Expected: Pawn is at rank 2 (index 2) for White perspective (from Black side it's rank 5).
+        # In _evaluate_pawn_storm:
+        # rank = 5. table_idx = 7-5 = 2.
+        # PAWN_STORM_PENALTY_BY_RANK[2]
+        
+        # Note: Previous test assumed constant PAWN_STORM_PENALTY.
+        # Code now uses PAWN_STORM_PENALTY_BY_RANK.
+        # We need to import it or check the value.
+        # Let's assume the test needs update.
+        
+        expected_penalty = -PAWN_STORM_PENALTY_BY_RANK[2] 
+        # Wait, the function returns "penalty" (positive number to be subtracted?)
+        # function returns: penalty -= table_value. So it returns a negative number.
+        
         pawn_storm_penalty = _evaluate_pawn_storm(wk_sq, 0, piece_bbs)
         self.assertEqual(pawn_storm_penalty, expected_penalty)
 
@@ -152,15 +180,20 @@ class TestAdvancedKingSafety(unittest.TestCase):
         # 黑王在 g8，被 f6 的白馬攻擊
         fen_attack = "rnbq1rk1/pppp1ppp/5n2/8/8/8/PPPPPPPP/RNBQ1RK1 b - - 0 1"
         p_bbs, o_bbs, _ = parse_fen(fen_attack)
+        from chess_engine.evaluation import _compute_all_attacks
+        w_att, b_att, _, _ = _compute_all_attacks(p_bbs, o_bbs[2])
+        
         # Score is from the current player's (Black's) perspective, so a negative score is expected
         # 分數是從當前玩家（黑方）視角，所以預期是負分
-        score_with_knight, _ = evaluate_king_safety(p_bbs, o_bbs)
+        score_with_knight, _ = evaluate_king_safety(p_bbs, o_bbs, w_att, b_att)
 
         # Remove the attacking White knight
         # 移除攻擊的白馬
         fen_no_knight = "rnbq1rk1/pppp1ppp/8/8/8/8/PPPPPPPP/RNBQ1RK1 b - - 0 1"
         p_bbs_no_k, o_bbs_no_k, _ = parse_fen(fen_no_knight)
-        score_no_knight, _ = evaluate_king_safety(p_bbs_no_k, o_bbs_no_k)
+        w_att_no, b_att_no, _, _ = _compute_all_attacks(p_bbs_no_k, o_bbs_no_k[2])
+        
+        score_no_knight, _ = evaluate_king_safety(p_bbs_no_k, o_bbs_no_k, w_att_no, b_att_no)
 
         # The penalty for Black should be less severe (closer to zero)
         # when the attacking knight is removed.
