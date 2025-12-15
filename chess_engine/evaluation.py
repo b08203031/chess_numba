@@ -84,6 +84,17 @@ for sq in range(64):
         mask |= RANK_MASKS[r]
     BLACK_FORWARD_RANKS[sq] = mask
 
+# Precomputed masks for single-file forward spans (for doubled pawn checks)
+# 預計算單一直線的前方掩碼（用於重疊兵檢查）
+WHITE_FRONT_FILE_MASKS = np.zeros(64, dtype=np.uint64)
+BLACK_FRONT_FILE_MASKS = np.zeros(64, dtype=np.uint64)
+
+for sq in range(64):
+    # WHITE_FRONT_FILE_MASKS[sq] = WHITE_FORWARD_RANKS[sq] & FILE_MASKS[sq % 8]
+    WHITE_FRONT_FILE_MASKS[sq] = WHITE_FORWARD_RANKS[sq] & FILE_MASKS[sq & 7]
+    
+    # BLACK_FRONT_FILE_MASKS[sq] = BLACK_FORWARD_RANKS[sq] & FILE_MASKS[sq % 8]
+    BLACK_FRONT_FILE_MASKS[sq] = BLACK_FORWARD_RANKS[sq] & FILE_MASKS[sq & 7]
 
 def _create_passed_pawn_masks():
     """
@@ -206,12 +217,10 @@ def _compute_all_attacks(piece_bbs, all_pieces_occupancy):
 def evaluate_pawn_structure(piece_bbs):
     """
     評估雙方的兵型結構（通路兵、孤兵、重疊兵、後兵、連結兵）。
-    
-    Args:
-        piece_bbs (np.ndarray): 12 個棋子的位元棋盤。
-        
-    Returns:
-        tuple: (mg_score, eg_score) 從白方視角。
+    Optimization (Bolt): 
+    - 使用位運算替代除法/模運算獲取 rank/file。
+    - 使用預計算的 WHITE/BLACK_FRONT_FILE_MASKS 優化重疊兵檢查。
+    - 使用位移運算優化後兵的支持掩碼 (Support Mask) 生成。
     """
     mg_score = np.int32(0)
     eg_score = np.int32(0)
@@ -220,13 +229,18 @@ def evaluate_pawn_structure(piece_bbs):
     black_pawns = piece_bbs[6]
     white_king_sq = get_lsb_index(piece_bbs[5])
     black_king_sq = get_lsb_index(piece_bbs[11])
+    
+    # Constant used for shift-based mask generation
+    ALL_ONES = np.uint64(0xFFFFFFFFFFFFFFFF)
 
     # --- 1. Iterate White Pawns ---
     temp_wp = white_pawns
     while temp_wp:
         sq = get_lsb_index(temp_wp)
-        rank = sq // 8
-        file_idx = sq % 8
+        
+        # BITWISE OPTIMIZATION: Shift instead of div/mod
+        rank = sq >> 3
+        file_idx = sq & 7
 
         adjacent_pawns = ADJACENT_FILES_MASKS[file_idx] & white_pawns
 
@@ -236,8 +250,8 @@ def evaluate_pawn_structure(piece_bbs):
             eg_score += ISOLATED_PAWN_PENALTY[1]
 
         # Doubled Pawn
-        # Check if there is a friendly pawn ahead on the same file
-        if (WHITE_FORWARD_RANKS[sq] & white_pawns & FILE_MASKS[file_idx]):
+        # OPTIMIZATION: Use precomputed single-file front mask
+        if (WHITE_FRONT_FILE_MASKS[sq] & white_pawns):
              mg_score += DOUBLED_PAWN_PENALTY[0]
              eg_score += DOUBLED_PAWN_PENALTY[1]
 
@@ -252,66 +266,38 @@ def evaluate_pawn_structure(piece_bbs):
                  eg_score += CONNECTED_PASSED_PAWN_BONUS[1]
 
             # King Proximity Logic & Blocked Check
-            # If the passed pawn is blocked by the enemy King, reduce the bonus drastically
             block_sq = sq + 8
-            if block_sq < 64:
-                dist_friendly = CHEBYSHEV_DISTANCE[white_king_sq, block_sq]
-                dist_enemy = CHEBYSHEV_DISTANCE[black_king_sq, block_sq]
+            # Note: Pawns on 7th (index 6) promote, so max rank here is 6. sq+8 is valid.
+            
+            dist_friendly = CHEBYSHEV_DISTANCE[white_king_sq, block_sq]
+            dist_enemy = CHEBYSHEV_DISTANCE[black_king_sq, block_sq]
 
-                # Rule 1: Pawn Blocked by Enemy King
-                # If enemy King is on the stop square or directly blocking
-                # For white pawn, stop sq is sq+8.
-                # If enemy king is ON sq+8, distance is 0.
-                is_blocked_by_king = (dist_enemy <= 1) and (dist_friendly > dist_enemy)
-                
-                if is_blocked_by_king:
-                     # Reduce the passed pawn bonus significantly if blocked by King and undefended/unsupported
-                     # Remove most of the bonus we just added
-                     # e.g., reduce by 90%
-                     penalty = np.int32(PASSED_PAWN_BONUS[rank][1] * 0.9)
-                     eg_score -= penalty
-                     mg_score -= np.int32(PASSED_PAWN_BONUS[rank][0] * 0.9)
+            # Rule 1: Pawn Blocked by Enemy King
+            is_blocked_by_king = (dist_enemy <= 1) and (dist_friendly > dist_enemy)
+            
+            if is_blocked_by_king:
+                 penalty = np.int32(PASSED_PAWN_BONUS[rank][1] * 0.9)
+                 eg_score -= penalty
+                 mg_score -= np.int32(PASSED_PAWN_BONUS[rank][0] * 0.9)
 
-                # Rule 2: Unstoppable Pawn (Simple Logic)
-                # If Friendly King is closer or supports, and Enemy King is far
-                # (TODO: Full Rule of the Square is complex with turn logic, this is a proxy)
-                
-                if rank > 3: # Only consider advanced passed pawns for proximity logic to save time/noise
-                    # Bonus if friendly king is closer, penalty if enemy is closer
-                    # Weight: 5 * Enemy - 2 * Friendly
-                    proximity_bonus = (dist_enemy * 5 - dist_friendly * 2) * rank # Scale by rank
-                    # Limit the impact
-                    proximity_bonus = max(-150, min(150, proximity_bonus))
-                    eg_score += proximity_bonus
+            # Rule 2: Unstoppable Pawn (Simple Logic)
+            if rank > 3: 
+                proximity_bonus = (dist_enemy * 5 - dist_friendly * 2) * rank 
+                proximity_bonus = max(-150, min(150, proximity_bonus))
+                eg_score += proximity_bonus
 
         # B. Backward Pawn Logic
-        # Definition: No friendly pawn on adjacent files is at the same rank or ahead (supporting).
-        # And the stop square (sq + 8) is controlled by an enemy pawn.
-        else: # Not passed (optimization: backward pawns usually aren't passed, though technically possible)
-             # Check adjacent friendly pawns support
-             # Friendly pawns on adjacent files AND (rank >= current rank)
-             # Using precomputed masks would be faster but for now:
-             
-             # Check if any adjacent pawn is on rank >= current rank
-             # Mask for ranks >= current rank
-             # We can use ~BLACK_FORWARD_RANKS[sq] which gives ranks >= rank?
-             # Actually, simpler:
-             # WHITE_FORWARD_RANKS[sq] gives ranks > rank.
-             # We need ranks >= rank. So WHITE_FORWARD_RANKS[sq] | rank_mask[rank].
-
-             support_mask = WHITE_FORWARD_RANKS[sq] | RANK_MASKS[rank]
+        else:
+             # OPTIMIZATION: Shift logic for support mask (Ranks >= current)
+             # support_mask = Ranks >= rank. Shift -1 left by (rank * 8).
+             support_mask = ALL_ONES << np.uint64(rank * 8)
              has_support = (adjacent_pawns & support_mask) != 0
 
              if not has_support:
-                 # Check if stop square is attacked by enemy pawn
-                 # Stop square for white is sq + 8
                  stop_sq = sq + 8
-                 if stop_sq < 64:
-                     # Check if black pawns attack stop_sq
-                     # PAWN_ATTACKS[1][stop_sq] gives squares occupied by Black pawns that attack stop_sq.
-                     if (PAWN_ATTACKS[1][stop_sq] & black_pawns):
-                         mg_score -= BACKWARD_PAWN_PENALTY[0]
-                         eg_score -= BACKWARD_PAWN_PENALTY[1]
+                 if (PAWN_ATTACKS[1][stop_sq] & black_pawns):
+                     mg_score -= BACKWARD_PAWN_PENALTY[0]
+                     eg_score -= BACKWARD_PAWN_PENALTY[1]
 
         temp_wp &= temp_wp - np.uint64(1)
 
@@ -319,9 +305,11 @@ def evaluate_pawn_structure(piece_bbs):
     temp_bp = black_pawns
     while temp_bp:
         sq = get_lsb_index(temp_bp)
-        rank = sq // 8 # 0-7
+        
+        # BITWISE OPTIMIZATION
+        rank = sq >> 3
+        file_idx = sq & 7
         relative_rank = 7 - rank
-        file_idx = sq % 8
 
         adjacent_pawns = ADJACENT_FILES_MASKS[file_idx] & black_pawns
 
@@ -331,8 +319,7 @@ def evaluate_pawn_structure(piece_bbs):
             eg_score -= ISOLATED_PAWN_PENALTY[1]
 
         # Doubled Pawn
-        # Check if there is a friendly pawn ahead (towards rank 0) on the same file
-        if (BLACK_FORWARD_RANKS[sq] & black_pawns & FILE_MASKS[file_idx]):
+        if (BLACK_FRONT_FILE_MASKS[sq] & black_pawns):
              mg_score -= DOUBLED_PAWN_PENALTY[0]
              eg_score -= DOUBLED_PAWN_PENALTY[1]
 
@@ -348,36 +335,34 @@ def evaluate_pawn_structure(piece_bbs):
 
             # King Proximity Logic & Blocked Check
             block_sq = sq - 8
-            if block_sq >= 0:
-                dist_friendly = CHEBYSHEV_DISTANCE[black_king_sq, block_sq]
-                dist_enemy = CHEBYSHEV_DISTANCE[white_king_sq, block_sq]
+            # Valid for rank > 1 (pawns start rank 1).
+            
+            dist_friendly = CHEBYSHEV_DISTANCE[black_king_sq, block_sq]
+            dist_enemy = CHEBYSHEV_DISTANCE[white_king_sq, block_sq]
 
-                # Rule 1: Pawn Blocked by Enemy King
-                is_blocked_by_king = (dist_enemy <= 1) and (dist_friendly > dist_enemy)
-                
-                if is_blocked_by_king:
-                     penalty = np.int32(PASSED_PAWN_BONUS[relative_rank][1] * 0.9)
-                     eg_score += penalty # Add penalty because we subtracted bonus earlier (for black)
-                     mg_score += np.int32(PASSED_PAWN_BONUS[relative_rank][0] * 0.9)
+            is_blocked_by_king = (dist_enemy <= 1) and (dist_friendly > dist_enemy)
+            
+            if is_blocked_by_king:
+                 penalty = np.int32(PASSED_PAWN_BONUS[relative_rank][1] * 0.9)
+                 eg_score += penalty
+                 mg_score += np.int32(PASSED_PAWN_BONUS[relative_rank][0] * 0.9)
 
-                if relative_rank > 3:
-                    proximity_bonus = (dist_enemy * 5 - dist_friendly * 2) * relative_rank
-                    proximity_bonus = max(-150, min(150, proximity_bonus))
-                    eg_score -= proximity_bonus
+            if relative_rank > 3:
+                proximity_bonus = (dist_enemy * 5 - dist_friendly * 2) * relative_rank
+                proximity_bonus = max(-150, min(150, proximity_bonus))
+                eg_score -= proximity_bonus
 
         # B. Backward Pawn Logic
         else:
-             # Support: Friendly pawns on adjacent files and rank <= current rank (since black moves down)
-             # BLACK_FORWARD_RANKS[sq] gives ranks < rank.
-             support_mask = BLACK_FORWARD_RANKS[sq] | RANK_MASKS[rank]
+             # Support: Ranks <= rank
+             # shift amount = (7-rank)*8
+             shift_amt = np.uint64((7 - rank) * 8)
+             support_mask = ALL_ONES >> shift_amt
              has_support = (adjacent_pawns & support_mask) != 0
 
              if not has_support:
                  stop_sq = sq - 8
-                 if stop_sq >= 0:
-                     # Check if white pawns attack stop_sq
-                     # PAWN_ATTACKS[0][stop_sq] gives squares occupied by White pawns that attack stop_sq.
-                     if (PAWN_ATTACKS[0][stop_sq] & white_pawns):
+                 if (PAWN_ATTACKS[0][stop_sq] & white_pawns):
                          mg_score += BACKWARD_PAWN_PENALTY[0]
                          eg_score += BACKWARD_PAWN_PENALTY[1]
 
@@ -490,22 +475,41 @@ def _evaluate_pawn_shield_for_color(king_sq, friendly_pawns, enemy_pawns, color)
 
         if not pawns_on_file:
             score -= PAWN_SHIELD_MISSING_PENALTY # Pawn shield missing
-        else:
-            pawn_sq = get_lsb_index(pawns_on_file)
-            pawn_rank = pawn_sq // 8
             
-            if pawn_rank == original_rank:
-                score += PAWN_SHIELD_INTACT_BONUS # Intact shield bonus increased
-            elif pawn_rank == one_step_rank:
-                score += PAWN_SHIELD_ADVANCED_BONUS # Advanced shield bonus increased
-            else:
-                score -= PAWN_SHIELD_PUSHED_PENALTY # Pushed shield penalty increased
-
-        if not (friendly_pawns & file_mask):
+            # Open/Semi-Open File Penalty (Only apply if NO friendly pawn exists to shield)
             if not (enemy_pawns & file_mask):
-                score -= KING_OPEN_FILE_PENALTY # Open file penalty increased from 20
+                score -= KING_OPEN_FILE_PENALTY 
             else:
-                score -= KING_SEMI_OPEN_FILE_PENALTY # Semi-open file penalty increased from 10
+                score -= KING_SEMI_OPEN_FILE_PENALTY 
+        else:
+            # Find the best shield pawn (closest to the king's rank)
+            best_pawn_rank = -1
+            
+            if color == 0: 
+                # White (King at Rank 0-1): Want smallest rank (closest to 0).
+                # LSB of pawns_on_file is the smallest index -> smallest rank.
+                pawn_sq = get_lsb_index(pawns_on_file)
+                best_pawn_rank = pawn_sq // 8
+            else:
+                # Black (King at Rank 7-8): Want largest rank (closest to 7).
+                # LSB gives smallest rank (furthest). Must iterate.
+                max_r = -1
+                temp_p = pawns_on_file
+                while temp_p:
+                     sq = get_lsb_index(temp_p)
+                     r = sq // 8
+                     if r > max_r:
+                         max_r = r
+                     temp_p &= temp_p - np.uint64(1)
+                best_pawn_rank = max_r
+            
+            # Evaluate the best shield pawn found
+            if best_pawn_rank == original_rank:
+                score += PAWN_SHIELD_INTACT_BONUS 
+            elif best_pawn_rank == one_step_rank:
+                score += PAWN_SHIELD_ADVANCED_BONUS 
+            else:
+                score -= PAWN_SHIELD_PUSHED_PENALTY 
 
     return score
 
@@ -776,93 +780,267 @@ def evaluate_mobility(piece_bbs, occupancy_bbs, white_pawn_attacks, black_pawn_a
     black_occupancy = occupancy_bbs[1]
     all_pieces_occupancy = occupancy_bbs[2]
 
-    # --- 1. Compute Pawn Attacks (Forbidden Zones) ---
-    # (Passed from caller)
-
-    # --- 2. Define Mobility Area (Safe Squares) ---
-    # Safe squares are those NOT occupied by own King/Queen and NOT attacked by enemy pawns.
-    # Note: ~own_occupancy is applied during move generation, but we add King/Queen to forbidden
-    # to explicitly exclude them from the mobility area definition if they weren't already blocked.
-
-    white_forbidden = black_pawn_attacks | piece_bbs[5] | piece_bbs[4]
-    black_forbidden = white_pawn_attacks | piece_bbs[11] | piece_bbs[10]
-
-    white_safe_mask = ~white_forbidden
-    black_safe_mask = ~black_forbidden
+    # --- 1. Define Mobility Area (Safe Squares) ---
+    # Safe squares are those NOT occupied by own pieces (including King/Queen) AND NOT attacked by enemy pawns.
+    # ~own_occupancy covers all friendly pieces.
+    # So we want squares where: (NOT own_occupancy) AND (NOT enemy_pawn_attacks).
+    # This is equivalent to: ~(own_occupancy | enemy_pawn_attacks).
+    
+    # Pre-calculate mobility masks to avoid repeated bitwise operations inside loops.
+    # 預先計算機動性掩碼，以避免在迴圈中重複進行位元運算。
+    
+    # For White: Squares not occupied by White AND not attacked by Black pawns.
+    white_mobility_mask = ~(white_occupancy | black_pawn_attacks)
+    
+    # For Black: Squares not occupied by Black AND not attacked by White pawns.
+    black_mobility_mask = ~(black_occupancy | white_pawn_attacks)
 
     # --- White Mobility / 白方機動性 ---
+    
     # Knights
     temp_bb = piece_bbs[1]
-    while temp_bb:
-        sq = get_lsb_index(temp_bb)
-        moves = count_bits(KNIGHT_ATTACKS[sq] & ~white_occupancy & white_safe_mask)
-        mg_score += (moves - KNIGHT_MOBILITY_BASE_MOVES) * KNIGHT_MOBILITY_WEIGHT[0]
-        eg_score += (moves - KNIGHT_MOBILITY_BASE_MOVES) * KNIGHT_MOBILITY_WEIGHT[1]
-        temp_bb &= temp_bb - np.uint64(1)
+    if temp_bb:
+        total_moves = 0
+        piece_count = 0
+        while temp_bb:
+            piece_count += 1
+            sq = get_lsb_index(temp_bb)
+            total_moves += count_bits(KNIGHT_ATTACKS[sq] & white_mobility_mask)
+            temp_bb &= temp_bb - np.uint64(1)
+            
+        mg_score += (total_moves - piece_count * KNIGHT_MOBILITY_BASE_MOVES) * KNIGHT_MOBILITY_WEIGHT[0]
+        eg_score += (total_moves - piece_count * KNIGHT_MOBILITY_BASE_MOVES) * KNIGHT_MOBILITY_WEIGHT[1]
 
     # Bishops
     temp_bb = piece_bbs[2]
-    while temp_bb:
-        sq = get_lsb_index(temp_bb)
-        moves = count_bits(get_bishop_attacks(sq, all_pieces_occupancy) & ~white_occupancy & white_safe_mask)
-        mg_score += (moves - BISHOP_MOBILITY_BASE_MOVES) * BISHOP_MOBILITY_WEIGHT[0]
-        eg_score += (moves - BISHOP_MOBILITY_BASE_MOVES) * BISHOP_MOBILITY_WEIGHT[1]
-        temp_bb &= temp_bb - np.uint64(1)
+    if temp_bb:
+        total_moves = 0
+        piece_count = 0
+        while temp_bb:
+            piece_count += 1
+            sq = get_lsb_index(temp_bb)
+            total_moves += count_bits(get_bishop_attacks(sq, all_pieces_occupancy) & white_mobility_mask)
+            temp_bb &= temp_bb - np.uint64(1)
+            
+        mg_score += (total_moves - piece_count * BISHOP_MOBILITY_BASE_MOVES) * BISHOP_MOBILITY_WEIGHT[0]
+        eg_score += (total_moves - piece_count * BISHOP_MOBILITY_BASE_MOVES) * BISHOP_MOBILITY_WEIGHT[1]
 
     # Rooks
     temp_bb = piece_bbs[3]
-    while temp_bb:
-        sq = get_lsb_index(temp_bb)
-        moves = count_bits(get_rook_attacks(sq, all_pieces_occupancy) & ~white_occupancy & white_safe_mask)
-        mg_score += (moves - ROOK_MOBILITY_BASE_MOVES) * ROOK_MOBILITY_WEIGHT[0]
-        eg_score += (moves - ROOK_MOBILITY_BASE_MOVES) * ROOK_MOBILITY_WEIGHT[1]
-        temp_bb &= temp_bb - np.uint64(1)
+    if temp_bb:
+        total_moves = 0
+        piece_count = 0
+        while temp_bb:
+            piece_count += 1
+            sq = get_lsb_index(temp_bb)
+            total_moves += count_bits(get_rook_attacks(sq, all_pieces_occupancy) & white_mobility_mask)
+            temp_bb &= temp_bb - np.uint64(1)
+            
+        mg_score += (total_moves - piece_count * ROOK_MOBILITY_BASE_MOVES) * ROOK_MOBILITY_WEIGHT[0]
+        eg_score += (total_moves - piece_count * ROOK_MOBILITY_BASE_MOVES) * ROOK_MOBILITY_WEIGHT[1]
 
     # Queens
     temp_bb = piece_bbs[4]
-    while temp_bb:
-        sq = get_lsb_index(temp_bb)
-        moves = count_bits(get_queen_attacks(sq, all_pieces_occupancy) & ~white_occupancy & white_safe_mask)
-        mg_score += (moves - QUEEN_MOBILITY_BASE_MOVES) * QUEEN_MOBILITY_WEIGHT[0]
-        eg_score += (moves - QUEEN_MOBILITY_BASE_MOVES) * QUEEN_MOBILITY_WEIGHT[1]
-        temp_bb &= temp_bb - np.uint64(1)
+    if temp_bb:
+        total_moves = 0
+        piece_count = 0
+        while temp_bb:
+            piece_count += 1
+            sq = get_lsb_index(temp_bb)
+            total_moves += count_bits(get_queen_attacks(sq, all_pieces_occupancy) & white_mobility_mask)
+            temp_bb &= temp_bb - np.uint64(1)
+            
+        mg_score += (total_moves - piece_count * QUEEN_MOBILITY_BASE_MOVES) * QUEEN_MOBILITY_WEIGHT[0]
+        eg_score += (total_moves - piece_count * QUEEN_MOBILITY_BASE_MOVES) * QUEEN_MOBILITY_WEIGHT[1]
 
 
     # --- Black Mobility / 黑方機動性 ---
+    
     # Knights
     temp_bb = piece_bbs[7]
-    while temp_bb:
-        sq = get_lsb_index(temp_bb)
-        moves = count_bits(KNIGHT_ATTACKS[sq] & ~black_occupancy & black_safe_mask)
-        mg_score -= (moves - KNIGHT_MOBILITY_BASE_MOVES) * KNIGHT_MOBILITY_WEIGHT[0]
-        eg_score -= (moves - KNIGHT_MOBILITY_BASE_MOVES) * KNIGHT_MOBILITY_WEIGHT[1]
-        temp_bb &= temp_bb - np.uint64(1)
+    if temp_bb:
+        total_moves = 0
+        piece_count = 0
+        while temp_bb:
+            piece_count += 1
+            sq = get_lsb_index(temp_bb)
+            total_moves += count_bits(KNIGHT_ATTACKS[sq] & black_mobility_mask)
+            temp_bb &= temp_bb - np.uint64(1)
+            
+        mg_score -= (total_moves - piece_count * KNIGHT_MOBILITY_BASE_MOVES) * KNIGHT_MOBILITY_WEIGHT[0]
+        eg_score -= (total_moves - piece_count * KNIGHT_MOBILITY_BASE_MOVES) * KNIGHT_MOBILITY_WEIGHT[1]
 
     # Bishops
     temp_bb = piece_bbs[8]
-    while temp_bb:
-        sq = get_lsb_index(temp_bb)
-        moves = count_bits(get_bishop_attacks(sq, all_pieces_occupancy) & ~black_occupancy & black_safe_mask)
-        mg_score -= (moves - BISHOP_MOBILITY_BASE_MOVES) * BISHOP_MOBILITY_WEIGHT[0]
-        eg_score -= (moves - BISHOP_MOBILITY_BASE_MOVES) * BISHOP_MOBILITY_WEIGHT[1]
-        temp_bb &= temp_bb - np.uint64(1)
+    if temp_bb:
+        total_moves = 0
+        piece_count = 0
+        while temp_bb:
+            piece_count += 1
+            sq = get_lsb_index(temp_bb)
+            total_moves += count_bits(get_bishop_attacks(sq, all_pieces_occupancy) & black_mobility_mask)
+            temp_bb &= temp_bb - np.uint64(1)
+            
+        mg_score -= (total_moves - piece_count * BISHOP_MOBILITY_BASE_MOVES) * BISHOP_MOBILITY_WEIGHT[0]
+        eg_score -= (total_moves - piece_count * BISHOP_MOBILITY_BASE_MOVES) * BISHOP_MOBILITY_WEIGHT[1]
 
     # Rooks
     temp_bb = piece_bbs[9]
-    while temp_bb:
-        sq = get_lsb_index(temp_bb)
-        moves = count_bits(get_rook_attacks(sq, all_pieces_occupancy) & ~black_occupancy & black_safe_mask)
-        mg_score -= (moves - ROOK_MOBILITY_BASE_MOVES) * ROOK_MOBILITY_WEIGHT[0]
-        eg_score -= (moves - ROOK_MOBILITY_BASE_MOVES) * ROOK_MOBILITY_WEIGHT[1]
-        temp_bb &= temp_bb - np.uint64(1)
+    if temp_bb:
+        total_moves = 0
+        piece_count = 0
+        while temp_bb:
+            piece_count += 1
+            sq = get_lsb_index(temp_bb)
+            total_moves += count_bits(get_rook_attacks(sq, all_pieces_occupancy) & black_mobility_mask)
+            temp_bb &= temp_bb - np.uint64(1)
+            
+        mg_score -= (total_moves - piece_count * ROOK_MOBILITY_BASE_MOVES) * ROOK_MOBILITY_WEIGHT[0]
+        eg_score -= (total_moves - piece_count * ROOK_MOBILITY_BASE_MOVES) * ROOK_MOBILITY_WEIGHT[1]
 
     # Queens
     temp_bb = piece_bbs[10]
+    if temp_bb:
+        total_moves = 0
+        piece_count = 0
+        while temp_bb:
+            piece_count += 1
+            sq = get_lsb_index(temp_bb)
+            total_moves += count_bits(get_queen_attacks(sq, all_pieces_occupancy) & black_mobility_mask)
+            temp_bb &= temp_bb - np.uint64(1)
+            
+        mg_score -= (total_moves - piece_count * QUEEN_MOBILITY_BASE_MOVES) * QUEEN_MOBILITY_WEIGHT[0]
+        eg_score -= (total_moves - piece_count * QUEEN_MOBILITY_BASE_MOVES) * QUEEN_MOBILITY_WEIGHT[1]
+
+    return mg_score, eg_score
+
+
+@numba.njit(numba.types.UniTuple(numba.int32, 2)(piece_bbs_signature, occupancy_bbs_signature, numba.uint64, numba.uint64), cache=True, boundscheck=False, fastmath=True)
+def evaluate_outposts(piece_bbs, occupancy_bbs, white_pawn_attacks, black_pawn_attacks):
+    """
+    評估前哨（Outposts）。
+    前哨定義：由己方兵支持，且不被敵方兵攻擊的方格上的騎士或主教。
+    如果該方格是“洞”（敵方兵永遠無法攻擊），則給予額外獎勵。
+
+    Args:
+        piece_bbs (np.ndarray): 12 個棋子的位元棋盤。
+        occupancy_bbs (np.ndarray): 佔用位元棋盤。
+        white_pawn_attacks (np.uint64): 白方兵攻擊的格子。
+        black_pawn_attacks (np.uint64): 黑方兵攻擊的格子。
+
+    Returns:
+        tuple: (mg_score, eg_score) 從白方視角。
+    """
+    mg_score = np.int32(0)
+    eg_score = np.int32(0)
+
+    white_pawns = piece_bbs[0]
+    white_knights = piece_bbs[1]
+    white_bishops = piece_bbs[2]
+    
+    black_pawns = piece_bbs[6]
+    black_knights = piece_bbs[7]
+    black_bishops = piece_bbs[8]
+
+    # --- White Outposts ---
+    # Knights
+    temp_bb = white_knights
     while temp_bb:
         sq = get_lsb_index(temp_bb)
-        moves = count_bits(get_queen_attacks(sq, all_pieces_occupancy) & ~black_occupancy & black_safe_mask)
-        mg_score -= (moves - QUEEN_MOBILITY_BASE_MOVES) * QUEEN_MOBILITY_WEIGHT[0]
-        eg_score -= (moves - QUEEN_MOBILITY_BASE_MOVES) * QUEEN_MOBILITY_WEIGHT[1]
+        # Check if safe from enemy pawns (not attacked by black pawns)
+        # PAWN_ATTACKS[BLACK, sq] gives squares where a BLACK pawn would be to attack sq.
+        # But here black_pawn_attacks is passed, which is the set of all squares attacked by black pawns.
+        # So we just check if sq is in black_pawn_attacks.
+        if not (black_pawn_attacks & BB_SQUARES[sq]):
+            # Check if supported by friendly pawn
+            # PAWN_ATTACKS[WHITE, sq] gives squares where a WHITE pawn stands to attack sq.
+            if (PAWN_ATTACKS[WHITE, sq] & white_pawns):
+                # Is Outpost
+                rank = sq // 8
+                mg_score += OUTPOST_BONUS_KNIGHT[rank][0]
+                eg_score += OUTPOST_BONUS_KNIGHT[rank][1]
+                
+                # Check for Hole (Weakness)
+                # No black pawn can attack it (currently or in future)
+                file_idx = sq % 8
+                # Check if there are any black pawns on adjacent files and ranks > rank (since black moves down)
+                # Wait, black pawns move down (rank 7 to 0).
+                # To attack square at 'rank', black pawn must be at 'rank + 1'.
+                # To be a hole, there should be no black pawns at 'rank >= 1' that can ever reach 'rank + 1' on adj files?
+                # Actually, simply: check if there are any black pawns on adjacent files that are BEHIND the outpost square (higher rank for black).
+                # White outpost at rank R. Black pawns at rank > R can advance to attack it.
+                # WHITE_FORWARD_RANKS[sq] gives ranks > rank.
+                if not (ADJACENT_FILES_MASKS[file_idx] & WHITE_FORWARD_RANKS[sq] & black_pawns):
+                     mg_score += OUTPOST_HOLE_BONUS[0]
+                     eg_score += OUTPOST_HOLE_BONUS[1]
+
+        temp_bb &= temp_bb - np.uint64(1)
+
+    # Bishops
+    temp_bb = white_bishops
+    while temp_bb:
+        sq = get_lsb_index(temp_bb)
+        if not (black_pawn_attacks & BB_SQUARES[sq]):
+            if (PAWN_ATTACKS[WHITE, sq] & white_pawns):
+                rank = sq // 8
+                mg_score += OUTPOST_BONUS_BISHOP[rank][0]
+                eg_score += OUTPOST_BONUS_BISHOP[rank][1]
+                
+                file_idx = sq % 8
+                if not (ADJACENT_FILES_MASKS[file_idx] & WHITE_FORWARD_RANKS[sq] & black_pawns):
+                     mg_score += OUTPOST_HOLE_BONUS[0]
+                     eg_score += OUTPOST_HOLE_BONUS[1]
+        temp_bb &= temp_bb - np.uint64(1)
+
+
+    # --- Black Outposts ---
+    # Knights
+    temp_bb = black_knights
+    while temp_bb:
+        sq = get_lsb_index(temp_bb)
+        # Check if safe from white pawns
+        if not (white_pawn_attacks & BB_SQUARES[sq]):
+            # Check if supported by friendly pawn
+            # PAWN_ATTACKS[BLACK, sq] gives squares where a BLACK pawn stands to attack sq.
+            if (PAWN_ATTACKS[BLACK, sq] & black_pawns):
+                # Is Outpost
+                rank = sq // 8
+                # Map rank for black: Rank 7 is like Rank 0 for White. 
+                # We want Rank 0-7 relative to black.
+                # Rank 0 (board) -> Rank 7 (relative)
+                # Rank 7 (board) -> Rank 0 (relative)
+                rel_rank = 7 - rank
+                
+                mg_score -= OUTPOST_BONUS_KNIGHT[rel_rank][0]
+                eg_score -= OUTPOST_BONUS_KNIGHT[rel_rank][1]
+                
+                # Check for Hole
+                # White pawns move up (0 to 7).
+                # Black outpost at rank R. White pawns at rank < R can advance to attack it.
+                # BLACK_FORWARD_RANKS[sq] gives ranks < rank.
+                file_idx = sq % 8
+                if not (ADJACENT_FILES_MASKS[file_idx] & BLACK_FORWARD_RANKS[sq] & white_pawns):
+                     mg_score -= OUTPOST_HOLE_BONUS[0]
+                     eg_score -= OUTPOST_HOLE_BONUS[1]
+
+        temp_bb &= temp_bb - np.uint64(1)
+
+    # Bishops
+    temp_bb = black_bishops
+    while temp_bb:
+        sq = get_lsb_index(temp_bb)
+        if not (white_pawn_attacks & BB_SQUARES[sq]):
+            if (PAWN_ATTACKS[BLACK, sq] & black_pawns):
+                rank = sq // 8
+                rel_rank = 7 - rank
+                
+                mg_score -= OUTPOST_BONUS_BISHOP[rel_rank][0]
+                eg_score -= OUTPOST_BONUS_BISHOP[rel_rank][1]
+                
+                file_idx = sq % 8
+                if not (ADJACENT_FILES_MASKS[file_idx] & BLACK_FORWARD_RANKS[sq] & white_pawns):
+                     mg_score -= OUTPOST_HOLE_BONUS[0]
+                     eg_score -= OUTPOST_HOLE_BONUS[1]
         temp_bb &= temp_bb - np.uint64(1)
 
     return mg_score, eg_score
@@ -1213,19 +1391,24 @@ def evaluate_position(piece_bbs, occupancy_bbs, game_state, lazy: bool = False):
     mg_score += mg_mobility
     eg_score += eg_mobility
 
-    # --- 7. Join Threat Evaluation / 加入威脅評估 ---
+    # --- 7. Join Outpost Evaluation / 加入前哨評估 ---
+    mg_outpost, eg_outpost = evaluate_outposts(piece_bbs, occupancy_bbs, white_pawn_attacks, black_pawn_attacks)
+    mg_score += mg_outpost
+    eg_score += eg_outpost
+
+    # --- 8. Join Threat Evaluation / 加入威脅評估 ---
     mg_threats, eg_threats = evaluate_threats(piece_bbs, occupancy_bbs, white_attacks, black_attacks, white_pawn_attacks, black_pawn_attacks)
     mg_score += mg_threats
     eg_score += eg_threats
 
-    # --- 8. 根據遊戲階段進行插值計算 ---
+    # --- 9. 根據遊戲階段進行插值計算 ---
     final_score = (mg_score * phase + eg_score * (MAX_PHASE - phase)) // MAX_PHASE
 
-    # --- 9. (Optional) Initiative Bonus / 主動權獎勵 ---
+    # --- 10. (Optional) Initiative Bonus / 主動權獎勵 ---
     if phase > INITIATIVE_PHASE_THRESHOLD:
         final_score += INITIATIVE_BONUS
 
-    # --- 10. 從當前執棋方的角度返回最終分數 ---
+    # --- 11. 從當前執棋方的角度返回最終分數 ---
     if side_to_move == 0:  # 白方回合
         return np.int32(final_score)
     else:  # 黑方回合
