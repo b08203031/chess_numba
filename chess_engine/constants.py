@@ -276,8 +276,8 @@ PASSED_PAWN_BONUS = np.array([
     [  0,   0], # Rank 1
     [ 10,  20], # Rank 2
     [ 20,  30], # Rank 3
-    [ 35, 50], # Rank 4
-    [ 50, 80], # Rank 5
+    [ 35,  50], # Rank 4
+    [ 50,  80], # Rank 5
     [ 80, 150], # Rank 6
     [150, 250], # Rank 7
     [  0,   0]  # Rank 8
@@ -297,6 +297,44 @@ DOUBLED_PAWN_PENALTY = np.array([-15, -10], dtype=np.int32) # MG, EG
 # Bonus for each passed pawn that is connected to another passed pawn.
 # 每個連結通路兵的獎勵。
 CONNECTED_PASSED_PAWN_BONUS = np.array([40, 80], dtype=np.int32) # MG, EG
+
+
+# =============================================================================
+# --- Outpost Constants / 前哨常量 ---
+# =============================================================================
+# Bonus for knights and bishops on outpost squares (supported by pawn, not attacked by pawn).
+# 前哨方格上的騎士和主教的獎勵（由兵支持，且未被兵攻擊）。
+
+# Outpost Bonuses by Rank (0-7).
+# Indices: Rank 0 to Rank 7.
+# Values: [MG, EG]
+# 騎士前哨獎勵
+OUTPOST_BONUS_KNIGHT = np.array([
+    [0, 0],    # Rank 1
+    [0, 0],    # Rank 2
+    [10, 5],   # Rank 3
+    [30, 15],  # Rank 4
+    [50, 40],  # Rank 5
+    [40, 30],  # Rank 6 (Octopus)
+    [20, 10],  # Rank 7
+    [0, 0]     # Rank 8
+], dtype=np.int32)
+
+# 主教前哨獎勵
+OUTPOST_BONUS_BISHOP = np.array([
+    [0, 0],    # Rank 1
+    [0, 0],    # Rank 2
+    [10, 5],   # Rank 3
+    [20, 15],  # Rank 4
+    [30, 25],  # Rank 5
+    [20, 15],  # Rank 6
+    [10, 5],   # Rank 7
+    [0, 0]     # Rank 8
+], dtype=np.int32)
+
+# Bonus if the outpost is a "Hole" (cannot be attacked by enemy pawns at all).
+# 如果前哨是“洞”（完全無法被敵方兵攻擊），則給予額外獎勵。
+OUTPOST_HOLE_BONUS = np.array([25, 15], dtype=np.int32) # MG, EG
 
 
 # =============================================================================
