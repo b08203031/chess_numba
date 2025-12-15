@@ -275,11 +275,11 @@ PASSED_PAWN_BONUS = np.array([
     # MG, EG
     [  0,   0], # Rank 1
     [ 10,  20], # Rank 2
-    [ 20,  40], # Rank 3
-    [ 35, 100], # Rank 4
-    [ 50, 150], # Rank 5
-    [ 80, 250], # Rank 6
-    [150, 400], # Rank 7
+    [ 20,  30], # Rank 3
+    [ 35, 50], # Rank 4
+    [ 50, 80], # Rank 5
+    [ 80, 150], # Rank 6
+    [150, 250], # Rank 7
     [  0,   0]  # Rank 8
 ], dtype=np.int32)
 
@@ -307,8 +307,8 @@ CONNECTED_PASSED_PAWN_BONUS = np.array([40, 80], dtype=np.int32) # MG, EG
 # Attack units for each piece type. Order: P, N, B, R, Q
 # 每個棋子類型的攻擊單位。順序：兵、馬、象、車、后
 # Updated: Aggressive weights for R and Q
+KING_SAFETY_WEAK_UNITS = np.array([2, 5, 5, 10, 16], dtype=np.int32) # P, N, B, R, Q
 KING_SAFETY_ATTACK_UNITS = np.array([2, 5, 5, 10, 16], dtype=np.int32) # P, N, B, R, Q
-
 # A non-linear table where the index is the sum of attack units, and the value is the penalty.
 # The penalty grows exponentially, rewarding multi-piece attacks.
 # 一個非線性表格，索引是攻擊單位的總和，值是懲罰分數。懲罰呈指數增長，獎勵多子協同攻擊。
@@ -464,7 +464,7 @@ LMR_REDUCTION = 1           # Depth reduction for LMR / LMR 的深度減少值
 # 晚期移動剪枝（LMP） - 在搜尋了一定數量的寧靜步後剪枝
 # Updated: Relaxed constraints to search even more moves (20 + 20*depth)
 LMP_MOVE_COUNT = np.array([
-    0 if d == 0 else 12 + 12 * d for d in range(MAX_PLY)
+    0 if d == 0 else 20 + 20 * d for d in range(MAX_PLY)
 ], dtype=np.int32)
 
 

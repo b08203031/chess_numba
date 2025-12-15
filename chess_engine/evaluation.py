@@ -523,7 +523,6 @@ def _evaluate_king_attackers(king_sq, color, piece_bbs, occupancy_bbs, enemy_att
 
     total_attack_units = np.int32(0)
     attacker_count = np.int32(0)
-    weak_count = np.int32(0)
 
     enemy_start_idx = 6 if color == 0 else 0
     (en_p, en_n, en_b, en_r, en_q, _) = piece_bbs[enemy_start_idx : enemy_start_idx + 6]
@@ -558,7 +557,7 @@ def _evaluate_king_attackers(king_sq, color, piece_bbs, occupancy_bbs, enemy_att
 
             # Check for weak squares attacked by this knight
             undefended_in_zone = knight_attacks_in_zone & ~friendly_attacks_bb
-            weak_count += count_bits(undefended_in_zone)
+            weak_count = count_bits(undefended_in_zone)
             total_attack_units += weak_count * KING_SAFETY_WEAK_UNITS[1] # Each weak square adds more units
 
         temp_bb &= temp_bb - np.uint64(1)
@@ -575,7 +574,7 @@ def _evaluate_king_attackers(king_sq, color, piece_bbs, occupancy_bbs, enemy_att
 
             # Check for weak squares attacked by this bishop
             undefended_in_zone = attacks_in_zone & ~friendly_attacks_bb
-            weak_count += count_bits(undefended_in_zone)
+            weak_count = count_bits(undefended_in_zone)
             total_attack_units += weak_count * KING_SAFETY_WEAK_UNITS[2] # Each weak square adds more units
         temp_bb &= temp_bb - np.uint64(1)
 
@@ -591,7 +590,7 @@ def _evaluate_king_attackers(king_sq, color, piece_bbs, occupancy_bbs, enemy_att
 
             # Check for weak squares attacked by this rook
             undefended_in_zone = attack_in_zone & ~friendly_attacks_bb
-            weak_count += count_bits(undefended_in_zone)
+            weak_count = count_bits(undefended_in_zone)
             total_attack_units += weak_count * KING_SAFETY_WEAK_UNITS[3] # Each weak square adds more units
 
         temp_bb &= temp_bb - np.uint64(1)
@@ -608,12 +607,12 @@ def _evaluate_king_attackers(king_sq, color, piece_bbs, occupancy_bbs, enemy_att
 
             # Check for weak squares attacked by this queen
             undefended_in_zone = attack_in_zone & ~friendly_attacks_bb
-            weak_count += count_bits(undefended_in_zone)
+            weak_count = count_bits(undefended_in_zone)
             total_attack_units += weak_count * KING_SAFETY_WEAK_UNITS[4] # Each weak square adds more units
 
         temp_bb &= temp_bb - np.uint64(1)
 
-    if attacker_count < 2 and weak_count == 0:
+    if attacker_count < 2:
        return np.int32(0)
     
     # --- Weak Squares Logic (Stockfish 11) ---
