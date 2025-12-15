@@ -275,11 +275,11 @@ PASSED_PAWN_BONUS = np.array([
     # MG, EG
     [  0,   0], # Rank 1
     [ 10,  20], # Rank 2
-    [ 20,  40], # Rank 3
-    [ 35, 100], # Rank 4
-    [ 50, 150], # Rank 5
-    [ 80, 250], # Rank 6
-    [150, 400], # Rank 7
+    [ 20,  30], # Rank 3
+    [ 35, 50], # Rank 4
+    [ 50, 80], # Rank 5
+    [ 80, 150], # Rank 6
+    [150, 250], # Rank 7
     [  0,   0]  # Rank 8
 ], dtype=np.int32)
 
@@ -464,7 +464,7 @@ LMR_REDUCTION = 1           # Depth reduction for LMR / LMR 的深度減少值
 # 晚期移動剪枝（LMP） - 在搜尋了一定數量的寧靜步後剪枝
 # Updated: Relaxed constraints to search even more moves (20 + 20*depth)
 LMP_MOVE_COUNT = np.array([
-    0 if d == 0 else 12 + 12 * d for d in range(MAX_PLY)
+    0 if d == 0 else 20 + 20 * d for d in range(MAX_PLY)
 ], dtype=np.int32)
 
 
