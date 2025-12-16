@@ -276,8 +276,8 @@ PASSED_PAWN_BONUS = np.array([
     [  0,   0], # Rank 1
     [ 10,  20], # Rank 2
     [ 20,  30], # Rank 3
-    [ 35,  50], # Rank 4
-    [ 50,  80], # Rank 5
+    [ 35, 50], # Rank 4
+    [ 50, 80], # Rank 5
     [ 80, 150], # Rank 6
     [150, 250], # Rank 7
     [  0,   0]  # Rank 8
@@ -297,7 +297,6 @@ DOUBLED_PAWN_PENALTY = np.array([-15, -10], dtype=np.int32) # MG, EG
 # Bonus for each passed pawn that is connected to another passed pawn.
 # 每個連結通路兵的獎勵。
 CONNECTED_PASSED_PAWN_BONUS = np.array([40, 80], dtype=np.int32) # MG, EG
-
 
 # =============================================================================
 # --- Outpost Constants / 前哨常量 ---
@@ -335,7 +334,6 @@ OUTPOST_BONUS_BISHOP = np.array([
 # Bonus if the outpost is a "Hole" (cannot be attacked by enemy pawns at all).
 # 如果前哨是“洞”（完全無法被敵方兵攻擊），則給予額外獎勵。
 OUTPOST_HOLE_BONUS = np.array([25, 15], dtype=np.int32) # MG, EG
-
 
 # =============================================================================
 # --- King Safety Constants (NEW - based on Chessprogramming Wiki) / 王的安全常量 ---

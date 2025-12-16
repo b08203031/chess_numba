@@ -62,7 +62,13 @@ class ParameterManager:
         self._add_param("CONNECTED_PASSED_PAWN_BONUS", constants.CONNECTED_PASSED_PAWN_BONUS)
         self._add_param("BACKWARD_PAWN_PENALTY", constants.BACKWARD_PAWN_PENALTY)
 
+        # --- Outposts ---
+        self._add_param("OUTPOST_BONUS_KNIGHT", constants.OUTPOST_BONUS_KNIGHT)
+        self._add_param("OUTPOST_BONUS_BISHOP", constants.OUTPOST_BONUS_BISHOP)
+        self._add_param("OUTPOST_HOLE_BONUS", constants.OUTPOST_HOLE_BONUS)
+
         # --- King Safety ---
+        self._add_param("KING_SAFETY_WEAK_UNITS", constants.KING_SAFETY_WEAK_UNITS)
         self._add_param("KING_SAFETY_ATTACK_UNITS", constants.KING_SAFETY_ATTACK_UNITS)
         self._add_param("KING_SAFETY_TABLE", constants.KING_SAFETY_TABLE)
         self._add_param("KING_TROPISM_WEIGHTS", constants.KING_TROPISM_WEIGHTS)
@@ -76,7 +82,6 @@ class ParameterManager:
         self._add_param("PAWN_SHIELD_PUSHED_PENALTY", constants.PAWN_SHIELD_PUSHED_PENALTY)
         self._add_param("KING_OPEN_FILE_PENALTY", constants.KING_OPEN_FILE_PENALTY)
         self._add_param("KING_SEMI_OPEN_FILE_PENALTY", constants.KING_SEMI_OPEN_FILE_PENALTY)
-        self._add_param("KING_SAFETY_WEAK_SQUARE_PENALTY", constants.KING_SAFETY_WEAK_SQUARE_PENALTY)
 
         # --- Threats ---
         self._add_param("THREAT_SAFE_PAWN", constants.THREAT_SAFE_PAWN)

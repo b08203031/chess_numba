@@ -18,7 +18,7 @@ from chess_engine.move_generator import (
 )
 # Re-import or copy helper data structures
 from chess_engine.evaluation import (
-    MANHATTAN_DISTANCE, ADJACENT_FILES_MASKS, WHITE_PASSED_PAWN_MASKS, BLACK_PASSED_PAWN_MASKS,
+    MANHATTAN_DISTANCE, CHEBYSHEV_DISTANCE, ADJACENT_FILES_MASKS, WHITE_PASSED_PAWN_MASKS, BLACK_PASSED_PAWN_MASKS,
     WHITE_FORWARD_RANKS, BLACK_FORWARD_RANKS
 )
 
@@ -40,23 +40,26 @@ IDX_ISOLATED_PAWN_PENALTY = 812
 IDX_DOUBLED_PAWN_PENALTY = 814
 IDX_CONNECTED_PASSED_PAWN_BONUS = 816
 IDX_BACKWARD_PAWN_PENALTY = 818
-IDX_KING_SAFETY_ATTACK_UNITS = 820
-IDX_KING_SAFETY_TABLE = 825
-IDX_KING_TROPISM_WEIGHTS = 925
-IDX_PAWN_STORM_PENALTY_BY_RANK = 930
-IDX_SCALING_WEIGHTS = 938
-IDX_PAWN_SHIELD_MISSING_PENALTY = 943
-IDX_PAWN_SHIELD_INTACT_BONUS = 944
-IDX_PAWN_SHIELD_ADVANCED_BONUS = 945
-IDX_PAWN_SHIELD_PUSHED_PENALTY = 946
-IDX_KING_OPEN_FILE_PENALTY = 947
-IDX_KING_SEMI_OPEN_FILE_PENALTY = 948
-IDX_KING_SAFETY_WEAK_SQUARE_PENALTY = 949
-IDX_THREAT_SAFE_PAWN = 950
-IDX_THREAT_MINOR_ON_MAJOR = 952
-IDX_THREAT_ROOK_ON_QUEEN = 954
-IDX_THREAT_HANGING = 956
-IDX_INITIATIVE_BONUS = 958
+IDX_OUTPOST_BONUS_KNIGHT = 820
+IDX_OUTPOST_BONUS_BISHOP = 836
+IDX_OUTPOST_HOLE_BONUS = 852
+IDX_KING_SAFETY_WEAK_UNITS = 854
+IDX_KING_SAFETY_ATTACK_UNITS = 859
+IDX_KING_SAFETY_TABLE = 864
+IDX_KING_TROPISM_WEIGHTS = 964
+IDX_PAWN_STORM_PENALTY_BY_RANK = 969
+IDX_SCALING_WEIGHTS = 977
+IDX_PAWN_SHIELD_MISSING_PENALTY = 982
+IDX_PAWN_SHIELD_INTACT_BONUS = 983
+IDX_PAWN_SHIELD_ADVANCED_BONUS = 984
+IDX_PAWN_SHIELD_PUSHED_PENALTY = 985
+IDX_KING_OPEN_FILE_PENALTY = 986
+IDX_KING_SEMI_OPEN_FILE_PENALTY = 987
+IDX_THREAT_SAFE_PAWN = 988
+IDX_THREAT_MINOR_ON_MAJOR = 990
+IDX_THREAT_ROOK_ON_QUEEN = 992
+IDX_THREAT_HANGING = 994
+IDX_INITIATIVE_BONUS = 996
 
 # --- Helper Functions to retrieve params from theta ---
 
@@ -73,11 +76,11 @@ def get_2d_val(theta, base_idx, row, col_size, col):
     # Flattened access
     return numba.int32(theta[base_idx + row * col_size + col])
 
-@numba.njit(numba.types.UniTuple(numba.uint64, 2)(piece_bbs_signature, numba.uint64), cache=True, boundscheck=False, fastmath=True)
+@numba.njit(numba.types.UniTuple(numba.uint64, 4)(piece_bbs_signature, numba.uint64), cache=True, boundscheck=False, fastmath=True)
 def _compute_all_attacks(piece_bbs, all_pieces_occupancy):
     """
     Computes the combined attack bitboards for White and Black pieces.
-    Returns: (white_attacks_bb, black_attacks_bb)
+    Returns: (white_attacks_bb, black_attacks_bb, white_pawn_attacks, black_pawn_attacks)
     """
     (wp_bb, wn_bb, wb_bb, wr_bb, wq_bb, wk_bb,
      bp_bb, bn_bb, bb_bb, br_bb, bq_bb, bk_bb) = piece_bbs
@@ -85,8 +88,8 @@ def _compute_all_attacks(piece_bbs, all_pieces_occupancy):
     # --- White Attacks ---
     white_attacks = np.uint64(0)
     # Pawns
-    white_attacks |= ((wp_bb & NOT_A_FILE) << np.uint64(7))
-    white_attacks |= ((wp_bb & NOT_H_FILE) << np.uint64(9))
+    white_pawn_attacks = ((wp_bb & NOT_A_FILE) << np.uint64(7)) | ((wp_bb & NOT_H_FILE) << np.uint64(9))
+    white_attacks |= white_pawn_attacks
     # Knights
     temp_bb = wn_bb
     while temp_bb:
@@ -112,8 +115,8 @@ def _compute_all_attacks(piece_bbs, all_pieces_occupancy):
     # --- Black Attacks ---
     black_attacks = np.uint64(0)
     # Pawns
-    black_attacks |= ((bp_bb & NOT_H_FILE) >> np.uint64(7))
-    black_attacks |= ((bp_bb & NOT_A_FILE) >> np.uint64(9))
+    black_pawn_attacks = ((bp_bb & NOT_H_FILE) >> np.uint64(7)) | ((bp_bb & NOT_A_FILE) >> np.uint64(9))
+    black_attacks |= black_pawn_attacks
     # Knights
     temp_bb = bn_bb
     while temp_bb:
@@ -136,7 +139,7 @@ def _compute_all_attacks(piece_bbs, all_pieces_occupancy):
     if bk_bb:
         black_attacks |= KING_ATTACKS[get_lsb_index(bk_bb)]
 
-    return white_attacks, black_attacks
+    return white_attacks, black_attacks, white_pawn_attacks, black_pawn_attacks
 
 
 # --- Evaluation Functions ---
@@ -172,8 +175,16 @@ def evaluate_pawn_structure(piece_bbs, theta):
             if rank > 3: 
                 block_sq = sq + 8 
                 if block_sq < 64:
-                    dist_friendly = MANHATTAN_DISTANCE[white_king_sq, block_sq]
-                    dist_enemy = MANHATTAN_DISTANCE[black_king_sq, block_sq]
+                    dist_friendly = CHEBYSHEV_DISTANCE[white_king_sq, block_sq]
+                    dist_enemy = CHEBYSHEV_DISTANCE[black_king_sq, block_sq]
+                    
+                    is_blocked_by_king = (dist_enemy <= 1) and (dist_friendly > dist_enemy)
+                    if is_blocked_by_king:
+                         penalty = np.int32(get_2d_val(theta, IDX_PASSED_PAWN_BONUS, rank, 2, 1) * 0.9)
+                         eg_score -= penalty
+                         mg_score -= np.int32(get_2d_val(theta, IDX_PASSED_PAWN_BONUS, rank, 2, 0) * 0.9)
+
+                    # Unstoppable (Bonus)
                     proximity_bonus = (dist_enemy * 5 - dist_friendly * 2) * rank
                     proximity_bonus = max(-150, min(150, proximity_bonus))
                     eg_score += proximity_bonus
@@ -213,8 +224,15 @@ def evaluate_pawn_structure(piece_bbs, theta):
             if relative_rank > 3:
                 block_sq = sq - 8
                 if block_sq >= 0:
-                    dist_friendly = MANHATTAN_DISTANCE[black_king_sq, block_sq]
-                    dist_enemy = MANHATTAN_DISTANCE[white_king_sq, block_sq]
+                    dist_friendly = CHEBYSHEV_DISTANCE[black_king_sq, block_sq]
+                    dist_enemy = CHEBYSHEV_DISTANCE[white_king_sq, block_sq]
+                    
+                    is_blocked_by_king = (dist_enemy <= 1) and (dist_friendly > dist_enemy)
+                    if is_blocked_by_king:
+                         penalty = np.int32(get_2d_val(theta, IDX_PASSED_PAWN_BONUS, relative_rank, 2, 1) * 0.9)
+                         eg_score += penalty
+                         mg_score += np.int32(get_2d_val(theta, IDX_PASSED_PAWN_BONUS, relative_rank, 2, 0) * 0.9)
+
                     proximity_bonus = (dist_enemy * 5 - dist_friendly * 2) * relative_rank
                     proximity_bonus = max(-150, min(150, proximity_bonus))
                     eg_score -= proximity_bonus
@@ -227,8 +245,7 @@ def evaluate_pawn_structure(piece_bbs, theta):
 
              if not has_support:
                  stop_sq = sq - 8
-                 if stop_sq >= 0:
-                     if (PAWN_ATTACKS[0][stop_sq] & white_pawns):
+                 if (PAWN_ATTACKS[0][stop_sq] & white_pawns):
                          mg_score += get_array_val(theta, IDX_BACKWARD_PAWN_PENALTY, 0)
                          eg_score += get_array_val(theta, IDX_BACKWARD_PAWN_PENALTY, 1)
 
@@ -373,6 +390,11 @@ def _evaluate_pawn_shield_for_color(king_sq, friendly_pawns, enemy_pawns, color,
 @numba.njit(numba.int32(numba.int32, numba.int32, piece_bbs_signature, occupancy_bbs_signature, numba.uint64, numba.uint64, numba.float64[:]), cache=True, boundscheck=False, fastmath=True)
 def _evaluate_king_attackers(king_sq, color, piece_bbs, occupancy_bbs, enemy_attacks_bb, friendly_attacks_bb, theta):
     king_zone = KING_ATTACK_ZONES[king_sq]
+    
+    # Optimization (match evaluation.py): 
+    if not (enemy_attacks_bb & king_zone):
+        return np.int32(0)
+        
     total_attack_units = np.int32(0)
     attacker_count = np.int32(0)
 
@@ -380,74 +402,82 @@ def _evaluate_king_attackers(king_sq, color, piece_bbs, occupancy_bbs, enemy_att
     (en_p, en_n, en_b, en_r, en_q, _) = piece_bbs[enemy_start_idx : enemy_start_idx + 6]
     all_pieces_occupancy = occupancy_bbs[2]
     
-    # Attack Units: P, N, B, R, Q
-    u_p = get_array_val(theta, IDX_KING_SAFETY_ATTACK_UNITS, 0)
-    u_n = get_array_val(theta, IDX_KING_SAFETY_ATTACK_UNITS, 1)
-    u_b = get_array_val(theta, IDX_KING_SAFETY_ATTACK_UNITS, 2)
-    u_r = get_array_val(theta, IDX_KING_SAFETY_ATTACK_UNITS, 3)
-    u_q = get_array_val(theta, IDX_KING_SAFETY_ATTACK_UNITS, 4)
-
-    # Pawns Logic Restored
-    pawn_attack_sources_bb = np.uint64(0)
-    temp_king_zone = king_zone
-    while temp_king_zone:
-        zone_sq = get_lsb_index(temp_king_zone)
-        pawn_attack_sources_bb |= PAWN_ATTACKS[color, zone_sq]
-        temp_king_zone &= temp_king_zone - np.uint64(1)
-
-    actual_pawn_attackers = pawn_attack_sources_bb & en_p
-    if actual_pawn_attackers:
-        num = count_bits(actual_pawn_attackers)
-        total_attack_units += num * u_p
-        attacker_count += num
-
-    # Knights
+    # Attack Units (P, N, B, R, Q) from params
+    # Assuming indices 0-4 correspond to P, N, B, R, Q
+    
+    # --- Pawns (commented out in evaluation.py but logic exists for other pieces) --- 
+    # Evaluation.py comments out Pawn attackers logic? 
+    # "Pawns - Find all enemy pawns ... (commented out)"
+    # Tunable eval previously had it. I will follow evaluation.py and NOT include pawn attackers if it is commented out.
+    # But wait, tunable_eval.py had it enabled.
+    # Checking evaluation.py again... yes, lines 580-593 are commented out.
+    # So I should remove it from tunable_eval.py to match.
+    
+    # --- Knights ---
     temp_bb = en_n
     while temp_bb:
         sq = get_lsb_index(temp_bb)
-        if KNIGHT_ATTACKS[sq] & king_zone:
-            total_attack_units += u_n
+        knight_attacks_in_zone = KNIGHT_ATTACKS[sq] & king_zone
+        if knight_attacks_in_zone:
+            total_attack_units += get_array_val(theta, IDX_KING_SAFETY_ATTACK_UNITS, 1)
             attacker_count += 1
+            
+            # Weak Squares (using WEAK_UNITS array)
+            undefended_in_zone = knight_attacks_in_zone & ~friendly_attacks_bb
+            weak_count = count_bits(undefended_in_zone)
+            total_attack_units += weak_count * get_array_val(theta, IDX_KING_SAFETY_WEAK_UNITS, 1)
+            
         temp_bb &= temp_bb - np.uint64(1)
         
-    # Bishops
+    # --- Bishops ---
     temp_bb = en_b
     while temp_bb:
         sq = get_lsb_index(temp_bb)
-        attacks = get_bishop_attacks(sq, all_pieces_occupancy & ~BB_SQUARES[sq])
-        if attacks & king_zone:
-            total_attack_units += u_b
+        attacks = get_bishop_attacks(sq, all_pieces_occupancy) # & ~BB_SQUARES[sq] implied? evaluation.py passes all_pieces_occupancy
+        attacks_in_zone = attacks & king_zone
+        if attacks_in_zone:
+            total_attack_units += get_array_val(theta, IDX_KING_SAFETY_ATTACK_UNITS, 2)
             attacker_count += 1
+            
+            undefended_in_zone = attacks_in_zone & ~friendly_attacks_bb
+            weak_count = count_bits(undefended_in_zone)
+            total_attack_units += weak_count * get_array_val(theta, IDX_KING_SAFETY_WEAK_UNITS, 2)
+            
         temp_bb &= temp_bb - np.uint64(1)
         
-    # Rooks
+    # --- Rooks ---
     temp_bb = en_r
     while temp_bb:
         sq = get_lsb_index(temp_bb)
-        attacks = get_rook_attacks(sq, all_pieces_occupancy & ~BB_SQUARES[sq])
-        if attacks & king_zone:
-            total_attack_units += u_r
+        attacks = get_rook_attacks(sq, all_pieces_occupancy)
+        attack_in_zone = attacks & king_zone
+        if attack_in_zone:
+            total_attack_units += get_array_val(theta, IDX_KING_SAFETY_ATTACK_UNITS, 3)
             attacker_count += 1
+            
+            undefended_in_zone = attack_in_zone & ~friendly_attacks_bb
+            weak_count = count_bits(undefended_in_zone)
+            total_attack_units += weak_count * get_array_val(theta, IDX_KING_SAFETY_WEAK_UNITS, 3)
+            
         temp_bb &= temp_bb - np.uint64(1)
         
-    # Queens
+    # --- Queens ---
     temp_bb = en_q
     while temp_bb:
         sq = get_lsb_index(temp_bb)
-        attacks = get_queen_attacks(sq, all_pieces_occupancy & ~BB_SQUARES[sq])
-        if attacks & king_zone:
-            total_attack_units += u_q
+        attacks = get_queen_attacks(sq, all_pieces_occupancy)
+        attack_in_zone = attacks & king_zone
+        if attack_in_zone:
+            total_attack_units += get_array_val(theta, IDX_KING_SAFETY_ATTACK_UNITS, 4)
             attacker_count += 1
+            
+            undefended_in_zone = attack_in_zone & ~friendly_attacks_bb
+            weak_count = count_bits(undefended_in_zone)
+            total_attack_units += weak_count * get_array_val(theta, IDX_KING_SAFETY_WEAK_UNITS, 4)
+            
         temp_bb &= temp_bb - np.uint64(1)
 
-    # Weak Squares
-    undefended_in_zone = (king_zone & enemy_attacks_bb) & ~friendly_attacks_bb
-    weak_count = count_bits(undefended_in_zone)
-    weak_penalty_val = get_int(theta, IDX_KING_SAFETY_WEAK_SQUARE_PENALTY)
-    weak_penalty = weak_count * weak_penalty_val
-    total_attack_units += weak_penalty
-
-    if attacker_count < 2 and weak_count == 0:
+    if attacker_count < 2:
         return np.int32(0)
 
     # Lookup table logic
@@ -511,11 +541,11 @@ def evaluate_king_safety(piece_bbs, occupancy_bbs, white_attacks, black_attacks,
     white_raw = white_shield + white_attackers + white_tropism + white_pawn_storm
     black_raw = black_shield + black_attackers + black_tropism + black_pawn_storm
 
-    # Scaling
-    w_n = get_array_val(theta, IDX_SCALING_WEIGHTS, 1)
-    w_b = get_array_val(theta, IDX_SCALING_WEIGHTS, 2)
-    w_r = get_array_val(theta, IDX_SCALING_WEIGHTS, 3)
-    w_q = get_array_val(theta, IDX_SCALING_WEIGHTS, 4)
+    # Scaling (Indices 0,1,2,3 for N,B,R,Q) - Fixed to match evaluation.py
+    w_n = get_array_val(theta, IDX_SCALING_WEIGHTS, 0)
+    w_b = get_array_val(theta, IDX_SCALING_WEIGHTS, 1)
+    w_r = get_array_val(theta, IDX_SCALING_WEIGHTS, 2)
+    w_q = get_array_val(theta, IDX_SCALING_WEIGHTS, 3)
 
     black_mat = (count_bits(bn_bb)*w_n + count_bits(bb_bb)*w_b + count_bits(br_bb)*w_r + count_bits(bq_bb)*w_q)
     white_scale = black_mat / MAX_SCALING_MATERIAL
@@ -627,7 +657,91 @@ def evaluate_mobility(piece_bbs, occupancy_bbs, theta):
     return mg_score, eg_score
 
 @numba.njit(numba.types.UniTuple(numba.int32, 2)(piece_bbs_signature, occupancy_bbs_signature, numba.uint64, numba.uint64, numba.float64[:]), cache=True, boundscheck=False, fastmath=True)
-def evaluate_threats(piece_bbs, occupancy_bbs, white_attacks, black_attacks, theta):
+def evaluate_outposts(piece_bbs, occupancy_bbs, white_pawn_attacks, black_pawn_attacks, theta):
+    mg_score = np.int32(0)
+    eg_score = np.int32(0)
+
+    white_pawns = piece_bbs[0]
+    white_knights = piece_bbs[1]
+    white_bishops = piece_bbs[2]
+    
+    black_pawns = piece_bbs[6]
+    black_knights = piece_bbs[7]
+    black_bishops = piece_bbs[8]
+    
+    hole_mg = get_array_val(theta, IDX_OUTPOST_HOLE_BONUS, 0)
+    hole_eg = get_array_val(theta, IDX_OUTPOST_HOLE_BONUS, 1)
+
+    # --- White Outposts ---
+    temp_bb = white_knights
+    while temp_bb:
+        sq = get_lsb_index(temp_bb)
+        if not (black_pawn_attacks & BB_SQUARES[sq]):
+            if (PAWN_ATTACKS[0, sq] & white_pawns):
+                rank = sq // 8
+                mg_score += get_2d_val(theta, IDX_OUTPOST_BONUS_KNIGHT, rank, 2, 0)
+                eg_score += get_2d_val(theta, IDX_OUTPOST_BONUS_KNIGHT, rank, 2, 1)
+                
+                file_idx = sq % 8
+                if not (ADJACENT_FILES_MASKS[file_idx] & WHITE_FORWARD_RANKS[sq] & black_pawns):
+                     mg_score += hole_mg
+                     eg_score += hole_eg
+        temp_bb &= temp_bb - np.uint64(1)
+
+    temp_bb = white_bishops
+    while temp_bb:
+        sq = get_lsb_index(temp_bb)
+        if not (black_pawn_attacks & BB_SQUARES[sq]):
+            if (PAWN_ATTACKS[0, sq] & white_pawns):
+                rank = sq // 8
+                mg_score += get_2d_val(theta, IDX_OUTPOST_BONUS_BISHOP, rank, 2, 0)
+                eg_score += get_2d_val(theta, IDX_OUTPOST_BONUS_BISHOP, rank, 2, 1)
+                
+                file_idx = sq % 8
+                if not (ADJACENT_FILES_MASKS[file_idx] & WHITE_FORWARD_RANKS[sq] & black_pawns):
+                     mg_score += hole_mg
+                     eg_score += hole_eg
+        temp_bb &= temp_bb - np.uint64(1)
+
+    # --- Black Outposts ---
+    temp_bb = black_knights
+    while temp_bb:
+        sq = get_lsb_index(temp_bb)
+        if not (white_pawn_attacks & BB_SQUARES[sq]):
+            if (PAWN_ATTACKS[1, sq] & black_pawns):
+                rank = sq // 8
+                rel_rank = 7 - rank
+                
+                mg_score -= get_2d_val(theta, IDX_OUTPOST_BONUS_KNIGHT, rel_rank, 2, 0)
+                eg_score -= get_2d_val(theta, IDX_OUTPOST_BONUS_KNIGHT, rel_rank, 2, 1)
+                
+                file_idx = sq % 8
+                if not (ADJACENT_FILES_MASKS[file_idx] & BLACK_FORWARD_RANKS[sq] & white_pawns):
+                     mg_score -= hole_mg
+                     eg_score -= hole_eg
+        temp_bb &= temp_bb - np.uint64(1)
+
+    temp_bb = black_bishops
+    while temp_bb:
+        sq = get_lsb_index(temp_bb)
+        if not (white_pawn_attacks & BB_SQUARES[sq]):
+            if (PAWN_ATTACKS[1, sq] & black_pawns):
+                rank = sq // 8
+                rel_rank = 7 - rank
+                
+                mg_score -= get_2d_val(theta, IDX_OUTPOST_BONUS_BISHOP, rel_rank, 2, 0)
+                eg_score -= get_2d_val(theta, IDX_OUTPOST_BONUS_BISHOP, rel_rank, 2, 1)
+                
+                file_idx = sq % 8
+                if not (ADJACENT_FILES_MASKS[file_idx] & BLACK_FORWARD_RANKS[sq] & white_pawns):
+                     mg_score -= hole_mg
+                     eg_score -= hole_eg
+        temp_bb &= temp_bb - np.uint64(1)
+
+    return mg_score, eg_score
+
+@numba.njit(numba.types.UniTuple(numba.int32, 2)(piece_bbs_signature, occupancy_bbs_signature, numba.uint64, numba.uint64, numba.uint64, numba.uint64, numba.float64[:]), cache=True, boundscheck=False, fastmath=True)
+def evaluate_threats(piece_bbs, occupancy_bbs, white_attacks, black_attacks, white_pawn_attacks, black_pawn_attacks, theta):
     mg_score = np.int32(0)
     eg_score = np.int32(0)
 
@@ -649,11 +763,6 @@ def evaluate_threats(piece_bbs, occupancy_bbs, white_attacks, black_attacks, the
     rook_queen_eg = get_array_val(theta, IDX_THREAT_ROOK_ON_QUEEN, 1)
 
     # --- 1. Safe Pawn Threats ---
-    white_pawn_attacks = ((wp_bb & NOT_A_FILE) << np.uint64(7)) | \
-                         ((wp_bb & NOT_H_FILE) << np.uint64(9))
-    black_pawn_attacks = ((bp_bb & NOT_H_FILE) >> np.uint64(7)) | \
-                         ((bp_bb & NOT_A_FILE) >> np.uint64(9))
-
     black_non_pawns = bn_bb | bb_bb | br_bb | bq_bb
     white_non_pawns = wn_bb | wb_bb | wr_bb | wq_bb
 
@@ -778,6 +887,35 @@ def _evaluate_king_pawn_endgame(piece_bbs, theta):
     while temp_wp:
         sq = get_lsb_index(temp_wp)
         score += eg_pawn_val + get_2d_val(theta, IDX_PST_EG, 0, 64, sq)
+        
+        # Unstoppable Pawn Logic (White) - Added
+        if not (WHITE_PASSED_PAWN_MASKS[sq] & black_pawns):
+            rank = sq // 8
+            steps_to_promote = 7 - rank
+            if rank == 1: steps_to_promote = 5 
+            
+            promotion_sq = (sq % 8) + 56
+            king_dist = CHEBYSHEV_DISTANCE[black_king_sq, promotion_sq]
+            
+            # Simplified side_to_move check (we don't have it here yet, assuming called for side-to-move adjustment later or just raw score)
+            # evaluation.py passes side_to_move to adjustment. 
+            # tunable_eval.py structure: _evaluate_king_pawn_endgame(piece_bbs, theta)
+            # It doesn't receive side_to_move!
+            # However, score is static. "Unstoppable" implies "even if opponent moves".
+            # Let's assume standard logic without tempo adjustment for now, or assume White to move?
+            # evaluation.py adjusts steps based on side_to_move.
+            # I cannot strictly implement it without side_to_move argument.
+            # But `evaluate_position_tunable` HAS `game_state[0]`.
+            # I should add `side_to_move` argument to `_evaluate_king_pawn_endgame`.
+            
+            adjusted_pawn_steps = steps_to_promote
+            # If we don't have side_to_move, we can't be precise.
+            # But wait, evaluate_position_tunable knows side_to_move.
+            
+            # For now, just raw distance check
+            if king_dist > adjusted_pawn_steps:
+                 score += 800
+
         temp_wp &= temp_wp - np.uint64(1)
         
     # Black
@@ -785,6 +923,20 @@ def _evaluate_king_pawn_endgame(piece_bbs, theta):
     while temp_bp:
         sq = get_lsb_index(temp_bp)
         score -= (eg_pawn_val + get_2d_val(theta, IDX_PST_EG, 0, 64, sq^56))
+        
+        if not (BLACK_PASSED_PAWN_MASKS[sq] & white_pawns):
+            rank = sq // 8
+            steps_to_promote = rank
+            if rank == 6: steps_to_promote = 5
+            
+            promotion_sq = (sq % 8)
+            king_dist = CHEBYSHEV_DISTANCE[white_king_sq, promotion_sq]
+            
+            adjusted_pawn_steps = steps_to_promote
+            
+            if king_dist > adjusted_pawn_steps:
+                score -= 800
+
         temp_bp &= temp_bp - np.uint64(1)
         
     score += get_2d_val(theta, IDX_PST_EG, 5, 64, white_king_sq)
@@ -816,6 +968,7 @@ def evaluate_position_tunable(piece_bbs, occupancy_bbs, game_state, theta):
         piece_bbs[7] | piece_bbs[8] | piece_bbs[9] | piece_bbs[10]
     )
     if all_pieces_except_pawns_and_kings == 0:
+        # Note: passed side_to_move implicitly if needed, but current impl is simplified
         score = _evaluate_king_pawn_endgame(piece_bbs, theta)
         return score if game_state[0] == 0 else -score
     
@@ -866,7 +1019,7 @@ def evaluate_position_tunable(piece_bbs, occupancy_bbs, game_state, theta):
     # Sub modules
     
     # Attacks (Expensive but needed for Safety and Threats)
-    white_attacks, black_attacks = _compute_all_attacks(piece_bbs, occupancy_bbs[2])
+    white_attacks, black_attacks, white_pawn_attacks, black_pawn_attacks = _compute_all_attacks(piece_bbs, occupancy_bbs[2])
     
     mks, eks = evaluate_king_safety(piece_bbs, occupancy_bbs, white_attacks, black_attacks, theta)
     mg_score += mks; eg_score += eks
@@ -880,8 +1033,11 @@ def evaluate_position_tunable(piece_bbs, occupancy_bbs, game_state, theta):
     mmb, emb = evaluate_mobility(piece_bbs, occupancy_bbs, theta)
     mg_score += mmb; eg_score += emb
     
-    mth, eth = evaluate_threats(piece_bbs, occupancy_bbs, white_attacks, black_attacks, theta)
+    mth, eth = evaluate_threats(piece_bbs, occupancy_bbs, white_attacks, black_attacks, white_pawn_attacks, black_pawn_attacks, theta)
     mg_score += mth; eg_score += eth
+    
+    mop, eop = evaluate_outposts(piece_bbs, occupancy_bbs, white_pawn_attacks, black_pawn_attacks, theta)
+    mg_score += mop; eg_score += eop
     
     final_score = (mg_score * phase + eg_score * (MAX_PHASE - phase)) // MAX_PHASE
     

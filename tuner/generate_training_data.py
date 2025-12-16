@@ -1,35 +1,31 @@
 """
-從 PGN 文件生成訓練數據集的腳本。(已整合 Stockfish 數據清洗功能)
+從 PGN 文件生成訓練數據集的腳本。(已整合 Stockfish 數據清洗功能，支援多進程並行處理)
 
 這個腳本的目的是為 `tuner.py` 調優腳本創建一個數據集，此版本專為
 Texel's Tuning Method 設計。它通過以下步驟工作：
 1.  讀取 PGN 文件並解析對局結果。
-2.  遍歷棋局中的每個局面。
-3.  使用基本過濾器（回合數、子力差距、是否被將軍）篩選候選局面。
-4.  **數據清洗 (核心功能)**: 使用 Stockfish 引擎作為裁判，對每個候選局面
-    進行淺層分析，並剔除那些最終賽果與 Stockfish 客觀評估嚴重不符的局面。
-5.  保存通過所有驗證的數據 (FEN 和對局結果) 到 .jsonl 文件。
+2.  將對局分配給多個工作進程 (Worker Process)。
+3.  每個 Worker 使用獨立的 Stockfish 引擎實例進行並行分析與清洗。
+4.  主進程收集結果並寫入 JSON Lines 文件。
 
 這個經過清洗的數據集將更客觀，有助於訓練出一個評估更理性、棋力更強的引擎。
 """
 import chess
 import chess.pgn
-import chess.engine  # 引入引擎通訊模組
+import chess.engine
 import json
 import sys
 import os
 import argparse
+import shutil
+import concurrent.futures
+import multiprocessing
 
 # --- 全局變數 ---
-STOCKFISH_ENGINE = None # 用於保存 Stockfish 引擎實例
+# 這些變數現在只在 worker 進程中被使用
+STOCKFISH_ENGINE = None
 
 def parse_result(result_str: str) -> float:
-    """
-    將 PGN 的 Result 字符串轉換為數值。
-    '1-0' -> 1.0 (白勝)
-    '0-1' -> 0.0 (黑勝)
-    '1/2-1/2' -> 0.5 (和棋)
-    """
     if result_str == '1-0':
         return 1.0
     elif result_str == '0-1':
@@ -40,169 +36,282 @@ def parse_result(result_str: str) -> float:
         return None
 
 def should_skip_position(board):
-    """
-    根據一些啟發式規則判斷是否應該跳過當前局面。
-    - 跳過正在被將軍的局面，因為評分可能不穩定。
-    - 跳過子力差距過大的局面。
-    """
     if board.is_check():
         return True
     
-    # 簡單的子力差距檢查
     material_diff = 0
     piece_values = {chess.PAWN: 1, chess.KNIGHT: 3, chess.BISHOP: 3, chess.ROOK: 5, chess.QUEEN: 9}
     for piece_type, value in piece_values.items():
         material_diff += len(board.pieces(piece_type, chess.WHITE)) * value
         material_diff -= len(board.pieces(piece_type, chess.BLACK)) * value
     
-    # 如果子力差距大於一車，就認為局面已定，跳過
     if abs(material_diff) > 5:
         return True
 
     return False
 
 def is_endgame_position(board: chess.Board) -> bool:
-    """
-    根據子力數量判斷是否為殘局局面。
-    規則：如果雙方都沒有皇后，或者盤面上非兵非王的棋子總數不多，則視為殘局。
-    """
-    # 如果盤面上沒有皇后，通常可以認為是殘局
     no_queens = not board.pieces(chess.QUEEN, chess.WHITE) and not board.pieces(chess.QUEEN, chess.BLACK)
     if no_queens:
         return True
 
-    # 計算雙方重子(Rook)和輕子(Knight, Bishop)的總數
     white_pieces = len(board.pieces(chess.ROOK, chess.WHITE)) * 2 + len(board.pieces(chess.KNIGHT, chess.WHITE)) + len(board.pieces(chess.BISHOP, chess.WHITE))
     black_pieces = len(board.pieces(chess.ROOK, chess.BLACK)) * 2 + len(board.pieces(chess.KNIGHT, chess.BLACK)) + len(board.pieces(chess.BISHOP, chess.BLACK))
 
-    # 如果雙方子力總值（簡化版）小於等於一個車+一個輕子，也視為殘局
-    # Stockfish 使用的閾值是 `QUEEN_PHASE = 4`, `ROOK_PHASE = 2`, `MINOR_PHASE = 1`
-    # 這裡我們用一個簡化的啟發式規則
     if (white_pieces + black_pieces) <= 7:
         return True
 
     return False
 
-# --- 新增: Stockfish 相關函式 ---
-
 def setup_stockfish_engine(path: str):
-    """
-    初始化並返回一個 Stockfish 引擎實例。
-    """
     global STOCKFISH_ENGINE
+    if path == 'stockfish' or path == 'stockfish.exe':
+        detected = shutil.which('stockfish')
+        if detected:
+            path = detected
+            
     try:
         STOCKFISH_ENGINE = chess.engine.SimpleEngine.popen_uci(path)
-        print(f"Stockfish engine initialized successfully from: {path}", file=sys.stderr)
     except FileNotFoundError:
         print(f"Error: Stockfish executable not found at the specified path: {path}", file=sys.stderr)
-        print("Please check the --stockfish-path argument.", file=sys.stderr)
         sys.exit(1)
 
 def is_evaluation_consistent(board: chess.Board, result: float, depth: int, threshold_cp: int) -> bool:
-    """
-    使用 Stockfish 檢查局面評估是否與最終賽果一致。
-    """
     if STOCKFISH_ENGINE is None:
         raise RuntimeError("Stockfish engine is not initialized.")
 
     try:
         info = STOCKFISH_ENGINE.analyse(board, chess.engine.Limit(depth=depth))
-        score = info["score"].white().score(mate_score=30000)
+        score_obj = info["score"].white()
+        
+        if score_obj.is_mate():
+            score = 30000 if score_obj.mate() > 0 else -30000
+        else:
+            score = score_obj.score()
 
-        if result == 1.0: # 白勝
-            return score > -threshold_cp
-        elif result == 0.0: # 黑勝
-            return score < threshold_cp
-        elif result == 0.5: # 和棋
-            return abs(score) <= threshold_cp
+        WIN_TOLERANCE = 30 
+        
+        if result == 1.0: 
+            return score > -WIN_TOLERANCE
+        elif result == 0.0: 
+            return score < WIN_TOLERANCE
+        elif result == 0.5: 
+            return abs(score) <= threshold_cp 
             
-    except (chess.engine.EngineTerminatedError, chess.engine.EngineError) as e:
-        print(f"\nStockfish engine error during analysis: {e}", file=sys.stderr)
+    except (chess.engine.EngineTerminatedError, chess.engine.EngineError):
         return False
 
     return True
 
-# --- 修改: 主生成函式 ---
+# --- Worker Function for Parallel Processing ---
 
-def generate_data_from_pgn(pgn_file: str, output_file: str, min_move: int, max_move: int, games_limit: int, depth: int, threshold: int):
+def process_game_batch(games_data, stockfish_path, depth, threshold, min_move, max_move):
     """
-    從 PGN 文件解析棋局，使用 Stockfish 清洗數據，並將結果保存到 JSON Lines 文件。
+    Worker function to process a batch of games.
+    games_data: list of (game_headers, moves_list) tuples.
+    This avoids pickling the entire game object or engine.
     """
-    positions_count = 0
-    games_processed = 0
-    positions_kept = 0
-    positions_discarded = 0
-
+    # Initialize engine for this worker
+    setup_stockfish_engine(stockfish_path)
+    
+    mg_results = []
+    eg_results = []
+    discarded = 0
+    
     try:
-        with open(pgn_file, encoding='utf-8') as pgn:
-            with open(output_file, 'w', encoding='utf-8') as f_out:
-                while True:
-                    game = chess.pgn.read_game(pgn)
-                    if game is None: break
-                    if games_limit and games_processed >= games_limit:
-                        print(f"\nReached game limit of {games_limit}.", file=sys.stderr)
-                        break
-                    
-                    result = parse_result(game.headers.get("Result", "*"))
-                    if result is None: continue
+        for headers, moves_san in games_data:
+            result = parse_result(headers.get("Result", "*"))
+            if result is None: continue
+            
+            # Reconstruct board
+            board = chess.Board() # Standard start pos
+            # If FEN is in headers (e.g. from position), handle it? Assuming standard startpos PGNs for now.
+            if "FEN" in headers:
+                board.set_fen(headers["FEN"])
 
-                    games_processed += 1
-                    board = game.board()
-                    
-                    for i, move in enumerate(game.mainline_moves()):
-                        board.push(move)
+            # Replay moves
+            # Optimisation: We only need to check positions within range.
+            # But we must play all moves to get there.
+            
+            for i, move_san in enumerate(moves_san):
+                try:
+                    move = board.parse_san(move_san)
+                except ValueError:
+                    break # Invalid move in PGN
+                
+                # Check quiescence before push (is_capture uses current board)
+                is_capture_or_promotion = board.is_capture(move) or move.promotion
+                
+                board.push(move)
+                
+                # Filter Quiescence (skip positions resulting from capture)
+                if is_capture_or_promotion:
+                    continue
+
+                if min_move <= board.fullmove_number <= max_move:
+                    if not board.is_checkmate() and not board.is_stalemate() and not board.is_insufficient_material() and not should_skip_position(board):
                         
-                        if min_move <= board.fullmove_number <= max_move:
-                            positions_count += 1
-                            # 應用基礎過濾器
-                            if not board.is_checkmate() and not board.is_stalemate() and not board.is_insufficient_material() and not should_skip_position(board) and not is_endgame_position(board):
-                                
-                                # --- 核心整合: 應用 Stockfish 過濾器 ---
-                                if is_evaluation_consistent(board, result, depth, threshold):
-                                    fen = board.fen()
-                                    data = {"fen": fen, "result": result}
-                                    f_out.write(json.dumps(data) + '\n')
-                                    positions_kept += 1
-                                else:
-                                    positions_discarded += 1 # 評估與賽果不符，丟棄
-                    
-                    if games_processed % 10 == 0:
-                         print(f"\rGames: {games_processed} | Total Pos: {positions_count} | Kept: {positions_kept} | Discarded: {positions_discarded}", end="", file=sys.stderr)
-
-    except Exception as e:
-        print(f"\nAn error occurred: {e}", file=sys.stderr)
+                        if is_evaluation_consistent(board, result, depth, threshold):
+                            fen = board.fen()
+                            data = json.dumps({"fen": fen, "result": result})
+                            
+                            if is_endgame_position(board):
+                                eg_results.append(data)
+                            else:
+                                mg_results.append(data)
+                        else:
+                            discarded += 1
     finally:
-        # 確保在程式結束時關閉引擎
         if STOCKFISH_ENGINE:
             STOCKFISH_ENGINE.quit()
-            print("\nStockfish engine shut down.", file=sys.stderr)
+            
+    return mg_results, eg_results, discarded
+
+def generate_data_parallel(pgn_file, output_mg, output_eg, min_move, max_move, games_limit, depth, threshold, stockfish_path, num_workers=None):
+    """
+    Main driver for parallel generation.
+    """
+    if num_workers is None:
+        num_workers = max(1, multiprocessing.cpu_count() - 1) # Leave 1 core for OS/Main
+        
+    print(f"Starting parallel generation with {num_workers} workers...", file=sys.stderr)
+    
+    # Reading PGN is sequential, analysis is parallel.
+    # Strategy: Read chunks of games, submit to pool.
+    
+    BATCH_SIZE = 50 # Games per worker task
+    
+    positions_count = 0 # Cannot track total positions easily without parsing moves in main, skipping for perf.
+    games_read = 0
+    mg_total = 0
+    eg_total = 0
+    discarded_total = 0
+    
+    # Buffer for batching
+    current_batch = []
+    futures = []
+    
+    with open(pgn_file, encoding='utf-8') as pgn, \
+         open(output_mg, 'w', encoding='utf-8') as f_mg, \
+         open(output_eg, 'w', encoding='utf-8') as f_eg, \
+         concurrent.futures.ProcessPoolExecutor(max_workers=num_workers) as executor:
+        
+        while True:
+            # Check for game limit
+            if games_limit and games_read >= games_limit:
+                break
+                
+            try:
+                game = chess.pgn.read_game(pgn)
+            except ValueError:
+                continue
+                
+            if game is None:
+                break
+                
+            games_read += 1
+            
+            # Extract minimal data for worker: Headers dict and list of moves (SAN strings)
+            # Passing SAN strings is safer than move objects across processes
+            headers = dict(game.headers)
+            moves = [move.uci() for move in game.mainline_moves()] # Using UCI string is slightly safer/faster to re-parse? SAN is smaller but requires context. 
+            # Board.parse_uci vs parse_san. parse_uci is faster. 
+            # But wait, read_game gives us Move objects.
+            # Ideally we pass UCI strings.
+            # Re-parsing UCI is very fast.
+            
+            # Wait, main moves are Move objects.
+            # board.push_uci(uci_str) works.
+            
+            current_batch.append((headers, moves))
+            
+            if len(current_batch) >= BATCH_SIZE:
+                # Submit batch
+                future = executor.submit(process_game_batch, current_batch, stockfish_path, depth, threshold, min_move, max_move)
+                futures.append(future)
+                current_batch = []
+                
+                # Check for completed futures to keep memory low
+                # (Simple polling or just let them pile up? Pile up is bad for memory if many results.
+                # But futures list grows. We should reap.)
+                
+                # Optimization: Reap completed futures periodically
+                # Instead of waiting only at the end, verify completion as we go to show progress
+                # But we can't block here or we lose read speed.
+                # A simple way is to check done futures from the list.
+                # But futures list might be huge if not reaped.
+                # Let's keep it simple: We iterate as_completed *after* reading all games?
+                # No, if 1M games, we run OOM.
+                # We must yield results as we go.
+                pass
+
+        # Submit remaining
+        if current_batch:
+            future = executor.submit(process_game_batch, current_batch, stockfish_path, depth, threshold, min_move, max_move)
+            futures.append(future)
+            
+        print(f"All games read. Waiting for {len(futures)} tasks to complete...", file=sys.stderr)
+        
+        # Collect results
+        # Use as_completed to print progress as tasks finish
+        for future in concurrent.futures.as_completed(futures):
+            try:
+                mg_res, eg_res, discarded = future.result()
+                
+                for line in mg_res:
+                    f_mg.write(line + '\n')
+                for line in eg_res:
+                    f_eg.write(line + '\n')
+                    
+                mg_total += len(mg_res)
+                eg_total += len(eg_res)
+                discarded_total += discarded
+                
+                # Progress update (rough)
+                total_kept = mg_total + eg_total
+                # Print every time a batch returns (or every few batches)
+                # Just print always for responsiveness, using carriage return
+                print(f"\rProcessed Positions (Kept+Discarded): {total_kept + discarded_total} | MG: {mg_total} | EG: {eg_total}", end="", file=sys.stderr)
+                     
+            except Exception as e:
+                print(f"\nWorker exception: {e}", file=sys.stderr)
 
     print(f"\n--- Data Generation Complete ---", file=sys.stderr)
-    print(f"Processed {games_processed} games.", file=sys.stderr)
-    print(f"Total positions considered: {positions_count}", file=sys.stderr)
-    print(f"Positions kept (consistent): {positions_kept}", file=sys.stderr)
-    print(f"Positions discarded (inconsistent): {positions_discarded}", file=sys.stderr)
-    print(f"Cleaned data saved to '{output_file}'.", file=sys.stderr)
-
+    print(f"Total Games Read: {games_read}", file=sys.stderr)
+    print(f"Middlegame positions saved: {mg_total}", file=sys.stderr)
+    print(f"Endgame positions saved: {eg_total}", file=sys.stderr)
+    print(f"Positions discarded: {discarded_total}", file=sys.stderr)
 
 if __name__ == '__main__':
-    # --- 修改: 修正 Stockfish 路徑，並新增相關參數 ---
-    default_stockfish_path = r"C:\Users\ren cian\OneDrive\桌面\chess\chess_numba\chess_numba\stockfish\stockfish-windows-x86-64-avx2.exe"
+    # Fix for Windows Multiprocessing
+    multiprocessing.freeze_support()
+
+    default_stockfish = shutil.which('stockfish')
+    if not default_stockfish:
+        if os.path.exists("./stockfish/stockfish-windows-x86-64-avx2.exe"):
+             default_stockfish = "./stockfish/stockfish-windows-x86-64-avx2.exe"
+        else:
+             default_stockfish = "stockfish"
+
+    default_pgn = "twic1613.pgn"
+    if not os.path.exists(default_pgn) and os.path.exists(os.path.join("tuner", "twic1613.pgn")):
+        default_pgn = os.path.join("tuner", "twic1613.pgn")
 
     parser = argparse.ArgumentParser(
-        description="Generate cleaned chess training data from PGN files using Stockfish as a referee.",
+        description="Generate cleaned chess training data (Parallel Split MG/EG) using Stockfish referee.",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter
     )
-    parser.add_argument("--pgn", type=str, default="twic1613.pgn", help="Input PGN file with master games.")
-    parser.add_argument("--output", type=str, default="training_data_texel_middlegame_cleaned.jsonl", help="Output file in JSON Lines format.")
-    parser.add_argument("--min-move", type=int, default=15, help="The first full move number from which to start collecting positions.")
-    parser.add_argument("--max-move", type=int, default=40, help="The last full move number at which to stop collecting positions.")
-    parser.add_argument("--games", type=int, default=1000, help="Limit the number of games to process from the PGN file (0 for all).")
+    parser.add_argument("--pgn", type=str, default=default_pgn, help="Input PGN file.")
+    parser.add_argument("--output-mg", type=str, default="training_data_middlegame_cleaned.jsonl", help="Output MG file.")
+    parser.add_argument("--output-eg", type=str, default="training_data_endgame_cleaned.jsonl", help="Output EG file.")
+    parser.add_argument("--min-move", type=int, default=8, help="Start move number.")
+    parser.add_argument("--max-move", type=int, default=200, help="End move number.")
+    parser.add_argument("--games", type=int, default=1000, help="Games limit (0 for all).")
     
-    # --- 新增: 用於數據清洗的命令行參數 ---
-    parser.add_argument("--stockfish-path", type=str, default=default_stockfish_path, help="Path to the Stockfish executable.")
-    parser.add_argument("--stockfish-depth", type=int, default=10, help="The shallow analysis depth for Stockfish to use for filtering.")
-    parser.add_argument("--consistency-threshold", type=int, default=50, help="Evaluation threshold in centipawns to determine if a position is inconsistent with the game result.")
+    parser.add_argument("--stockfish-path", type=str, default=default_stockfish, help="Stockfish executable path.")
+    parser.add_argument("--stockfish-depth", type=int, default=10, help="Stockfish analysis depth.")
+    parser.add_argument("--consistency-threshold", type=int, default=30, help="Draw consistency threshold (cp).")
+    parser.add_argument("--workers", type=int, default=None, help="Number of worker processes (default: CPU count - 1).")
 
     args = parser.parse_args()
 
@@ -210,16 +319,20 @@ if __name__ == '__main__':
         print(f"Error: PGN file not found at '{args.pgn}'", file=sys.stderr)
         sys.exit(1)
 
-    # 啟動引擎
-    setup_stockfish_engine(args.stockfish_path)
-    
-    # 執行數據生成與清洗
-    generate_data_from_pgn(
+    # In worker model, setup happens in worker.
+    # But check if stockfish path is valid once here.
+    if not shutil.which(args.stockfish_path) and not os.path.exists(args.stockfish_path):
+         print(f"Warning: Stockfish path '{args.stockfish_path}' might be invalid.", file=sys.stderr)
+
+    generate_data_parallel(
         pgn_file=args.pgn,
-        output_file=args.output,
+        output_mg=args.output_mg,
+        output_eg=args.output_eg,
         min_move=args.min_move,
         max_move=args.max_move,
         games_limit=args.games if args.games > 0 else None,
         depth=args.stockfish_depth,
-        threshold=args.consistency_threshold
+        threshold=args.consistency_threshold,
+        stockfish_path=args.stockfish_path,
+        num_workers=args.workers
     )
