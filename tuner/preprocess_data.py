@@ -3,6 +3,7 @@ import numpy as np
 import chess
 import glob
 import os
+import argparse
 from chess_engine.constants import STOP_SEARCH_FLAG
 
 def parse_fen_to_arrays(fen):
@@ -57,6 +58,10 @@ def parse_fen_to_arrays(fen):
     return piece_bbs, occupancy_bbs, game_state
 
 def preprocess(input_files, output_file):
+    if not input_files:
+        print("No input files provided.")
+        return
+
     all_piece_bbs = []
     all_occupancy_bbs = []
     all_game_states = []
@@ -66,27 +71,34 @@ def preprocess(input_files, output_file):
     
     for filename in input_files:
         print(f"Processing {filename}...")
-        with open(filename, 'r', encoding='utf-8') as f:
-            for line in f:
-                try:
-                    data = json.loads(line)
-                    fen = data['fen']
-                    result = float(data['result'])
-                    
-                    p_bbs, o_bbs, g_st = parse_fen_to_arrays(fen)
-                    
-                    all_piece_bbs.append(p_bbs)
-                    all_occupancy_bbs.append(o_bbs)
-                    all_game_states.append(g_st)
-                    all_results.append(result)
-                    
-                    count += 1
-                    if count % 10000 == 0:
-                        print(f"Parsed {count} positions...")
+        try:
+            with open(filename, 'r', encoding='utf-8') as f:
+                for line in f:
+                    try:
+                        data = json.loads(line)
+                        fen = data['fen']
+                        result = float(data['result'])
                         
-                except Exception as e:
-                    print(f"Error parsing line: {line.strip()} -> {e}")
-                    continue
+                        p_bbs, o_bbs, g_st = parse_fen_to_arrays(fen)
+                        
+                        all_piece_bbs.append(p_bbs)
+                        all_occupancy_bbs.append(o_bbs)
+                        all_game_states.append(g_st)
+                        all_results.append(result)
+                        
+                        count += 1
+                        if count % 10000 == 0:
+                            print(f"Parsed {count} positions...")
+                            
+                    except Exception as e:
+                        print(f"Error parsing line: {line.strip()} -> {e}")
+                        continue
+        except FileNotFoundError:
+            print(f"Warning: File {filename} not found, skipping.")
+
+    if count == 0:
+        print("No valid data found. Aborting save.")
+        return
 
     print(f"Saving {count} positions to {output_file}...")
     
@@ -100,8 +112,24 @@ def preprocess(input_files, output_file):
     print("Done.")
 
 if __name__ == "__main__":
-    files = glob.glob("tuner/training_data_*.jsonl")
-    if not files:
-        print("No training data found in tuner/ directory.")
+    parser = argparse.ArgumentParser(description="Preprocess JSONL training data into NPZ format for tuner.")
+    parser.add_argument("--files", nargs='+', default=None, help="List of input JSONL files.")
+    parser.add_argument("--output", type=str, default="tuner/dataset.npz", help="Output NPZ file.")
+    
+    args = parser.parse_args()
+    
+    # If explicit files not provided, default to glob logic
+    if args.files:
+        files = args.files
     else:
-        preprocess(files, "tuner/dataset.npz")
+        # Default behavior: look for known generated files
+        # Prioritize the newly split files if they exist, else everything
+        potential_files = glob.glob("tuner/training_data_*_cleaned.jsonl")
+        files = potential_files
+    
+    if not files:
+        print("No training data found in tuner/ directory (matching 'tuner/training_data_*_cleaned.jsonl').")
+        print("Please run generate_training_data.py first.")
+    else:
+        print(f"Found input files: {files}")
+        preprocess(files, args.output)
