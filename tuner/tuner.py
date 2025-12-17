@@ -140,6 +140,7 @@ class SPSAOptimizer:
         
         # King Safety Attack Units: P < N < B < R < Q (Axis 0)
         cm.add_monotonic("KING_SAFETY_ATTACK_UNITS", axis=0, direction='increasing')
+        cm.add_monotonic("KING_SAFETY_WEAK_UNITS", axis=0, direction='increasing')
 
         print(f"Constraints configured: {len(cm.constraints)} constraints active.")
 
@@ -279,8 +280,8 @@ class SPSAOptimizer:
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--iter", type=int, default=1000, help="Number of SPSA iterations")
-    parser.add_argument("--alpha", type=float, default=5000.0, help="Learning rate scaling (a)")
-    parser.add_argument("--c", type=float, default=5.0, help="Perturbation scaling (c)")
+    parser.add_argument("--alpha", type=float, default=10000.0, help="Learning rate scaling (a)")
+    parser.add_argument("--c", type=float, default=4.0, help="Perturbation scaling (c)")
     
     # New arguments
     parser.add_argument("--tune", nargs='+', help="List of parameter names to tune (others will be frozen)")
