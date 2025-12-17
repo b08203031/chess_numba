@@ -871,8 +871,8 @@ def evaluate_threats(piece_bbs, occupancy_bbs, white_attacks, black_attacks, whi
 
     return mg_score, eg_score
 
-@numba.njit(numba.int32(piece_bbs_signature, numba.float64[:]), cache=True, boundscheck=False, fastmath=True)
-def _evaluate_king_pawn_endgame(piece_bbs, theta):
+@numba.njit(numba.int32(piece_bbs_signature, numba.uint64, numba.float64[:]), cache=True, boundscheck=False, fastmath=True)
+def _evaluate_king_pawn_endgame(piece_bbs, side_to_move, theta):
     score = np.int32(0)
     white_pawns = piece_bbs[0]
     white_king_sq = get_lsb_index(piece_bbs[5])
@@ -897,22 +897,10 @@ def _evaluate_king_pawn_endgame(piece_bbs, theta):
             promotion_sq = (sq % 8) + 56
             king_dist = CHEBYSHEV_DISTANCE[black_king_sq, promotion_sq]
             
-            # Simplified side_to_move check (we don't have it here yet, assuming called for side-to-move adjustment later or just raw score)
-            # evaluation.py passes side_to_move to adjustment. 
-            # tunable_eval.py structure: _evaluate_king_pawn_endgame(piece_bbs, theta)
-            # It doesn't receive side_to_move!
-            # However, score is static. "Unstoppable" implies "even if opponent moves".
-            # Let's assume standard logic without tempo adjustment for now, or assume White to move?
-            # evaluation.py adjusts steps based on side_to_move.
-            # I cannot strictly implement it without side_to_move argument.
-            # But `evaluate_position_tunable` HAS `game_state[0]`.
-            # I should add `side_to_move` argument to `_evaluate_king_pawn_endgame`.
-            
             adjusted_pawn_steps = steps_to_promote
-            # If we don't have side_to_move, we can't be precise.
-            # But wait, evaluate_position_tunable knows side_to_move.
-            
-            # For now, just raw distance check
+            if side_to_move == 0: # White to move
+                adjusted_pawn_steps -= 1
+
             if king_dist > adjusted_pawn_steps:
                  score += 800
 
@@ -933,7 +921,9 @@ def _evaluate_king_pawn_endgame(piece_bbs, theta):
             king_dist = CHEBYSHEV_DISTANCE[white_king_sq, promotion_sq]
             
             adjusted_pawn_steps = steps_to_promote
-            
+            if side_to_move == 1: # Black to move
+                adjusted_pawn_steps -= 1
+
             if king_dist > adjusted_pawn_steps:
                 score -= 800
 
@@ -962,17 +952,16 @@ def _evaluate_king_pawn_endgame(piece_bbs, theta):
 
 @numba.njit(numba.int32(piece_bbs_signature, occupancy_bbs_signature, game_state_signature, numba.float64[:]), cache=True, boundscheck=False, fastmath=True)
 def evaluate_position_tunable(piece_bbs, occupancy_bbs, game_state, theta):
+    side_to_move = game_state[0]
+
     # King Pawn Endgame
     all_pieces_except_pawns_and_kings = (
         piece_bbs[1] | piece_bbs[2] | piece_bbs[3] | piece_bbs[4] |
         piece_bbs[7] | piece_bbs[8] | piece_bbs[9] | piece_bbs[10]
     )
     if all_pieces_except_pawns_and_kings == 0:
-        # Note: passed side_to_move implicitly if needed, but current impl is simplified
-        score = _evaluate_king_pawn_endgame(piece_bbs, theta)
-        return score if game_state[0] == 0 else -score
-    
-    side_to_move = game_state[0]
+        score = _evaluate_king_pawn_endgame(piece_bbs, side_to_move, theta)
+        return score if side_to_move == 0 else -score
     
     # Phase
     phase = np.int32(0)
