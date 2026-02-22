@@ -7,7 +7,8 @@ import threading
 
 from chess_engine.evaluation import evaluate_position
 from chess_engine.move_generator import (
-    generate_legal_moves, is_in_check, has_sufficient_material, generate_captures
+    generate_legal_moves, is_in_check, has_sufficient_material, generate_captures,
+    generate_legal_moves_buffer, generate_captures_buffer
 )
 from chess_engine.zobrist import get_lsb_index
 from chess_engine.board_operations import make_move, unmake_move, make_null_move
@@ -107,7 +108,7 @@ def get_lmr_reduction(depth, move_count, history_score):
     return max(0, int(reduction))
 
 @numba.njit(cache=True, boundscheck=False, fastmath=True)
-def score_moves(piece_bbs, occupancy_bbs, game_state, moves, tt_move, killer_moves_at_ply, history_table, counter_move, scores_out):
+def score_moves(piece_bbs, occupancy_bbs, game_state, moves, scores, move_count, tt_move, killer_moves_at_ply, history_table, counter_move):
     side_to_move = game_state[0]
     opponent_pieces_bb = occupancy_bbs[1] if side_to_move == 0 else occupancy_bbs[0]
     
@@ -115,7 +116,7 @@ def score_moves(piece_bbs, occupancy_bbs, game_state, moves, tt_move, killer_mov
     pinned_white = get_pinned_pieces(piece_bbs, occupancy_bbs, WHITE)
     pinned_black = get_pinned_pieces(piece_bbs, occupancy_bbs, BLACK)
     
-    for i in range(len(moves)):
+    for i in range(move_count):
         move = moves[i]
         score = 0
         if move == tt_move:
@@ -152,7 +153,7 @@ def score_moves(piece_bbs, occupancy_bbs, game_state, moves, tt_move, killer_mov
                     aggressor_type = find_piece_type_on_square(piece_bbs, get_from_square(move))
                     score = history_table[aggressor_type, to_square]
 
-        scores_out[i] = score
+        scores[i] = score
 
 quiescence_search_return_type = numba.types.Tuple([
     numba.int32, numba.uint64, numba.uint64, numba.uint64
@@ -163,7 +164,7 @@ quiescence_search_return_type = numba.types.Tuple([
 #     numba.int32, numba.int32, numba.int32, search_context_type
 # ), cache=True)
 @numba.njit(cache=True)
-def quiescence_search(piece_bbs, occupancy_bbs, game_state, alpha, beta, ply, search_context):
+def quiescence_search(piece_bbs, occupancy_bbs, game_state, alpha, beta, ply, search_context, q_ply):
     q_nodes = np.uint64(1)
     search_context.nodes_searched += 1
 
@@ -183,21 +184,22 @@ def quiescence_search(piece_bbs, occupancy_bbs, game_state, alpha, beta, ply, se
                 search_context.stop_flag[0] = True
                 return np.int32(0), q_nodes, delta_pruned, see_pruned
 
+    if ply >= MAX_PLY:
+        return evaluate_position(piece_bbs, occupancy_bbs, game_state, lazy=False), q_nodes, delta_pruned, see_pruned
+
     is_currently_in_check = is_in_check(piece_bbs, occupancy_bbs, game_state)
 
+    move_count = 0
     if is_currently_in_check:
-        if ply >= MAX_PLY:
-            return evaluate_position(piece_bbs, occupancy_bbs, game_state, lazy=False), q_nodes, delta_pruned, see_pruned
-
         # If in check, we must evade. No stand_pat (can't stand pat in check).
         # We must generate ALL legal moves (evasions).
-        moves = generate_legal_moves(piece_bbs, occupancy_bbs, game_state)
-        if len(moves) == 0:
+        move_count = generate_legal_moves_buffer(piece_bbs, occupancy_bbs, game_state, search_context.moves_buffer, ply)
+        if move_count == 0:
             # Checkmate
             return np.int32(-MATE_SCORE + ply), q_nodes, delta_pruned, see_pruned
     else:
         # If not in check, we can stand pat (static evaluation)
-        if ply >= MAX_QUIESCENCE_DEPTH:
+        if q_ply >= MAX_QUIESCENCE_DEPTH:
             return evaluate_position(piece_bbs, occupancy_bbs, game_state, lazy=False), q_nodes, delta_pruned, see_pruned
 
         stand_pat = evaluate_position(piece_bbs, occupancy_bbs, game_state, lazy=False)
@@ -205,52 +207,44 @@ def quiescence_search(piece_bbs, occupancy_bbs, game_state, alpha, beta, ply, se
             return beta, q_nodes, delta_pruned, see_pruned
         alpha = max(alpha, stand_pat)
 
-        moves = generate_captures(piece_bbs, occupancy_bbs, game_state)
-        if len(moves) == 0:
+        move_count = generate_captures_buffer(piece_bbs, occupancy_bbs, game_state, search_context.moves_buffer, ply)
+        if move_count == 0:
             return stand_pat, q_nodes, delta_pruned, see_pruned
 
     # --- Sort moves in QSearch ---
-    # Use score_moves to sort captures (SEE >= 0 first).
-    # We pass NO_MOVE for counter_move and reuse killer_moves/history though they apply less to captures.
-    # We need to handle 'ply' bounds for killer_moves access if ply >= MAX_PLY (though QSearch usually called with valid ply).
-    # search_context.killer_moves is size MAX_PLY*2.
-    # QSearch can go beyond MAX_PLY if not careful, but we checked ply >= MAX_QUIESCENCE_DEPTH (5) 
-    # but actual ply can be larger if called from deep search.
-    # _search limits ply < MAX_PLY. So ply passed to quiescence_search from _search is < MAX_PLY.
-    # Recursive calls increment ply. We should check bounds or use dummy.
-    
+    moves = search_context.moves_buffer[ply]
+    scores = search_context.move_scores[ply]
+
     # Safe access to killers:
     safe_ply = min(ply, MAX_PLY - 1)
-    
-    # Use score_moves to sort. 
-    # Note: score_moves is heavy? For captures it calculates SEE.
-    # This is beneficial for Alpha-Beta pruning in QSearch.
-    # Allocation here (np.empty) is cheaper than np.zeros and safe for QSearch recursion.
-    scores = np.empty(len(moves), dtype=np.int32)
+
+    # Use score_moves to sort captures (SEE >= 0 first).
     score_moves(
-        piece_bbs, occupancy_bbs, game_state, moves, 
-        NO_MOVE, # No TT move in QSearch loop usually (unless we probed TT above)
+        piece_bbs, occupancy_bbs, game_state, 
+        moves, 
+        scores, 
+        move_count,
+        NO_MOVE, # No TT move in QSearch loop usually
         search_context.killer_moves[safe_ply*2:safe_ply*2+2], 
         search_context.history_table, 
-        NO_MOVE, # No counter move
-        scores
+        NO_MOVE # No counter move
     )
     
-    # Sort moves based on scores
-    for i in range(len(moves)):
-        best_idx = i
-        for j in range(i + 1, len(moves)):
-            if scores[j] > scores[best_idx]: best_idx = j
-        moves[i], moves[best_idx] = moves[best_idx], moves[i]
-        scores[i], scores[best_idx] = scores[best_idx], scores[i]
-        
     # Optimization: Calculate pinned pieces once for QS pruning logic
-    # Note: score_moves called above calculated them internally too.
-    # We need them here for the loop.
     pinned_white = get_pinned_pieces(piece_bbs, occupancy_bbs, WHITE)
     pinned_black = get_pinned_pieces(piece_bbs, occupancy_bbs, BLACK)
 
-    for i in range(len(moves)):
+    for i in range(move_count):
+        # Lazy Selection Sort: find the best remaining move
+        best_idx = i
+        for j in range(i + 1, move_count):
+            if scores[j] > scores[best_idx]:
+                best_idx = j
+        
+        # Swap moves and scores in the pre-allocated buffers
+        moves[i], moves[best_idx] = moves[best_idx], moves[i]
+        scores[i], scores[best_idx] = scores[best_idx], scores[i]
+
         move = moves[i]
         score_val = scores[i]
         
@@ -285,7 +279,7 @@ def quiescence_search(piece_bbs, occupancy_bbs, game_state, alpha, beta, ply, se
 
         unmake_info = make_move(piece_bbs, occupancy_bbs, game_state, move)
         score, child_q_nodes, child_delta_pruned, child_see_pruned = quiescence_search(
-            piece_bbs, occupancy_bbs, game_state, -beta, -alpha, ply + 1, search_context
+            piece_bbs, occupancy_bbs, game_state, -beta, -alpha, ply + 1, search_context, q_ply + 1
         )
         unmake_move(piece_bbs, occupancy_bbs, game_state, move, unmake_info)
 
@@ -386,8 +380,8 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
     original_alpha = alpha
     
     # --- Initialization ---
+    move_count = 0
     moves_generated = False
-    moves = np.empty(0, dtype=np.uint16)
 
     tt_move = NO_MOVE
     tt_entry = probe_tt(search_context.transposition_table, zobrist_key)
@@ -493,7 +487,7 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
     
     if depth == 0:
         search_context.pv_table[ply, :].fill(NO_MOVE)
-        eval_score, q_nodes, child_delta_pruned, child_see_pruned = quiescence_search(piece_bbs, occupancy_bbs, game_state, alpha, beta, 0, search_context)
+        eval_score, q_nodes, child_delta_pruned, child_see_pruned = quiescence_search(piece_bbs, occupancy_bbs, game_state, alpha, beta, ply, search_context, 0)
         qs_delta_pruned += child_delta_pruned
         qs_see_pruned += child_see_pruned
         return (eval_score, NO_MOVE, nodes_searched, q_nodes, cutoffs, tt_hits,
@@ -562,7 +556,7 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                     iid_searches, singular_extensions)
 
         if ENABLE_RAZORING and static_score + RAZORING_MARGIN < alpha:
-            razor_score, child_q_nodes, child_delta_pruned, child_see_pruned = quiescence_search(piece_bbs, occupancy_bbs, game_state, alpha, alpha + 1, 0, search_context)
+            razor_score, child_q_nodes, child_delta_pruned, child_see_pruned = quiescence_search(piece_bbs, occupancy_bbs, game_state, alpha, alpha + 1, ply, search_context, 0)
             quiescence_nodes += child_q_nodes
             qs_delta_pruned += child_delta_pruned
             qs_see_pruned += child_see_pruned
@@ -573,9 +567,9 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                         iid_searches, singular_extensions)
 
     if not moves_generated:
-        moves = generate_legal_moves(piece_bbs, occupancy_bbs, game_state)
+        move_count = generate_legal_moves_buffer(piece_bbs, occupancy_bbs, game_state, search_context.moves_buffer, ply)
 
-    if len(moves) == 0:
+    if move_count == 0:
         search_context.pv_table[ply, :].fill(NO_MOVE)
         if is_currently_in_check:
             return (np.int32(-MATE_SCORE + ply), NO_MOVE, nodes_searched, quiescence_nodes, cutoffs, tt_hits, null_move_cutoffs, futility_pruned, razoring_used, rfp_pruned, lmp_pruned, probcut_pruned, qs_delta_pruned, qs_see_pruned, iid_searches, singular_extensions)
@@ -592,31 +586,48 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
             prev_to = get_to_square(prev_move)
             counter_move = search_context.counter_moves[prev_from, prev_to]
 
-    # Use pre-allocated buffer for move scores to avoid allocation
+    moves = search_context.moves_buffer[ply]
     scores = search_context.move_scores[ply]
-    score_moves(piece_bbs, occupancy_bbs, game_state, moves, tt_move, search_context.killer_moves[ply*2:ply*2+2], search_context.history_table, counter_move, scores)
+
+    # Safe access to killers:
+    safe_ply = min(ply, MAX_PLY - 1)
+
+    score_moves(
+        piece_bbs, occupancy_bbs, game_state, 
+        moves, 
+        scores, 
+        move_count,
+        tt_move, 
+        search_context.killer_moves[safe_ply*2:safe_ply*2+2], 
+        search_context.history_table, 
+        counter_move
+    )
     
     best_move, max_eval = NO_MOVE, -INFINITY
-    quiet_move_counter, move_count = 0, 0
+    quiet_move_counter, searched_move_count = 0, 0
     
     # Track tried quiet moves for history malus
-    quiet_moves_tried = np.empty(len(moves), dtype=np.uint16)
+    quiet_moves_tried = search_context.quiet_moves_tried[ply]
     quiet_moves_tried_count = 0
     
     # Optimization: Calculate pinned pieces once for shallow pruning logic
     pinned_white = get_pinned_pieces(piece_bbs, occupancy_bbs, WHITE)
     pinned_black = get_pinned_pieces(piece_bbs, occupancy_bbs, BLACK)
 
-    for i in range(len(moves)):
+    for i in range(move_count):
+        # Lazy Selection Sort
         best_idx = i
-        for j in range(i + 1, len(moves)):
-            if scores[j] > scores[best_idx]: best_idx = j
+        for j in range(i + 1, move_count):
+            if scores[j] > scores[best_idx]:
+                best_idx = j
+        
+        # Swap moves and scores
         moves[i], moves[best_idx] = moves[best_idx], moves[i]
         scores[i], scores[best_idx] = scores[best_idx], scores[i]
-        
+
         move = moves[i]
         if move == excluded_move: continue
-        move_count += 1
+        searched_move_count += 1
         
         opponent_pieces_bb = occupancy_bbs[1] if game_state[0] == 0 else occupancy_bbs[0]
         
@@ -699,7 +710,7 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
         search_depth = depth - 1 + current_extension
 
         evaluation = 0
-        if move_count == 1:
+        if searched_move_count == 1:
             evaluation, _, child_nodes, child_q_nodes, child_cutoffs, child_tt_hits, child_nmc, child_fp, child_ru, child_rfp, child_lmp, child_pcp, child_qdp, child_qsp, child_iid, child_se = _search(
                 piece_bbs, occupancy_bbs, game_state, search_depth, -beta, -alpha, search_context, ply + 1, NO_MOVE)
             evaluation = -evaluation
@@ -711,7 +722,7 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                 aggressor_type = find_piece_type_on_square(piece_bbs, from_sq)
                 history_score = search_context.history_table[aggressor_type, to_sq]
 
-                lmr = get_lmr_reduction(depth, move_count, history_score)
+                lmr = get_lmr_reduction(depth, searched_move_count, history_score)
 
                 # Reduce LMR for moves that improve King Tropism (Logic kept from previous version)
                 side_to_move = game_state[0]
@@ -798,7 +809,12 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
     final_flag = TT_FLAG_ALPHA if max_eval <= original_alpha else (TT_FLAG_BETA if max_eval >= beta else TT_FLAG_EXACT)
     if max_eval == -INFINITY:
         max_eval = original_alpha
-    if best_move == NO_MOVE and len(moves) > 0: best_move = moves[0]
+    if best_move == NO_MOVE and move_count > 0:
+        # Fallback to first move that is not excluded
+        for i in range(move_count):
+            if moves[i] != excluded_move:
+                best_move = moves[i]
+                break
     
     tt_score = max_eval
     if tt_score > MATE_IN_MAX_PLY: tt_score += ply

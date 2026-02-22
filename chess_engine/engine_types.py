@@ -47,6 +47,8 @@ search_context_spec = [
     ('see_pruned_quiets', numba.uint64),
     ('history_pruned', numba.uint64),
     ('move_scores', numba.int32[:, :]),
+    ('moves_buffer', numba.uint16[:, :]),
+    ('quiet_moves_tried', numba.uint16[:, :]),
 ]
 
 @jitclass(search_context_spec)
@@ -105,6 +107,8 @@ class SearchContext:
         
         # Pre-allocated move scores buffer to avoid allocation in hot loop
         self.move_scores = np.zeros((MAX_PLY, 256), dtype=np.int32)
+        self.moves_buffer = np.zeros((MAX_PLY, 256), dtype=np.uint16)
+        self.quiet_moves_tried = np.zeros((MAX_PLY, 256), dtype=np.uint16)
 
         # Initialize new stats
         self.see_pruned_captures = np.uint64(0)
