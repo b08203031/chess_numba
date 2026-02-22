@@ -225,13 +225,12 @@ def is_square_attacked(piece_bbs, occupancy_bbs, game_state, sq, attacker_side):
         
     return False
 
-@numba.njit(numba.uint16[:](piece_bbs_signature, occupancy_bbs_signature, game_state_signature), cache=True, boundscheck=False, fastmath=True)
-def generate_legal_moves(piece_bbs, occupancy_bbs, game_state):
+@numba.njit(numba.uint16[:](piece_bbs_signature, occupancy_bbs_signature, game_state_signature, numba.uint16[:]), cache=True, boundscheck=False, fastmath=True)
+def generate_legal_moves_buffer(piece_bbs, occupancy_bbs, game_state, out):
     """
-    Generates all fully legal moves for the current position.
-    This version is refactored to use the new board state representation.
+    Generates all fully legal moves for the current position into the provided buffer.
     """
-    moves = np.zeros(256, dtype=np.uint16)
+    moves = out
     move_count = 0
     
     side_to_move, castling_rights, en_passant_square, _, _ = game_state
@@ -391,7 +390,6 @@ def generate_legal_moves(piece_bbs, occupancy_bbs, game_state):
             bb &= (bb - np.uint64(1))
     
     # --- Filter for legality ---
-    legal_moves_final = np.zeros(256, dtype=np.uint16)
     legal_move_count = 0
 
     king_bb = piece_bbs[5] if side_to_move == WHITE else piece_bbs[11]
@@ -410,13 +408,23 @@ def generate_legal_moves(piece_bbs, occupancy_bbs, game_state):
 
         # Check if the king is attacked by the new side to move (the opponent)
         if not is_square_attacked(piece_bbs, occupancy_bbs, game_state, king_sq, game_state[0]):
-            legal_moves_final[legal_move_count] = move
+            moves[legal_move_count] = move
             legal_move_count += 1
 
         # Unmake the move to restore the board state for the next iteration
         unmake_move(piece_bbs, occupancy_bbs, game_state, move, unmake_info)
                 
-    return legal_moves_final[:legal_move_count]
+    return moves[:legal_move_count]
+
+
+@numba.njit(numba.uint16[:](piece_bbs_signature, occupancy_bbs_signature, game_state_signature), cache=True, boundscheck=False, fastmath=True)
+def generate_legal_moves(piece_bbs, occupancy_bbs, game_state):
+    """
+    Wrapper for generate_legal_moves_buffer to maintain compatibility.
+    Allocates a new array.
+    """
+    moves = np.zeros(256, dtype=np.uint16)
+    return generate_legal_moves_buffer(piece_bbs, occupancy_bbs, game_state, moves)
 
 
 @numba.njit(nbt.uint16[:](piece_bbs_signature, occupancy_bbs_signature, game_state_signature), cache=True, boundscheck=False, fastmath=True)
@@ -614,13 +622,13 @@ def has_sufficient_material(piece_bbs, side_to_move):
         return (piece_bbs[9] | piece_bbs[10]) != 0
 
 
-@numba.njit(nbt.uint16[:](piece_bbs_signature, occupancy_bbs_signature, game_state_signature), cache=True, boundscheck=False, fastmath=True)
-def generate_captures(piece_bbs, occupancy_bbs, game_state):
+@numba.njit(nbt.uint16[:](piece_bbs_signature, occupancy_bbs_signature, game_state_signature, numba.uint16[:]), cache=True, boundscheck=False, fastmath=True)
+def generate_captures_buffer(piece_bbs, occupancy_bbs, game_state, out):
     """
-    Generates all fully legal capture and promotion moves for the current position.
+    Generates all fully legal capture and promotion moves for the current position into the provided buffer.
     This is used in quiescence search.
     """
-    moves = np.zeros(128, dtype=np.uint16)
+    moves = out
     move_count = 0
 
     side_to_move, _, en_passant_square, _, _ = game_state
@@ -784,7 +792,6 @@ def generate_captures(piece_bbs, occupancy_bbs, game_state):
             bb &= (bb - np.uint64(1))
 
     # --- Filter for legality ---
-    legal_moves_final = np.zeros(128, dtype=np.uint16)
     legal_move_count = 0
 
     king_bb = piece_bbs[5] if side_to_move == WHITE else piece_bbs[11]
@@ -799,9 +806,17 @@ def generate_captures(piece_bbs, occupancy_bbs, game_state):
         king_sq = get_lsb_index(king_bb_after_move) if king_bb_after_move else original_king_sq
 
         if not is_square_attacked(piece_bbs, occupancy_bbs, game_state, king_sq, game_state[0]):
-            legal_moves_final[legal_move_count] = move
+            moves[legal_move_count] = move
             legal_move_count += 1
 
         unmake_move(piece_bbs, occupancy_bbs, game_state, move, unmake_info)
 
-    return legal_moves_final[:legal_move_count]
+    return moves[:legal_move_count]
+
+@numba.njit(nbt.uint16[:](piece_bbs_signature, occupancy_bbs_signature, game_state_signature), cache=True, boundscheck=False, fastmath=True)
+def generate_captures(piece_bbs, occupancy_bbs, game_state):
+    """
+    Wrapper for generate_captures_buffer.
+    """
+    moves = np.zeros(128, dtype=np.uint16)
+    return generate_captures_buffer(piece_bbs, occupancy_bbs, game_state, moves)

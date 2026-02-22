@@ -22,7 +22,10 @@ def get_lsb_index(bitboard):
     """Returns the index (0-63) of the least significant bit set."""
     if bitboard == 0:
         return -1
-    return DE_BRUIJN_INDEX[((bitboard ^ (bitboard - 1)) * DE_BRUIJN_SEQUENCE) >> np.uint64(58)]
+    # Use LSB isolation: bitboard & -bitboard
+    # For uint64, -bitboard is (~bitboard + 1)
+    lsb = bitboard & (~bitboard + np.uint64(1))
+    return DE_BRUIJN_INDEX[(lsb * DE_BRUIJN_SEQUENCE) >> np.uint64(58)]
 
 # Basic Attack Tables (Initialize once if possible, or use logic)
 # Numba caches function compilation, so we can embed logic.
