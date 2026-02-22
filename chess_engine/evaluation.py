@@ -118,88 +118,6 @@ def _create_passed_pawn_masks():
 WHITE_PASSED_PAWN_MASKS, BLACK_PASSED_PAWN_MASKS = _create_passed_pawn_masks()
 
 
-@numba.njit(numba.types.UniTuple(numba.uint64, 4)(piece_bbs_signature, numba.uint64), cache=True, boundscheck=False, fastmath=True)
-def _compute_all_attacks(piece_bbs, all_pieces_occupancy):
-    """
-    Computes the combined attack bitboards for White and Black pieces.
-    Returns: (white_attacks_bb, black_attacks_bb, white_pawn_attacks, black_pawn_attacks)
-    """
-    (wp_bb, wn_bb, wb_bb, wr_bb, wq_bb, wk_bb,
-     bp_bb, bn_bb, bb_bb, br_bb, bq_bb, bk_bb) = piece_bbs
-
-    # --- White Attacks ---
-    white_attacks = np.uint64(0)
-
-    # Pawns (using precomputed PAWN_ATTACKS reverse lookup, we need forward here?)
-    # Wait, PAWN_ATTACKS in move_generator was derived from:
-    # PAWN_ATTACKS[WHITE, sq] = ((bb_sq & NOT_A_FILE) >> 9) | ((bb_sq & NOT_H_FILE) >> 7)
-    # This is "Attacks From SQ" if bb_sq is the pawn.
-    # So we can iterate white pawns.
-    # Optimization: Use bulk operations if possible, but numba loop is fine.
-    # Bulk pawn attacks:
-    # White captures: (wp_bb & NOT_A_FILE) << 7 | (wp_bb & NOT_H_FILE) << 9
-    white_pawn_attacks = ((wp_bb & NOT_A_FILE) << np.uint64(7)) | ((wp_bb & NOT_H_FILE) << np.uint64(9))
-    white_attacks |= white_pawn_attacks
-
-    # Knights
-    temp_bb = wn_bb
-    while temp_bb:
-        sq = get_lsb_index(temp_bb)
-        white_attacks |= KNIGHT_ATTACKS[sq]
-        temp_bb &= temp_bb - np.uint64(1)
-
-    # Bishops & Queens (Diagonal)
-    temp_bb = wb_bb | wq_bb
-    while temp_bb:
-        sq = get_lsb_index(temp_bb)
-        white_attacks |= get_bishop_attacks(sq, all_pieces_occupancy)
-        temp_bb &= temp_bb - np.uint64(1)
-
-    # Rooks & Queens (Orthogonal)
-    temp_bb = wr_bb | wq_bb
-    while temp_bb:
-        sq = get_lsb_index(temp_bb)
-        white_attacks |= get_rook_attacks(sq, all_pieces_occupancy)
-        temp_bb &= temp_bb - np.uint64(1)
-
-    # King
-    if wk_bb:
-        white_attacks |= KING_ATTACKS[get_lsb_index(wk_bb)]
-
-    # --- Black Attacks ---
-    black_attacks = np.uint64(0)
-
-    # Pawns
-    # Black captures: (bp_bb & NOT_H_FILE) >> 7 | (bp_bb & NOT_A_FILE) >> 9
-    black_pawn_attacks = ((bp_bb & NOT_H_FILE) >> np.uint64(7)) | ((bp_bb & NOT_A_FILE) >> np.uint64(9))
-    black_attacks |= black_pawn_attacks
-
-    # Knights
-    temp_bb = bn_bb
-    while temp_bb:
-        sq = get_lsb_index(temp_bb)
-        black_attacks |= KNIGHT_ATTACKS[sq]
-        temp_bb &= temp_bb - np.uint64(1)
-
-    # Bishops & Queens
-    temp_bb = bb_bb | bq_bb
-    while temp_bb:
-        sq = get_lsb_index(temp_bb)
-        black_attacks |= get_bishop_attacks(sq, all_pieces_occupancy)
-        temp_bb &= temp_bb - np.uint64(1)
-
-    # Rooks & Queens
-    temp_bb = br_bb | bq_bb
-    while temp_bb:
-        sq = get_lsb_index(temp_bb)
-        black_attacks |= get_rook_attacks(sq, all_pieces_occupancy)
-        temp_bb &= temp_bb - np.uint64(1)
-
-    # King
-    if bk_bb:
-        black_attacks |= KING_ATTACKS[get_lsb_index(bk_bb)]
-
-    return white_attacks, black_attacks, white_pawn_attacks, black_pawn_attacks
 
 
 @numba.njit(numba.types.UniTuple(numba.int32, 2)(piece_bbs_signature), cache=True, boundscheck=False, fastmath=True)
@@ -754,118 +672,6 @@ def evaluate_king_safety(piece_bbs, occupancy_bbs, white_attacks, black_attacks)
     return mg_safety_score, eg_safety_score
 
 
-@numba.njit(numba.types.UniTuple(numba.int32, 2)(piece_bbs_signature, occupancy_bbs_signature, numba.uint64, numba.uint64), cache=True, boundscheck=False, fastmath=True)
-def evaluate_mobility(piece_bbs, occupancy_bbs, white_pawn_attacks, black_pawn_attacks):
-    """
-    評估雙方棋子的機動性。
-    實作「安全機動性 (Safe Mobility)」：排除被敵方兵攻擊的格子以及被己方王/后阻擋的格子。
-    
-    Args:
-        piece_bbs (np.ndarray): 12 個棋子的位元棋盤。
-        occupancy_bbs (np.ndarray): 佔用位元棋盤。
-        white_pawn_attacks (np.uint64): 白方兵攻擊的格子。
-        black_pawn_attacks (np.uint64): 黑方兵攻擊的格子。
-        
-    Returns:
-        tuple: (mg_score, eg_score) 從白方視角。
-    """
-    mg_score = np.int32(0)
-    eg_score = np.int32(0)
-
-    white_occupancy = occupancy_bbs[0]
-    black_occupancy = occupancy_bbs[1]
-    all_pieces_occupancy = occupancy_bbs[2]
-
-    # --- 1. Compute Pawn Attacks (Forbidden Zones) ---
-    # (Passed from caller)
-
-    # --- 2. Define Mobility Area (Safe Squares) ---
-    # Safe squares are those NOT occupied by own King/Queen and NOT attacked by enemy pawns.
-    # Note: ~own_occupancy is applied during move generation, but we add King/Queen to forbidden
-    # to explicitly exclude them from the mobility area definition if they weren't already blocked.
-
-    white_forbidden = black_pawn_attacks | piece_bbs[5] | piece_bbs[4]
-    black_forbidden = white_pawn_attacks | piece_bbs[11] | piece_bbs[10]
-
-    white_safe_mask = ~white_forbidden
-    black_safe_mask = ~black_forbidden
-
-    # --- White Mobility / 白方機動性 ---
-    # Knights
-    temp_bb = piece_bbs[1]
-    while temp_bb:
-        sq = get_lsb_index(temp_bb)
-        moves = count_bits(KNIGHT_ATTACKS[sq] & ~white_occupancy & white_safe_mask)
-        mg_score += (moves - KNIGHT_MOBILITY_BASE_MOVES) * KNIGHT_MOBILITY_WEIGHT[0]
-        eg_score += (moves - KNIGHT_MOBILITY_BASE_MOVES) * KNIGHT_MOBILITY_WEIGHT[1]
-        temp_bb &= temp_bb - np.uint64(1)
-
-    # Bishops
-    temp_bb = piece_bbs[2]
-    while temp_bb:
-        sq = get_lsb_index(temp_bb)
-        moves = count_bits(get_bishop_attacks(sq, all_pieces_occupancy) & ~white_occupancy & white_safe_mask)
-        mg_score += (moves - BISHOP_MOBILITY_BASE_MOVES) * BISHOP_MOBILITY_WEIGHT[0]
-        eg_score += (moves - BISHOP_MOBILITY_BASE_MOVES) * BISHOP_MOBILITY_WEIGHT[1]
-        temp_bb &= temp_bb - np.uint64(1)
-
-    # Rooks
-    temp_bb = piece_bbs[3]
-    while temp_bb:
-        sq = get_lsb_index(temp_bb)
-        moves = count_bits(get_rook_attacks(sq, all_pieces_occupancy) & ~white_occupancy & white_safe_mask)
-        mg_score += (moves - ROOK_MOBILITY_BASE_MOVES) * ROOK_MOBILITY_WEIGHT[0]
-        eg_score += (moves - ROOK_MOBILITY_BASE_MOVES) * ROOK_MOBILITY_WEIGHT[1]
-        temp_bb &= temp_bb - np.uint64(1)
-
-    # Queens
-    temp_bb = piece_bbs[4]
-    while temp_bb:
-        sq = get_lsb_index(temp_bb)
-        moves = count_bits(get_queen_attacks(sq, all_pieces_occupancy) & ~white_occupancy & white_safe_mask)
-        mg_score += (moves - QUEEN_MOBILITY_BASE_MOVES) * QUEEN_MOBILITY_WEIGHT[0]
-        eg_score += (moves - QUEEN_MOBILITY_BASE_MOVES) * QUEEN_MOBILITY_WEIGHT[1]
-        temp_bb &= temp_bb - np.uint64(1)
-
-
-    # --- Black Mobility / 黑方機動性 ---
-    # Knights
-    temp_bb = piece_bbs[7]
-    while temp_bb:
-        sq = get_lsb_index(temp_bb)
-        moves = count_bits(KNIGHT_ATTACKS[sq] & ~black_occupancy & black_safe_mask)
-        mg_score -= (moves - KNIGHT_MOBILITY_BASE_MOVES) * KNIGHT_MOBILITY_WEIGHT[0]
-        eg_score -= (moves - KNIGHT_MOBILITY_BASE_MOVES) * KNIGHT_MOBILITY_WEIGHT[1]
-        temp_bb &= temp_bb - np.uint64(1)
-
-    # Bishops
-    temp_bb = piece_bbs[8]
-    while temp_bb:
-        sq = get_lsb_index(temp_bb)
-        moves = count_bits(get_bishop_attacks(sq, all_pieces_occupancy) & ~black_occupancy & black_safe_mask)
-        mg_score -= (moves - BISHOP_MOBILITY_BASE_MOVES) * BISHOP_MOBILITY_WEIGHT[0]
-        eg_score -= (moves - BISHOP_MOBILITY_BASE_MOVES) * BISHOP_MOBILITY_WEIGHT[1]
-        temp_bb &= temp_bb - np.uint64(1)
-
-    # Rooks
-    temp_bb = piece_bbs[9]
-    while temp_bb:
-        sq = get_lsb_index(temp_bb)
-        moves = count_bits(get_rook_attacks(sq, all_pieces_occupancy) & ~black_occupancy & black_safe_mask)
-        mg_score -= (moves - ROOK_MOBILITY_BASE_MOVES) * ROOK_MOBILITY_WEIGHT[0]
-        eg_score -= (moves - ROOK_MOBILITY_BASE_MOVES) * ROOK_MOBILITY_WEIGHT[1]
-        temp_bb &= temp_bb - np.uint64(1)
-
-    # Queens
-    temp_bb = piece_bbs[10]
-    while temp_bb:
-        sq = get_lsb_index(temp_bb)
-        moves = count_bits(get_queen_attacks(sq, all_pieces_occupancy) & ~black_occupancy & black_safe_mask)
-        mg_score -= (moves - QUEEN_MOBILITY_BASE_MOVES) * QUEEN_MOBILITY_WEIGHT[0]
-        eg_score -= (moves - QUEEN_MOBILITY_BASE_MOVES) * QUEEN_MOBILITY_WEIGHT[1]
-        temp_bb &= temp_bb - np.uint64(1)
-
-    return mg_score, eg_score
 
 @numba.njit(numba.types.UniTuple(numba.int32, 2)(piece_bbs_signature, occupancy_bbs_signature, numba.uint64, numba.uint64), cache=True, boundscheck=False, fastmath=True)
 def evaluate_outposts(piece_bbs, occupancy_bbs, white_pawn_attacks, black_pawn_attacks):
@@ -997,162 +803,197 @@ def evaluate_outposts(piece_bbs, occupancy_bbs, white_pawn_attacks, black_pawn_a
 
     return mg_score, eg_score
 
-@numba.njit(numba.types.UniTuple(numba.int32, 2)(piece_bbs_signature, occupancy_bbs_signature, numba.uint64, numba.uint64, numba.uint64, numba.uint64), cache=True, boundscheck=False, fastmath=True)
-def evaluate_threats(piece_bbs, occupancy_bbs, white_attacks, black_attacks, white_pawn_attacks, black_pawn_attacks):
-    """
-    評估局面的威脅（Threats）。
-    包括：安全兵威脅、以小博大（輕子攻重子）、車捉后、懸掛子。
 
-    Args:
-        piece_bbs: 棋子位元棋盤。
-        occupancy_bbs: 佔用位元棋盤。
-        white_attacks: 白方所有棋子的攻擊位元板。
-        black_attacks: 黑方所有棋子的攻擊位元板。
-        white_pawn_attacks: 白方兵攻擊的格子。
-        black_pawn_attacks: 黑方兵攻擊的格子。
 
-    Returns:
-        (mg_score, eg_score): 威脅評估分數（從白方視角）。
-    """
-    mg_score = np.int32(0)
-    eg_score = np.int32(0)
+@numba.njit(numba.types.Tuple((numba.uint64, numba.uint64, numba.uint64, numba.uint64, numba.int32, numba.int32, numba.int32, numba.int32))(piece_bbs_signature, occupancy_bbs_signature), cache=True, boundscheck=False, fastmath=True)
+def evaluate_attacks_mobility_threats(piece_bbs, occupancy_bbs):
+    (wp_bb, wn_bb, wb_bb, wr_bb, wq_bb, wk_bb,
+     bp_bb, bn_bb, bb_bb, br_bb, bq_bb, bk_bb) = piece_bbs
 
-    (wp_bb, wn_bb, wb_bb, wr_bb, wq_bb, _,
-     bp_bb, bn_bb, bb_bb, br_bb, bq_bb, _) = piece_bbs
-
+    white_occupancy = occupancy_bbs[0]
+    black_occupancy = occupancy_bbs[1]
     all_occupancy = occupancy_bbs[2]
 
-    # --- 1. Threats by Safe Pawns / 安全兵威脅 ---
-    # Safe Pawn: A pawn that attacks an enemy piece (N, B, R, Q).
-    # We implicitly assume attacking pawns are "safe" or the trade is good.
-    # Note: We do NOT count pawn attacking pawn here (that's structure/capture).
+    # --- Pawn Attacks ---
+    white_pawn_attacks = ((wp_bb & NOT_A_FILE) << np.uint64(7)) | ((wp_bb & NOT_H_FILE) << np.uint64(9))
+    black_pawn_attacks = ((bp_bb & NOT_H_FILE) >> np.uint64(7)) | ((bp_bb & NOT_A_FILE) >> np.uint64(9))
 
+    white_attacks = white_pawn_attacks
+    black_attacks = black_pawn_attacks
+
+    # --- Safe Masks for Mobility ---
+    white_safe_mask = ~(black_pawn_attacks | wk_bb | wq_bb)
+    black_safe_mask = ~(white_pawn_attacks | bk_bb | bq_bb)
+
+    # --- Accumulators ---
+    mg_mobility = np.int32(0)
+    eg_mobility = np.int32(0)
+    
+    white_minor_attacks = np.uint64(0)
+    white_rook_attacks = np.uint64(0)
+    
+    black_minor_attacks = np.uint64(0)
+    black_rook_attacks = np.uint64(0)
+
+    # --- White Pieces ---
+    temp_bb = wn_bb
+    while temp_bb:
+        sq = get_lsb_index(temp_bb)
+        att = KNIGHT_ATTACKS[sq]
+        white_attacks |= att
+        white_minor_attacks |= att
+        moves = count_bits(att & ~white_occupancy & white_safe_mask)
+        mg_mobility += (moves - KNIGHT_MOBILITY_BASE_MOVES) * KNIGHT_MOBILITY_WEIGHT[0]
+        eg_mobility += (moves - KNIGHT_MOBILITY_BASE_MOVES) * KNIGHT_MOBILITY_WEIGHT[1]
+        temp_bb &= temp_bb - np.uint64(1)
+
+    temp_bb = wb_bb
+    while temp_bb:
+        sq = get_lsb_index(temp_bb)
+        att = get_bishop_attacks(sq, all_occupancy)
+        white_attacks |= att
+        white_minor_attacks |= att
+        moves = count_bits(att & ~white_occupancy & white_safe_mask)
+        mg_mobility += (moves - BISHOP_MOBILITY_BASE_MOVES) * BISHOP_MOBILITY_WEIGHT[0]
+        eg_mobility += (moves - BISHOP_MOBILITY_BASE_MOVES) * BISHOP_MOBILITY_WEIGHT[1]
+        temp_bb &= temp_bb - np.uint64(1)
+
+    temp_bb = wr_bb
+    while temp_bb:
+        sq = get_lsb_index(temp_bb)
+        att = get_rook_attacks(sq, all_occupancy)
+        white_attacks |= att
+        white_rook_attacks |= att
+        moves = count_bits(att & ~white_occupancy & white_safe_mask)
+        mg_mobility += (moves - ROOK_MOBILITY_BASE_MOVES) * ROOK_MOBILITY_WEIGHT[0]
+        eg_mobility += (moves - ROOK_MOBILITY_BASE_MOVES) * ROOK_MOBILITY_WEIGHT[1]
+        temp_bb &= temp_bb - np.uint64(1)
+
+    temp_bb = wq_bb
+    while temp_bb:
+        sq = get_lsb_index(temp_bb)
+        att = get_queen_attacks(sq, all_occupancy)
+        white_attacks |= att
+        moves = count_bits(att & ~white_occupancy & white_safe_mask)
+        mg_mobility += (moves - QUEEN_MOBILITY_BASE_MOVES) * QUEEN_MOBILITY_WEIGHT[0]
+        eg_mobility += (moves - QUEEN_MOBILITY_BASE_MOVES) * QUEEN_MOBILITY_WEIGHT[1]
+        temp_bb &= temp_bb - np.uint64(1)
+
+    if wk_bb:
+        white_attacks |= KING_ATTACKS[get_lsb_index(wk_bb)]
+
+
+    # --- Black Pieces ---
+    temp_bb = bn_bb
+    while temp_bb:
+        sq = get_lsb_index(temp_bb)
+        att = KNIGHT_ATTACKS[sq]
+        black_attacks |= att
+        black_minor_attacks |= att
+        moves = count_bits(att & ~black_occupancy & black_safe_mask)
+        mg_mobility -= (moves - KNIGHT_MOBILITY_BASE_MOVES) * KNIGHT_MOBILITY_WEIGHT[0]
+        eg_mobility -= (moves - KNIGHT_MOBILITY_BASE_MOVES) * KNIGHT_MOBILITY_WEIGHT[1]
+        temp_bb &= temp_bb - np.uint64(1)
+
+    temp_bb = bb_bb
+    while temp_bb:
+        sq = get_lsb_index(temp_bb)
+        att = get_bishop_attacks(sq, all_occupancy)
+        black_attacks |= att
+        black_minor_attacks |= att
+        moves = count_bits(att & ~black_occupancy & black_safe_mask)
+        mg_mobility -= (moves - BISHOP_MOBILITY_BASE_MOVES) * BISHOP_MOBILITY_WEIGHT[0]
+        eg_mobility -= (moves - BISHOP_MOBILITY_BASE_MOVES) * BISHOP_MOBILITY_WEIGHT[1]
+        temp_bb &= temp_bb - np.uint64(1)
+
+    temp_bb = br_bb
+    while temp_bb:
+        sq = get_lsb_index(temp_bb)
+        att = get_rook_attacks(sq, all_occupancy)
+        black_attacks |= att
+        black_rook_attacks |= att
+        moves = count_bits(att & ~black_occupancy & black_safe_mask)
+        mg_mobility -= (moves - ROOK_MOBILITY_BASE_MOVES) * ROOK_MOBILITY_WEIGHT[0]
+        eg_mobility -= (moves - ROOK_MOBILITY_BASE_MOVES) * ROOK_MOBILITY_WEIGHT[1]
+        temp_bb &= temp_bb - np.uint64(1)
+
+    temp_bb = bq_bb
+    while temp_bb:
+        sq = get_lsb_index(temp_bb)
+        att = get_queen_attacks(sq, all_occupancy)
+        black_attacks |= att
+        moves = count_bits(att & ~black_occupancy & black_safe_mask)
+        mg_mobility -= (moves - QUEEN_MOBILITY_BASE_MOVES) * QUEEN_MOBILITY_WEIGHT[0]
+        eg_mobility -= (moves - QUEEN_MOBILITY_BASE_MOVES) * QUEEN_MOBILITY_WEIGHT[1]
+        temp_bb &= temp_bb - np.uint64(1)
+
+    if bk_bb:
+        black_attacks |= KING_ATTACKS[get_lsb_index(bk_bb)]
+
+
+    # --- Threats Evaluation ---
+    mg_threats = np.int32(0)
+    eg_threats = np.int32(0)
+
+    # 1. Safe Pawn Threats
     black_non_pawns = bn_bb | bb_bb | br_bb | bq_bb
     white_non_pawns = wn_bb | wb_bb | wr_bb | wq_bb
 
     white_safe_pawn_threats = white_pawn_attacks & black_non_pawns
     if white_safe_pawn_threats:
         count = count_bits(white_safe_pawn_threats)
-        mg_score += THREAT_SAFE_PAWN[0] * count
-        eg_score += THREAT_SAFE_PAWN[1] * count
+        mg_threats += THREAT_SAFE_PAWN[0] * count
+        eg_threats += THREAT_SAFE_PAWN[1] * count
 
     black_safe_pawn_threats = black_pawn_attacks & white_non_pawns
     if black_safe_pawn_threats:
         count = count_bits(black_safe_pawn_threats)
-        mg_score -= THREAT_SAFE_PAWN[0] * count
-        eg_score -= THREAT_SAFE_PAWN[1] * count
+        mg_threats -= THREAT_SAFE_PAWN[0] * count
+        eg_threats -= THREAT_SAFE_PAWN[1] * count
 
-    # --- 2. Hanging Pieces / 懸掛子 ---
-    # Hanging: Enemy piece is attacked by us AND NOT defended by enemy.
-    # Defended: Covered by enemy attacks.
-    # Note: white_attacks includes attacks by all white pieces.
-    # black_attacks includes attacks by all black pieces.
-
-    # White attacking Black Hanging pieces
-    # Targets: Black pieces attacked by White AND NOT in Black Attacks
-    black_hanging = (piece_bbs[1] | piece_bbs[2] | piece_bbs[3] | piece_bbs[4] | piece_bbs[6] | piece_bbs[7] | piece_bbs[8] | piece_bbs[9] | piece_bbs[10]) # All black pieces except King (indices 6-10 are Bp, Bn, Bb, Br, Bq) -> Wait, indices are:
-    # 0-5 White (P,N,B,R,Q,K), 6-11 Black (P,N,B,R,Q,K).
-    # piece_bbs[1] is White Knight?? No.
-    # Black pieces are 6,7,8,9,10.
-    all_black_pieces = bp_bb | bn_bb | bb_bb | br_bb | bq_bb
+    # 2. Hanging Pieces
+    all_black_pieces = black_non_pawns | bp_bb
     black_hanging_mask = (all_black_pieces & white_attacks) & ~black_attacks
-
     if black_hanging_mask:
         count = count_bits(black_hanging_mask)
-        mg_score += THREAT_HANGING[0] * count
-        eg_score += THREAT_HANGING[1] * count
+        mg_threats += THREAT_HANGING[0] * count
+        eg_threats += THREAT_HANGING[1] * count
 
-    # Black attacking White Hanging pieces
-    all_white_pieces = wp_bb | wn_bb | wb_bb | wr_bb | wq_bb
+    all_white_pieces = white_non_pawns | wp_bb
     white_hanging_mask = (all_white_pieces & black_attacks) & ~white_attacks
-
     if white_hanging_mask:
         count = count_bits(white_hanging_mask)
-        mg_score -= THREAT_HANGING[0] * count
-        eg_score -= THREAT_HANGING[1] * count
+        mg_threats -= THREAT_HANGING[0] * count
+        eg_threats -= THREAT_HANGING[1] * count
 
-    # --- 3. Minor Attacking Major / 輕子攻擊重子 ---
-    # White Minor (N, B) attacking Black Major (R, Q)
-    # We need to compute attacks specifically from Minors.
-
-    # White Knights
-    temp_bb = wn_bb
-    white_knight_attacks = np.uint64(0)
-    while temp_bb:
-        sq = get_lsb_index(temp_bb)
-        white_knight_attacks |= KNIGHT_ATTACKS[sq]
-        temp_bb &= temp_bb - np.uint64(1)
-
-    # White Bishops
-    temp_bb = wb_bb
-    white_bishop_attacks = np.uint64(0)
-    while temp_bb:
-        sq = get_lsb_index(temp_bb)
-        white_bishop_attacks |= get_bishop_attacks(sq, all_occupancy)
-        temp_bb &= temp_bb - np.uint64(1)
-
-    white_minor_attacks = white_knight_attacks | white_bishop_attacks
+    # 3. Minor Attacking Major
     black_majors = br_bb | bq_bb
+    threats_w = white_minor_attacks & black_majors
+    if threats_w:
+        count = count_bits(threats_w)
+        mg_threats += THREAT_MINOR_ON_MAJOR[0] * count
+        eg_threats += THREAT_MINOR_ON_MAJOR[1] * count
 
-    threats = white_minor_attacks & black_majors
-    if threats:
-        count = count_bits(threats)
-        mg_score += THREAT_MINOR_ON_MAJOR[0] * count
-        eg_score += THREAT_MINOR_ON_MAJOR[1] * count
-
-    # Black Minor (N, B) attacking White Major (R, Q)
-    temp_bb = bn_bb
-    black_knight_attacks = np.uint64(0)
-    while temp_bb:
-        sq = get_lsb_index(temp_bb)
-        black_knight_attacks |= KNIGHT_ATTACKS[sq]
-        temp_bb &= temp_bb - np.uint64(1)
-
-    temp_bb = bb_bb
-    black_bishop_attacks = np.uint64(0)
-    while temp_bb:
-        sq = get_lsb_index(temp_bb)
-        black_bishop_attacks |= get_bishop_attacks(sq, all_occupancy)
-        temp_bb &= temp_bb - np.uint64(1)
-
-    black_minor_attacks = black_knight_attacks | black_bishop_attacks
     white_majors = wr_bb | wq_bb
+    threats_b = black_minor_attacks & white_majors
+    if threats_b:
+        count = count_bits(threats_b)
+        mg_threats -= THREAT_MINOR_ON_MAJOR[0] * count
+        eg_threats -= THREAT_MINOR_ON_MAJOR[1] * count
 
-    threats = black_minor_attacks & white_majors
-    if threats:
-        count = count_bits(threats)
-        mg_score -= THREAT_MINOR_ON_MAJOR[0] * count
-        eg_score -= THREAT_MINOR_ON_MAJOR[1] * count
-
-    # --- 4. Rook Attacking Queen / 車捉后 ---
-
-    # White Rook attacking Black Queen
-    temp_bb = wr_bb
-    white_rook_attacks = np.uint64(0)
-    while temp_bb:
-        sq = get_lsb_index(temp_bb)
-        white_rook_attacks |= get_rook_attacks(sq, all_occupancy)
-        temp_bb &= temp_bb - np.uint64(1)
-
+    # 4. Rook Attacking Queen
     if white_rook_attacks & bq_bb:
         count = count_bits(white_rook_attacks & bq_bb)
-        mg_score += THREAT_ROOK_ON_QUEEN[0] * count
-        eg_score += THREAT_ROOK_ON_QUEEN[1] * count
-
-    # Black Rook attacking White Queen
-    temp_bb = br_bb
-    black_rook_attacks = np.uint64(0)
-    while temp_bb:
-        sq = get_lsb_index(temp_bb)
-        black_rook_attacks |= get_rook_attacks(sq, all_occupancy)
-        temp_bb &= temp_bb - np.uint64(1)
+        mg_threats += THREAT_ROOK_ON_QUEEN[0] * count
+        eg_threats += THREAT_ROOK_ON_QUEEN[1] * count
 
     if black_rook_attacks & wq_bb:
         count = count_bits(black_rook_attacks & wq_bb)
-        mg_score -= THREAT_ROOK_ON_QUEEN[0] * count
-        eg_score -= THREAT_ROOK_ON_QUEEN[1] * count
+        mg_threats -= THREAT_ROOK_ON_QUEEN[0] * count
+        eg_threats -= THREAT_ROOK_ON_QUEEN[1] * count
 
-    return mg_score, eg_score
+    return (white_attacks, black_attacks, white_pawn_attacks, black_pawn_attacks, 
+            mg_mobility, eg_mobility, mg_threats, eg_threats)
 
 
 @numba.njit(numba.int32(piece_bbs_signature, numba.uint64), cache=True, boundscheck=False, fastmath=True)
@@ -1318,8 +1159,9 @@ def evaluate_position(piece_bbs, occupancy_bbs, game_state, lazy: bool = False):
         final_score = (mg_score * phase + eg_score * (MAX_PHASE - phase)) // MAX_PHASE
         return np.int32(final_score) if side_to_move == 0 else np.int32(-final_score)
 
-    # --- Compute Full Attack Bitboards (Optimization for King Safety) ---
-    white_attacks, black_attacks, white_pawn_attacks, black_pawn_attacks = _compute_all_attacks(piece_bbs, occupancy_bbs[2])
+    # --- Compute Attacks, Mobility, Threats (Optimized Single Pass) ---
+    (white_attacks, black_attacks, white_pawn_attacks, black_pawn_attacks,
+     mg_mobility, eg_mobility, mg_threats, eg_threats) = evaluate_attacks_mobility_threats(piece_bbs, occupancy_bbs)
 
     # --- 3. (Full Evaluation) 加入國王安全分數 ---
     mg_king_safety, eg_king_safety = evaluate_king_safety(piece_bbs, occupancy_bbs, white_attacks, black_attacks)
@@ -1337,8 +1179,6 @@ def evaluate_position(piece_bbs, occupancy_bbs, game_state, lazy: bool = False):
     eg_score += eg_coord
 
     # --- 6. 加入棋子機動性分數 ---
-    # Re-enabled with Safe Mobility logic
-    mg_mobility, eg_mobility = evaluate_mobility(piece_bbs, occupancy_bbs, white_pawn_attacks, black_pawn_attacks)
     mg_score += mg_mobility
     eg_score += eg_mobility
 
@@ -1348,7 +1188,6 @@ def evaluate_position(piece_bbs, occupancy_bbs, game_state, lazy: bool = False):
     eg_score += eg_outpost
 
     # --- 8. Join Threat Evaluation / 加入威脅評估 ---
-    mg_threats, eg_threats = evaluate_threats(piece_bbs, occupancy_bbs, white_attacks, black_attacks, white_pawn_attacks, black_pawn_attacks)
     mg_score += mg_threats
     eg_score += eg_threats
 

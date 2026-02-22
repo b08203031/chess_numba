@@ -1,6 +1,8 @@
 # chess_engine/zobrist.py
 import numpy as np
 import numba
+from numba.extending import intrinsic
+from numba import types
 from chess_engine.engine_types import piece_bbs_signature, game_state_signature
 
 WHITE = 0
@@ -53,27 +55,27 @@ CASTLING_RIGHTS_KEYS = np.array([
 是一個長度為 16 的一維陣列（對應 4 個位元的組合）。
 """
 
-from chess_engine.constants import DE_BRUIJN_INDEX, DE_BRUIJN_SEQUENCE
+# New implementation using intrinsic
+@intrinsic
+def count_trailing_zeros(typingctx, val):
+    def codegen(context, builder, signature, args):
+        val_arg = args[0]
+        # llvm.cttz.i64(i64 <src>, i1 <is_zero_undef>)
+        # We pass False for is_zero_undef, so it is defined for 0 (returns 64).
+        return builder.cttz(val_arg, context.get_constant(types.boolean, False))
+
+    sig = types.int64(types.uint64)
+    return sig, codegen
 
 @numba.jit(numba.int8(numba.uint64), nopython=True, inline='always')
 def get_lsb_index(bitboard: np.uint64) -> int:
     """
-    使用 De Bruijn 序列位掃描（Bitscan）技術尋找最低有效位（LSB）的索引。
-    這是一個非常快速的 O(1) 操作。
-
-    Args:
-        bitboard (np.uint64): 要尋找 LSB 的位元棋盤。
-
-    Returns:
-        int: LSB 的索引 (0-63)。如果位元棋盤為空，則返回 -1。
+    Uses hardware CTZ (Count Trailing Zeros) intrinsic via LLVM to find LSB index.
+    Replacing De Bruijn multiplication for better performance.
     """
-    bitboard = np.uint64(bitboard)
     if bitboard == 0:
         return -1
-    lsb = bitboard & (-bitboard)
-    # 使用 De Bruijn 序列進行哈希映射
-    index = (lsb * DE_BRUIJN_SEQUENCE) >> np.uint64(58)
-    return DE_BRUIJN_INDEX[index]
+    return numba.int8(count_trailing_zeros(bitboard))
 
 @numba.jit(numba.uint64(piece_bbs_signature, game_state_signature), nopython=True)
 def compute_initial_hash(piece_bbs: np.ndarray, game_state: np.ndarray) -> np.uint64:

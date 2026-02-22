@@ -9,6 +9,9 @@ from chess_engine.constants import (
 from chess_engine.engine_types import piece_bbs_signature, occupancy_bbs_signature
 from chess_engine.bitboard_utils import find_piece_type_on_square
 import numba.types as nbt
+# Import Magic Bitboard functions
+from chess_engine.move_generator import get_bishop_attacks, get_rook_attacks
+
 
 # Piece Values for SEE (based on Stockfish's internal values for SEE)
 # P=100, N=320, B=330, R=500, Q=900, K=20000
@@ -52,36 +55,14 @@ def get_step_attacks(square, offsets):
 
 @numba.njit(cache=True)
 def get_sliding_attacks(square, occupied, is_diagonal):
-    # Hyperbola Quintessence or similar would be fast, but simple ray casting for now
-    # to avoid complex dependencies. Stockfish uses Magic Bitboards.
-    # We will use a simplified loop for Numba.
-    attacks = np.uint64(0)
-
+    """
+    Get sliding attacks using Magic Bitboards (O(1) lookup).
+    Replaces the previous slow ray-casting loop.
+    """
     if is_diagonal:
-        directions = DIAGONAL_DIRECTIONS
+        return get_bishop_attacks(square, occupied)
     else:
-        directions = ORTHOGONAL_DIRECTIONS
-
-    for d in directions:
-        curr = square
-        while True:
-            # Check file wrap
-            curr_file = curr % 8
-            if d == 1 and curr_file == 7: break
-            if d == -1 and curr_file == 0: break
-            if d == 9 and curr_file == 7: break # Up-Right
-            if d == -7 and curr_file == 7: break # Down-Right
-            if d == 7 and curr_file == 0: break # Up-Left
-            if d == -9 and curr_file == 0: break # Down-Left
-
-            curr += d
-            if not (0 <= curr < 64):
-                break
-
-            attacks |= BB_SQUARES[curr]
-            if (occupied & BB_SQUARES[curr]) != 0:
-                break
-    return attacks
+        return get_rook_attacks(square, occupied)
 
 @numba.njit(cache=True)
 def get_pinned_pieces(piece_bbs, occupancy_bbs, side):
