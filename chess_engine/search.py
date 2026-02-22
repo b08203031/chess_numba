@@ -107,8 +107,7 @@ def get_lmr_reduction(depth, move_count, history_score):
     return max(0, int(reduction))
 
 @numba.njit(cache=True, boundscheck=False, fastmath=True)
-def score_moves(piece_bbs, occupancy_bbs, game_state, moves, tt_move, killer_moves_at_ply, history_table, counter_move):
-    scores = np.zeros(len(moves), dtype=np.int32)
+def score_moves(piece_bbs, occupancy_bbs, game_state, moves, tt_move, killer_moves_at_ply, history_table, counter_move, scores_out):
     side_to_move = game_state[0]
     opponent_pieces_bb = occupancy_bbs[1] if side_to_move == 0 else occupancy_bbs[0]
     
@@ -153,8 +152,7 @@ def score_moves(piece_bbs, occupancy_bbs, game_state, moves, tt_move, killer_mov
                     aggressor_type = find_piece_type_on_square(piece_bbs, get_from_square(move))
                     score = history_table[aggressor_type, to_square]
 
-        scores[i] = score
-    return scores
+        scores_out[i] = score
 
 quiescence_search_return_type = numba.types.Tuple([
     numba.int32, numba.uint64, numba.uint64, numba.uint64
@@ -227,12 +225,15 @@ def quiescence_search(piece_bbs, occupancy_bbs, game_state, alpha, beta, ply, se
     # Use score_moves to sort. 
     # Note: score_moves is heavy? For captures it calculates SEE.
     # This is beneficial for Alpha-Beta pruning in QSearch.
-    scores = score_moves(
+    # Allocation here (np.empty) is cheaper than np.zeros and safe for QSearch recursion.
+    scores = np.empty(len(moves), dtype=np.int32)
+    score_moves(
         piece_bbs, occupancy_bbs, game_state, moves, 
         NO_MOVE, # No TT move in QSearch loop usually (unless we probed TT above)
         search_context.killer_moves[safe_ply*2:safe_ply*2+2], 
         search_context.history_table, 
-        NO_MOVE # No counter move
+        NO_MOVE, # No counter move
+        scores
     )
     
     # Sort moves based on scores
@@ -591,7 +592,9 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
             prev_to = get_to_square(prev_move)
             counter_move = search_context.counter_moves[prev_from, prev_to]
 
-    scores = score_moves(piece_bbs, occupancy_bbs, game_state, moves, tt_move, search_context.killer_moves[ply*2:ply*2+2], search_context.history_table, counter_move)
+    # Use pre-allocated buffer for move scores to avoid allocation
+    scores = search_context.move_scores[ply]
+    score_moves(piece_bbs, occupancy_bbs, game_state, moves, tt_move, search_context.killer_moves[ply*2:ply*2+2], search_context.history_table, counter_move, scores)
     
     best_move, max_eval = NO_MOVE, -INFINITY
     quiet_move_counter, move_count = 0, 0

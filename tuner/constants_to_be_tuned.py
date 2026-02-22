@@ -462,8 +462,6 @@ KING_TROPISM_WEIGHTS = np.array([15, 18, 21, 24, 37], dtype=np.int32)
 
 PAWN_STORM_PENALTY_BY_RANK = np.array([13, 6, 93, 37, 9, 39, 34, 0], dtype=np.int32)
 
-SCALING_WEIGHTS = np.array([11, 14, 0, 0, 0], dtype=np.int32)
-
 PAWN_SHIELD_MISSING_PENALTY = 0
 
 PAWN_SHIELD_INTACT_BONUS = 47

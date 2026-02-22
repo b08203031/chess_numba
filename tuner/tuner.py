@@ -103,7 +103,6 @@ class SPSAOptimizer:
         cm.add_range("KING_SAFETY_TABLE", min_val=0)
         cm.add_range("KING_TROPISM_WEIGHTS", min_val=0)
         cm.add_range("PAWN_STORM_PENALTY_BY_RANK", min_val=0)
-        cm.add_range("SCALING_WEIGHTS", min_val=0)
         cm.add_range("PAWN_SHIELD_MISSING_PENALTY", min_val=0)
         cm.add_range("PAWN_SHIELD_INTACT_BONUS", min_val=0)
         cm.add_range("PAWN_SHIELD_ADVANCED_BONUS", min_val=0)
@@ -280,13 +279,13 @@ class SPSAOptimizer:
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--iter", type=int, default=1000, help="Number of SPSA iterations")
-    parser.add_argument("--alpha", type=float, default=10000.0, help="Learning rate scaling (a)")
-    parser.add_argument("--c", type=float, default=4.0, help="Perturbation scaling (c)")
+    parser.add_argument("--alpha", type=float, default=30000.0, help="Learning rate scaling (a)")
+    parser.add_argument("--c", type=float, default=2.0, help="Perturbation scaling (c)")
     
     # New arguments
     parser.add_argument("--tune", nargs='+', help="List of parameter names to tune (others will be frozen)")
     parser.add_argument("--exclude", nargs='+', help="List of parameter names to exclude/freeze")
-    parser.add_argument("--batch-size", type=int, default=None, help="Mini-batch size for gradient estimation (e.g. 16384)")
+    parser.add_argument("--batch-size", type=int, default=32768, help="Mini-batch size for gradient estimation (e.g. 16384)")
     
     args = parser.parse_args()
 

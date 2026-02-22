@@ -9,6 +9,7 @@ import math
 import chess
 import chess.engine
 import chess.pgn
+import threading
 import concurrent.futures
 import traceback
 from tune_search.param_config import SEARCH_PARAMS, get_bounds, get_step, get_default_params
@@ -21,91 +22,83 @@ def get_engine_cmd_list(params):
     Constructs the command line list for the engine with specific parameters.
     params: dict of {PARAM_NAME: value}
     """
-    cmd = [sys.executable, "tune_search/engine_adapter.py"]
+    cmd = [sys.executable, "-u", "tune_search/engine_adapter.py"]
     for k, v in params.items():
         cmd.append(f"--{k}")
         cmd.append(str(v))
     return cmd
 
-def warmup_engine(engine):
+def warmup_engine(engine, name="Engine"):
     """
     Runs a shallow search to trigger Numba JIT compilation.
     This prevents the first actual game move from timing out.
     """
     try:
-        # Search startpos for 1ms or depth 1
-        engine.play(chess.Board(), chess.engine.Limit(depth=1))
+        # Search Kiwipete position for depth 1 to trigger JIT compilation on more complex positions
+        print(f"[{name}] Warming up with Kiwipete depth 1... (May take ~1 min)")
+        kiwipete = "r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1"
+        engine.play(chess.Board(kiwipete), chess.engine.Limit(depth=1))
+        print(f"[{name}] Warmup complete.")
     except Exception as e:
-        print(f"Warmup failed: {e}")
+        print(f"[{name}] Warmup failed: {e}")
 
-def play_game(params1, params2, time_limit, increment, opening_fen=None):
+def play_game_reused(engine1, engine2, time_limit, increment, opening_fen=None):
     """
-    Plays a single game between Engine 1 (White) and Engine 2 (Black).
+    Plays a single game between two ALREADY RUNNING engines.
+    engine1: White
+    engine2: Black
     Returns score for Engine 1 (1.0 win, 0.5 draw, 0.0 loss).
     """
-    
-    # Start Engine 1
-    cmd1 = get_engine_cmd_list(params1)
-    try:
-        # Increase timeout to allow for Numba JIT compilation
-        engine1 = chess.engine.SimpleEngine.popen_uci(cmd1, timeout=60.0)
-        warmup_engine(engine1)
-    except Exception as e:
-        print(f"Error starting engine 1: {e}")
-        traceback.print_exc()
-        return 0.5
-
-    # Start Engine 2
-    cmd2 = get_engine_cmd_list(params2)
-    try:
-        engine2 = chess.engine.SimpleEngine.popen_uci(cmd2, timeout=60.0)
-        warmup_engine(engine2)
-    except Exception as e:
-        print(f"Error starting engine 2: {e}")
-        traceback.print_exc()
-        engine1.quit()
-        return 0.5
-
     board = chess.Board(opening_fen) if opening_fen else chess.Board()
     
+    # Reset engines for new game
+    # python-chess engine.configure() fails for 'ucinewgame' because main.py doesn't report it as an option.
+    # We send it directly as a command to ensure internal state (Hash, History) is cleared.
+    try:
+        if engine1.protocol: engine1.protocol.send_line("ucinewgame")
+        if engine2.protocol: engine2.protocol.send_line("ucinewgame")
+        # Small sleep to ensure engines process it, though UCI doesn't strictly require wait
+        time.sleep(0.05)
+    except Exception as e:
+        print(f"Error sending ucinewgame command: {e}")
+
     # Parse time control
+    # Note: 'time' in Limit is generally "time limit for this move" if used this way,
+    # or base time if handling clock. python-chess SimpleEngine.play with Limit(time=X) 
+    # usually treats X as movetime (seconds per move).
+    # Increment is not a standard argument for fixed-movetime Limit constructor.
+    # If the user provides "0.1+0.01", we treat it as movetime=0.1s and ignore increment for now
+    # to avoid TypeError.
     limit = chess.engine.Limit(time=time_limit)
     
     # Game Loop
     try:
         while not board.is_game_over():
             if board.turn == chess.WHITE:
-                # Engine 1
                 result = engine1.play(board, limit)
             else:
-                # Engine 2
                 result = engine2.play(board, limit)
                 
             if result.move is None:
-                # Resignation or crash?
-                print("Engine returned no move. Claiming loss.")
-                if board.turn == chess.WHITE:
-                    # White (Engine 1) crashed -> Loss
-                    engine1.quit()
-                    engine2.quit()
-                    return 0.0
-                else:
-                    # Black (Engine 2) crashed -> Win for Engine 1
-                    engine1.quit()
-                    engine2.quit()
-                    return 1.0
+                print(f"Engine ({'White' if board.turn == chess.WHITE else 'Black'}) returned no move. Claiming loss.")
+                return 0.0 if board.turn == chess.WHITE else 1.0
                     
             board.push(result.move)
     except Exception as e:
+        # Check if it's a timeout error (wrapped by concurrent.futures or asyncio)
+        msg = str(e)
+        if "TimeoutError" in msg or "timeout" in msg.lower():
+            # If engine times out, it loses.
+            print(f"Engine ({'White' if board.turn == chess.WHITE else 'Black'}) timed out (Loss)")
+            if board.turn == chess.WHITE:
+                return 0.0 # White timed out, Black wins (Score for Engine 1 is 0.0)
+            else:
+                return 1.0 # Black timed out, White wins (Score for Engine 1 is 1.0)
+        
         print(f"Game error: {e}")
         traceback.print_exc()
-        engine1.quit()
-        engine2.quit()
         return 0.5
 
-    engine1.quit()
-    engine2.quit()
-    
     outcome = board.outcome()
     if outcome.winner == chess.WHITE:
         return 1.0
@@ -116,7 +109,7 @@ def play_game(params1, params2, time_limit, increment, opening_fen=None):
 
 def run_match_python(base_params, test_params, num_games=10, tc="0.1+0.01", concurrency=1, opening_book="tuner/twic1613.pgn"):
     """
-    Runs a match using python-chess.
+    Runs a match using python-chess, REUSING engine processes to avoid recompilation overhead.
     """
     
     # Parse TC
@@ -130,78 +123,180 @@ def run_match_python(base_params, test_params, num_games=10, tc="0.1+0.01", conc
         
     # Load Openings
     openings = []
-    
     if opening_book and os.path.exists(opening_book):
         try:
-            # Check file extension to decide how to load
             _, ext = os.path.splitext(opening_book)
-            
             if ext == '.bin':
-                # Polyglot Book - Generate openings via Random Walk
-                import chess.polyglot
+                import chess.polyglot as pg
                 print(f"Generating openings from Polyglot book: {opening_book}")
-                
-                with chess.polyglot.open_reader(opening_book) as reader:
-                    for _ in range(num_games): # One opening per game pair is enough
+                with pg.open_reader(opening_book) as reader:
+                    for _ in range(num_games):
                         board = chess.Board()
-                        # Walk 8 plies (4 moves) or until out of book
                         for _ in range(8):
                             try:
                                 entry = reader.weighted_choice(board)
                                 board.push(entry.move)
                             except IndexError:
-                                # No moves in book for this position
                                 break
                         openings.append(board.fen())
-                        
             else:
-                # PGN Book
                 with open(opening_book) as f:
-                    # Read first N games as openings
-                    for _ in range(num_games * 2): # Read enough
+                    for _ in range(num_games * 2):
                         game = chess.pgn.read_game(f)
                         if game is None: break
-                        # Play out first 8 plies (4 moves) to get a position
                         board = game.board()
                         for i, move in enumerate(game.mainline_moves()):
                             if i >= 8: break
                             board.push(move)
                         openings.append(board.fen())
-                        
         except Exception as e:
             print(f"Error reading opening book: {e}")
     
     if not openings:
         openings = [chess.STARTING_FEN]
 
+    # --- Start Engines ONCE ---
+    # We create two engines: 'Base' and 'Test'.
+    # Note: If concurrency > 1, we would need a pool of engines.
+    # For now, let's assume concurrency=1 or create multiple pairs.
+    
+    # To support concurrency properly with reused engines, we need a list of engine pairs.
+    # num_pairs = concurrency
+    
+    engine_pairs = []
+    
+    print(f"Starting {concurrency} engine pair(s)...")
+    
+    # Use ThreadPoolExecutor to start engines and warmup in parallel
+    # This avoids sequential waiting for each engine to compile
+    
+    def start_engine_pair(index):
+        try:
+            # Base Engine
+            cmd_base = get_engine_cmd_list(base_params)
+            engine_base = chess.engine.SimpleEngine.popen_uci(cmd_base, timeout=120.0)
+            
+            # Test Engine
+            cmd_test = get_engine_cmd_list(test_params)
+            engine_test = chess.engine.SimpleEngine.popen_uci(cmd_test, timeout=120.0)
+            
+            # Warmup
+            # Warmup both engines in this thread (still sequential per pair, but pairs are parallel)
+            warmup_engine(engine_base, f"Base-{index}")
+            warmup_engine(engine_test, f"Test-{index}")
+            
+            return (engine_base, engine_test)
+        except Exception as e:
+            print(f"Error starting engine pair {index}: {e}")
+            return None
+
+    try:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=concurrency) as executor:
+            futures = [executor.submit(start_engine_pair, i) for i in range(concurrency)]
+            
+            for future in concurrent.futures.as_completed(futures):
+                pair = future.result()
+                if pair:
+                    engine_pairs.append(pair)
+                else:
+                    raise Exception("Failed to start one or more engine pairs")
+            
+    except Exception as e:
+        print(f"Error starting engines: {e}")
+        for b, t in engine_pairs:
+            b.quit()
+            t.quit()
+        return 0.5
+
     score_test = 0.0
     games_played = 0
+    results = {"win": 0, "loss": 0, "draw": 0}
     
-    # Pairwise games (A vs B, then B vs A from same opening)
-    pairs = num_games // 2
+    # We distribute the 'pairs of games' (A vs B, B vs A) among the engine workers
+    total_pairs = num_games // 2
     
-    def play_pair(idx):
-        opening = random.choice(openings)
+    # Queue of work: each item is an opening FEN
+    work_queue = [random.choice(openings) for _ in range(total_pairs)]
+    
+    lock = threading.Lock()
+    
+    def worker(pair_idx):
+        """
+        Worker function using a specific engine pair (engine_base, engine_test).
+        Process games from the queue until empty.
+        """
+        my_base, my_test = engine_pairs[pair_idx]
         
-        # Game 1: Test (White) vs Base (Black)
-        s1 = play_game(test_params, base_params, base_time, inc, opening)
-        
-        # Game 2: Base (White) vs Test (Black)
-        s2 = play_game(base_params, test_params, base_time, inc, opening)
-        
-        # s2 is score for Base. Test score is 1.0 - s2
-        return s1 + (1.0 - s2)
+        while True:
+            try:
+                # Pop work
+                with lock:
+                    if not work_queue:
+                        return
+                    opening = work_queue.pop()
+            except IndexError:
+                return
 
-    with concurrent.futures.ThreadPoolExecutor(max_workers=concurrency) as executor:
-        futures = [executor.submit(play_pair, i) for i in range(pairs)]
-        
-        for future in concurrent.futures.as_completed(futures):
-            pair_score = future.result()
-            score_test += pair_score
-            games_played += 2
-            # print(f"Games: {games_played}/{num_games}, Test Score: {score_test}")
+            # Play Game 1: Test (White) vs Base (Black)
+            # Use 'my_test' as White, 'my_base' as Black
+            s1 = play_game_reused(my_test, my_base, base_time, inc, opening)
+            
+            res_str1 = "Draw"
+            if s1 == 1.0: res_str1 = "Test Won"
+            elif s1 == 0.0: res_str1 = "Base Won"
+            
+            # Play Game 2: Base (White) vs Test (Black)
+            # Use 'my_base' as White, 'my_test' as Black
+            s2 = play_game_reused(my_base, my_test, base_time, inc, opening)
+            
+            # s2 is score for Base (White). Test score is 1.0 - s2
+            test_score_g2 = 1.0 - s2
+            
+            res_str2 = "Draw"
+            if s2 == 1.0: res_str2 = "Base Won"
+            elif s2 == 0.0: res_str2 = "Test Won"
 
-    return score_test / games_played
+            pair_score = s1 + test_score_g2
+            
+            with lock:
+                nonlocal score_test, games_played
+                score_test += pair_score
+                games_played += 2
+                
+                # Update stats
+                for s in [s1, test_score_g2]:
+                    if s == 1.0: results["win"] += 1
+                    elif s == 0.0: results["loss"] += 1
+                    else: results["draw"] += 1
+                
+                print(f"Game Pair Finished: {res_str1} | {res_str2} (Test Score: {score_test}/{games_played})")
+
+    # Start threads
+    threads = []
+    # import threading # Removed as it's already imported at top
+    for i in range(concurrency):
+        t = threading.Thread(target=worker, args=(i,))
+        t.start()
+        threads.append(t)
+        
+    for t in threads:
+        t.join()
+
+    # Cleanup Engines
+    print("Closing engines...")
+    for b, t in engine_pairs:
+        try:
+            b.quit()
+        except Exception:
+            b.close()
+        try:
+            t.quit()
+        except Exception:
+            t.close()
+
+    final_score = score_test / games_played if games_played > 0 else 0.5
+    print(f"Match Finished. Test Score: {final_score:.3f} ({results['win']} W - {results['loss']} L - {results['draw']} D)")
+    return final_score
 
 class SPSAOptimizer:
     def __init__(self, param_names, initial_params):

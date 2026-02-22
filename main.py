@@ -198,7 +198,7 @@ def uci_loop():
                     moves, weights = zip(*book_moves)
                     selected_move = random.choices(moves, weights=weights, k=1)[0]
                     log_info("Playing from book")
-                    print(f"bestmove {move_to_uci(selected_move)}")
+                    print(f"bestmove {move_to_uci(selected_move)}", flush=True)
                     continue
 
                 # --- Prepare Search Context / 準備搜尋上下文 ---
@@ -217,7 +217,7 @@ def uci_loop():
                         board_state[0], board_state[1], board_state[2], max_depth, time_config, global_search_context,
                         game_history_list=current_game_history, tt_generation=global_tt_generation
                     )
-                    print(f"bestmove {move_to_uci(best_move)}")
+                    print(f"bestmove {move_to_uci(best_move)}", flush=True)
 
                 search_thread = threading.Thread(target=search_worker)
                 search_thread.start()

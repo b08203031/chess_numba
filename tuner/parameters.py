@@ -73,7 +73,6 @@ class ParameterManager:
         self._add_param("KING_SAFETY_TABLE", constants.KING_SAFETY_TABLE)
         self._add_param("KING_TROPISM_WEIGHTS", constants.KING_TROPISM_WEIGHTS)
         self._add_param("PAWN_STORM_PENALTY_BY_RANK", constants.PAWN_STORM_PENALTY_BY_RANK)
-        self._add_param("SCALING_WEIGHTS", constants.SCALING_WEIGHTS)
         
         # King Safety Scalars
         self._add_param("PAWN_SHIELD_MISSING_PENALTY", constants.PAWN_SHIELD_MISSING_PENALTY)
