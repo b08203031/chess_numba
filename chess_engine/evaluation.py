@@ -218,7 +218,7 @@ def evaluate_pawn_structure(piece_bbs):
              
              # Check if any adjacent pawn is on rank >= current rank
              # Mask for ranks >= current rank
-             # We can use ~BLACK_FORWARD_RANKS[sq] which gives ranks >= rank?
+             # We can use ~BLACK_FORWARD_RANKS[sq] which gives ranks >= rank.
              # Actually, simpler:
              # WHITE_FORWARD_RANKS[sq] gives ranks > rank.
              # We need ranks >= rank. So WHITE_FORWARD_RANKS[sq] | rank_mask[rank].
@@ -658,140 +658,7 @@ def evaluate_king_safety(piece_bbs, occupancy_bbs, white_attacks, black_attacks,
     return mg_safety_score, eg_safety_score
 
 
-
-@numba.njit(numba.types.UniTuple(numba.int32, 2)(piece_bbs_signature, occupancy_bbs_signature, numba.uint64, numba.uint64), cache=True, boundscheck=False, fastmath=True)
-def evaluate_outposts(piece_bbs, occupancy_bbs, white_pawn_attacks, black_pawn_attacks):
-    """
-    評估前哨（Outposts）。
-    前哨定義：由己方兵支持，且不被敵方兵攻擊的方格上的騎士或主教。
-    如果該方格是“洞”（敵方兵永遠無法攻擊），則給予額外獎勵。
-
-    Args:
-        piece_bbs (np.ndarray): 12 個棋子的位元棋盤。
-        occupancy_bbs (np.ndarray): 佔用位元棋盤。
-        white_pawn_attacks (np.uint64): 白方兵攻擊的格子。
-        black_pawn_attacks (np.uint64): 黑方兵攻擊的格子。
-
-    Returns:
-        tuple: (mg_score, eg_score) 從白方視角。
-    """
-    mg_score = np.int32(0)
-    eg_score = np.int32(0)
-
-    white_pawns = piece_bbs[0]
-    white_knights = piece_bbs[1]
-    white_bishops = piece_bbs[2]
-    
-    black_pawns = piece_bbs[6]
-    black_knights = piece_bbs[7]
-    black_bishops = piece_bbs[8]
-
-    # --- White Outposts ---
-    # Knights
-    temp_bb = white_knights
-    while temp_bb:
-        sq = get_lsb_index(temp_bb)
-        # Check if safe from enemy pawns (not attacked by black pawns)
-        # PAWN_ATTACKS[BLACK, sq] gives squares where a BLACK pawn would be to attack sq.
-        # But here black_pawn_attacks is passed, which is the set of all squares attacked by black pawns.
-        # So we just check if sq is in black_pawn_attacks.
-        if not (black_pawn_attacks & BB_SQUARES[sq]):
-            # Check if supported by friendly pawn
-            # PAWN_ATTACKS[WHITE, sq] gives squares where a WHITE pawn stands to attack sq.
-            if (PAWN_ATTACKS[WHITE, sq] & white_pawns):
-                # Is Outpost
-                rank = sq // 8
-                mg_score += OUTPOST_BONUS_KNIGHT[rank, 0]
-                eg_score += OUTPOST_BONUS_KNIGHT[rank, 1]
-                
-                # Check for Hole (Weakness)
-                # No black pawn can attack it (currently or in future)
-                file_idx = sq % 8
-                # Check if there are any black pawns on adjacent files and ranks > rank (since black moves down)
-                # Wait, black pawns move down (rank 7 to 0).
-                # To attack square at 'rank', black pawn must be at 'rank + 1'.
-                # To be a hole, there should be no black pawns at 'rank >= 1' that can ever reach 'rank + 1' on adj files?
-                # Actually, simply: check if there are any black pawns on adjacent files that are BEHIND the outpost square (higher rank for black).
-                # White outpost at rank R. Black pawns at rank > R can advance to attack it.
-                # WHITE_FORWARD_RANKS[sq] gives ranks > rank.
-                if not (ADJACENT_FILES_MASKS[file_idx] & WHITE_FORWARD_RANKS[sq] & black_pawns):
-                     mg_score += OUTPOST_HOLE_BONUS[0]
-                     eg_score += OUTPOST_HOLE_BONUS[1]
-
-        temp_bb &= temp_bb - np.uint64(1)
-
-    # Bishops
-    temp_bb = white_bishops
-    while temp_bb:
-        sq = get_lsb_index(temp_bb)
-        if not (black_pawn_attacks & BB_SQUARES[sq]):
-            if (PAWN_ATTACKS[WHITE, sq] & white_pawns):
-                rank = sq // 8
-                mg_score += OUTPOST_BONUS_BISHOP[rank, 0]
-                eg_score += OUTPOST_BONUS_BISHOP[rank, 1]
-                
-                file_idx = sq % 8
-                if not (ADJACENT_FILES_MASKS[file_idx] & WHITE_FORWARD_RANKS[sq] & black_pawns):
-                     mg_score += OUTPOST_HOLE_BONUS[0]
-                     eg_score += OUTPOST_HOLE_BONUS[1]
-        temp_bb &= temp_bb - np.uint64(1)
-
-
-    # --- Black Outposts ---
-    # Knights
-    temp_bb = black_knights
-    while temp_bb:
-        sq = get_lsb_index(temp_bb)
-        # Check if safe from white pawns
-        if not (white_pawn_attacks & BB_SQUARES[sq]):
-            # Check if supported by friendly pawn
-            # PAWN_ATTACKS[BLACK, sq] gives squares where a BLACK pawn stands to attack sq.
-            if (PAWN_ATTACKS[BLACK, sq] & black_pawns):
-                # Is Outpost
-                rank = sq // 8
-                # Map rank for black: Rank 7 is like Rank 0 for White. 
-                # We want Rank 0-7 relative to black.
-                # Rank 0 (board) -> Rank 7 (relative)
-                # Rank 7 (board) -> Rank 0 (relative)
-                rel_rank = 7 - rank
-                
-                mg_score -= OUTPOST_BONUS_KNIGHT[rel_rank, 0]
-                eg_score -= OUTPOST_BONUS_KNIGHT[rel_rank, 1]
-                
-                # Check for Hole
-                # White pawns move up (0 to 7).
-                # Black outpost at rank R. White pawns at rank < R can advance to attack it.
-                # BLACK_FORWARD_RANKS[sq] gives ranks < rank.
-                file_idx = sq % 8
-                if not (ADJACENT_FILES_MASKS[file_idx] & BLACK_FORWARD_RANKS[sq] & white_pawns):
-                     mg_score -= OUTPOST_HOLE_BONUS[0]
-                     eg_score -= OUTPOST_HOLE_BONUS[1]
-
-        temp_bb &= temp_bb - np.uint64(1)
-
-    # Bishops
-    temp_bb = black_bishops
-    while temp_bb:
-        sq = get_lsb_index(temp_bb)
-        if not (white_pawn_attacks & BB_SQUARES[sq]):
-            if (PAWN_ATTACKS[BLACK, sq] & black_pawns):
-                rank = sq // 8
-                rel_rank = 7 - rank
-                
-                mg_score -= OUTPOST_BONUS_BISHOP[rel_rank, 0]
-                eg_score -= OUTPOST_BONUS_BISHOP[rel_rank, 1]
-                
-                file_idx = sq % 8
-                if not (ADJACENT_FILES_MASKS[file_idx] & BLACK_FORWARD_RANKS[sq] & white_pawns):
-                     mg_score -= OUTPOST_HOLE_BONUS[0]
-                     eg_score -= OUTPOST_HOLE_BONUS[1]
-        temp_bb &= temp_bb - np.uint64(1)
-
-    return mg_score, eg_score
-
-
-
-@numba.njit(numba.types.Tuple((numba.uint64, numba.uint64, numba.uint64, numba.uint64, numba.int32, numba.int32, numba.int32, numba.int32, numba.int32, numba.int32))(piece_bbs_signature, occupancy_bbs_signature), cache=True, boundscheck=False, fastmath=True)
+@numba.njit(numba.types.Tuple((numba.uint64, numba.uint64, numba.uint64, numba.uint64, numba.int32, numba.int32, numba.int32, numba.int32, numba.int32, numba.int32, numba.int32, numba.int32))(piece_bbs_signature, occupancy_bbs_signature), cache=True, boundscheck=False, fastmath=True)
 def evaluate_attacks_mobility_threats(piece_bbs, occupancy_bbs):
     (wp_bb, wn_bb, wb_bb, wr_bb, wq_bb, wk_bb,
      bp_bb, bn_bb, bb_bb, br_bb, bq_bb, bk_bb) = piece_bbs
@@ -828,6 +695,10 @@ def evaluate_attacks_mobility_threats(piece_bbs, occupancy_bbs):
     white_piece_tropism = np.int32(0)
     black_piece_tropism = np.int32(0)
 
+    # --- Outpost Accumulators ---
+    mg_outpost = np.int32(0)
+    eg_outpost = np.int32(0)
+
     # --- White Pieces ---
     temp_bb = wn_bb
     while temp_bb:
@@ -843,6 +714,17 @@ def evaluate_attacks_mobility_threats(piece_bbs, occupancy_bbs):
         distance = MANHATTAN_DISTANCE[sq, black_king_sq]
         white_piece_tropism += KING_TROPISM_WEIGHTS[1] * (KING_TROPISM_MAX_DISTANCE - distance)
         
+        # Outpost Logic (White Knight)
+        if not (black_pawn_attacks & BB_SQUARES[sq]):
+            if (PAWN_ATTACKS[WHITE, sq] & wp_bb):
+                rank = sq // 8
+                mg_outpost += OUTPOST_BONUS_KNIGHT[rank, 0]
+                eg_outpost += OUTPOST_BONUS_KNIGHT[rank, 1]
+                file_idx = sq % 8
+                if not (ADJACENT_FILES_MASKS[file_idx] & WHITE_FORWARD_RANKS[sq] & bp_bb):
+                     mg_outpost += OUTPOST_HOLE_BONUS[0]
+                     eg_outpost += OUTPOST_HOLE_BONUS[1]
+
         temp_bb &= temp_bb - np.uint64(1)
 
     temp_bb = wb_bb
@@ -858,6 +740,17 @@ def evaluate_attacks_mobility_threats(piece_bbs, occupancy_bbs):
         # Tropism
         distance = MANHATTAN_DISTANCE[sq, black_king_sq]
         white_piece_tropism += KING_TROPISM_WEIGHTS[2] * (KING_TROPISM_MAX_DISTANCE - distance)
+
+        # Outpost Logic (White Bishop)
+        if not (black_pawn_attacks & BB_SQUARES[sq]):
+            if (PAWN_ATTACKS[WHITE, sq] & wp_bb):
+                rank = sq // 8
+                mg_outpost += OUTPOST_BONUS_BISHOP[rank, 0]
+                eg_outpost += OUTPOST_BONUS_BISHOP[rank, 1]
+                file_idx = sq % 8
+                if not (ADJACENT_FILES_MASKS[file_idx] & WHITE_FORWARD_RANKS[sq] & bp_bb):
+                     mg_outpost += OUTPOST_HOLE_BONUS[0]
+                     eg_outpost += OUTPOST_HOLE_BONUS[1]
 
         temp_bb &= temp_bb - np.uint64(1)
 
@@ -911,6 +804,18 @@ def evaluate_attacks_mobility_threats(piece_bbs, occupancy_bbs):
         distance = MANHATTAN_DISTANCE[sq, white_king_sq]
         black_piece_tropism += KING_TROPISM_WEIGHTS[1] * (KING_TROPISM_MAX_DISTANCE - distance)
 
+        # Outpost Logic (Black Knight)
+        if not (white_pawn_attacks & BB_SQUARES[sq]):
+            if (PAWN_ATTACKS[BLACK, sq] & bp_bb):
+                rank = sq // 8
+                rel_rank = 7 - rank
+                mg_outpost -= OUTPOST_BONUS_KNIGHT[rel_rank, 0]
+                eg_outpost -= OUTPOST_BONUS_KNIGHT[rel_rank, 1]
+                file_idx = sq % 8
+                if not (ADJACENT_FILES_MASKS[file_idx] & BLACK_FORWARD_RANKS[sq] & wp_bb):
+                     mg_outpost -= OUTPOST_HOLE_BONUS[0]
+                     eg_outpost -= OUTPOST_HOLE_BONUS[1]
+
         temp_bb &= temp_bb - np.uint64(1)
 
     temp_bb = bb_bb
@@ -926,6 +831,18 @@ def evaluate_attacks_mobility_threats(piece_bbs, occupancy_bbs):
         # Tropism
         distance = MANHATTAN_DISTANCE[sq, white_king_sq]
         black_piece_tropism += KING_TROPISM_WEIGHTS[2] * (KING_TROPISM_MAX_DISTANCE - distance)
+
+        # Outpost Logic (Black Bishop)
+        if not (white_pawn_attacks & BB_SQUARES[sq]):
+            if (PAWN_ATTACKS[BLACK, sq] & bp_bb):
+                rank = sq // 8
+                rel_rank = 7 - rank
+                mg_outpost -= OUTPOST_BONUS_BISHOP[rel_rank, 0]
+                eg_outpost -= OUTPOST_BONUS_BISHOP[rel_rank, 1]
+                file_idx = sq % 8
+                if not (ADJACENT_FILES_MASKS[file_idx] & BLACK_FORWARD_RANKS[sq] & wp_bb):
+                     mg_outpost -= OUTPOST_HOLE_BONUS[0]
+                     eg_outpost -= OUTPOST_HOLE_BONUS[1]
 
         temp_bb &= temp_bb - np.uint64(1)
 
@@ -1026,7 +943,7 @@ def evaluate_attacks_mobility_threats(piece_bbs, occupancy_bbs):
         eg_threats -= THREAT_ROOK_ON_QUEEN[1] * count
 
     return (white_attacks, black_attacks, white_pawn_attacks, black_pawn_attacks, 
-            mg_mobility, eg_mobility, mg_threats, eg_threats, white_piece_tropism, black_piece_tropism)
+            mg_mobility, eg_mobility, mg_threats, eg_threats, white_piece_tropism, black_piece_tropism, mg_outpost, eg_outpost)
 
 
 @numba.njit(numba.int32(piece_bbs_signature, numba.uint64), cache=True, boundscheck=False, fastmath=True)
@@ -1194,7 +1111,7 @@ def evaluate_position(piece_bbs, occupancy_bbs, game_state, lazy: bool = False):
     # --- Compute Attacks, Mobility, Threats (Optimized Single Pass) ---
     (white_attacks, black_attacks, white_pawn_attacks, black_pawn_attacks,
      mg_mobility, eg_mobility, mg_threats, eg_threats,
-     white_piece_tropism, black_piece_tropism) = evaluate_attacks_mobility_threats(piece_bbs, occupancy_bbs)
+     white_piece_tropism, black_piece_tropism, mg_outpost, eg_outpost) = evaluate_attacks_mobility_threats(piece_bbs, occupancy_bbs)
 
     # --- 4. 加入兵形結構分數 (Moved up for King Safety dependency) ---
     mg_pawn_structure, eg_pawn_structure, white_pawn_tropism, black_pawn_tropism = evaluate_pawn_structure(piece_bbs)
@@ -1221,7 +1138,7 @@ def evaluate_position(piece_bbs, occupancy_bbs, game_state, lazy: bool = False):
     eg_score += eg_mobility
 
     # --- 7. Join Outpost Evaluation / 加入前哨評估 ---
-    mg_outpost, eg_outpost = evaluate_outposts(piece_bbs, occupancy_bbs, white_pawn_attacks, black_pawn_attacks)
+    # mg_outpost, eg_outpost = evaluate_outposts(piece_bbs, occupancy_bbs, white_pawn_attacks, black_pawn_attacks)
     mg_score += mg_outpost
     eg_score += eg_outpost
 

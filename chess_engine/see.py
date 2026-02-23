@@ -96,8 +96,8 @@ def get_lva_and_remove(attackers, piece_bbs, side_mask):
             return PIECE_VALUES[i], sq_bb, i
     return 0, np.uint64(0), -1
 
-@numba.njit(nbt.int32(piece_bbs_signature, occupancy_bbs_signature, nbt.int64, nbt.int64, nbt.int64, nbt.uint64, nbt.uint64), cache=True)
-def see(piece_bbs, occupancy_bbs, side_to_move, from_sq, to_sq, pinned_white, pinned_black):
+@numba.njit(cache=True)
+def see(piece_bbs, occupancy_bbs, side_to_move, from_sq, to_sq, pinned_white, pinned_black, attacker_type=-1, victim_type=-1):
     """
     Static Exchange Evaluation (SEE).
     Mimics Stockfish's logic:
@@ -114,11 +114,16 @@ def see(piece_bbs, occupancy_bbs, side_to_move, from_sq, to_sq, pinned_white, pi
     # But for 'from_sq', we know side_to_move.
 
     # Initial Attacker Type
-    attacker_type = find_piece_type_on_square_side(piece_bbs, from_sq, side_to_move) % 6
+    if attacker_type == -1:
+        attacker_type = find_piece_type_on_square_side(piece_bbs, from_sq, side_to_move)
+    
     if attacker_type == -1: return 0 # Should not happen for legal moves
+    attacker_type %= 6
 
     # Initial Victim Type
-    victim_type = find_piece_type_on_square_side(piece_bbs, to_sq, 1 - side_to_move)
+    if victim_type == -1:
+        victim_type = find_piece_type_on_square_side(piece_bbs, to_sq, 1 - side_to_move)
+    
     if victim_type != -1:
         victim_type %= 6
 
@@ -238,8 +243,8 @@ def see(piece_bbs, occupancy_bbs, side_to_move, from_sq, to_sq, pinned_white, pi
     return scores[0]
 
 
-@numba.njit(nbt.boolean(piece_bbs_signature, occupancy_bbs_signature, nbt.int64, nbt.int64, nbt.int64, nbt.int32, nbt.uint64, nbt.uint64), cache=True)
-def see_ge(piece_bbs, occupancy_bbs, side_to_move, from_sq, to_sq, threshold, pinned_white, pinned_black):
+@numba.njit(cache=True)
+def see_ge(piece_bbs, occupancy_bbs, side_to_move, from_sq, to_sq, threshold, pinned_white, pinned_black, attacker_type=-1, victim_type=-1):
     """
     SEE >= Threshold.
     Optimized to exit early.
@@ -247,10 +252,15 @@ def see_ge(piece_bbs, occupancy_bbs, side_to_move, from_sq, to_sq, threshold, pi
     """
     # Identical setup to see()
 
-    attacker_type = find_piece_type_on_square_side(piece_bbs, from_sq, side_to_move) % 6
+    if attacker_type == -1:
+        attacker_type = find_piece_type_on_square_side(piece_bbs, from_sq, side_to_move)
+    
     if attacker_type == -1: return False # Should not happen
+    attacker_type %= 6
 
-    victim_type = find_piece_type_on_square_side(piece_bbs, to_sq, 1 - side_to_move)
+    if victim_type == -1:
+        victim_type = find_piece_type_on_square_side(piece_bbs, to_sq, 1 - side_to_move)
+    
     if victim_type != -1:
         victim_type %= 6
 

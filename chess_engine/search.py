@@ -123,11 +123,14 @@ def score_moves(piece_bbs, occupancy_bbs, game_state, moves, scores, move_count,
             if is_capture:
                 # Use SEE to distinguish Good vs Bad captures
                 from_sq = get_from_square(move)
-                # Optimization: Use see_ge(0) instead of full see()
-                is_good_capture = see_ge(piece_bbs, occupancy_bbs, side_to_move, from_sq, to_square, 0, pinned_white, pinned_black)
                 
+                # Optimization: Lookup piece types once and reuse them in see_ge and MVV_LVA
                 victim_type = find_piece_type_on_square_side(piece_bbs, to_square, 1 - side_to_move)
                 aggressor_type = find_piece_type_on_square_side(piece_bbs, from_sq, side_to_move)
+
+                # Optimization: Use see_ge(0) instead of full see()
+                is_good_capture = see_ge(piece_bbs, occupancy_bbs, side_to_move, from_sq, to_square, 0, pinned_white, pinned_black, aggressor_type, victim_type)
+                
                 mvv_lva = 0
                 if victim_type != -1:
                     mvv_lva = (MG_MATERIAL_VALUES[victim_type % 6] - MG_MATERIAL_VALUES[aggressor_type % 6])
