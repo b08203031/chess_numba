@@ -4,11 +4,12 @@ import numba
 
 from chess_engine.move import (
     encode_move, SPECIAL_MOVE_FLAG_NORMAL, SPECIAL_MOVE_FLAG_PROMOTION, SPECIAL_MOVE_FLAG_EN_PASSANT, SPECIAL_MOVE_FLAG_CASTLING,
-    PROMO_QUEEN, PROMO_ROOK, PROMO_BISHOP, PROMO_KNIGHT
+    PROMO_QUEEN, PROMO_ROOK, PROMO_BISHOP, PROMO_KNIGHT,
+    get_from_square, get_special_move_flag
 )
 from chess_engine.board_operations import make_move, unmake_move
 # from chess_engine.engine_types import board_state_flat_signature # This is no longer needed
-from chess_engine.constants import BB_SQUARES
+from chess_engine.constants import BB_SQUARES, ROOK, QUEEN, BISHOP, KING
 import numba.types as nbt
 
 # =============================================================================
@@ -69,7 +70,7 @@ ROOK_MAGIC_NUMBERS = np.array([
     0x8220020041009aa, 0x201000208040041, 0x8006010850008204, 0x1094004093002402,
 ], dtype=np.uint64)
 
-from chess_engine.bitboard_utils import get_lsb_index, count_bits
+from chess_engine.bitboard_utils import get_lsb_index, count_bits, SQUARES_BETWEEN, ROOK_RAYS, BISHOP_RAYS
 
 @numba.njit(numba.uint64(numba.uint8), cache=True, boundscheck=False, fastmath=True)
 def mask_bishop_attacks(sq):
@@ -223,6 +224,49 @@ def is_square_attacked(piece_bbs, occupancy_bbs, game_state, sq, attacker_side):
         if get_rook_attacks(sq, all_pieces_bb) & (br | bq): return True
         
     return False
+
+@numba.njit(cache=True)
+def get_pinned_pieces(piece_bbs, occupancy_bbs, side):
+    """
+    Returns a bitboard of all pieces of 'side' that are pinned to their King
+    by enemy sliding pieces.
+    Optimized using bitboard operations and precomputed SQUARES_BETWEEN.
+    """
+    king_idx = KING if side == WHITE else (KING + 6)
+    king_bb = piece_bbs[king_idx]
+    if not king_bb: return np.uint64(0)
+    king_sq = get_lsb_index(king_bb)
+
+    pinned = np.uint64(0)
+    occupied = occupancy_bbs[2]
+    own_pieces = occupancy_bbs[side]
+    enemy_offset = 6 if side == WHITE else 0
+
+    enemy_rooks = piece_bbs[ROOK + enemy_offset] | piece_bbs[QUEEN + enemy_offset]
+    enemy_bishops = piece_bbs[BISHOP + enemy_offset] | piece_bbs[QUEEN + enemy_offset]
+
+    # Orthogonal pinners: enemy rooks/queens on same rank or file as king
+    pinners = ROOK_RAYS[king_sq] & enemy_rooks
+    while pinners:
+        pinner_sq = get_lsb_index(pinners)
+        between = SQUARES_BETWEEN[king_sq, pinner_sq]
+        blockers = between & occupied
+        # If exactly one piece between king and pinner, and it belongs to side, it's pinned
+        if count_bits(blockers) == 1 and (blockers & own_pieces):
+            pinned |= blockers
+        pinners &= pinners - np.uint64(1)
+
+    # Diagonal pinners: enemy bishops/queens on same diagonal as king
+    pinners = BISHOP_RAYS[king_sq] & enemy_bishops
+    while pinners:
+        pinner_sq = get_lsb_index(pinners)
+        between = SQUARES_BETWEEN[king_sq, pinner_sq]
+        blockers = between & occupied
+        if count_bits(blockers) == 1 and (blockers & own_pieces):
+            pinned |= blockers
+        pinners &= pinners - np.uint64(1)
+
+    return pinned
 
 @numba.njit(numba.int32(piece_bbs_signature, occupancy_bbs_signature, game_state_signature, numba.uint16[:, :], numba.int32), cache=True, boundscheck=False, fastmath=True)
 def generate_legal_moves_buffer(piece_bbs, occupancy_bbs, game_state, moves_buffer, ply):
@@ -394,10 +438,22 @@ def generate_legal_moves_buffer(piece_bbs, occupancy_bbs, game_state, moves_buff
     king_bb = piece_bbs[5] if side_to_move == WHITE else piece_bbs[11]
     original_king_sq = get_lsb_index(king_bb) if king_bb else 0
 
+    # Optimization: Pre-calculate pinned pieces and check status to skip expensive make/unmake
+    opponent_side = 1 - side_to_move
+    in_check = is_square_attacked(piece_bbs, occupancy_bbs, game_state, original_king_sq, opponent_side)
+    pinned = get_pinned_pieces(piece_bbs, occupancy_bbs, side_to_move) if not in_check else np.uint64(0)
+
     for i in range(move_count):
         move = moves_buffer[ply, i]
+        from_sq = get_from_square(move)
+        
+        # Fast path: if not in check, not pinned, not a king move, and not en passant, it MUST be legal.
+        if not in_check and not (pinned & BB_SQUARES[from_sq]) and from_sq != original_king_sq and get_special_move_flag(move) != SPECIAL_MOVE_FLAG_EN_PASSANT:
+            moves_buffer[ply, legal_move_count] = move
+            legal_move_count += 1
+            continue
 
-        # Make the move on the board
+        # Slow path: full legality check via make/unmake
         unmake_info = make_move(piece_bbs, occupancy_bbs, game_state, move)
 
         # After the move, the 'side_to_move' in game_state is the opponent.
@@ -797,8 +853,20 @@ def generate_captures_buffer(piece_bbs, occupancy_bbs, game_state, moves_buffer,
     king_bb = piece_bbs[5] if side_to_move == WHITE else piece_bbs[11]
     original_king_sq = get_lsb_index(king_bb) if king_bb else 0
 
+    # Optimization: Pre-calculate pinned pieces and check status to skip expensive make/unmake
+    opponent_side = 1 - side_to_move
+    in_check = is_square_attacked(piece_bbs, occupancy_bbs, game_state, original_king_sq, opponent_side)
+    pinned = get_pinned_pieces(piece_bbs, occupancy_bbs, side_to_move) if not in_check else np.uint64(0)
+
     for i in range(move_count):
         move = moves_buffer[ply, i]
+        from_sq = get_from_square(move)
+        
+        # Fast path: if not in check, not pinned, not a king move, and not en passant, it MUST be legal.
+        if not in_check and not (pinned & BB_SQUARES[from_sq]) and from_sq != original_king_sq and get_special_move_flag(move) != SPECIAL_MOVE_FLAG_EN_PASSANT:
+            moves_buffer[ply, legal_move_count] = move
+            legal_move_count += 1
+            continue
 
         unmake_info = make_move(piece_bbs, occupancy_bbs, game_state, move)
 

@@ -512,9 +512,7 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
         # Static Eval Safety Check (Stockfish logic: static_eval >= beta - margin)
         # Margin roughly 19*depth + 418 in SF. We use a simpler loose margin.
         # Ensure position is not too bad to skip move.
-        static_eval_for_nmp = evaluate_position(piece_bbs, occupancy_bbs, game_state, lazy=True)
-
-        if static_eval_for_nmp >= beta:
+        if static_score >= beta:
             original_state_for_null = game_state.copy()
             make_null_move(game_state)
             

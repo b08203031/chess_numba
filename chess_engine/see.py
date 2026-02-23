@@ -12,7 +12,8 @@ import numba.types as nbt
 # Import Magic Bitboard functions
 from chess_engine.move_generator import (
     get_bishop_attacks, get_rook_attacks,
-    PAWN_ATTACKS, KNIGHT_ATTACKS, KING_ATTACKS
+    PAWN_ATTACKS, KNIGHT_ATTACKS, KING_ATTACKS,
+    get_pinned_pieces
 )
 from chess_engine.bitboard_utils import get_lsb_index, count_bits
 
@@ -41,48 +42,6 @@ def get_sliding_attacks(square, occupied, is_diagonal):
     else:
         return get_rook_attacks(square, occupied)
 
-@numba.njit(cache=True)
-def get_pinned_pieces(piece_bbs, occupancy_bbs, side):
-    """
-    Returns a bitboard of all pieces of 'side' that are pinned to their King
-    by enemy sliding pieces.
-    Optimized using bitboard operations and precomputed SQUARES_BETWEEN.
-    """
-    king_idx = KING if side == WHITE else (KING + 6)
-    king_bb = piece_bbs[king_idx]
-    if not king_bb: return np.uint64(0)
-    king_sq = get_lsb_index(king_bb)
-
-    pinned = np.uint64(0)
-    occupied = occupancy_bbs[2]
-    own_pieces = occupancy_bbs[side]
-    enemy_offset = 6 if side == WHITE else 0
-
-    enemy_rooks = piece_bbs[ROOK + enemy_offset] | piece_bbs[QUEEN + enemy_offset]
-    enemy_bishops = piece_bbs[BISHOP + enemy_offset] | piece_bbs[QUEEN + enemy_offset]
-
-    # Orthogonal pinners: enemy rooks/queens on same rank or file as king
-    pinners = ROOK_RAYS[king_sq] & enemy_rooks
-    while pinners:
-        pinner_sq = get_lsb_index(pinners)
-        between = SQUARES_BETWEEN[king_sq, pinner_sq]
-        blockers = between & occupied
-        # If exactly one piece between king and pinner, and it belongs to side, it's pinned
-        if count_bits(blockers) == 1 and (blockers & own_pieces):
-            pinned |= blockers
-        pinners &= pinners - np.uint64(1)
-
-    # Diagonal pinners: enemy bishops/queens on same diagonal as king
-    pinners = BISHOP_RAYS[king_sq] & enemy_bishops
-    while pinners:
-        pinner_sq = get_lsb_index(pinners)
-        between = SQUARES_BETWEEN[king_sq, pinner_sq]
-        blockers = between & occupied
-        if count_bits(blockers) == 1 and (blockers & own_pieces):
-            pinned |= blockers
-        pinners &= pinners - np.uint64(1)
-
-    return pinned
 
 @numba.njit(cache=True)
 def get_attackers_for_see(square, occupied, piece_bbs, side_mask):

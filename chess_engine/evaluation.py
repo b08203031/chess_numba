@@ -1115,43 +1115,42 @@ def evaluate_position(piece_bbs, occupancy_bbs, game_state, lazy: bool = False):
         return score if game_state[0] == 0 else -score
     side_to_move = game_state[0]
 
-    # --- 1. 計算遊戲階段 (Game Phase) ---
+    # --- 1. & 2. Phase, Material, and PST (Fused Loop) ---
     phase = np.int32(0)
-    phase += count_bits(piece_bbs[1]) * PHASE_WEIGHTS[1]
-    phase += count_bits(piece_bbs[2]) * PHASE_WEIGHTS[2]
-    phase += count_bits(piece_bbs[3]) * PHASE_WEIGHTS[3]
-    phase += count_bits(piece_bbs[4]) * PHASE_WEIGHTS[4]
-    phase += count_bits(piece_bbs[7]) * PHASE_WEIGHTS[1]
-    phase += count_bits(piece_bbs[8]) * PHASE_WEIGHTS[2]
-    phase += count_bits(piece_bbs[9]) * PHASE_WEIGHTS[3]
-    phase += count_bits(piece_bbs[10]) * PHASE_WEIGHTS[4]
-    phase = min(phase, MAX_PHASE)
-
-    # --- 2. 計算中局和殘局的基礎分數（物質 + 位置） ---
     mg_score = np.int32(0)
     eg_score = np.int32(0)
 
-    for piece_type in range(6):
-        mg_score += count_bits(piece_bbs[piece_type]) * MG_MATERIAL_VALUES[piece_type]
-        eg_score += count_bits(piece_bbs[piece_type]) * EG_MATERIAL_VALUES[piece_type]
-        mg_score -= count_bits(piece_bbs[piece_type + 6]) * MG_MATERIAL_VALUES[piece_type]
-        eg_score -= count_bits(piece_bbs[piece_type + 6]) * EG_MATERIAL_VALUES[piece_type]
-
+    # White pieces (Indices 0-5)
     for piece_type in range(6):
         bb = piece_bbs[piece_type]
+        count = 0
         while bb:
             sq = get_lsb_index(bb)
             mg_score += PST_MG[piece_type, sq]
             eg_score += PST_EG[piece_type, sq]
+            count += 1
             bb &= bb - np.uint64(1)
+        
+        mg_score += count * MG_MATERIAL_VALUES[piece_type]
+        eg_score += count * EG_MATERIAL_VALUES[piece_type]
+        phase += count * PHASE_WEIGHTS[piece_type]
 
+    # Black pieces (Indices 6-11)
     for piece_type in range(6):
         bb = piece_bbs[piece_type + 6]
+        count = 0
         while bb:
             sq = get_lsb_index(bb)
             mg_score -= PST_MG[piece_type, sq ^ 56]
             eg_score -= PST_EG[piece_type, sq ^ 56]
+            count += 1
             bb &= bb - np.uint64(1)
+            
+        mg_score -= count * MG_MATERIAL_VALUES[piece_type]
+        eg_score -= count * EG_MATERIAL_VALUES[piece_type]
+        phase += count * PHASE_WEIGHTS[piece_type]
+
+    phase = min(phase, MAX_PHASE)
 
     # --- Lazy Evaluation Checkpoint / 懶惰評估檢查點 ---
     if lazy:
