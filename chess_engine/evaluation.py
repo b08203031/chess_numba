@@ -5,9 +5,8 @@ import numpy as np
 
 from chess_engine.constants import *
 
-from chess_engine.zobrist import get_lsb_index
+from chess_engine.bitboard_utils import get_lsb_index, count_bits, KING_ATTACK_ZONES, FILE_MASKS
 from chess_engine.engine_types import piece_bbs_signature, occupancy_bbs_signature, game_state_signature
-from chess_engine.bitboard_utils import count_bits, KING_ATTACK_ZONES, FILE_MASKS
 from chess_engine.move_generator import (
     get_bishop_attacks, get_rook_attacks, get_queen_attacks, KNIGHT_ATTACKS, PAWN_ATTACKS, KING_ATTACKS
 )

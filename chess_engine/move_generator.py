@@ -69,8 +69,7 @@ ROOK_MAGIC_NUMBERS = np.array([
     0x8220020041009aa, 0x201000208040041, 0x8006010850008204, 0x1094004093002402,
 ], dtype=np.uint64)
 
-from chess_engine.zobrist import get_lsb_index
-from chess_engine.bitboard_utils import count_bits
+from chess_engine.bitboard_utils import get_lsb_index, count_bits
 
 @numba.njit(numba.uint64(numba.uint8), cache=True, boundscheck=False, fastmath=True)
 def mask_bishop_attacks(sq):

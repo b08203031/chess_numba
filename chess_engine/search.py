@@ -10,7 +10,7 @@ from chess_engine.move_generator import (
     generate_legal_moves, is_in_check, has_sufficient_material, generate_captures,
     generate_legal_moves_buffer, generate_captures_buffer
 )
-from chess_engine.zobrist import get_lsb_index
+from chess_engine.bitboard_utils import get_lsb_index
 from chess_engine.board_operations import make_move, unmake_move, make_null_move
 from chess_engine.move import (
     get_to_square, get_from_square, get_special_move_flag,
@@ -108,13 +108,9 @@ def get_lmr_reduction(depth, move_count, history_score):
     return max(0, int(reduction))
 
 @numba.njit(cache=True, boundscheck=False, fastmath=True)
-def score_moves(piece_bbs, occupancy_bbs, game_state, moves, scores, move_count, tt_move, killer_moves_at_ply, history_table, counter_move):
+def score_moves(piece_bbs, occupancy_bbs, game_state, moves, scores, move_count, tt_move, killer_moves_at_ply, history_table, counter_move, pinned_white, pinned_black):
     side_to_move = game_state[0]
     opponent_pieces_bb = occupancy_bbs[1] if side_to_move == 0 else occupancy_bbs[0]
-    
-    # Optimization: Calculate pinned pieces once per move scoring batch
-    pinned_white = get_pinned_pieces(piece_bbs, occupancy_bbs, WHITE)
-    pinned_black = get_pinned_pieces(piece_bbs, occupancy_bbs, BLACK)
     
     for i in range(move_count):
         move = moves[i]
@@ -218,6 +214,10 @@ def quiescence_search(piece_bbs, occupancy_bbs, game_state, alpha, beta, ply, se
     # Safe access to killers:
     safe_ply = min(ply, MAX_PLY - 1)
 
+    # Optimization: Calculate pinned pieces once for QS pruning logic and score_moves
+    pinned_white = get_pinned_pieces(piece_bbs, occupancy_bbs, WHITE)
+    pinned_black = get_pinned_pieces(piece_bbs, occupancy_bbs, BLACK)
+
     # Use score_moves to sort captures (SEE >= 0 first).
     score_moves(
         piece_bbs, occupancy_bbs, game_state, 
@@ -227,12 +227,10 @@ def quiescence_search(piece_bbs, occupancy_bbs, game_state, alpha, beta, ply, se
         NO_MOVE, # No TT move in QSearch loop usually
         search_context.killer_moves[safe_ply*2:safe_ply*2+2], 
         search_context.history_table, 
-        NO_MOVE # No counter move
+        NO_MOVE, # No counter move
+        pinned_white,
+        pinned_black
     )
-    
-    # Optimization: Calculate pinned pieces once for QS pruning logic
-    pinned_white = get_pinned_pieces(piece_bbs, occupancy_bbs, WHITE)
-    pinned_black = get_pinned_pieces(piece_bbs, occupancy_bbs, BLACK)
 
     for i in range(move_count):
         # Lazy Selection Sort: find the best remaining move
@@ -592,6 +590,10 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
     # Safe access to killers:
     safe_ply = min(ply, MAX_PLY - 1)
 
+    # Optimization: Calculate pinned pieces once for shallow pruning logic and score_moves
+    pinned_white = get_pinned_pieces(piece_bbs, occupancy_bbs, WHITE)
+    pinned_black = get_pinned_pieces(piece_bbs, occupancy_bbs, BLACK)
+
     score_moves(
         piece_bbs, occupancy_bbs, game_state, 
         moves, 
@@ -600,7 +602,9 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
         tt_move, 
         search_context.killer_moves[safe_ply*2:safe_ply*2+2], 
         search_context.history_table, 
-        counter_move
+        counter_move,
+        pinned_white,
+        pinned_black
     )
     
     best_move, max_eval = NO_MOVE, -INFINITY
@@ -609,10 +613,6 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
     # Track tried quiet moves for history malus
     quiet_moves_tried = search_context.quiet_moves_tried[ply]
     quiet_moves_tried_count = 0
-    
-    # Optimization: Calculate pinned pieces once for shallow pruning logic
-    pinned_white = get_pinned_pieces(piece_bbs, occupancy_bbs, WHITE)
-    pinned_black = get_pinned_pieces(piece_bbs, occupancy_bbs, BLACK)
 
     for i in range(move_count):
         # Lazy Selection Sort

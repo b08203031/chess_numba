@@ -2,7 +2,7 @@
 import numba
 import numpy as np
 from chess_engine.constants import (
-    BB_SQUARES, DE_BRUIJN_SEQUENCE, DE_BRUIJN_INDEX,
+    BB_SQUARES,
     WHITE, BLACK, PAWN, KNIGHT, BISHOP, ROOK, QUEEN, KING,
     MG_MATERIAL_VALUES
 )
@@ -10,7 +10,11 @@ from chess_engine.engine_types import piece_bbs_signature, occupancy_bbs_signatu
 from chess_engine.bitboard_utils import find_piece_type_on_square
 import numba.types as nbt
 # Import Magic Bitboard functions
-from chess_engine.move_generator import get_bishop_attacks, get_rook_attacks
+from chess_engine.move_generator import (
+    get_bishop_attacks, get_rook_attacks,
+    PAWN_ATTACKS, KNIGHT_ATTACKS, KING_ATTACKS
+)
+from chess_engine.bitboard_utils import get_lsb_index
 
 
 # Piece Values for SEE (based on Stockfish's internal values for SEE)
@@ -20,38 +24,11 @@ from chess_engine.move_generator import get_bishop_attacks, get_rook_attacks
 
 PIECE_VALUES = MG_MATERIAL_VALUES
 
-@numba.njit(nbt.int32(nbt.uint64), cache=True)
-def get_lsb_index(bitboard):
-    """Returns the index (0-63) of the least significant bit set."""
-    if bitboard == 0:
-        return -1
-    # Use LSB isolation: bitboard & -bitboard
-    # For uint64, -bitboard is (~bitboard + 1)
-    lsb = bitboard & (~bitboard + np.uint64(1))
-    return DE_BRUIJN_INDEX[(lsb * DE_BRUIJN_SEQUENCE) >> np.uint64(58)]
-
 # Basic Attack Tables (Initialize once if possible, or use logic)
 # Numba caches function compilation, so we can embed logic.
 
-KNIGHT_OFFSETS = np.array([-17, -15, -10, -6, 6, 10, 15, 17], dtype=np.int32)
-KING_OFFSETS = np.array([-9, -8, -7, -1, 1, 7, 8, 9], dtype=np.int32)
 DIAGONAL_DIRECTIONS = np.array([-9, -7, 7, 9], dtype=np.int32)
 ORTHOGONAL_DIRECTIONS = np.array([-8, -1, 1, 8], dtype=np.int32)
-
-@numba.njit(cache=True)
-def get_step_attacks(square, offsets):
-    attacks = np.uint64(0)
-    sq_rank = square // 8
-    sq_file = square % 8
-    for off in offsets:
-        target = square + off
-        if 0 <= target < 64:
-            tr = target // 8
-            tf = target % 8
-            # Check for wrap-around
-            if abs(tr - sq_rank) <= 2 and abs(tf - sq_file) <= 2:
-                attacks |= BB_SQUARES[target]
-    return attacks
 
 @numba.njit(cache=True)
 def get_sliding_attacks(square, occupied, is_diagonal):
@@ -172,30 +149,17 @@ def get_attackers_for_see(square, occupied, piece_bbs, side_mask):
     Optimized for SEE loop (uses passed 'occupied' which has holes).
     """
     attackers = np.uint64(0)
-
-    # Note: Stockfish uses lookup tables for everything. We use calculation.
-    # To optimize, we inline as much as possible.
-
-    # 1. Pawns (Inverse logic: Attacked by Pawn means Pawn at Capture Position)
-    if side_mask == WHITE:
-        # White P attacks 'square' from sq-9 or sq-7
-        if square >= 9 and (square % 8) > 0:
-             if (piece_bbs[PAWN] & BB_SQUARES[square - 9]): attackers |= BB_SQUARES[square - 9]
-        if square >= 7 and (square % 8) < 7:
-             if (piece_bbs[PAWN] & BB_SQUARES[square - 7]): attackers |= BB_SQUARES[square - 7]
-    else:
-        # Black P attacks 'square' from sq+9 or sq+7
-        if square <= 54 and (square % 8) < 7:
-             if (piece_bbs[PAWN+6] & BB_SQUARES[square + 9]): attackers |= BB_SQUARES[square + 9]
-        if square <= 56 and (square % 8) > 0:
-             if (piece_bbs[PAWN+6] & BB_SQUARES[square + 7]): attackers |= BB_SQUARES[square + 7]
-
     offset = 0 if side_mask == WHITE else 6
 
-    # 2. Knights
+    # 1. Pawns - Use precomputed attack tables.
+    # Note: PAWN_ATTACKS[side, sq] returns squares where a pawn of 'side' 
+    # must be to attack 'sq'.
+    attackers |= (PAWN_ATTACKS[side_mask, square] & piece_bbs[offset + PAWN])
+
+    # 2. Knights - Use precomputed attack tables
     knights = piece_bbs[KNIGHT + offset]
     if knights:
-        attackers |= (get_step_attacks(square, KNIGHT_OFFSETS) & knights)
+        attackers |= (KNIGHT_ATTACKS[square] & knights)
 
     # 3. Sliders
     # We use the current 'occupied' which has holes where pieces were captured!
@@ -211,10 +175,10 @@ def get_attackers_for_see(square, occupied, piece_bbs, side_mask):
     if sliders_orth:
         attackers |= (get_sliding_attacks(square, occupied, False) & sliders_orth)
 
-    # 4. King
+    # 4. King - Use precomputed attack tables
     kings = piece_bbs[KING + offset]
     if kings:
-        attackers |= (get_step_attacks(square, KING_OFFSETS) & kings)
+        attackers |= (KING_ATTACKS[square] & kings)
 
     return attackers
 

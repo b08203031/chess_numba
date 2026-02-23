@@ -1,7 +1,30 @@
 import numpy as np
 import numba as nb
+from numba.extending import intrinsic
+from numba import types
 from chess_engine.constants import BB_SQUARES
 from chess_engine.engine_types import piece_bbs_signature
+
+# hardware intrinsic for trailing zeros
+@intrinsic
+def count_trailing_zeros(typingctx, val):
+    def codegen(context, builder, signature, args):
+        val_arg = args[0]
+        # llvm.cttz.i64(i64 <src>, i1 <is_zero_undef>)
+        # We pass False for is_zero_undef, so it is defined for 0 (returns 64).
+        return builder.cttz(val_arg, context.get_constant(types.boolean, False))
+
+    sig = types.int64(types.uint64)
+    return sig, codegen
+
+@nb.njit(nb.int8(nb.uint64), cache=True, inline='always')
+def get_lsb_index(bitboard: np.uint64) -> int:
+    """
+    Uses hardware CTZ (Count Trailing Zeros) intrinsic via LLVM to find LSB index.
+    """
+    if bitboard == 0:
+        return -1
+    return nb.int8(count_trailing_zeros(bitboard))
 
 def _init_king_attack_zones():
     """
