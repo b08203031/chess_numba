@@ -119,7 +119,7 @@ WHITE_PASSED_PAWN_MASKS, BLACK_PASSED_PAWN_MASKS = _create_passed_pawn_masks()
 
 
 
-@numba.njit(numba.types.UniTuple(numba.int32, 2)(piece_bbs_signature), cache=True, boundscheck=False, fastmath=True)
+@numba.njit(numba.types.UniTuple(numba.int32, 4)(piece_bbs_signature), cache=True, boundscheck=False, fastmath=True)
 def evaluate_pawn_structure(piece_bbs):
     """
     評估雙方的兵型結構（通路兵、孤兵、重疊兵、後兵、連結兵）。
@@ -128,10 +128,13 @@ def evaluate_pawn_structure(piece_bbs):
         piece_bbs (np.ndarray): 12 個棋子的位元棋盤。
         
     Returns:
-        tuple: (mg_score, eg_score) 從白方視角。
+        tuple: (mg_score, eg_score, white_pawn_tropism, black_pawn_tropism) 從白方視角。
     """
     mg_score = np.int32(0)
     eg_score = np.int32(0)
+    
+    white_pawn_tropism = np.int32(0)
+    black_pawn_tropism = np.int32(0)
     
     white_pawns = piece_bbs[0]
     black_pawns = piece_bbs[6]
@@ -146,6 +149,10 @@ def evaluate_pawn_structure(piece_bbs):
         file_idx = sq % 8
 
         adjacent_pawns = ADJACENT_FILES_MASKS[file_idx] & white_pawns
+
+        # Tropism
+        dist = MANHATTAN_DISTANCE[sq, black_king_sq]
+        white_pawn_tropism += KING_TROPISM_WEIGHTS[0] * (KING_TROPISM_MAX_DISTANCE - dist)
 
         # Isolated Pawn
         if not adjacent_pawns:
@@ -242,6 +249,10 @@ def evaluate_pawn_structure(piece_bbs):
 
         adjacent_pawns = ADJACENT_FILES_MASKS[file_idx] & black_pawns
 
+        # Tropism
+        dist = MANHATTAN_DISTANCE[sq, white_king_sq]
+        black_pawn_tropism += KING_TROPISM_WEIGHTS[0] * (KING_TROPISM_MAX_DISTANCE - dist)
+
         # Isolated Pawn
         if not adjacent_pawns:
             mg_score -= ISOLATED_PAWN_PENALTY[0]
@@ -300,7 +311,7 @@ def evaluate_pawn_structure(piece_bbs):
 
         temp_bp &= temp_bp - np.uint64(1)
 
-    return mg_score, eg_score
+    return mg_score, eg_score, white_pawn_tropism, black_pawn_tropism
 
 
 @numba.njit(numba.types.UniTuple(numba.int32, 2)(piece_bbs_signature), cache=True, boundscheck=False, fastmath=True)
@@ -556,28 +567,6 @@ def _evaluate_king_attackers(king_sq, color, piece_bbs, occupancy_bbs, enemy_att
     return -KING_SAFETY_TABLE[min(total_attack_units, len(KING_SAFETY_TABLE) - 1)]
 
 @numba.njit(numba.int32(numba.int32, numba.int32, piece_bbs_signature), cache=True, boundscheck=False, fastmath=True)
-def _evaluate_king_tropism(king_sq, color, piece_bbs):
-    """
-    (Phase 3) Calculates a penalty based on the proximity of enemy pieces to the king.
-    (階段 3) 根據敵方棋子與國王的距離計算懲罰。
-    """
-    penalty = np.int32(0)
-    enemy_start_idx = 6 if color == 0 else 0
-
-    for piece_type_offset in range(5):
-        piece_type = enemy_start_idx + piece_type_offset
-        weight = KING_TROPISM_WEIGHTS[piece_type_offset]
-
-        temp_bb = piece_bbs[piece_type]
-        while temp_bb:
-            sq = get_lsb_index(temp_bb)
-            distance = MANHATTAN_DISTANCE[sq, king_sq]
-            penalty += weight * (KING_TROPISM_MAX_DISTANCE - distance)
-            temp_bb &= temp_bb - np.uint64(1)
-
-    return -penalty
-
-@numba.njit(numba.int32(numba.int32, numba.int32, piece_bbs_signature), cache=True, boundscheck=False, fastmath=True)
 def _evaluate_pawn_storm(king_sq, color, piece_bbs):
     """
     (Phase 4) Calculates a penalty for enemy pawns near the king (pawn storm).
@@ -615,8 +604,8 @@ def _evaluate_pawn_storm(king_sq, color, piece_bbs):
 
     return penalty
 
-@numba.njit(numba.types.UniTuple(numba.int32, 2)(piece_bbs_signature, occupancy_bbs_signature, numba.uint64, numba.uint64), cache=True, boundscheck=False, fastmath=True)
-def evaluate_king_safety(piece_bbs, occupancy_bbs, white_attacks, black_attacks):
+@numba.njit(numba.types.UniTuple(numba.int32, 2)(piece_bbs_signature, occupancy_bbs_signature, numba.uint64, numba.uint64, numba.int32, numba.int32), cache=True, boundscheck=False, fastmath=True)
+def evaluate_king_safety(piece_bbs, occupancy_bbs, white_attacks, black_attacks, white_tropism, black_tropism):
     """
     Refactored King Safety evaluation based on Chess Programming Wiki.
     重構的國王安全評估，基於 Chess Programming Wiki。
@@ -630,12 +619,10 @@ def evaluate_king_safety(piece_bbs, occupancy_bbs, white_attacks, black_attacks)
     # --- Calculate raw scores for each component / 計算每個組件的原始分數 ---
     white_shield = _evaluate_pawn_shield_for_color(white_king_sq, wp_bb, bp_bb, 0)
     white_attackers = _evaluate_king_attackers(white_king_sq, 0, piece_bbs, occupancy_bbs, black_attacks, white_attacks)
-    white_tropism = _evaluate_king_tropism(white_king_sq, 0, piece_bbs)
     white_pawn_storm = _evaluate_pawn_storm(white_king_sq, 0, piece_bbs)
 
     black_shield = _evaluate_pawn_shield_for_color(black_king_sq, bp_bb, wp_bb, 1)
     black_attackers = _evaluate_king_attackers(black_king_sq, 1, piece_bbs, occupancy_bbs, white_attacks, black_attacks)
-    black_tropism = _evaluate_king_tropism(black_king_sq, 1, piece_bbs)
     black_pawn_storm = _evaluate_pawn_storm(black_king_sq, 1, piece_bbs)
 
     # --- Sum raw scores / 加總原始分數 ---
@@ -804,7 +791,7 @@ def evaluate_outposts(piece_bbs, occupancy_bbs, white_pawn_attacks, black_pawn_a
 
 
 
-@numba.njit(numba.types.Tuple((numba.uint64, numba.uint64, numba.uint64, numba.uint64, numba.int32, numba.int32, numba.int32, numba.int32))(piece_bbs_signature, occupancy_bbs_signature), cache=True, boundscheck=False, fastmath=True)
+@numba.njit(numba.types.Tuple((numba.uint64, numba.uint64, numba.uint64, numba.uint64, numba.int32, numba.int32, numba.int32, numba.int32, numba.int32, numba.int32))(piece_bbs_signature, occupancy_bbs_signature), cache=True, boundscheck=False, fastmath=True)
 def evaluate_attacks_mobility_threats(piece_bbs, occupancy_bbs):
     (wp_bb, wn_bb, wb_bb, wr_bb, wq_bb, wk_bb,
      bp_bb, bn_bb, bb_bb, br_bb, bq_bb, bk_bb) = piece_bbs
@@ -812,6 +799,10 @@ def evaluate_attacks_mobility_threats(piece_bbs, occupancy_bbs):
     white_occupancy = occupancy_bbs[0]
     black_occupancy = occupancy_bbs[1]
     all_occupancy = occupancy_bbs[2]
+
+    # Extract King Squares for Tropism
+    white_king_sq = get_lsb_index(wk_bb)
+    black_king_sq = get_lsb_index(bk_bb)
 
     # --- Pawn Attacks ---
     white_pawn_attacks = ((wp_bb & NOT_A_FILE) << np.uint64(7)) | ((wp_bb & NOT_H_FILE) << np.uint64(9))
@@ -834,6 +825,9 @@ def evaluate_attacks_mobility_threats(piece_bbs, occupancy_bbs):
     black_minor_attacks = np.uint64(0)
     black_rook_attacks = np.uint64(0)
 
+    white_piece_tropism = np.int32(0)
+    black_piece_tropism = np.int32(0)
+
     # --- White Pieces ---
     temp_bb = wn_bb
     while temp_bb:
@@ -844,6 +838,11 @@ def evaluate_attacks_mobility_threats(piece_bbs, occupancy_bbs):
         moves = count_bits(att & ~white_occupancy & white_safe_mask)
         mg_mobility += (moves - KNIGHT_MOBILITY_BASE_MOVES) * KNIGHT_MOBILITY_WEIGHT[0]
         eg_mobility += (moves - KNIGHT_MOBILITY_BASE_MOVES) * KNIGHT_MOBILITY_WEIGHT[1]
+        
+        # Tropism: Distance to Black King
+        distance = MANHATTAN_DISTANCE[sq, black_king_sq]
+        white_piece_tropism += KING_TROPISM_WEIGHTS[1] * (KING_TROPISM_MAX_DISTANCE - distance)
+        
         temp_bb &= temp_bb - np.uint64(1)
 
     temp_bb = wb_bb
@@ -855,6 +854,11 @@ def evaluate_attacks_mobility_threats(piece_bbs, occupancy_bbs):
         moves = count_bits(att & ~white_occupancy & white_safe_mask)
         mg_mobility += (moves - BISHOP_MOBILITY_BASE_MOVES) * BISHOP_MOBILITY_WEIGHT[0]
         eg_mobility += (moves - BISHOP_MOBILITY_BASE_MOVES) * BISHOP_MOBILITY_WEIGHT[1]
+        
+        # Tropism
+        distance = MANHATTAN_DISTANCE[sq, black_king_sq]
+        white_piece_tropism += KING_TROPISM_WEIGHTS[2] * (KING_TROPISM_MAX_DISTANCE - distance)
+
         temp_bb &= temp_bb - np.uint64(1)
 
     temp_bb = wr_bb
@@ -866,6 +870,11 @@ def evaluate_attacks_mobility_threats(piece_bbs, occupancy_bbs):
         moves = count_bits(att & ~white_occupancy & white_safe_mask)
         mg_mobility += (moves - ROOK_MOBILITY_BASE_MOVES) * ROOK_MOBILITY_WEIGHT[0]
         eg_mobility += (moves - ROOK_MOBILITY_BASE_MOVES) * ROOK_MOBILITY_WEIGHT[1]
+        
+        # Tropism
+        distance = MANHATTAN_DISTANCE[sq, black_king_sq]
+        white_piece_tropism += KING_TROPISM_WEIGHTS[3] * (KING_TROPISM_MAX_DISTANCE - distance)
+
         temp_bb &= temp_bb - np.uint64(1)
 
     temp_bb = wq_bb
@@ -876,6 +885,11 @@ def evaluate_attacks_mobility_threats(piece_bbs, occupancy_bbs):
         moves = count_bits(att & ~white_occupancy & white_safe_mask)
         mg_mobility += (moves - QUEEN_MOBILITY_BASE_MOVES) * QUEEN_MOBILITY_WEIGHT[0]
         eg_mobility += (moves - QUEEN_MOBILITY_BASE_MOVES) * QUEEN_MOBILITY_WEIGHT[1]
+        
+        # Tropism
+        distance = MANHATTAN_DISTANCE[sq, black_king_sq]
+        white_piece_tropism += KING_TROPISM_WEIGHTS[4] * (KING_TROPISM_MAX_DISTANCE - distance)
+
         temp_bb &= temp_bb - np.uint64(1)
 
     if wk_bb:
@@ -892,6 +906,11 @@ def evaluate_attacks_mobility_threats(piece_bbs, occupancy_bbs):
         moves = count_bits(att & ~black_occupancy & black_safe_mask)
         mg_mobility -= (moves - KNIGHT_MOBILITY_BASE_MOVES) * KNIGHT_MOBILITY_WEIGHT[0]
         eg_mobility -= (moves - KNIGHT_MOBILITY_BASE_MOVES) * KNIGHT_MOBILITY_WEIGHT[1]
+        
+        # Tropism: Distance to White King
+        distance = MANHATTAN_DISTANCE[sq, white_king_sq]
+        black_piece_tropism += KING_TROPISM_WEIGHTS[1] * (KING_TROPISM_MAX_DISTANCE - distance)
+
         temp_bb &= temp_bb - np.uint64(1)
 
     temp_bb = bb_bb
@@ -903,6 +922,11 @@ def evaluate_attacks_mobility_threats(piece_bbs, occupancy_bbs):
         moves = count_bits(att & ~black_occupancy & black_safe_mask)
         mg_mobility -= (moves - BISHOP_MOBILITY_BASE_MOVES) * BISHOP_MOBILITY_WEIGHT[0]
         eg_mobility -= (moves - BISHOP_MOBILITY_BASE_MOVES) * BISHOP_MOBILITY_WEIGHT[1]
+        
+        # Tropism
+        distance = MANHATTAN_DISTANCE[sq, white_king_sq]
+        black_piece_tropism += KING_TROPISM_WEIGHTS[2] * (KING_TROPISM_MAX_DISTANCE - distance)
+
         temp_bb &= temp_bb - np.uint64(1)
 
     temp_bb = br_bb
@@ -914,6 +938,11 @@ def evaluate_attacks_mobility_threats(piece_bbs, occupancy_bbs):
         moves = count_bits(att & ~black_occupancy & black_safe_mask)
         mg_mobility -= (moves - ROOK_MOBILITY_BASE_MOVES) * ROOK_MOBILITY_WEIGHT[0]
         eg_mobility -= (moves - ROOK_MOBILITY_BASE_MOVES) * ROOK_MOBILITY_WEIGHT[1]
+        
+        # Tropism
+        distance = MANHATTAN_DISTANCE[sq, white_king_sq]
+        black_piece_tropism += KING_TROPISM_WEIGHTS[3] * (KING_TROPISM_MAX_DISTANCE - distance)
+
         temp_bb &= temp_bb - np.uint64(1)
 
     temp_bb = bq_bb
@@ -924,6 +953,11 @@ def evaluate_attacks_mobility_threats(piece_bbs, occupancy_bbs):
         moves = count_bits(att & ~black_occupancy & black_safe_mask)
         mg_mobility -= (moves - QUEEN_MOBILITY_BASE_MOVES) * QUEEN_MOBILITY_WEIGHT[0]
         eg_mobility -= (moves - QUEEN_MOBILITY_BASE_MOVES) * QUEEN_MOBILITY_WEIGHT[1]
+        
+        # Tropism
+        distance = MANHATTAN_DISTANCE[sq, white_king_sq]
+        black_piece_tropism += KING_TROPISM_WEIGHTS[4] * (KING_TROPISM_MAX_DISTANCE - distance)
+
         temp_bb &= temp_bb - np.uint64(1)
 
     if bk_bb:
@@ -992,7 +1026,7 @@ def evaluate_attacks_mobility_threats(piece_bbs, occupancy_bbs):
         eg_threats -= THREAT_ROOK_ON_QUEEN[1] * count
 
     return (white_attacks, black_attacks, white_pawn_attacks, black_pawn_attacks, 
-            mg_mobility, eg_mobility, mg_threats, eg_threats)
+            mg_mobility, eg_mobility, mg_threats, eg_threats, white_piece_tropism, black_piece_tropism)
 
 
 @numba.njit(numba.int32(piece_bbs_signature, numba.uint64), cache=True, boundscheck=False, fastmath=True)
@@ -1064,7 +1098,7 @@ def _evaluate_king_pawn_endgame(piece_bbs, side_to_move):
     score -= PST_EG[5, black_king_sq ^ 56]
 
     # 2. 通路兵獎勵 (使用 evaluate_pawn_structure 簡化計算)
-    _, eg_pawn_score = evaluate_pawn_structure(piece_bbs)
+    _, eg_pawn_score, _, _ = evaluate_pawn_structure(piece_bbs)
     score += eg_pawn_score
 
     # 3. 國王活動獎勵
@@ -1159,17 +1193,23 @@ def evaluate_position(piece_bbs, occupancy_bbs, game_state, lazy: bool = False):
 
     # --- Compute Attacks, Mobility, Threats (Optimized Single Pass) ---
     (white_attacks, black_attacks, white_pawn_attacks, black_pawn_attacks,
-     mg_mobility, eg_mobility, mg_threats, eg_threats) = evaluate_attacks_mobility_threats(piece_bbs, occupancy_bbs)
+     mg_mobility, eg_mobility, mg_threats, eg_threats,
+     white_piece_tropism, black_piece_tropism) = evaluate_attacks_mobility_threats(piece_bbs, occupancy_bbs)
 
-    # --- 3. (Full Evaluation) 加入國王安全分數 ---
-    mg_king_safety, eg_king_safety = evaluate_king_safety(piece_bbs, occupancy_bbs, white_attacks, black_attacks)
-    mg_score += mg_king_safety
-    eg_score += eg_king_safety
-
-    # --- 4. 加入兵形結構分數 ---
-    mg_pawn_structure, eg_pawn_structure = evaluate_pawn_structure(piece_bbs)
+    # --- 4. 加入兵形結構分數 (Moved up for King Safety dependency) ---
+    mg_pawn_structure, eg_pawn_structure, white_pawn_tropism, black_pawn_tropism = evaluate_pawn_structure(piece_bbs)
     mg_score += mg_pawn_structure
     eg_score += eg_pawn_structure
+
+    # --- 3. (Full Evaluation) 加入國王安全分數 ---
+    white_attack_tropism = -(white_pawn_tropism + white_piece_tropism) # White attacking Black
+    black_attack_tropism = -(black_pawn_tropism + black_piece_tropism) # Black attacking White
+    
+    # Pass 'black_attack_tropism' to White King Safety (because it represents danger TO White King)
+    # Pass 'white_attack_tropism' to Black King Safety (because it represents danger TO Black King)
+    mg_king_safety, eg_king_safety = evaluate_king_safety(piece_bbs, occupancy_bbs, white_attacks, black_attacks, black_attack_tropism, white_attack_tropism)
+    mg_score += mg_king_safety
+    eg_score += eg_king_safety
 
     # --- 5. 加入棋子協同性分數 ---
     mg_coord, eg_coord = evaluate_piece_coordination(piece_bbs)

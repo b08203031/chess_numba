@@ -140,14 +140,14 @@ def init_sliders_attacks():
         for i in range(indices):
             occ = set_occupancy(i, relevant_bits_count, attack_mask)
             magic_index = (np.uint64(occ) * BISHOP_MAGIC_NUMBERS[sq]) >> np.uint64(64 - BISHOP_RELEVANT_BITS[sq])
-            bishop_attacks[sq][magic_index] = bishop_attacks_on_the_fly(sq, occ)
+            bishop_attacks[sq, magic_index] = bishop_attacks_on_the_fly(sq, occ)
             
         attack_mask, relevant_bits_count = ROOK_MASKS[sq], count_bits(ROOK_MASKS[sq])
         indices = 1 << relevant_bits_count
         for i in range(indices):
             occ = set_occupancy(i, relevant_bits_count, attack_mask)
             magic_index = (np.uint64(occ) * ROOK_MAGIC_NUMBERS[sq]) >> np.uint64(64 - ROOK_RELEVANT_BITS[sq])
-            rook_attacks[sq][magic_index] = rook_attacks_on_the_fly(sq, occ)
+            rook_attacks[sq, magic_index] = rook_attacks_on_the_fly(sq, occ)
     return bishop_attacks, rook_attacks
 
 BISHOP_ATTACKS, ROOK_ATTACKS = init_sliders_attacks()
@@ -162,7 +162,7 @@ def get_bishop_attacks(sq, occ):
     occ &= BISHOP_MASKS[sq]
     occ *= BISHOP_MAGIC_NUMBERS[sq]
     occ >>= np.uint64(64-BISHOP_RELEVANT_BITS[sq])
-    return BISHOP_ATTACKS[sq][occ]
+    return BISHOP_ATTACKS[sq, occ]
     # return bishop_attacks_on_the_fly(sq, occ)
 
 @numba.njit(numba.uint64(numba.uint8, numba.uint64), cache=True, boundscheck=False, fastmath=True)
@@ -173,7 +173,7 @@ def get_rook_attacks(sq, occ):
     occ &= ROOK_MASKS[sq]
     occ *= ROOK_MAGIC_NUMBERS[sq]
     occ >>= np.uint64(64-ROOK_RELEVANT_BITS[sq])
-    return ROOK_ATTACKS[sq][occ]
+    return ROOK_ATTACKS[sq, occ]
     # return rook_attacks_on_the_fly(sq, occ)
 
 @numba.njit(numba.uint64(numba.uint8, numba.uint64), cache=True, boundscheck=False, fastmath=True)
@@ -213,15 +213,19 @@ def is_square_attacked(piece_bbs, occupancy_bbs, game_state, sq, attacker_side):
         if PAWN_ATTACKS[WHITE, sq] & wp: return True
         if KING_ATTACKS[sq] & wk: return True
         if KNIGHT_ATTACKS[sq] & wn: return True
-        if get_bishop_attacks(sq, all_pieces_bb) & (wb | wq): return True
-        if get_rook_attacks(sq, all_pieces_bb) & (wr | wq): return True
+        if (wb | wq):
+            if get_bishop_attacks(sq, all_pieces_bb) & (wb | wq): return True
+        if (wr | wq):
+            if get_rook_attacks(sq, all_pieces_bb) & (wr | wq): return True
     else: # Attacker is BLACK
         bp, bn, bb, br, bq, bk = piece_bbs[6], piece_bbs[7], piece_bbs[8], piece_bbs[9], piece_bbs[10], piece_bbs[11]
         if PAWN_ATTACKS[BLACK, sq] & bp: return True
         if KING_ATTACKS[sq] & bk: return True
         if KNIGHT_ATTACKS[sq] & bn: return True
-        if get_bishop_attacks(sq, all_pieces_bb) & (bb | bq): return True
-        if get_rook_attacks(sq, all_pieces_bb) & (br | bq): return True
+        if (bb | bq):
+            if get_bishop_attacks(sq, all_pieces_bb) & (bb | bq): return True
+        if (br | bq):
+            if get_rook_attacks(sq, all_pieces_bb) & (br | bq): return True
         
     return False
 
