@@ -26,7 +26,7 @@ def is_king_in_check(piece_bbs, occupancy_bbs, game_state):
     king_sq = get_lsb_index(piece_bbs[king_bb_index])
 
     # Check if the king's square is attacked by the opponent / 檢查王的方格是否被對手攻擊
-    return is_square_attacked(piece_bbs, occupancy_bbs, game_state, king_sq, 1 - side_to_move)
+    return is_square_attacked(piece_bbs, occupancy_bbs, king_sq, 1 - side_to_move)
 
 PERFT_RESULTS = {
     "startpos": {

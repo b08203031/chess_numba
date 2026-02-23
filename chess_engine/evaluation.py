@@ -119,16 +119,17 @@ WHITE_PASSED_PAWN_MASKS, BLACK_PASSED_PAWN_MASKS = _create_passed_pawn_masks()
 
 
 
-@numba.njit(numba.types.UniTuple(numba.int32, 4)(piece_bbs_signature), cache=True, boundscheck=False, fastmath=True)
+@numba.njit(numba.types.UniTuple(numba.int32, 6)(piece_bbs_signature), cache=True, boundscheck=False, fastmath=True)
 def evaluate_pawn_structure(piece_bbs):
     """
     評估雙方的兵型結構（通路兵、孤兵、重疊兵、後兵、連結兵）。
+    以及兵風暴（Pawn Storm）懲罰。
     
     Args:
         piece_bbs (np.ndarray): 12 個棋子的位元棋盤。
         
     Returns:
-        tuple: (mg_score, eg_score, white_pawn_tropism, black_pawn_tropism) 從白方視角。
+        tuple: (mg_score, eg_score, white_pawn_tropism, black_pawn_tropism, white_pawn_storm, black_pawn_storm) 從白方視角。
     """
     mg_score = np.int32(0)
     eg_score = np.int32(0)
@@ -136,10 +137,17 @@ def evaluate_pawn_structure(piece_bbs):
     white_pawn_tropism = np.int32(0)
     black_pawn_tropism = np.int32(0)
     
+    # Pawn Storm Accumulators (Negative values, penalties)
+    white_pawn_storm = np.int32(0)
+    black_pawn_storm = np.int32(0)
+    
     white_pawns = piece_bbs[0]
     black_pawns = piece_bbs[6]
     white_king_sq = get_lsb_index(piece_bbs[5])
     black_king_sq = get_lsb_index(piece_bbs[11])
+    
+    white_king_file = white_king_sq % 8
+    black_king_file = black_king_sq % 8
 
     # --- 1. Iterate White Pawns ---
     temp_wp = white_pawns
@@ -153,6 +161,10 @@ def evaluate_pawn_structure(piece_bbs):
         # Tropism
         dist = MANHATTAN_DISTANCE[sq, black_king_sq]
         white_pawn_tropism += KING_TROPISM_WEIGHTS[0] * (KING_TROPISM_MAX_DISTANCE - dist)
+        
+        # Pawn Storm (White Pawn attacking Black King)
+        if abs(file_idx - black_king_file) <= 1:
+            black_pawn_storm -= PAWN_STORM_PENALTY_BY_RANK[7 - rank]
 
         # Isolated Pawn
         if not adjacent_pawns:
@@ -252,6 +264,10 @@ def evaluate_pawn_structure(piece_bbs):
         # Tropism
         dist = MANHATTAN_DISTANCE[sq, white_king_sq]
         black_pawn_tropism += KING_TROPISM_WEIGHTS[0] * (KING_TROPISM_MAX_DISTANCE - dist)
+        
+        # Pawn Storm (Black Pawn attacking White King)
+        if abs(file_idx - white_king_file) <= 1:
+            white_pawn_storm -= PAWN_STORM_PENALTY_BY_RANK[rank]
 
         # Isolated Pawn
         if not adjacent_pawns:
@@ -311,7 +327,7 @@ def evaluate_pawn_structure(piece_bbs):
 
         temp_bp &= temp_bp - np.uint64(1)
 
-    return mg_score, eg_score, white_pawn_tropism, black_pawn_tropism
+    return mg_score, eg_score, white_pawn_tropism, black_pawn_tropism, white_pawn_storm, black_pawn_storm
 
 
 @numba.njit(numba.types.UniTuple(numba.int32, 2)(piece_bbs_signature), cache=True, boundscheck=False, fastmath=True)
@@ -566,46 +582,8 @@ def _evaluate_king_attackers(king_sq, color, piece_bbs, occupancy_bbs, enemy_att
     # The score from the table is a penalty, so it should be negative.
     return -KING_SAFETY_TABLE[min(total_attack_units, len(KING_SAFETY_TABLE) - 1)]
 
-@numba.njit(numba.int32(numba.int32, numba.int32, piece_bbs_signature), cache=True, boundscheck=False, fastmath=True)
-def _evaluate_pawn_storm(king_sq, color, piece_bbs):
-    """
-    (Phase 4) Calculates a penalty for enemy pawns near the king (pawn storm).
-    Revised to use rank-based penalty.
-    """
-    penalty = np.int32(0)
-    king_file = king_sq % 8
-    enemy_pawn_idx = 6 if color == 0 else 0
-    enemy_pawns = piece_bbs[enemy_pawn_idx]
-
-    # Iterate over files adjacent to the king
-    for f in range(max(0, king_file - 1), min(7, king_file + 1) + 1):
-        file_mask = FILE_MASKS[f]
-        pawns_on_file = enemy_pawns & file_mask
-        
-        while pawns_on_file:
-            sq = get_lsb_index(pawns_on_file)
-            rank = sq // 8
-            
-            # Determine the penalty index based on the pawn's rank relative to the defending king's back rank
-            # White King (color 0) is at rank 0. Black pawns attack. 
-            # Black pawn at Rank 2 (index 2) -> Very close -> High penalty.
-            # Black King (color 1) is at rank 7. White pawns attack.
-            # White pawn at Rank 5 (index 5) -> 7-5=2 -> Very close -> High penalty.
-            
-            table_idx = rank if color == 0 else (7 - rank)
-            penalty -= PAWN_STORM_PENALTY_BY_RANK[table_idx] # Penalty should be subtracted (score is relative to side to move) or returned as positive penalty to be subtracted later?
-            # The function returns "penalty", and caller does: white_raw_safety + white_pawn_storm.
-            # But the other functions return "score" (often negative for penalties).
-            # Let's check _evaluate_king_tropism: returns -penalty.
-            # Let's check _evaluate_king_attackers: returns -KING_SAFETY_TABLE[...].
-            # So this function should return a NEGATIVE value.
-            
-            pawns_on_file &= pawns_on_file - np.uint64(1)
-
-    return penalty
-
-@numba.njit(numba.types.UniTuple(numba.int32, 2)(piece_bbs_signature, occupancy_bbs_signature, numba.uint64, numba.uint64, numba.int32, numba.int32), cache=True, boundscheck=False, fastmath=True)
-def evaluate_king_safety(piece_bbs, occupancy_bbs, white_attacks, black_attacks, white_tropism, black_tropism):
+@numba.njit(numba.types.UniTuple(numba.int32, 2)(piece_bbs_signature, occupancy_bbs_signature, numba.uint64, numba.uint64, numba.int32, numba.int32, numba.int32, numba.int32), cache=True, boundscheck=False, fastmath=True)
+def evaluate_king_safety(piece_bbs, occupancy_bbs, white_attacks, black_attacks, white_tropism, black_tropism, white_pawn_storm_score, black_pawn_storm_score):
     """
     Refactored King Safety evaluation based on Chess Programming Wiki.
     重構的國王安全評估，基於 Chess Programming Wiki。
@@ -619,15 +597,13 @@ def evaluate_king_safety(piece_bbs, occupancy_bbs, white_attacks, black_attacks,
     # --- Calculate raw scores for each component / 計算每個組件的原始分數 ---
     white_shield = _evaluate_pawn_shield_for_color(white_king_sq, wp_bb, bp_bb, 0)
     white_attackers = _evaluate_king_attackers(white_king_sq, 0, piece_bbs, occupancy_bbs, black_attacks, white_attacks)
-    white_pawn_storm = _evaluate_pawn_storm(white_king_sq, 0, piece_bbs)
 
     black_shield = _evaluate_pawn_shield_for_color(black_king_sq, bp_bb, wp_bb, 1)
     black_attackers = _evaluate_king_attackers(black_king_sq, 1, piece_bbs, occupancy_bbs, white_attacks, black_attacks)
-    black_pawn_storm = _evaluate_pawn_storm(black_king_sq, 1, piece_bbs)
 
     # --- Sum raw scores / 加總原始分數 ---
-    white_raw_safety = white_shield + white_attackers + white_tropism + white_pawn_storm
-    black_raw_safety = black_shield + black_attackers + black_tropism + black_pawn_storm
+    white_raw_safety = white_shield + white_attackers + white_tropism + white_pawn_storm_score
+    black_raw_safety = black_shield + black_attackers + black_tropism + black_pawn_storm_score
 
     # --- Phase 4: Scaling based on enemy material / 階段 4：基於敵方材質進行縮放 ---
     black_material_for_scaling = (count_bits(bn_bb) * SCALING_WEIGHTS[0] +
@@ -1015,7 +991,7 @@ def _evaluate_king_pawn_endgame(piece_bbs, side_to_move):
     score -= PST_EG[5, black_king_sq ^ 56]
 
     # 2. 通路兵獎勵 (使用 evaluate_pawn_structure 簡化計算)
-    _, eg_pawn_score, _, _ = evaluate_pawn_structure(piece_bbs)
+    _, eg_pawn_score, _, _, _, _ = evaluate_pawn_structure(piece_bbs)
     score += eg_pawn_score
 
     # 3. 國王活動獎勵
@@ -1074,6 +1050,7 @@ def evaluate_position(piece_bbs, occupancy_bbs, game_state, lazy: bool = False):
     # White pieces (Indices 0-5)
     for piece_type in range(6):
         bb = piece_bbs[piece_type]
+        if not bb: continue
         count = 0
         while bb:
             sq = get_lsb_index(bb)
@@ -1089,6 +1066,7 @@ def evaluate_position(piece_bbs, occupancy_bbs, game_state, lazy: bool = False):
     # Black pieces (Indices 6-11)
     for piece_type in range(6):
         bb = piece_bbs[piece_type + 6]
+        if not bb: continue
         count = 0
         while bb:
             sq = get_lsb_index(bb)
@@ -1114,7 +1092,7 @@ def evaluate_position(piece_bbs, occupancy_bbs, game_state, lazy: bool = False):
      white_piece_tropism, black_piece_tropism, mg_outpost, eg_outpost) = evaluate_attacks_mobility_threats(piece_bbs, occupancy_bbs)
 
     # --- 4. 加入兵形結構分數 (Moved up for King Safety dependency) ---
-    mg_pawn_structure, eg_pawn_structure, white_pawn_tropism, black_pawn_tropism = evaluate_pawn_structure(piece_bbs)
+    mg_pawn_structure, eg_pawn_structure, white_pawn_tropism, black_pawn_tropism, white_pawn_storm, black_pawn_storm = evaluate_pawn_structure(piece_bbs)
     mg_score += mg_pawn_structure
     eg_score += eg_pawn_structure
 
@@ -1124,7 +1102,7 @@ def evaluate_position(piece_bbs, occupancy_bbs, game_state, lazy: bool = False):
     
     # Pass 'black_attack_tropism' to White King Safety (because it represents danger TO White King)
     # Pass 'white_attack_tropism' to Black King Safety (because it represents danger TO Black King)
-    mg_king_safety, eg_king_safety = evaluate_king_safety(piece_bbs, occupancy_bbs, white_attacks, black_attacks, black_attack_tropism, white_attack_tropism)
+    mg_king_safety, eg_king_safety = evaluate_king_safety(piece_bbs, occupancy_bbs, white_attacks, black_attacks, black_attack_tropism, white_attack_tropism, white_pawn_storm, black_pawn_storm)
     mg_score += mg_king_safety
     eg_score += eg_king_safety
 
@@ -1158,4 +1136,3 @@ def evaluate_position(piece_bbs, occupancy_bbs, game_state, lazy: bool = False):
         return np.int32(final_score)
     else:  # 黑方回合
         return np.int32(-final_score)
-    # return np.int32(0)  # Placeholder return statement

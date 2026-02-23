@@ -21,7 +21,7 @@
         "name": "Lichess Puzzle 002LW",
         "fen": "3r1rk1/1b3pp1/3p4/p3nPPQ/4P3/3q1BN1/8/2R2RK1 w - - 2 29",
         "solution": "f5f6",
-        "engine_move": "g1h1"
+        "engine_move": "c1c7"
     },
     {
         "name": "Lichess Puzzle 006NL",

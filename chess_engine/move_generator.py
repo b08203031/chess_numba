@@ -201,8 +201,8 @@ _precompute_pawn_attacks()
 from chess_engine.engine_types import piece_bbs_signature, occupancy_bbs_signature, game_state_signature
 
 
-@numba.njit(numba.boolean(piece_bbs_signature, occupancy_bbs_signature, game_state_signature, numba.uint8, numba.uint8), cache=True, boundscheck=False, fastmath=True)
-def is_square_attacked(piece_bbs, occupancy_bbs, game_state, sq, attacker_side):
+@numba.njit(numba.boolean(piece_bbs_signature, occupancy_bbs_signature, numba.uint8, numba.uint8), cache=True, boundscheck=False, fastmath=True)
+def is_square_attacked(piece_bbs, occupancy_bbs, sq, attacker_side):
     """
     Checks if a given square is attacked by the specified side.
     """
@@ -355,8 +355,8 @@ def generate_legal_moves_buffer(piece_bbs, occupancy_bbs, game_state, moves_buff
                 moves_buffer[ply, move_count] = encode_move(from_sq, np.uint8(en_passant_square), 0, SPECIAL_MOVE_FLAG_EN_PASSANT); move_count += 1
 
         # --- Castling ---
-        if (castling_rights & WK) and not(all_pieces_bb & 0x60) and not is_square_attacked(piece_bbs, occupancy_bbs, game_state, 4, BLACK) and not is_square_attacked(piece_bbs, occupancy_bbs, game_state, 5, BLACK) and not is_square_attacked(piece_bbs, occupancy_bbs, game_state, 6, BLACK): moves_buffer[ply, move_count]=encode_move(4,6,0,SPECIAL_MOVE_FLAG_CASTLING); move_count+=1
-        if (castling_rights & WQ) and not(all_pieces_bb & 0xe) and not is_square_attacked(piece_bbs, occupancy_bbs, game_state, 4, BLACK) and not is_square_attacked(piece_bbs, occupancy_bbs, game_state, 3, BLACK) and not is_square_attacked(piece_bbs, occupancy_bbs, game_state, 2, BLACK): moves_buffer[ply, move_count]=encode_move(4,2,0,SPECIAL_MOVE_FLAG_CASTLING); move_count+=1
+        if (castling_rights & WK) and not(all_pieces_bb & 0x60) and not is_square_attacked(piece_bbs, occupancy_bbs, 4, BLACK) and not is_square_attacked(piece_bbs, occupancy_bbs, 5, BLACK) and not is_square_attacked(piece_bbs, occupancy_bbs, 6, BLACK): moves_buffer[ply, move_count]=encode_move(4,6,0,SPECIAL_MOVE_FLAG_CASTLING); move_count+=1
+        if (castling_rights & WQ) and not(all_pieces_bb & 0xe) and not is_square_attacked(piece_bbs, occupancy_bbs, 4, BLACK) and not is_square_attacked(piece_bbs, occupancy_bbs, 3, BLACK) and not is_square_attacked(piece_bbs, occupancy_bbs, 2, BLACK): moves_buffer[ply, move_count]=encode_move(4,2,0,SPECIAL_MOVE_FLAG_CASTLING); move_count+=1
 
     else: # BLACK
         # --- Pawn Moves ---
@@ -415,8 +415,8 @@ def generate_legal_moves_buffer(piece_bbs, occupancy_bbs, game_state, moves_buff
                 moves_buffer[ply, move_count] = encode_move(from_sq, np.uint8(en_passant_square), 0, SPECIAL_MOVE_FLAG_EN_PASSANT); move_count += 1
 
         # --- Castling ---
-        if (castling_rights & BK) and not(all_pieces_bb & 0x6000000000000000) and not is_square_attacked(piece_bbs, occupancy_bbs, game_state, 60, WHITE) and not is_square_attacked(piece_bbs, occupancy_bbs, game_state, 61, WHITE) and not is_square_attacked(piece_bbs, occupancy_bbs, game_state, 62, WHITE): moves_buffer[ply, move_count]=encode_move(60,62,0,SPECIAL_MOVE_FLAG_CASTLING); move_count+=1
-        if (castling_rights & BQ) and not(all_pieces_bb & 0xe00000000000000) and not is_square_attacked(piece_bbs, occupancy_bbs, game_state, 60, WHITE) and not is_square_attacked(piece_bbs, occupancy_bbs, game_state, 59, WHITE) and not is_square_attacked(piece_bbs, occupancy_bbs, game_state, 58, WHITE): moves_buffer[ply, move_count]=encode_move(60,58,0,SPECIAL_MOVE_FLAG_CASTLING); move_count+=1
+        if (castling_rights & BK) and not(all_pieces_bb & 0x6000000000000000) and not is_square_attacked(piece_bbs, occupancy_bbs, 60, WHITE) and not is_square_attacked(piece_bbs, occupancy_bbs, 61, WHITE) and not is_square_attacked(piece_bbs, occupancy_bbs, 62, WHITE): moves_buffer[ply, move_count]=encode_move(60,62,0,SPECIAL_MOVE_FLAG_CASTLING); move_count+=1
+        if (castling_rights & BQ) and not(all_pieces_bb & 0xe00000000000000) and not is_square_attacked(piece_bbs, occupancy_bbs, 60, WHITE) and not is_square_attacked(piece_bbs, occupancy_bbs, 59, WHITE) and not is_square_attacked(piece_bbs, occupancy_bbs, 58, WHITE): moves_buffer[ply, move_count]=encode_move(60,58,0,SPECIAL_MOVE_FLAG_CASTLING); move_count+=1
 
     # --- Leaper Moves (Knights, Bishops, Rooks, Queens, Kings) ---
     leaper_bbs = (wn_bb, wb_bb, wr_bb, wq_bb, wk_bb) if side_to_move == WHITE else (bn_bb, bb_bb, br_bb, bq_bb, bk_bb)
@@ -444,7 +444,7 @@ def generate_legal_moves_buffer(piece_bbs, occupancy_bbs, game_state, moves_buff
 
     # Optimization: Pre-calculate pinned pieces and check status to skip expensive make/unmake
     opponent_side = 1 - side_to_move
-    in_check = is_square_attacked(piece_bbs, occupancy_bbs, game_state, original_king_sq, opponent_side)
+    in_check = is_square_attacked(piece_bbs, occupancy_bbs, original_king_sq, opponent_side)
     pinned = get_pinned_pieces(piece_bbs, occupancy_bbs, side_to_move) if not in_check else np.uint64(0)
 
     for i in range(move_count):
@@ -466,7 +466,7 @@ def generate_legal_moves_buffer(piece_bbs, occupancy_bbs, game_state, moves_buff
         king_sq = get_lsb_index(king_bb_after_move) if king_bb_after_move else original_king_sq
 
         # Check if the king is attacked by the new side to move (the opponent)
-        if not is_square_attacked(piece_bbs, occupancy_bbs, game_state, king_sq, game_state[0]):
+        if not is_square_attacked(piece_bbs, occupancy_bbs, king_sq, game_state[0]):
             moves_buffer[ply, legal_move_count] = move
             legal_move_count += 1
 
@@ -668,7 +668,7 @@ def is_in_check(piece_bbs, occupancy_bbs, game_state):
     if king_bb == 0: # Should not happen in a legal position
         return False
     king_sq = get_lsb_index(king_bb)
-    return is_square_attacked(piece_bbs, occupancy_bbs, game_state, king_sq, 1 - side_to_move)
+    return is_square_attacked(piece_bbs, occupancy_bbs, king_sq, 1 - side_to_move)
 
 @numba.njit(numba.boolean(piece_bbs_signature, numba.uint8), cache=True, boundscheck=False, fastmath=True)
 def has_sufficient_material(piece_bbs, side_to_move):
@@ -859,7 +859,7 @@ def generate_captures_buffer(piece_bbs, occupancy_bbs, game_state, moves_buffer,
 
     # Optimization: Pre-calculate pinned pieces and check status to skip expensive make/unmake
     opponent_side = 1 - side_to_move
-    in_check = is_square_attacked(piece_bbs, occupancy_bbs, game_state, original_king_sq, opponent_side)
+    in_check = is_square_attacked(piece_bbs, occupancy_bbs, original_king_sq, opponent_side)
     pinned = get_pinned_pieces(piece_bbs, occupancy_bbs, side_to_move) if not in_check else np.uint64(0)
 
     for i in range(move_count):
@@ -877,7 +877,7 @@ def generate_captures_buffer(piece_bbs, occupancy_bbs, game_state, moves_buffer,
         king_bb_after_move = piece_bbs[5] if side_to_move == WHITE else piece_bbs[11]
         king_sq = get_lsb_index(king_bb_after_move) if king_bb_after_move else original_king_sq
 
-        if not is_square_attacked(piece_bbs, occupancy_bbs, game_state, king_sq, game_state[0]):
+        if not is_square_attacked(piece_bbs, occupancy_bbs, king_sq, game_state[0]):
             moves_buffer[ply, legal_move_count] = move
             legal_move_count += 1
 
