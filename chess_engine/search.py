@@ -32,7 +32,7 @@ from chess_engine.constants import (
     PRUNING_CAPTURE_SEE_MARGIN, PRUNING_QUIET_SEE_MARGIN, PRUNING_HISTORY_THRESHOLD,
     WHITE, BLACK
 )
-from chess_engine.bitboard_utils import find_piece_type_on_square
+from chess_engine.bitboard_utils import find_piece_type_on_square, find_piece_type_on_square_side
 from chess_engine.debug_utils import log_info
 from chess_engine.see import see, see_ge, get_pinned_pieces
 from chess_engine.transposition_table import (
@@ -126,8 +126,8 @@ def score_moves(piece_bbs, occupancy_bbs, game_state, moves, scores, move_count,
                 # Optimization: Use see_ge(0) instead of full see()
                 is_good_capture = see_ge(piece_bbs, occupancy_bbs, side_to_move, from_sq, to_square, 0, pinned_white, pinned_black)
                 
-                victim_type = find_piece_type_on_square(piece_bbs, to_square)
-                aggressor_type = find_piece_type_on_square(piece_bbs, from_sq)
+                victim_type = find_piece_type_on_square_side(piece_bbs, to_square, 1 - side_to_move)
+                aggressor_type = find_piece_type_on_square_side(piece_bbs, from_sq, side_to_move)
                 mvv_lva = 0
                 if victim_type != -1:
                     mvv_lva = (MG_MATERIAL_VALUES[victim_type % 6] - MG_MATERIAL_VALUES[aggressor_type % 6])
@@ -146,7 +146,7 @@ def score_moves(piece_bbs, occupancy_bbs, game_state, moves, scores, move_count,
                 elif move == counter_move:
                     score = SCORE_COUNTER_MOVE
                 else:
-                    aggressor_type = find_piece_type_on_square(piece_bbs, get_from_square(move))
+                    aggressor_type = find_piece_type_on_square_side(piece_bbs, get_from_square(move), side_to_move)
                     score = history_table[aggressor_type, to_square]
 
         scores[i] = score
@@ -250,7 +250,8 @@ def quiescence_search(piece_bbs, occupancy_bbs, game_state, alpha, beta, ply, se
             if ENABLE_DELTA_PRUNING:
                 is_promotion = get_special_move_flag(move) == SPECIAL_MOVE_FLAG_PROMOTION
                 promotion_gain = MG_MATERIAL_VALUES[4] - MG_MATERIAL_VALUES[0] if is_promotion else 0
-                victim_type = find_piece_type_on_square(piece_bbs, get_to_square(move))
+                side_to_move = game_state[0]
+                victim_type = find_piece_type_on_square_side(piece_bbs, get_to_square(move), 1 - side_to_move)
                 victim_value = MG_MATERIAL_VALUES[victim_type % 6] if victim_type != -1 else 0
                 potential_gain = victim_value + promotion_gain
                 
@@ -655,7 +656,7 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
 
                  # History Pruning
                  if ENABLE_HISTORY_PRUNING:
-                     aggressor_type = find_piece_type_on_square(piece_bbs, from_sq)
+                     aggressor_type = find_piece_type_on_square_side(piece_bbs, from_sq, side_to_move)
                      history_score = search_context.history_table[aggressor_type, to_sq]
                      if history_score < PRUNING_HISTORY_THRESHOLD:
                          search_context.history_pruned += 1
@@ -719,7 +720,7 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
             lmr = 0
             if ENABLE_LMR and depth >= LMR_MIN_DEPTH and is_quiet_move and quiet_move_counter >= LMR_MIN_QUIET_MOVE_INDEX:
                 # Get History Score for adjustment
-                aggressor_type = find_piece_type_on_square(piece_bbs, from_sq)
+                aggressor_type = find_piece_type_on_square_side(piece_bbs, from_sq, game_state[0])
                 history_score = search_context.history_table[aggressor_type, to_sq]
 
                 lmr = get_lmr_reduction(depth, searched_move_count, history_score)
@@ -782,7 +783,7 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
             cutoffs += 1
             if is_quiet_move:
                 bonus = depth * depth
-                aggressor_type = find_piece_type_on_square(piece_bbs, get_from_square(move))
+                aggressor_type = find_piece_type_on_square_side(piece_bbs, get_from_square(move), game_state[0])
                 
                 # Apply Gravity Bonus to the cutoff move
                 update_history(search_context.history_table, aggressor_type, get_to_square(move), bonus)
@@ -798,7 +799,7 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                 # Apply History Malus to all previous quiet moves that failed low
                 for q_idx in range(quiet_moves_tried_count - 1): # Exclude the current move (last one added)
                     bad_move = quiet_moves_tried[q_idx]
-                    bad_aggressor = find_piece_type_on_square(piece_bbs, get_from_square(bad_move))
+                    bad_aggressor = find_piece_type_on_square_side(piece_bbs, get_from_square(bad_move), game_state[0])
                     update_history(search_context.history_table, bad_aggressor, get_to_square(bad_move), -bonus)
 
                 if move != search_context.killer_moves[ply * 2]:

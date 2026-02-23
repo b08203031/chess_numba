@@ -17,6 +17,16 @@ def count_trailing_zeros(typingctx, val):
     sig = types.int64(types.uint64)
     return sig, codegen
 
+# hardware intrinsic for set bits (population count)
+@intrinsic
+def count_set_bits(typingctx, val):
+    def codegen(context, builder, signature, args):
+        res = builder.ctpop(args[0])
+        # Return as int32
+        return builder.trunc(res, context.get_data_type(types.int32))
+    sig = types.int32(types.uint64)
+    return sig, codegen
+
 @nb.njit(nb.int8(nb.uint64), cache=True, inline='always')
 def get_lsb_index(bitboard: np.uint64) -> int:
     """
@@ -69,6 +79,58 @@ def _init_file_masks():
 
 FILE_MASKS = _init_file_masks()
 
+def _init_squares_between():
+    """
+    Pre-computes squares between any two squares on the same rank, file, or diagonal.
+    """
+    sq_between = np.zeros((64, 64), dtype=np.uint64)
+    for s1 in range(64):
+        for s2 in range(64):
+            if s1 == s2: continue
+            
+            r1, f1 = s1 // 8, s1 % 8
+            r2, f2 = s2 // 8, s2 % 8
+            
+            if r1 == r2: # Same rank
+                df = 1 if f2 > f1 else -1
+                for f in range(f1 + df, f2, df):
+                    sq_between[s1, s2] |= BB_SQUARES[r1 * 8 + f]
+            elif f1 == f2: # Same file
+                dr = 1 if r2 > r1 else -1
+                for r in range(r1 + dr, r2, dr):
+                    sq_between[s1, s2] |= BB_SQUARES[r * 8 + f1]
+            elif abs(r1 - r2) == abs(f1 - f2): # Same diagonal
+                dr = 1 if r2 > r1 else -1
+                df = 1 if f2 > f1 else -1
+                for i in range(1, abs(r1 - r2)):
+                    sq_between[s1, s2] |= BB_SQUARES[(r1 + i * dr) * 8 + (f1 + i * df)]
+    return sq_between
+
+SQUARES_BETWEEN = _init_squares_between()
+
+def _init_rays():
+    """
+    Pre-computes orthogonal and diagonal rays for each square.
+    """
+    rook_rays = np.zeros(64, dtype=np.uint64)
+    bishop_rays = np.zeros(64, dtype=np.uint64)
+    for sq in range(64):
+        r, f = sq // 8, sq % 8
+        # Rook rays
+        for r_curr in range(r + 1, 8): rook_rays[sq] |= BB_SQUARES[r_curr * 8 + f]
+        for r_curr in range(r - 1, -1, -1): rook_rays[sq] |= BB_SQUARES[r_curr * 8 + f]
+        for f_curr in range(f + 1, 8): rook_rays[sq] |= BB_SQUARES[r * 8 + f_curr]
+        for f_curr in range(f - 1, -1, -1): rook_rays[sq] |= BB_SQUARES[r * 8 + f_curr]
+        # Bishop rays
+        for i in range(1, 8):
+            if r+i < 8 and f+i < 8: bishop_rays[sq] |= BB_SQUARES[(r+i)*8 + (f+i)]
+            if r+i < 8 and f-i >= 0: bishop_rays[sq] |= BB_SQUARES[(r+i)*8 + (f-i)]
+            if r-i >= 0 and f+i < 8: bishop_rays[sq] |= BB_SQUARES[(r-i)*8 + (f+i)]
+            if r-i >= 0 and f-i >= 0: bishop_rays[sq] |= BB_SQUARES[(r-i)*8 + (f-i)]
+    return rook_rays, bishop_rays
+
+ROOK_RAYS, BISHOP_RAYS = _init_rays()
+
 @nb.njit(nb.int8(piece_bbs_signature, nb.uint8), cache=True)
 def find_piece_type_on_square(piece_bbs, square):
     """
@@ -87,20 +149,22 @@ def find_piece_type_on_square(piece_bbs, square):
             return nb.int8(piece_type)
     return nb.int8(-1)
 
+@nb.njit(nb.int8(piece_bbs_signature, nb.uint8, nb.uint8), cache=True)
+def find_piece_type_on_square_side(piece_bbs, square, side):
+    """
+    Finds the piece type on a square, but only for the given side (0=White, 1=Black).
+    Reduces the search space from 12 to 6 bitboards.
+    """
+    bb_square = BB_SQUARES[square]
+    start = 0 if side == 0 else 6
+    for piece_type in range(start, start + 6):
+        if piece_bbs[piece_type] & bb_square:
+            return nb.int8(piece_type)
+    return nb.int8(-1)
+
 @nb.njit(nb.int32(nb.uint64), cache=True)
 def count_bits(bb: np.uint64) -> np.int32:
     """
-    使用 SWAR (SIMD within a register) 技術計算 uint64 位元棋盤中設置為 1 的位元數量。
-    這是一個 O(1) 的常數時間操作，不依賴於設置位元的數量。
-    
-    Args:
-        bb (np.uint64): 需要計算位元數的位元棋盤。
-        
-    Returns:
-        np.int32: 設置為 1 的位元數量。
+    Uses hardware POPCNT intrinsic via LLVM to find the number of set bits.
     """
-    # A series of parallel bitwise operations / 一系列並行的位元運算
-    bb = bb - ((bb >> np.uint64(1)) & np.uint64(0x5555555555555555))
-    bb = (bb & np.uint64(0x3333333333333333)) + ((bb >> np.uint64(2)) & np.uint64(0x3333333333333333))
-    bb = (bb + (bb >> np.uint64(4))) & np.uint64(0x0F0F0F0F0F0F0F0F)
-    return np.int32((bb * np.uint64(0x0101010101010101)) >> np.uint64(56))
+    return count_set_bits(bb)

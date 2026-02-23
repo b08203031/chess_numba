@@ -160,8 +160,8 @@ def evaluate_pawn_structure(piece_bbs):
 
         # A. Passed Pawn Logic
         if not (WHITE_PASSED_PAWN_MASKS[sq] & black_pawns):
-            mg_score += PASSED_PAWN_BONUS[rank][0]
-            eg_score += PASSED_PAWN_BONUS[rank][1]
+            mg_score += PASSED_PAWN_BONUS[rank, 0]
+            eg_score += PASSED_PAWN_BONUS[rank, 1]
 
             # Connected Passed Pawn Bonus
             if adjacent_pawns:
@@ -185,9 +185,9 @@ def evaluate_pawn_structure(piece_bbs):
                      # Reduce the passed pawn bonus significantly if blocked by King and undefended/unsupported
                      # Remove most of the bonus we just added
                      # e.g., reduce by 90%
-                     penalty = np.int32(PASSED_PAWN_BONUS[rank][1] * 0.9)
+                     penalty = np.int32(PASSED_PAWN_BONUS[rank, 1] * 0.9)
                      eg_score -= penalty
-                     mg_score -= np.int32(PASSED_PAWN_BONUS[rank][0] * 0.9)
+                     mg_score -= np.int32(PASSED_PAWN_BONUS[rank, 0] * 0.9)
 
                 # Rule 2: Unstoppable Pawn (Simple Logic)
                 # If Friendly King is closer or supports, and Enemy King is far
@@ -225,8 +225,8 @@ def evaluate_pawn_structure(piece_bbs):
                  stop_sq = sq + 8
                  if stop_sq < 64:
                      # Check if black pawns attack stop_sq
-                     # PAWN_ATTACKS[1][stop_sq] gives squares occupied by Black pawns that attack stop_sq.
-                     if (PAWN_ATTACKS[1][stop_sq] & black_pawns):
+                     # PAWN_ATTACKS[1, stop_sq] gives squares occupied by Black pawns that attack stop_sq.
+                     if (PAWN_ATTACKS[1, stop_sq] & black_pawns):
                          mg_score -= BACKWARD_PAWN_PENALTY[0]
                          eg_score -= BACKWARD_PAWN_PENALTY[1]
 
@@ -255,8 +255,8 @@ def evaluate_pawn_structure(piece_bbs):
 
         # A. Passed Pawn Logic
         if not (BLACK_PASSED_PAWN_MASKS[sq] & white_pawns):
-            mg_score -= PASSED_PAWN_BONUS[relative_rank][0]
-            eg_score -= PASSED_PAWN_BONUS[relative_rank][1]
+            mg_score -= PASSED_PAWN_BONUS[relative_rank, 0]
+            eg_score -= PASSED_PAWN_BONUS[relative_rank, 1]
 
             # Connected Passed Pawn Bonus
             if adjacent_pawns:
@@ -273,9 +273,9 @@ def evaluate_pawn_structure(piece_bbs):
                 is_blocked_by_king = (dist_enemy <= 1) and (dist_friendly > dist_enemy)
                 
                 if is_blocked_by_king:
-                     penalty = np.int32(PASSED_PAWN_BONUS[relative_rank][1] * 0.9)
+                     penalty = np.int32(PASSED_PAWN_BONUS[relative_rank, 1] * 0.9)
                      eg_score += penalty # Add penalty because we subtracted bonus earlier (for black)
-                     mg_score += np.int32(PASSED_PAWN_BONUS[relative_rank][0] * 0.9)
+                     mg_score += np.int32(PASSED_PAWN_BONUS[relative_rank, 0] * 0.9)
 
                 if relative_rank > 3:
                     proximity_bonus = (dist_enemy * 5 - dist_friendly * 2) * relative_rank
@@ -293,8 +293,8 @@ def evaluate_pawn_structure(piece_bbs):
                  stop_sq = sq - 8
                  if stop_sq >= 0:
                      # Check if white pawns attack stop_sq
-                     # PAWN_ATTACKS[0][stop_sq] gives squares occupied by White pawns that attack stop_sq.
-                     if (PAWN_ATTACKS[0][stop_sq] & white_pawns):
+                     # PAWN_ATTACKS[0, stop_sq] gives squares occupied by White pawns that attack stop_sq.
+                     if (PAWN_ATTACKS[0, stop_sq] & white_pawns):
                          mg_score += BACKWARD_PAWN_PENALTY[0]
                          eg_score += BACKWARD_PAWN_PENALTY[1]
 
@@ -714,8 +714,8 @@ def evaluate_outposts(piece_bbs, occupancy_bbs, white_pawn_attacks, black_pawn_a
             if (PAWN_ATTACKS[WHITE, sq] & white_pawns):
                 # Is Outpost
                 rank = sq // 8
-                mg_score += OUTPOST_BONUS_KNIGHT[rank][0]
-                eg_score += OUTPOST_BONUS_KNIGHT[rank][1]
+                mg_score += OUTPOST_BONUS_KNIGHT[rank, 0]
+                eg_score += OUTPOST_BONUS_KNIGHT[rank, 1]
                 
                 # Check for Hole (Weakness)
                 # No black pawn can attack it (currently or in future)
@@ -740,8 +740,8 @@ def evaluate_outposts(piece_bbs, occupancy_bbs, white_pawn_attacks, black_pawn_a
         if not (black_pawn_attacks & BB_SQUARES[sq]):
             if (PAWN_ATTACKS[WHITE, sq] & white_pawns):
                 rank = sq // 8
-                mg_score += OUTPOST_BONUS_BISHOP[rank][0]
-                eg_score += OUTPOST_BONUS_BISHOP[rank][1]
+                mg_score += OUTPOST_BONUS_BISHOP[rank, 0]
+                eg_score += OUTPOST_BONUS_BISHOP[rank, 1]
                 
                 file_idx = sq % 8
                 if not (ADJACENT_FILES_MASKS[file_idx] & WHITE_FORWARD_RANKS[sq] & black_pawns):
@@ -768,8 +768,8 @@ def evaluate_outposts(piece_bbs, occupancy_bbs, white_pawn_attacks, black_pawn_a
                 # Rank 7 (board) -> Rank 0 (relative)
                 rel_rank = 7 - rank
                 
-                mg_score -= OUTPOST_BONUS_KNIGHT[rel_rank][0]
-                eg_score -= OUTPOST_BONUS_KNIGHT[rel_rank][1]
+                mg_score -= OUTPOST_BONUS_KNIGHT[rel_rank, 0]
+                eg_score -= OUTPOST_BONUS_KNIGHT[rel_rank, 1]
                 
                 # Check for Hole
                 # White pawns move up (0 to 7).
@@ -791,8 +791,8 @@ def evaluate_outposts(piece_bbs, occupancy_bbs, white_pawn_attacks, black_pawn_a
                 rank = sq // 8
                 rel_rank = 7 - rank
                 
-                mg_score -= OUTPOST_BONUS_BISHOP[rel_rank][0]
-                eg_score -= OUTPOST_BONUS_BISHOP[rel_rank][1]
+                mg_score -= OUTPOST_BONUS_BISHOP[rel_rank, 0]
+                eg_score -= OUTPOST_BONUS_BISHOP[rel_rank, 1]
                 
                 file_idx = sq % 8
                 if not (ADJACENT_FILES_MASKS[file_idx] & BLACK_FORWARD_RANKS[sq] & white_pawns):
@@ -1012,7 +1012,7 @@ def _evaluate_king_pawn_endgame(piece_bbs, side_to_move):
     temp_wp = white_pawns
     while temp_wp:
         sq = get_lsb_index(temp_wp)
-        score += EG_MATERIAL_VALUES[0] + PST_EG[0][sq]
+        score += EG_MATERIAL_VALUES[0] + PST_EG[0, sq]
         
         # Unstoppable Pawn Logic (White)
         # Check if passed
@@ -1039,7 +1039,7 @@ def _evaluate_king_pawn_endgame(piece_bbs, side_to_move):
     temp_bp = black_pawns
     while temp_bp:
         sq = get_lsb_index(temp_bp)
-        score -= (EG_MATERIAL_VALUES[0] + PST_EG[0][sq ^ 56])
+        score -= (EG_MATERIAL_VALUES[0] + PST_EG[0, sq ^ 56])
         
         # Unstoppable Pawn Logic (Black)
         if not (BLACK_PASSED_PAWN_MASKS[sq] & white_pawns):
@@ -1060,8 +1060,8 @@ def _evaluate_king_pawn_endgame(piece_bbs, side_to_move):
         temp_bp &= temp_bp - np.uint64(1)
 
     # King position
-    score += PST_EG[5][white_king_sq]
-    score -= PST_EG[5][black_king_sq ^ 56]
+    score += PST_EG[5, white_king_sq]
+    score -= PST_EG[5, black_king_sq ^ 56]
 
     # 2. 通路兵獎勵 (使用 evaluate_pawn_structure 簡化計算)
     _, eg_pawn_score = evaluate_pawn_structure(piece_bbs)
@@ -1141,16 +1141,16 @@ def evaluate_position(piece_bbs, occupancy_bbs, game_state, lazy: bool = False):
         bb = piece_bbs[piece_type]
         while bb:
             sq = get_lsb_index(bb)
-            mg_score += PST_MG[piece_type][sq]
-            eg_score += PST_EG[piece_type][sq]
+            mg_score += PST_MG[piece_type, sq]
+            eg_score += PST_EG[piece_type, sq]
             bb &= bb - np.uint64(1)
 
     for piece_type in range(6):
         bb = piece_bbs[piece_type + 6]
         while bb:
             sq = get_lsb_index(bb)
-            mg_score -= PST_MG[piece_type][sq ^ 56]
-            eg_score -= PST_EG[piece_type][sq ^ 56]
+            mg_score -= PST_MG[piece_type, sq ^ 56]
+            eg_score -= PST_EG[piece_type, sq ^ 56]
             bb &= bb - np.uint64(1)
 
     # --- Lazy Evaluation Checkpoint / 懶惰評估檢查點 ---

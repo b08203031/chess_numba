@@ -314,11 +314,6 @@ class ChessVisionApp(tk.Tk):
         self.btn_new_game.pack(side="left", fill="x", expand=True, padx=(5, 0))
         ToolTip(self.btn_new_game, "快速鍵 (Shortcut): Ctrl+N")
 
-        # Calibrate Button (New)
-        self.btn_calibrate = ttk.Button(btn_frame, text="校準 (Calibrate)", command=self.start_calibration_thread)
-        self.btn_calibrate.pack(side="left", fill="x", expand=True, padx=(5, 0))
-        ToolTip(self.btn_calibrate, "請確保棋盤處於標準初始位置\nEnsure board is in standard starting position")
-
         # Shortcuts
         self.bind('<Return>', lambda e: self.start_analysis_thread())
         self.bind('<Escape>', lambda e: self.stop_analysis())
@@ -371,39 +366,6 @@ class ChessVisionApp(tk.Tk):
         self.lbl_score.config(text="評分 (Score): --")
         self.lbl_bestmove.config(text="最佳著法 (Best Move): --")
         messagebox.showinfo("Info", "新遊戲已開始 (New Game Started) - 置換表已清除 (Hash Cleared)")
-
-    def start_calibration_thread(self):
-        """Starts the calibration process in a separate thread."""
-        if self.analyzing:
-            messagebox.showwarning("Warning", "請先停止分析 (Please stop analysis first)")
-            return
-        
-        response = messagebox.askokcancel("校準 (Calibrate)", "請確保螢幕上顯示標準初始局面的棋盤。\n按下確定後，系統將在 2 秒後進行偵測。\n\nEnsure the board is in the standard starting position on screen.\nDetection starts 2 seconds after clicking OK.")
-        if not response:
-            return
-
-        self.btn_calibrate.config(state="disabled")
-        threading.Thread(target=self._run_calibration, daemon=True).start()
-
-    def _run_calibration(self):
-        try:
-            time.sleep(2) # Give user time to switch focus
-            
-            import screen_recognizer
-            if not self.recognizer:
-                self.recognizer = screen_recognizer.ScreenRecognizer()
-
-            success = self.recognizer.calibrate()
-            
-            if success:
-                self.message_queue.put({"type": "calibration_success"})
-            else:
-                self.message_queue.put({"type": "error", "message": "校準失敗 (Calibration Failed)\n請確認棋盤清晰可見且為標準初始局面。"})
-        
-        except Exception as e:
-            self.message_queue.put({"type": "error", "message": f"校準錯誤: {e}"})
-        finally:
-            self.message_queue.put({"type": "calibration_finished"})
 
     def start_analysis_thread(self):
         if self.warming_up:
@@ -592,18 +554,6 @@ class ChessVisionApp(tk.Tk):
                     self.analyzing = False
                     self.btn_analyze.config(state="normal")
                     self.btn_stop.config(state="disabled")
-
-                elif msg["type"] == "calibration_success":
-                    messagebox.showinfo("Success", "校準成功！已學習棋盤樣式。\nCalibration Successful!")
-                    # Auto-update orientation in UI if possible
-                    if self.recognizer and self.recognizer.board_orientation == 'w':
-                        self.my_color_var.set('w')
-                    else:
-                        self.my_color_var.set('b')
-                    self.draw_board()
-
-                elif msg["type"] == "calibration_finished":
-                    self.btn_calibrate.config(state="normal")
                 
                 elif msg["type"] == "log":
                     print(f"[LOG] {msg['message']}")
