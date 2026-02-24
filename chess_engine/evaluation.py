@@ -6,7 +6,7 @@ import numpy as np
 from chess_engine.constants import *
 
 from chess_engine.bitboard_utils import get_lsb_index, count_bits, KING_ATTACK_ZONES, FILE_MASKS
-from chess_engine.engine_types import piece_bbs_signature, occupancy_bbs_signature, game_state_signature
+from chess_engine.engine_types import piece_bbs_signature, occupancy_bbs_signature, game_state_signature, piece_counts_signature
 from chess_engine.move_generator import (
     get_bishop_attacks, get_rook_attacks, get_queen_attacks, KNIGHT_ATTACKS, PAWN_ATTACKS, KING_ATTACKS
 )
@@ -330,13 +330,14 @@ def evaluate_pawn_structure(piece_bbs):
     return mg_score, eg_score, white_pawn_tropism, black_pawn_tropism, white_pawn_storm, black_pawn_storm
 
 
-@numba.njit(numba.types.UniTuple(numba.int32, 2)(piece_bbs_signature), cache=True, boundscheck=False, fastmath=True)
-def evaluate_piece_coordination(piece_bbs):
+@numba.njit(numba.types.UniTuple(numba.int32, 2)(piece_bbs_signature, piece_counts_signature), cache=True, boundscheck=False, fastmath=True)
+def evaluate_piece_coordination(piece_bbs, piece_counts):
     """
     評估棋子協同性特徵（雙象、車在開放線）。
     
     Args:
         piece_bbs (np.ndarray): 12 個棋子的位元棋盤。
+        piece_counts (np.ndarray): 12 個棋子的數量。
         
     Returns:
         tuple: (mg_score, eg_score) 從白方視角。
@@ -345,19 +346,19 @@ def evaluate_piece_coordination(piece_bbs):
     eg_score = np.int32(0)
 
     white_pawns = piece_bbs[0]
-    white_bishops = piece_bbs[2]
+    # white_bishops = piece_bbs[2] # Not needed for iteration, count from piece_counts
     white_rooks = piece_bbs[3]
     black_pawns = piece_bbs[6]
-    black_bishops = piece_bbs[8]
+    # black_bishops = piece_bbs[8] # Not needed for iteration
     black_rooks = piece_bbs[9]
 
     # --- 1. Bishop Pair / 雙象 ---
     # A bonus is awarded if a side has two or more bishops.
     # 擁有雙象給予獎勵。
-    if count_bits(white_bishops) >= 2:
+    if piece_counts[2] >= 2:
         mg_score += BISHOP_PAIR_BONUS[0]
         eg_score += BISHOP_PAIR_BONUS[1]
-    if count_bits(black_bishops) >= 2:
+    if piece_counts[8] >= 2:
         mg_score -= BISHOP_PAIR_BONUS[0]
         eg_score -= BISHOP_PAIR_BONUS[1]
 
@@ -582,8 +583,8 @@ def _evaluate_king_attackers(king_sq, color, piece_bbs, occupancy_bbs, enemy_att
     # The score from the table is a penalty, so it should be negative.
     return -KING_SAFETY_TABLE[min(total_attack_units, len(KING_SAFETY_TABLE) - 1)]
 
-@numba.njit(numba.types.UniTuple(numba.int32, 2)(piece_bbs_signature, occupancy_bbs_signature, numba.uint64, numba.uint64, numba.int32, numba.int32, numba.int32, numba.int32), cache=True, boundscheck=False, fastmath=True)
-def evaluate_king_safety(piece_bbs, occupancy_bbs, white_attacks, black_attacks, white_tropism, black_tropism, white_pawn_storm_score, black_pawn_storm_score):
+@numba.njit(numba.types.UniTuple(numba.int32, 2)(piece_bbs_signature, occupancy_bbs_signature, numba.uint64, numba.uint64, numba.int32, numba.int32, numba.int32, numba.int32, piece_counts_signature), cache=True, boundscheck=False, fastmath=True)
+def evaluate_king_safety(piece_bbs, occupancy_bbs, white_attacks, black_attacks, white_tropism, black_tropism, white_pawn_storm_score, black_pawn_storm_score, piece_counts):
     """
     Refactored King Safety evaluation based on Chess Programming Wiki.
     重構的國王安全評估，基於 Chess Programming Wiki。
@@ -606,18 +607,18 @@ def evaluate_king_safety(piece_bbs, occupancy_bbs, white_attacks, black_attacks,
     black_raw_safety = black_shield + black_attackers + black_tropism + black_pawn_storm_score
 
     # --- Phase 4: Scaling based on enemy material / 階段 4：基於敵方材質進行縮放 ---
-    black_material_for_scaling = (count_bits(bn_bb) * SCALING_WEIGHTS[0] +
-                                 count_bits(bb_bb) * SCALING_WEIGHTS[1] +
-                                 count_bits(br_bb) * SCALING_WEIGHTS[2] +
-                                 count_bits(bq_bb) * SCALING_WEIGHTS[3])
+    black_material_for_scaling = (piece_counts[7] * SCALING_WEIGHTS[0] +
+                                 piece_counts[8] * SCALING_WEIGHTS[1] +
+                                 piece_counts[9] * SCALING_WEIGHTS[2] +
+                                 piece_counts[10] * SCALING_WEIGHTS[3])
     white_scaling_factor = black_material_for_scaling / MAX_SCALING_MATERIAL
 
     white_final_safety = np.int32(white_raw_safety * white_scaling_factor)
 
-    white_material_for_scaling = (count_bits(wn_bb) * SCALING_WEIGHTS[0] +
-                                 count_bits(wb_bb) * SCALING_WEIGHTS[1] +
-                                 count_bits(wr_bb) * SCALING_WEIGHTS[2] +
-                                 count_bits(wq_bb) * SCALING_WEIGHTS[3])
+    white_material_for_scaling = (piece_counts[1] * SCALING_WEIGHTS[0] +
+                                 piece_counts[2] * SCALING_WEIGHTS[1] +
+                                 piece_counts[3] * SCALING_WEIGHTS[2] +
+                                 piece_counts[4] * SCALING_WEIGHTS[3])
     black_scaling_factor = white_material_for_scaling / MAX_SCALING_MATERIAL
 
     black_final_safety = np.int32(black_raw_safety * black_scaling_factor)
@@ -1016,6 +1017,31 @@ def _evaluate_king_pawn_endgame(piece_bbs, side_to_move):
     return score
 
 
+@numba.njit(numba.types.Tuple((numba.int32, numba.int32, numba.int32))(numba.int32, numba.uint64, numba.boolean), cache=True, boundscheck=False, fastmath=True, inline='always')
+def _process_piece_score_and_count(piece_type, bb, is_white):
+    mg = 0
+    eg = 0
+    count = 0
+    while bb:
+        sq = get_lsb_index(bb)
+        if is_white:
+            mg += PST_MG[piece_type, sq]
+            eg += PST_EG[piece_type, sq]
+        else:
+            mg -= PST_MG[piece_type, sq ^ 56]
+            eg -= PST_EG[piece_type, sq ^ 56]
+        count += 1
+        bb &= bb - np.uint64(1)
+        
+    if is_white:
+        mg += count * MG_MATERIAL_VALUES[piece_type]
+        eg += count * EG_MATERIAL_VALUES[piece_type]
+    else:
+        mg -= count * MG_MATERIAL_VALUES[piece_type]
+        eg -= count * EG_MATERIAL_VALUES[piece_type]
+        
+    return mg, eg, count
+
 @numba.njit(numba.int32(piece_bbs_signature, occupancy_bbs_signature, game_state_signature, numba.boolean), cache=True, boundscheck=False, fastmath=True)
 def evaluate_position(piece_bbs, occupancy_bbs, game_state, lazy: bool = False):
     """
@@ -1042,43 +1068,33 @@ def evaluate_position(piece_bbs, occupancy_bbs, game_state, lazy: bool = False):
         return score if game_state[0] == 0 else -score
     side_to_move = game_state[0]
 
-    # --- 1. & 2. Phase, Material, and PST (Fused Loop) ---
-    phase = np.int32(0)
-    mg_score = np.int32(0)
-    eg_score = np.int32(0)
-
-    # White pieces (Indices 0-5)
-    for piece_type in range(6):
-        bb = piece_bbs[piece_type]
-        if not bb: continue
-        count = 0
-        while bb:
-            sq = get_lsb_index(bb)
-            mg_score += PST_MG[piece_type, sq]
-            eg_score += PST_EG[piece_type, sq]
-            count += 1
-            bb &= bb - np.uint64(1)
-        
-        mg_score += count * MG_MATERIAL_VALUES[piece_type]
-        eg_score += count * EG_MATERIAL_VALUES[piece_type]
-        phase += count * PHASE_WEIGHTS[piece_type]
-
-    # Black pieces (Indices 6-11)
-    for piece_type in range(6):
-        bb = piece_bbs[piece_type + 6]
-        if not bb: continue
-        count = 0
-        while bb:
-            sq = get_lsb_index(bb)
-            mg_score -= PST_MG[piece_type, sq ^ 56]
-            eg_score -= PST_EG[piece_type, sq ^ 56]
-            count += 1
-            bb &= bb - np.uint64(1)
-            
-        mg_score -= count * MG_MATERIAL_VALUES[piece_type]
-        eg_score -= count * EG_MATERIAL_VALUES[piece_type]
-        phase += count * PHASE_WEIGHTS[piece_type]
-
+    # --- 1. & 2. Phase, Material, and PST (Unrolled & Fused) ---
+    # Unrolled to avoid array allocation for piece_counts and improve vectorization
+    
+    mg_0, eg_0, cnt_0 = _process_piece_score_and_count(0, piece_bbs[0], True)
+    mg_1, eg_1, cnt_1 = _process_piece_score_and_count(1, piece_bbs[1], True)
+    mg_2, eg_2, cnt_2 = _process_piece_score_and_count(2, piece_bbs[2], True)
+    mg_3, eg_3, cnt_3 = _process_piece_score_and_count(3, piece_bbs[3], True)
+    mg_4, eg_4, cnt_4 = _process_piece_score_and_count(4, piece_bbs[4], True)
+    mg_5, eg_5, cnt_5 = _process_piece_score_and_count(5, piece_bbs[5], True)
+    
+    mg_6, eg_6, cnt_6 = _process_piece_score_and_count(0, piece_bbs[6], False)
+    mg_7, eg_7, cnt_7 = _process_piece_score_and_count(1, piece_bbs[7], False)
+    mg_8, eg_8, cnt_8 = _process_piece_score_and_count(2, piece_bbs[8], False)
+    mg_9, eg_9, cnt_9 = _process_piece_score_and_count(3, piece_bbs[9], False)
+    mg_10, eg_10, cnt_10 = _process_piece_score_and_count(4, piece_bbs[10], False)
+    mg_11, eg_11, cnt_11 = _process_piece_score_and_count(5, piece_bbs[11], False)
+    
+    mg_score = np.int32(mg_0 + mg_1 + mg_2 + mg_3 + mg_4 + mg_5 + mg_6 + mg_7 + mg_8 + mg_9 + mg_10 + mg_11)
+    eg_score = np.int32(eg_0 + eg_1 + eg_2 + eg_3 + eg_4 + eg_5 + eg_6 + eg_7 + eg_8 + eg_9 + eg_10 + eg_11)
+    
+    piece_counts = (cnt_0, cnt_1, cnt_2, cnt_3, cnt_4, cnt_5, cnt_6, cnt_7, cnt_8, cnt_9, cnt_10, cnt_11)
+    
+    # Calculate phase
+    # PHASE_WEIGHTS: [0, 1, 1, 2, 4, 0] (Pawn, Knight, Bishop, Rook, Queen, King)
+    # Using tuple indexing for counts
+    phase = (cnt_1 * PHASE_WEIGHTS[1] + cnt_2 * PHASE_WEIGHTS[2] + cnt_3 * PHASE_WEIGHTS[3] + cnt_4 * PHASE_WEIGHTS[4] +
+             cnt_7 * PHASE_WEIGHTS[1] + cnt_8 * PHASE_WEIGHTS[2] + cnt_9 * PHASE_WEIGHTS[3] + cnt_10 * PHASE_WEIGHTS[4])
     phase = min(phase, MAX_PHASE)
 
     # --- Lazy Evaluation Checkpoint / 懶惰評估檢查點 ---
@@ -1102,12 +1118,12 @@ def evaluate_position(piece_bbs, occupancy_bbs, game_state, lazy: bool = False):
     
     # Pass 'black_attack_tropism' to White King Safety (because it represents danger TO White King)
     # Pass 'white_attack_tropism' to Black King Safety (because it represents danger TO Black King)
-    mg_king_safety, eg_king_safety = evaluate_king_safety(piece_bbs, occupancy_bbs, white_attacks, black_attacks, black_attack_tropism, white_attack_tropism, white_pawn_storm, black_pawn_storm)
+    mg_king_safety, eg_king_safety = evaluate_king_safety(piece_bbs, occupancy_bbs, white_attacks, black_attacks, black_attack_tropism, white_attack_tropism, white_pawn_storm, black_pawn_storm, piece_counts)
     mg_score += mg_king_safety
     eg_score += eg_king_safety
 
     # --- 5. 加入棋子協同性分數 ---
-    mg_coord, eg_coord = evaluate_piece_coordination(piece_bbs)
+    mg_coord, eg_coord = evaluate_piece_coordination(piece_bbs, piece_counts)
     mg_score += mg_coord
     eg_score += eg_coord
 

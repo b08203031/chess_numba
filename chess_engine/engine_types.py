@@ -20,6 +20,7 @@ PAWN, KNIGHT, BISHOP, ROOK, QUEEN, KING = 0, 1, 2, 3, 4, 5
 piece_bbs_signature = numba.uint64[::1]
 occupancy_bbs_signature = numba.uint64[::1]
 game_state_signature = numba.uint64[::1]
+piece_counts_signature = numba.types.UniTuple(numba.int32, 12)
 
 unmake_info_signature = numba.types.Tuple([
     numba.int8, numba.uint8, numba.uint8, numba.uint8, numba.uint64

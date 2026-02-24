@@ -9,6 +9,11 @@ import time
 import chess
 import traceback
 import re
+try:
+    from PIL import Image, ImageTk
+    HAS_PIL = True
+except ImportError:
+    HAS_PIL = False
 
 # --- Configuration & Constants ---
 UNICODE_PIECES = {
@@ -339,11 +344,42 @@ class ChessVisionApp(tk.Tk):
         # 3. Board Canvas
         self.canvas_size = 400
         self.square_size = self.canvas_size // 8
+        
+        # Try to load images
+        self.load_piece_images()
+        
         self.canvas = tk.Canvas(self, width=self.canvas_size, height=self.canvas_size)
         self.canvas.pack(padx=10, pady=10)
         
         # Initial Draw
         self.draw_board()
+
+    def load_piece_images(self):
+        """Loads piece images from templates folder."""
+        self.piece_images = {}
+        if not HAS_PIL:
+            print("[WARN] Pillow library not found. Falling back to unicode pieces.")
+            return
+
+        try:
+            script_dir = os.path.dirname(os.path.abspath(__file__))
+            template_dir = os.path.join(script_dir, "templates")
+            pieces = ['wP', 'wN', 'wB', 'wR', 'wQ', 'wK', 'bP', 'bN', 'bB', 'bR', 'bQ', 'bK']
+            
+            for p in pieces:
+                path = os.path.join(template_dir, f"{p}.png")
+                if not os.path.exists(path):
+                    print(f"[WARN] Piece image not found: {path}")
+                    continue
+                
+                img = Image.open(path)
+                img = img.resize((self.square_size, self.square_size), Image.Resampling.LANCZOS)
+                self.piece_images[p] = ImageTk.PhotoImage(img)
+                
+            print(f"[INFO] Loaded {len(self.piece_images)} piece images.")
+        except Exception as e:
+            print(f"[WARN] Failed to load piece images: {e}")
+            self.piece_images = {}
 
     def _run_warmup(self):
         """Runs a silent short search to warm up the engine JIT."""
@@ -583,18 +619,40 @@ class ChessVisionApp(tk.Tk):
                 color = BOARD_COLORS[(rank + file) % 2]
                 self.canvas.create_rectangle(x1, y1, x2, y2, fill=color, outline="")
                 
+                # Labels (Coordinates)
+                label_color = "#B58863" if (rank + file) % 2 == 1 else "#F0D9B5"
+                if display_file == 0: # Left edge
+                    self.canvas.create_text(x1 + 2, y1 + 2, text=str(rank + 1), anchor="nw", font=("Arial", 8), fill=label_color)
+                if display_rank == 7: # Bottom edge
+                    self.canvas.create_text(x2 - 2, y2 - 2, text=chr(ord('a') + file), anchor="se", font=("Arial", 8), fill=label_color)
+
                 # Piece
                 square_idx = chess.square(file, rank)
                 piece = self.board.piece_at(square_idx)
                 
                 if piece:
-                    symbol = UNICODE_PIECES.get(piece.symbol())
-                    self.canvas.create_text(
-                        x1 + self.square_size // 2,
-                        y1 + self.square_size // 2,
-                        text=symbol,
-                        font=("Segoe UI Symbol", 32)
-                    )
+                    # Try to draw image first
+                    drawn_image = False
+                    if hasattr(self, 'piece_images') and self.piece_images:
+                        piece_key = f"{'w' if piece.color else 'b'}{piece.symbol().upper()}"
+                        if piece_key in self.piece_images:
+                            self.canvas.create_image(
+                                x1 + self.square_size // 2,
+                                y1 + self.square_size // 2,
+                                image=self.piece_images[piece_key],
+                                anchor="center"
+                            )
+                            drawn_image = True
+                    
+                    # Fallback to Unicode text
+                    if not drawn_image:
+                        symbol = UNICODE_PIECES.get(piece.symbol())
+                        self.canvas.create_text(
+                            x1 + self.square_size // 2,
+                            y1 + self.square_size // 2,
+                            text=symbol,
+                            font=("Segoe UI Symbol", 32)
+                        )
 
     def on_closing(self):
         self.engine.quit_engine()
