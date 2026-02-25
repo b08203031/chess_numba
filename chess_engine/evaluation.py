@@ -5,7 +5,7 @@ import numpy as np
 
 from chess_engine.constants import *
 
-from chess_engine.bitboard_utils import get_lsb_index, count_bits, KING_ATTACK_ZONES, FILE_MASKS
+from chess_engine.bitboard_utils import get_lsb_index, count_bits, WHITE_KING_ZONES, BLACK_KING_ZONES, FILE_MASKS
 from chess_engine.engine_types import piece_bbs_signature, occupancy_bbs_signature, game_state_signature, piece_counts_signature
 from chess_engine.move_generator import (
     get_bishop_attacks, get_rook_attacks, get_queen_attacks, KNIGHT_ATTACKS, PAWN_ATTACKS, KING_ATTACKS
@@ -454,13 +454,13 @@ def _evaluate_pawn_shield_for_color(king_sq, friendly_pawns, enemy_pawns, color)
 
     return score
 
-@numba.njit(numba.int32(numba.int32, numba.int32, piece_bbs_signature, occupancy_bbs_signature, numba.uint64, numba.uint64), cache=True, boundscheck=False, fastmath=True)
-def _evaluate_king_attackers(king_sq, color, piece_bbs, occupancy_bbs, enemy_attacks_bb, friendly_attacks_bb):
+@numba.njit(numba.int32(numba.int32, numba.int32, piece_bbs_signature, occupancy_bbs_signature, numba.uint64, numba.uint64, numba.uint64), cache=True, boundscheck=False, fastmath=True)
+def _evaluate_king_attackers(king_sq, color, piece_bbs, occupancy_bbs, enemy_attacks_bb, friendly_attacks_bb, king_zone):
     """
     (Phase 2) Calculates the threat score based on pieces attacking the king zone using a non-linear model.
     (階段 2) 根據攻擊國王區域的棋子，使用非線性模型計算威脅分數。
     """
-    king_zone = KING_ATTACK_ZONES[king_sq]
+    # king_zone is now passed as an argument
 
     # Optimization: If no enemy piece attacks the king zone, we can skip individual piece checks.
     if not (enemy_attacks_bb & king_zone):
@@ -597,10 +597,10 @@ def evaluate_king_safety(piece_bbs, occupancy_bbs, white_attacks, black_attacks,
 
     # --- Calculate raw scores for each component / 計算每個組件的原始分數 ---
     white_shield = _evaluate_pawn_shield_for_color(white_king_sq, wp_bb, bp_bb, 0)
-    white_attackers = _evaluate_king_attackers(white_king_sq, 0, piece_bbs, occupancy_bbs, black_attacks, white_attacks)
+    white_attackers = _evaluate_king_attackers(white_king_sq, 0, piece_bbs, occupancy_bbs, black_attacks, white_attacks, WHITE_KING_ZONES[white_king_sq])
 
     black_shield = _evaluate_pawn_shield_for_color(black_king_sq, bp_bb, wp_bb, 1)
-    black_attackers = _evaluate_king_attackers(black_king_sq, 1, piece_bbs, occupancy_bbs, white_attacks, black_attacks)
+    black_attackers = _evaluate_king_attackers(black_king_sq, 1, piece_bbs, occupancy_bbs, white_attacks, black_attacks, BLACK_KING_ZONES[black_king_sq])
 
     # --- Sum raw scores / 加總原始分數 ---
     white_raw_safety = white_shield + white_attackers + white_tropism + white_pawn_storm_score

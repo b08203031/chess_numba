@@ -93,7 +93,7 @@ def get_lva_and_remove(attackers, piece_bbs, side_mask):
         subset = attackers & piece_bbs[i + offset]
         if subset:
             sq_bb = subset & -subset
-            return PIECE_VALUES[i], sq_bb, i
+            return PIECE_VALUES[i], np.uint64(sq_bb), i
     return 0, np.uint64(0), -1
 
 @numba.njit(cache=True)

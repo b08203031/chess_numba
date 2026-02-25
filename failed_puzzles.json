@@ -1,5 +1,11 @@
 [
     {
+        "name": "Lichess Puzzle 005qG",
+        "fen": "8/8/1p1k1p1p/3np3/2B2p2/PP1K1PP1/7P/8 w - - 0 37",
+        "solution": "c4d5",
+        "engine_move": "d3e4"
+    },
+    {
         "name": "Lichess Puzzle 006of",
         "fen": "r2qr2k/1pp2Qp1/1b4np/pP2P3/P4n2/B1N2N1P/5PP1/R3R1K1 b - - 0 20",
         "solution": "d8d3",
@@ -12,22 +18,22 @@
         "engine_move": "f1d3"
     },
     {
+        "name": "Lichess Puzzle 002rd",
+        "fen": "r6k/q1p2p1p/1b2bPr1/p1ppP2Q/3P2p1/4B3/PP2NRPP/3R2K1 w - - 2 26",
+        "solution": "e2f4",
+        "engine_move": "d4c5"
+    },
+    {
         "name": "Lichess Puzzle 004d8",
         "fen": "8/4kr2/R2p4/1p1Pp3/5pp1/3K1P2/PPP5/8 w - - 0 40",
         "solution": "a6a7",
         "engine_move": "f3g4"
     },
     {
-        "name": "Lichess Puzzle 002LW",
-        "fen": "3r1rk1/1b3pp1/3p4/p3nPPQ/4P3/3q1BN1/8/2R2RK1 w - - 2 29",
-        "solution": "f5f6",
-        "engine_move": "c1c7"
-    },
-    {
-        "name": "Lichess Puzzle 006NL",
-        "fen": "1r6/k2qn1b1/p1N1p1p1/2PpPpN1/2n2P1P/p4B2/1PP2Q2/1K1R3R b - - 0 32",
-        "solution": "e7c6",
-        "engine_move": "d7c6"
+        "name": "Lichess Puzzle 0055Y",
+        "fen": "r1b2rk1/p3pp2/2B5/2Qpq3/3N2pp/4b3/2P2PPP/1R2K2R w K - 0 24",
+        "solution": "f2e3",
+        "engine_move": "c5d5"
     },
     {
         "name": "Lichess Puzzle 008o6",

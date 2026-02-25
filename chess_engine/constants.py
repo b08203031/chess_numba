@@ -252,7 +252,7 @@ QUEEN_MOBILITY_WEIGHT = np.array([2, 1], dtype=np.int32) # MG, EG
 # --- Bishop Pair / 雙象優勢 ---
 # Bonus for having both bishops. This bonus is generally stronger in open positions.
 # 擁有雙象的獎勵。這個獎勵在開放局面中通常更強。
-BISHOP_PAIR_BONUS = np.array([10, 20], dtype=np.int32) # MG, EG
+BISHOP_PAIR_BONUS = np.array([20, 30], dtype=np.int32) # MG, EG
 
 # --- Rook on Open/Semi-Open File / 車在開放線/半開放線 ---
 # Bonus for a rook on a file with no friendly pawns (semi-open)
@@ -343,9 +343,8 @@ OUTPOST_HOLE_BONUS = np.array([25, 15], dtype=np.int32) # MG, EG
 # Attack units for each piece type. Order: P, N, B, R, Q
 # 每個棋子類型的攻擊單位。順序：兵、馬、象、車、后
 # Updated: Aggressive weights for R and Q
-KING_SAFETY_WEAK_UNITS = np.array([2, 5, 5, 10, 16], dtype=np.int32) # P, N, B, R, Q
-KING_SAFETY_ATTACK_UNITS = np.array([2, 5, 5, 10, 16], dtype=np.int32) # P, N, B, R, Q
-# A non-linear table where the index is the sum of attack units, and the value is the penalty.
+KING_SAFETY_WEAK_UNITS = np.array([1, 2, 2, 5, 8], dtype=np.int32) # P, N, B, R, Q
+KING_SAFETY_ATTACK_UNITS = np.array([1, 2, 2, 5, 8], dtype=np.int32) # P, N, B, R, Q# A non-linear table where the index is the sum of attack units, and the value is the penalty.
 # The penalty grows exponentially, rewarding multi-piece attacks.
 # 一個非線性表格，索引是攻擊單位的總和，值是懲罰分數。懲罰呈指數增長，獎勵多子協同攻擊。
 # Updated: Steeper, quadratic-plus growth curve
@@ -373,12 +372,12 @@ PAWN_STORM_PENALTY_BY_RANK = np.array([0, 0, 80, 50, 30, 10, 5, 0], dtype=np.int
 SCALING_WEIGHTS = np.array([0, 4, 4, 6, 10], dtype=np.int32) # N, B, R, Q - for scaling factor / 用於縮放因子的權重
 MAX_SCALING_MATERIAL = (2*4 + 2*4 + 2*6 + 1*10) # Sum of all weights for one side / 一方所有權重的總和
 
-PAWN_SHIELD_MISSING_PENALTY = 30
-PAWN_SHIELD_INTACT_BONUS = 20
-PAWN_SHIELD_ADVANCED_BONUS = 10
-PAWN_SHIELD_PUSHED_PENALTY = 20
-KING_OPEN_FILE_PENALTY = 25
-KING_SEMI_OPEN_FILE_PENALTY = 10
+PAWN_SHIELD_MISSING_PENALTY = 15
+PAWN_SHIELD_INTACT_BONUS = 10
+PAWN_SHIELD_ADVANCED_BONUS = 5
+PAWN_SHIELD_PUSHED_PENALTY = 10
+KING_OPEN_FILE_PENALTY = 10
+KING_SEMI_OPEN_FILE_PENALTY = 5
 KING_SAFETY_WEAK_SQUARE_PENALTY = 20
 
 EG_SAFETY_SCALE = 0.5 # Scale down endgame king safety impact / 縮減殘局王的安全影響
@@ -390,7 +389,7 @@ EG_SAFETY_SCALE = 0.5 # Scale down endgame king safety impact / 縮減殘局王�
 
 # Threat By Safe Pawn: Friendly pawn attacks enemy piece (N, B, R, Q).
 # 兵的威脅：己方兵攻擊敵方棋子（N, B, R, Q）。
-THREAT_SAFE_PAWN = np.array([60, 60], dtype=np.int32) # MG, EG
+THREAT_SAFE_PAWN = np.array([45, 45], dtype=np.int32) # MG, EG
 
 # Minor Attacking Major: Knight/Bishop attacking Rook/Queen.
 # 輕子攻擊重子：馬/象攻擊車/后。
@@ -404,7 +403,7 @@ THREAT_ROOK_ON_QUEEN = np.array([20, 10], dtype=np.int32) # MG, EG
 # 懸掛子：敵方棋子被攻擊且未被防守。
 # This is a bonus for the ATTACKER.
 # 這是給攻擊者的獎勵。
-THREAT_HANGING = np.array([35, 20], dtype=np.int32) # MG, EG
+THREAT_HANGING = np.array([25, 15], dtype=np.int32) # MG, EG
 
 
 # =============================================================================

@@ -36,10 +36,13 @@ def get_lsb_index(bitboard: np.uint64) -> int:
         return -1
     return nb.int8(count_trailing_zeros(bitboard))
 
-def _init_king_attack_zones():
+def _init_king_attack_zones(color):
     """
     預計算棋盤上每個方格的 3x3 王的攻擊區域再加上前面一排 1x3 的區域。
     3x3 區域以王為中心。
+
+    Args:
+        color (int): 0 為白方，1 為黑方。
 
     Returns:
         np.array: 大小為 64 的 uint64 陣列，每個元素代表對應方格的王周圍的攻擊區域位元棋盤。
@@ -49,7 +52,17 @@ def _init_king_attack_zones():
         zone_bb = np.uint64(0)
         rank, file = sq // 8, sq % 8
 
-        for r in range(rank - 1, rank + 3):
+        # Start with 3x3 centered at King
+        r_start = rank - 1
+        r_end = rank + 2
+        
+        # Add one more rank in front
+        if color == 0: # White (moving up)
+            r_end = rank + 3
+        else: # Black (moving down)
+            r_start = rank - 2
+
+        for r in range(r_start, r_end):
             for f in range(file - 1, file + 2):
                 if 0 <= r < 8 and 0 <= f < 8:
                     target_sq = r * 8 + f
@@ -60,7 +73,8 @@ def _init_king_attack_zones():
         zones[sq] = zone_bb
     return zones
 
-KING_ATTACK_ZONES = _init_king_attack_zones()
+WHITE_KING_ZONES = _init_king_attack_zones(0)
+BLACK_KING_ZONES = _init_king_attack_zones(1)
 
 def _init_file_masks():
     """
