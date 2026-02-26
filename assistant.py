@@ -484,7 +484,8 @@ class ChessVisionApp(tk.Tk):
                     # Update UI in main thread
                     def update_ui_fields(r):
                         self.castling_var.set(r)
-                        self.ep_var.set("-") # Default EP to empty as it's hard to guess
+                        # Keep existing EP square if it was set manually by the user
+                        # self.ep_var.set("-") 
 
                     self.after(0, update_ui_fields, new_rights)
 

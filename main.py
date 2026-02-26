@@ -109,34 +109,44 @@ def uci_loop():
                 global_tt_generation = 0 # Reset generation on new game
             elif command == "position":
                 # --- Parse position command / 解析 position 命令 ---
-                game_history = [] # Reset history for new position command sequence
+                
+                # Update history only if a base position is provided
+                has_base = "startpos" in tokens or "fen" in tokens or "kiwipete" in tokens
+                if has_base:
+                    game_history = []
                 
                 if "startpos" in tokens:
                     fen = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
                     piece_bbs, occupancy_bbs, game_state = parse_fen(fen)
                     board_state = (piece_bbs, occupancy_bbs, game_state)
-                    # Add initial state key to history
                     game_history.append(game_state[4])
                 
                 elif "kiwipete" in tokens:
                     fen = "r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - "
                     piece_bbs, occupancy_bbs, game_state = parse_fen(fen)
                     board_state = (piece_bbs, occupancy_bbs, game_state)
-                    # Add initial state key to history
                     game_history.append(game_state[4])
                     
                 elif "fen" in tokens:
                     fen_start_index = tokens.index("fen") + 1
-                    fen = " ".join(tokens[fen_start_index:])
+                    # Stop before 'moves' if present
+                    if "moves" in tokens:
+                        moves_idx = tokens.index("moves")
+                        fen = " ".join(tokens[fen_start_index:moves_idx])
+                    else:
+                        fen = " ".join(tokens[fen_start_index:])
+                        
                     piece_bbs, occupancy_bbs, game_state = parse_fen(fen)
                     board_state = (piece_bbs, occupancy_bbs, game_state)
-                    # Add initial state key to history
                     game_history.append(game_state[4])
                 
                 # Handle 'moves' / 處理 'moves'
                 if "moves" in tokens:
+                    if board_state is None:
+                        log_info("Moves received without board state. Ignoring.")
+                        continue
+
                     moves_start_index = tokens.index("moves") + 1
-                    # We need to update board_state. Since tuples are immutable, we reconstruct it.
                     p_bbs, o_bbs, g_state = board_state
                     
                     for move_uci in tokens[moves_start_index:]:
@@ -144,10 +154,11 @@ def uci_loop():
                         found_move = False
                         for legal_move in legal_moves:
                             if move_to_uci(legal_move) == move_uci:
-                                # make_move modifies in-place but returns info. 
-                                # make_move 會就地修改，但返回 info。
                                 make_move(p_bbs, o_bbs, g_state, legal_move)
-                                # Append new key to history
+                                # Only add to history if not already there (to avoid duplicates if moves are sent incrementally)
+                                # But UCI usually sends full list, so we trust it.
+                                # Actually, if we didn't reset history, we should only append NEW moves.
+                                # But the logic above resets history if 'startpos/fen' is present, which is the standard case.
                                 game_history.append(g_state[4])
                                 found_move = True
                                 break
