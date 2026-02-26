@@ -220,22 +220,18 @@ def evaluate_pawn_structure(piece_bbs):
                     proximity_bonus = max(-150, min(150, proximity_bonus))
                     eg_score += proximity_bonus
 
-        # B. Backward Pawn Logic
-        # Definition: No friendly pawn on adjacent files is at the same rank or ahead (supporting).
+         # B. Backward Pawn Logic
+        # Definition: No friendly pawn on adjacent files is at the same rank or behind (supporting).
+        # A backward pawn is one that has fallen behind its neighbors.
         # And the stop square (sq + 8) is controlled by an enemy pawn.
-        else: # Not passed (optimization: backward pawns usually aren't passed, though technically possible)
-             # Check adjacent friendly pawns support
-             # Friendly pawns on adjacent files AND (rank >= current rank)
-             # Using precomputed masks would be faster but for now:
-             
-             # Check if any adjacent pawn is on rank >= current rank
-             # Mask for ranks >= current rank
-             # We can use ~BLACK_FORWARD_RANKS[sq] which gives ranks >= rank.
-             # Actually, simpler:
+        else: # Not passed
+             # Check adjacent friendly pawns support (from BEHIND or SAME RANK)
+             # Friendly pawns on adjacent files AND (rank <= current rank)
              # WHITE_FORWARD_RANKS[sq] gives ranks > rank.
-             # We need ranks >= rank. So WHITE_FORWARD_RANKS[sq] | rank_mask[rank].
+             # BLACK_FORWARD_RANKS[sq] gives ranks < rank.
+             # We need ranks <= rank. So BLACK_FORWARD_RANKS[sq] | RANK_MASKS[rank].
 
-             support_mask = WHITE_FORWARD_RANKS[sq] | RANK_MASKS[rank]
+             support_mask = BLACK_FORWARD_RANKS[sq] | RANK_MASKS[rank]
              has_support = (adjacent_pawns & support_mask) != 0
 
              if not has_support:
@@ -313,7 +309,9 @@ def evaluate_pawn_structure(piece_bbs):
         else:
              # Support: Friendly pawns on adjacent files and rank <= current rank (since black moves down)
              # BLACK_FORWARD_RANKS[sq] gives ranks < rank.
-             support_mask = BLACK_FORWARD_RANKS[sq] | RANK_MASKS[rank]
+             # FIX: Support comes from BEHIND (ranks > rank for Black). This corresponds to WHITE_FORWARD_RANKS for Black.
+
+             support_mask = WHITE_FORWARD_RANKS[sq] | RANK_MASKS[rank]
              has_support = (adjacent_pawns & support_mask) != 0
 
              if not has_support:
@@ -607,18 +605,18 @@ def evaluate_king_safety(piece_bbs, occupancy_bbs, white_attacks, black_attacks,
     black_raw_safety = black_shield + black_attackers + black_tropism + black_pawn_storm_score
 
     # --- Phase 4: Scaling based on enemy material / 階段 4：基於敵方材質進行縮放 ---
-    black_material_for_scaling = (piece_counts[7] * SCALING_WEIGHTS[0] +
-                                 piece_counts[8] * SCALING_WEIGHTS[1] +
-                                 piece_counts[9] * SCALING_WEIGHTS[2] +
-                                 piece_counts[10] * SCALING_WEIGHTS[3])
+    black_material_for_scaling = (piece_counts[7] * SCALING_WEIGHTS[1] +
+                                 piece_counts[8] * SCALING_WEIGHTS[2] +
+                                 piece_counts[9] * SCALING_WEIGHTS[3] +
+                                 piece_counts[10] * SCALING_WEIGHTS[4])
     white_scaling_factor = black_material_for_scaling / MAX_SCALING_MATERIAL
 
     white_final_safety = np.int32(white_raw_safety * white_scaling_factor)
 
-    white_material_for_scaling = (piece_counts[1] * SCALING_WEIGHTS[0] +
-                                 piece_counts[2] * SCALING_WEIGHTS[1] +
-                                 piece_counts[3] * SCALING_WEIGHTS[2] +
-                                 piece_counts[4] * SCALING_WEIGHTS[3])
+    white_material_for_scaling = (piece_counts[1] * SCALING_WEIGHTS[1] +
+                                 piece_counts[2] * SCALING_WEIGHTS[2] +
+                                 piece_counts[3] * SCALING_WEIGHTS[3] +
+                                 piece_counts[4] * SCALING_WEIGHTS[4])
     black_scaling_factor = white_material_for_scaling / MAX_SCALING_MATERIAL
 
     black_final_safety = np.int32(black_raw_safety * black_scaling_factor)
@@ -656,8 +654,10 @@ def evaluate_attacks_mobility_threats(piece_bbs, occupancy_bbs):
     black_attacks = black_pawn_attacks
 
     # --- Safe Masks for Mobility ---
-    white_safe_mask = ~(black_pawn_attacks | wk_bb | wq_bb)
-    black_safe_mask = ~(white_pawn_attacks | bk_bb | bq_bb)
+    # Safe mask excludes squares attacked by enemy pawns. 
+    # Squares occupied by friendly pieces are filtered by ~occupancy in the mobility loop.
+    white_safe_mask = ~black_pawn_attacks
+    black_safe_mask = ~white_pawn_attacks
 
     # --- Accumulators ---
     mg_mobility = np.int32(0)

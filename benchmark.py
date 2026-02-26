@@ -90,9 +90,13 @@ def run_benchmark_for_fen(fen, depth, name):
 def run_all_benchmarks():
     """Runs all benchmark tests. / 運行所有基準測試。"""
 
+    # Warm up: Standard starting position
+    startpos_fen = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
+    run_benchmark_for_fen(startpos_fen, depth=2, name="Start Position") # Reduced depth for faster verification
+
     # Benchmark 1: Standard starting position
     startpos_fen = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
-    run_benchmark_for_fen(startpos_fen, depth=12, name="Start Position") # Reduced depth for faster verification
+    run_benchmark_for_fen(startpos_fen, depth=10, name="Start Position")
 
     # Benchmark 2: Kiwipete position
     kiwipete_fen = "r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1"

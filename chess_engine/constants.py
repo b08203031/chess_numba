@@ -274,9 +274,9 @@ ROOK_ON_SEVENTH_BONUS = np.array([20, 50], dtype=np.int32) # MG, EG
 PASSED_PAWN_BONUS = np.array([
     # MG, EG
     [  0,   0], # Rank 1
-    [ 10,  20], # Rank 2
-    [ 20,  30], # Rank 3
-    [ 35, 50], # Rank 4
+    [ 0,  0], # Rank 2
+    [ 10,  20], # Rank 3
+    [ 30, 50], # Rank 4
     [ 50, 80], # Rank 5
     [ 80, 150], # Rank 6
     [150, 250], # Rank 7
@@ -296,7 +296,7 @@ DOUBLED_PAWN_PENALTY = np.array([-15, -10], dtype=np.int32) # MG, EG
 # --- Connected Passed Pawns / 連結通路兵 ---
 # Bonus for each passed pawn that is connected to another passed pawn.
 # 每個連結通路兵的獎勵。
-CONNECTED_PASSED_PAWN_BONUS = np.array([40, 80], dtype=np.int32) # MG, EG
+CONNECTED_PASSED_PAWN_BONUS = np.array([15, 35], dtype=np.int32) # MG, EG
 
 # =============================================================================
 # --- Outpost Constants / 前哨常量 ---
@@ -343,7 +343,7 @@ OUTPOST_HOLE_BONUS = np.array([25, 15], dtype=np.int32) # MG, EG
 # Attack units for each piece type. Order: P, N, B, R, Q
 # 每個棋子類型的攻擊單位。順序：兵、馬、象、車、后
 # Updated: Aggressive weights for R and Q
-KING_SAFETY_WEAK_UNITS = np.array([1, 2, 2, 5, 8], dtype=np.int32) # P, N, B, R, Q
+KING_SAFETY_WEAK_UNITS = np.array([0, 1, 1, 2, 3], dtype=np.int32) # P, N, B, R, Q
 KING_SAFETY_ATTACK_UNITS = np.array([1, 2, 2, 5, 8], dtype=np.int32) # P, N, B, R, Q# A non-linear table where the index is the sum of attack units, and the value is the penalty.
 # The penalty grows exponentially, rewarding multi-piece attacks.
 # 一個非線性表格，索引是攻擊單位的總和，值是懲罰分數。懲罰呈指數增長，獎勵多子協同攻擊。
@@ -354,7 +354,7 @@ KING_SAFETY_TABLE = np.array([
 
 # --- Phase 3: King Tropism / 王的向性 ---
 KING_TROPISM_MAX_DISTANCE = 14 # Max MANHATTAN distance / 最大曼哈頓距離
-KING_TROPISM_WEIGHTS = np.array([1, 2, 3, 5, 8], dtype=np.int32) # P, N, B, R, Q
+KING_TROPISM_WEIGHTS = np.array([0, 1, 1, 2, 3], dtype=np.int32) # P, N, B, R, Q
 
 # --- Phase 4: Advanced & Dynamic / 進階與動態 ---
 # REMOVED: Flat penalty
