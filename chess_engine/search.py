@@ -449,7 +449,9 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
         #    a. We are NOT at the Root Node (ply > 0)
         #    b. The stored depth is sufficient
         #    c. The score bounds (Alpha/Beta) are valid for a cutoff
-        if ply > 0 and tt_entry['depth'] >= depth:
+        #    d. We are NOT in a singular extension search (excluded_move == NO_MOVE)
+        #       OR the TT move is NOT the excluded move.
+        if ply > 0 and tt_entry['depth'] >= depth and (excluded_move == NO_MOVE or tt_move != excluded_move):
             tt_hits += 1
             tt_score = np.int32(tt_entry['score'])
 

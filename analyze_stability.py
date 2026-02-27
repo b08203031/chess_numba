@@ -34,11 +34,13 @@ def main():
     transposition_table = create_transposition_table(64)
     killer_moves = np.zeros(MAX_PLY * 2, dtype=np.uint16)
     pv_table = np.zeros((MAX_PLY, MAX_PLY), dtype=np.uint16)
-    # History table: 6 piece types x 64 squares (approximated for simplicity in initialization)
+    # History table: 12 piece types x 64 squares
     # The search uses [piece_type, square]
-    history_table = np.zeros((6, 64), dtype=np.int32)
+    history_table = np.zeros((12, 64), dtype=np.int32)
+    butterfly_history = np.zeros((64, 64), dtype=np.int32)
+    continuation_history = np.zeros((12, 64, 12, 64), dtype=np.int16)
     
-    search_context = SearchContext(transposition_table, killer_moves, pv_table, history_table)
+    search_context = SearchContext(transposition_table, killer_moves, pv_table, history_table, butterfly_history, continuation_history)
 
     # 3. Setup Loop
     board = game.board()

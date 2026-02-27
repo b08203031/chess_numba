@@ -194,7 +194,9 @@ def analyze():
     killer_moves = np.zeros(MAX_PLY * 2, dtype=np.uint16)
     pv_table = np.zeros((MAX_PLY, MAX_PLY), dtype=np.uint16)
     history_table = np.zeros((12, 64), dtype=np.int32)
-    search_context = SearchContext(transposition_table, killer_moves, pv_table, history_table)
+    butterfly_history = np.zeros((64, 64), dtype=np.int32)
+    continuation_history = np.zeros((12, 64, 12, 64), dtype=np.int16)
+    search_context = SearchContext(transposition_table, killer_moves, pv_table, history_table, butterfly_history, continuation_history)
 
     for puzzle in failed_puzzles:
         print("\n" + "="*50)

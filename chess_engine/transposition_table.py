@@ -10,13 +10,16 @@ TT_FLAG_ALPHA = 2  # Upper bound (score <= alpha), an ALL-node / 上界（分數
 TT_FLAG_BETA = 3   # Lower bound (score >= beta), a CUT-node / 下界（分數 >= beta），截斷節點（CUT-node）
 
 # 2. Define the data type (dtype) for a transposition table entry / 定義置換表項目的數據類型
+# Total size: 8 (key) + 2 (score) + 1 (depth) + 1 (flag) + 1 (generation) + 2 (best_move) + 1 (padding) = 16 bytes
+# Using 16 bytes ensures optimal memory alignment on 64-bit systems.
 tt_entry_dtype = np.dtype([
     ('key', np.uint64),       # Zobrist hash key / Zobrist 哈希鍵值
     ('score', np.int16),      # Evaluation score / 評估分數
     ('depth', np.uint8),      # Search depth / 搜尋深度
     ('flag', np.uint8),       # Node type flag (Exact, Alpha, Beta) / 節點類型標誌
     ('generation', np.uint8), # Generation ID for aging / 用於老化的世代 ID
-    ('best_move', np.uint16)  # Best move found at this node / 此節點找到的最佳移動
+    ('best_move', np.uint16), # Best move found at this node / 此節點找到的最佳移動
+    ('padding', np.uint8)     # Padding for 16-byte alignment / 用於 16 字節對齊的填充
 ])
 
 # Convert the NumPy dtype to a Numba-compatible type / 將 NumPy dtype 轉換為 Numba 兼容類型
@@ -30,6 +33,7 @@ _EMPTY_TT_ENTRY['flag'] = TT_FLAG_NONE
 def create_transposition_table(size_mb):
     """
     根據指定的 MB 大小初始化置換表。
+    為了優化效能，將項目數量限制為 2 的冪次方，以便使用位元運算進行索引。
     
     Args:
         size_mb (int): 置換表的大小（MB）。
@@ -38,7 +42,16 @@ def create_transposition_table(size_mb):
         np.ndarray: 置換表陣列。
     """
     entry_size_bytes = tt_entry_dtype.itemsize
-    num_entries = (size_mb * 1024 * 1024) // entry_size_bytes
+    total_bytes = size_mb * 1024 * 1024
+    max_entries = total_bytes // entry_size_bytes
+    
+    # Find the largest power of 2 less than or equal to max_entries
+    # 找到小於或等於 max_entries 的最大 2 的冪次方
+    if max_entries <= 0:
+        num_entries = 0
+    else:
+        num_entries = 1 << (max_entries.bit_length() - 1)
+        
     transposition_table = np.zeros(num_entries, dtype=tt_entry_dtype)
     return transposition_table
 
@@ -62,6 +75,7 @@ def clear_transposition_table(tt):
 def probe_tt(tt, zobrist_key):
     """
     在置換表中查找項目。如果鍵值匹配，則返回該項目。
+    使用位元與運算 (&) 代替取模運算 (%) 以提高效能。
     
     Args:
         tt (np.ndarray): 置換表。
@@ -70,7 +84,10 @@ def probe_tt(tt, zobrist_key):
     Returns:
         tuple: 置換表項目。如果未命中，則返回空項目。
     """
-    index = zobrist_key % len(tt)
+    if len(tt) == 0:
+        return _EMPTY_TT_ENTRY
+        
+    index = zobrist_key & np.uint64(len(tt) - 1)
     entry = tt[index]
     if entry['key'] == zobrist_key:
         return entry
@@ -91,7 +108,10 @@ def store_tt(tt, zobrist_key, depth, score, flag, best_move, current_generation)
         best_move (int): 最佳移動。
         current_generation (int): 當前搜尋世代。
     """
-    index = zobrist_key % len(tt)
+    if len(tt) == 0:
+        return
+        
+    index = zobrist_key & np.uint64(len(tt) - 1)
     existing_entry = tt[index]
 
     # Replacement Strategy / 替換策略:
@@ -110,9 +130,15 @@ def store_tt(tt, zobrist_key, depth, score, flag, best_move, current_generation)
             replace = True
 
     if replace:
+        # Best move preservation: If we are not storing a new best move, but the keys match,
+        # we keep the best move already in the table.
+        final_best_move = np.uint16(best_move)
+        if final_best_move == 0 and existing_entry['key'] == zobrist_key:
+            final_best_move = existing_entry['best_move']
+
         tt[index]['key'] = zobrist_key
         tt[index]['depth'] = np.uint8(depth)
         tt[index]['score'] = np.int16(score)
         tt[index]['flag'] = np.uint8(flag)
         tt[index]['generation'] = np.uint8(current_generation)
-        tt[index]['best_move'] = np.uint16(best_move)
+        tt[index]['best_move'] = final_best_move

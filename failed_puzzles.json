@@ -1,11 +1,11 @@
 [
     {
-        "name": "Lichess Puzzle 006eO",
-        "fen": "8/8/2p5/1p1p1k2/3P4/1PP1pK2/8/8 w - - 4 65",
-        "solution": "b3b4",
-        "engine_move": "f3e3",
-        "rating": "2186",
-        "theme": "defensiveMove endgame equality oneMove pawnEndgame"
+        "name": "Lichess Puzzle 005yO",
+        "fen": "r1r2k2/ppq3bQ/4p2p/4n3/3p4/2P5/PBB2PPP/4R1K1 w - - 3 25",
+        "solution": "b2a3",
+        "engine_move": "c2b3",
+        "rating": "2793",
+        "theme": "advantage exposedKing middlegame quietMove veryLong"
     },
     {
         "name": "Lichess Puzzle 006of",

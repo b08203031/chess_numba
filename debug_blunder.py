@@ -17,8 +17,10 @@ def run_debug():
     tt = create_transposition_table(16)
     killer_moves = np.zeros(256, dtype=np.uint16)
     history_table = np.zeros((12, 64), dtype=np.int32)
+    butterfly_history = np.zeros((64, 64), dtype=np.int32)
+    continuation_history = np.zeros((12, 64, 12, 64), dtype=np.int16)
     pv_table = np.zeros((128, 128), dtype=np.uint16)
-    ctx = SearchContext(tt, killer_moves, pv_table, history_table)
+    ctx = SearchContext(tt, killer_moves, pv_table, history_table, butterfly_history, continuation_history)
     
     # Run a quick search
     iterative_deepening_search(p_bbs, o_bbs, g_state, 2, {'optimum_time': 0, 'maximum_time': 0}, ctx)
