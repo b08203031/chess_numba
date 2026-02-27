@@ -58,6 +58,8 @@ def uci_loop():
     # Update killer_moves to be 1D array matching SearchContext definition
     killer_moves = np.zeros(MAX_PLY * 2, dtype=np.uint16)
     history_table = np.zeros((12, 64), dtype=np.int32)
+    butterfly_history = np.zeros((64, 64), dtype=np.int32)
+    continuation_history = np.zeros((12, 64, 12, 64), dtype=np.int16)
     pv_table = np.zeros((MAX_PLY, MAX_PLY), dtype=np.uint16)
 
     # --- Initialize Opening Book / 初始化開局書 ---
@@ -104,6 +106,8 @@ def uci_loop():
                 clear_transposition_table(transposition_table)
                 killer_moves.fill(0)
                 history_table.fill(0)
+                butterfly_history.fill(0)
+                continuation_history.fill(0)
                 pv_table.fill(0)
                 game_history = []
                 global_tt_generation = 0 # Reset generation on new game
@@ -214,7 +218,10 @@ def uci_loop():
 
                 # --- Prepare Search Context / 準備搜尋上下文 ---
                 # Create a new context for this search / 為此搜尋創建新的上下文
-                global_search_context = SearchContext(transposition_table, killer_moves, pv_table, history_table)
+                global_search_context = SearchContext(
+                    transposition_table, killer_moves, pv_table, history_table,
+                    butterfly_history, continuation_history
+                )
                 
                 # Update TT Generation
                 global_tt_generation = (global_tt_generation + 1) % 256

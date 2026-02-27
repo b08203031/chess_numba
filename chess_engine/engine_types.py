@@ -52,6 +52,7 @@ search_context_spec = [
     ('quiet_moves_tried', numba.uint16[:, :]),
     ('continuation_history', numba.int16[:, :, :, :]),
     ('pawn_correction_history', numba.int16[:]),
+    ('butterfly_history', numba.int32[:, :]),
 ]
 
 @jitclass(search_context_spec)
@@ -80,7 +81,7 @@ class SearchContext:
         continuation_history (numba.int16[:, :, :, :]): 連續歷史表。
         pawn_correction_history (numba.int16[:]): 兵型修正歷史表。
     """
-    def __init__(self, transposition_table, killer_moves, pv_table, history_table):
+    def __init__(self, transposition_table, killer_moves, pv_table, history_table, butterfly_history, continuation_history):
         """
         初始化搜尋上下文。
 
@@ -89,11 +90,15 @@ class SearchContext:
             killer_moves: 預先分配的殺手步表。
             pv_table: 預先分配的 PV 表。
             history_table: 預先分配的歷史表。
+            butterfly_history: 預先分配的蝴蝶歷史表。
+            continuation_history: 預先分配的連續歷史表。
         """
         self.transposition_table = transposition_table
         self.killer_moves = killer_moves
         self.pv_table = pv_table
         self.history_table = history_table
+        self.butterfly_history = butterfly_history
+        self.continuation_history = continuation_history
         self.nodes_searched = np.uint64(0)
         self.end_time = 0.0
         # 使用陣列來包裝布林值，以便可以作為引用傳遞並在外部修改
@@ -120,8 +125,7 @@ class SearchContext:
         self.see_pruned_quiets = np.uint64(0)
         self.history_pruned = np.uint64(0)
 
-        # Initialize Continuation History and Pawn Correction History
-        self.continuation_history = np.zeros((12, 64, 12, 64), dtype=np.int16)
+        # Initialize Pawn Correction History
         self.pawn_correction_history = np.zeros(CORRECTION_HISTORY_SIZE, dtype=np.int16)
 
 search_context_type = SearchContext.class_type.instance_type

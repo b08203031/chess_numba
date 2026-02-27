@@ -62,6 +62,18 @@ def update_history(history_table, piece_type, to_square, bonus):
     history_table[piece_type, to_square] = new_value
 
 @numba.njit(cache=True, boundscheck=False, fastmath=True)
+def update_butterfly_history(butterfly_table, from_sq, to_sq, bonus):
+    """
+    Updates the butterfly history table using the gravity formula.
+    """
+    current_value = butterfly_table[from_sq, to_sq]
+    clamped_bonus = min(max(bonus, -MAX_HISTORY), MAX_HISTORY)
+    
+    # Gravity formula
+    new_value = current_value + clamped_bonus - (current_value * abs(clamped_bonus)) // MAX_HISTORY
+    butterfly_table[from_sq, to_sq] = new_value
+
+@numba.njit(cache=True, boundscheck=False, fastmath=True)
 def update_continuation_history(context, prev_move, prev_piece, curr_move, curr_piece, bonus):
     """
     Updates the continuation history table.
@@ -160,8 +172,12 @@ def score_moves(piece_bbs, occupancy_bbs, game_state, moves, scores, move_count,
                 elif move == counter_move:
                     score = SCORE_COUNTER_MOVE
                 else:
-                    aggressor_type = find_piece_type_on_square_side(piece_bbs, get_from_square(move), side_to_move)
+                    from_sq = get_from_square(move)
+                    aggressor_type = find_piece_type_on_square_side(piece_bbs, from_sq, side_to_move)
                     score = history_table[aggressor_type, to_square]
+                    
+                    # Butterfly History
+                    score += search_context.butterfly_history[from_sq, to_square]
                     
                     # Continuation History
                     if prev_move != NO_MOVE and prev_piece != -1:
@@ -837,6 +853,7 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                 
                 # Apply Gravity Bonus to the cutoff move
                 update_history(search_context.history_table, aggressor_type, to_sq, bonus)
+                update_butterfly_history(search_context.butterfly_history, get_from_square(move), to_sq, bonus)
 
                 # --- Continuation History Update (Bonus) ---
                 if ply > 0:
@@ -858,8 +875,11 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                 # Apply History Malus to all previous quiet moves that failed low
                 for q_idx in range(quiet_moves_tried_count - 1): # Exclude the current move (last one added)
                     bad_move = quiet_moves_tried[q_idx]
-                    bad_aggressor = find_piece_type_on_square_side(piece_bbs, get_from_square(bad_move), game_state[0])
-                    update_history(search_context.history_table, bad_aggressor, get_to_square(bad_move), -bonus)
+                    bad_from = get_from_square(bad_move)
+                    bad_to = get_to_square(bad_move)
+                    bad_aggressor = find_piece_type_on_square_side(piece_bbs, bad_from, game_state[0])
+                    update_history(search_context.history_table, bad_aggressor, bad_to, -bonus)
+                    update_butterfly_history(search_context.butterfly_history, bad_from, bad_to, -bonus)
                     
                     # --- Continuation History Update (Malus) ---
                     if ply > 0:
@@ -923,9 +943,10 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
 def iterative_deepening_search(piece_bbs, occupancy_bbs, game_state, max_depth, time_config, search_context, game_history_list=None, tt_generation=0):
     start_time = time.time()
     
-    # --- Decay History Table ---
+    # --- Decay History Tables ---
     # Divide history values by 2 to prioritize recent successful moves and reduce impact of old history
     search_context.history_table[:] = search_context.history_table[:] // 2
+    search_context.butterfly_history[:] = search_context.butterfly_history[:] // 2
 
     # --- Setup Game History ---
     if game_history_list is not None:

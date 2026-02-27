@@ -1,5 +1,13 @@
 [
     {
+        "name": "Lichess Puzzle 006eO",
+        "fen": "8/8/2p5/1p1p1k2/3P4/1PP1pK2/8/8 w - - 4 65",
+        "solution": "b3b4",
+        "engine_move": "f3e3",
+        "rating": "2186",
+        "theme": "defensiveMove endgame equality oneMove pawnEndgame"
+    },
+    {
         "name": "Lichess Puzzle 006of",
         "fen": "r2qr2k/1pp2Qp1/1b4np/pP2P3/P4n2/B1N2N1P/5PP1/R3R1K1 b - - 0 20",
         "solution": "d8d3",
@@ -14,14 +22,6 @@
         "engine_move": "f1d3",
         "rating": "2286",
         "theme": "attraction crushing defensiveMove exposedKing long middlegame queensideAttack sacrifice"
-    },
-    {
-        "name": "Lichess Puzzle 002rd",
-        "fen": "r6k/q1p2p1p/1b2bPr1/p1ppP2Q/3P2p1/4B3/PP2NRPP/3R2K1 w - - 2 26",
-        "solution": "e2f4",
-        "engine_move": "d4c5",
-        "rating": "1776",
-        "theme": "crushing kingsideAttack long middlegame pin"
     },
     {
         "name": "Lichess Puzzle 002LW",

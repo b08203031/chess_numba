@@ -1,8 +1,21 @@
 # 進階搜尋歷史啟發技術說明
 
-本文檔說明本引擎引入的兩項關鍵搜尋增強技術：**Continuation History（延續歷史）** 與 **Correction History（修正歷史）**。這些技術源自 Stockfish 等頂尖引擎的開發經驗，旨在提升移動排序的效率與靜態評估的準確性。
+本文檔說明本引擎引入的三項關鍵搜尋增強技術：**Butterfly History（蝴蝶歷史）**、**Continuation History（延續歷史）** 與 **Correction History（修正歷史）**。這些技術源自 Stockfish 等頂尖引擎的開發經驗，旨在提升移動排序的效率與靜態評估的準確性。
 
-## 1. Continuation History (延續歷史)
+## 1. Butterfly History (蝴蝶歷史啟發)
+
+### 概念
+**Butterfly History (蝴蝶歷史啟發)** 是一種特殊的歷史啟發資料結構，其名稱源於資料在 2D 陣列中的分布圖形類似蝴蝶的翅膀（因為合法的移動通常分布在主對角線兩側的特定區域）。
+
+傳統歷史表通常使用 `[piece_type][to_square]` (12 x 64) 的結構，這被稱為 "Piece-To History"。
+而 Butterfly History 則使用 **`[from_square][to_square]`** (64 x 64 = 4096) 的結構。
+
+### 特點與差異
+*   **精確度**：Butterfly History 比 Piece-To History 更精確，因為它區分了「從哪裡移動過來」。例如，同樣是騎士跳到 F3，從 G1 跳過來（標準開局）和從 D2 跳過來（可能是撤退或調整）在 Butterfly 表中是不同的條目，而在 Piece-To 表中則被混為一談。
+*   **空間佔用**：Butterfly 表需要 4096 個 entries，而 Piece-To 表只需要 768 個。雖然較大，但對於現代電腦來說完全可以接受。
+*   **本引擎現況**：本引擎目前已完整實作 **Butterfly History**，並與 **Piece-To History** 及 **Continuation History** 協同工作，為寧靜步（Quiet Moves）提供多層次的排序啟發。
+
+## 2. Continuation History (延續歷史)
 
 ### 概念
 傳統的歷史啟發（History Heuristic）僅追蹤「某個移動在任意局面下的成功率」。然而，西洋棋的移動往往具有連貫性與對話性。Continuation History 試圖捕捉「基於上一手棋的脈絡，當前移動的好壞」。
@@ -58,21 +71,6 @@ Correction History 的核心思想是：**「如果搜尋結果（動態分數�
 
 ---
 
-## 3. 其他相關技術：Butterfly History (蝴蝶歷史啟發)
-
-### 概念
-**Butterfly History (蝴蝶歷史啟發)** 是一種特殊的歷史啟發資料結構，其名稱源於資料在 2D 陣列中的分布圖形類似蝴蝶的翅膀（因為合法的移動通常分布在主對角線兩側的特定區域）。
-
-傳統歷史表通常使用 `[piece_type][to_square]` (12 x 64) 的結構，這被稱為 "Piece-To History"。
-而 Butterfly History 則使用 **`[from_square][to_square]`** (64 x 64 = 4096) 的結構。
-
-### 特點與差異
-*   **精確度**：Butterfly History 比 Piece-To History 更精確，因為它區分了「從哪裡移動過來」。例如，同樣是騎士跳到 F3，從 G1 跳過來（標準開局）和從 D2 跳過來（可能是撤退或調整）在 Butterfly 表中是不同的條目，而在 Piece-To 表中則被混為一談。
-*   **空間佔用**：Butterfly 表需要 4096 個 entries，而 Piece-To 表只需要 768 個。雖然較大，但對於現代電腦來說完全可以接受。
-*   **本引擎現況**：目前本引擎主要使用 **Piece-To History** 作為基礎歷史啟發，並輔以 **Continuation History** 來捕捉更深層的移動關聯。未來可以考慮引入 Butterfly History 來進一步細化單步移動的歷史統計。
-
----
-
 ## 4. 常見問題 (Q&A)
 
 ### Q: 啟用這些功能後，總搜尋節點數 (Total Nodes Searched) 增加，搜尋時間變長，這正常嗎？
@@ -98,7 +96,8 @@ Correction History 的核心思想是：**「如果搜尋結果（動態分數�
 
 | 技術 | 關注點 | 作用 | 核心機制 |
 | :--- | :--- | :--- | :--- |
-| **Continuation History** | **移動排序** | 讓好棋更早被搜尋到 | 4D 歷史表 (前手棋 -> 當前棋) |
+| **Butterfly History** | **移動排序** | 根據移動軌跡（從哪到哪）優化排序 | 2D 歷史表 [from][to] |
+| **Continuation History** | **移動排序** | 根據前一手棋的脈絡優化排序 | 4D 歷史表 (前手棋 -> 當前棋) |
 | **Correction History** | **評估準確性** | 修正靜態評估的系統性誤差 | 基於兵形 Hash 的動態分數修正 |
 
-這兩項技術相輔相成：Continuation History 讓引擎搜得**更快**，而 Correction History 讓引擎搜得**更準**。它們共同構成了現代強大西洋棋引擎的重要基石。
+這些技術相輔相成：Butterfly 與 Continuation History 讓引擎搜得**更快**（更好的排序），而 Correction History 讓引擎搜得**更準**。它們共同構成了現代強大西洋棋引擎的重要基石。
