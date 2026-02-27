@@ -853,9 +853,9 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
         if is_giving_check_after_move:
             # Only extend if the check is not a losing sacrifice (SEE >= 0)
             # This prevents extending "spite checks" that just delay the inevitable.
-            # Using a slightly negative threshold (-100) to be safe for some tactical checks.
+            # Using a more relaxed negative threshold (-300) to allow for tactical sacrifices (e.g. Rook sac).
             # Optimization: Calculate SEE only if it's a check.
-            if see_ge(piece_bbs, occupancy_bbs, game_state[0], from_sq, to_sq, -100, pinned_white, pinned_black):
+            if see_ge(piece_bbs, occupancy_bbs, game_state[0], from_sq, to_sq, SEE_THRESHOLD, pinned_white, pinned_black):
                 check_extension = 1
         
         current_extension = check_extension

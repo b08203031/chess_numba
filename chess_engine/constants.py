@@ -471,9 +471,9 @@ ENABLE_HISTORY_PRUNING = True      # Enable pruning based on History Score
 
 # NEW: Pruning Parameters (Tightened for Performance/Strength Balance)
 PRUNING_SHALLOW_DEPTH = 8         # Prune moves only if depth is below this
-PRUNING_CAPTURE_SEE_MARGIN = -150 # Tightened from -200 (More pruning)
-PRUNING_QUIET_SEE_MARGIN = -80    # Tightened from -100 (More pruning)
-PRUNING_HISTORY_THRESHOLD = -1000 # Tightened from -1500 (More pruning, threshold is higher/closer to 0)
+PRUNING_CAPTURE_SEE_MARGIN = -200 # Tightened from -200 (More pruning)
+PRUNING_QUIET_SEE_MARGIN = -100    # Tightened from -100 (More pruning)
+PRUNING_HISTORY_THRESHOLD = -1500 # Tightened from -1500 (More pruning, threshold is higher/closer to 0)
 
 # Master switches for existing pruning techniques / 現有剪枝技術的總開關
 ENABLE_NMP = True           # Null Move Pruning
@@ -486,16 +486,16 @@ NULL_MOVE_REDUCTION = 2
 MAX_QUIESCENCE_DEPTH = 5
 
 # Razoring
-RAZORING_MARGIN = 600 # Tightened from 700
+RAZORING_MARGIN = 700 # Tightened from 700
 
 # Futility Pruning
-FP_MARGIN_D1 = 350 # Tightened from 400
-FP_MARGIN_D2 = 650 # Tightened from 700
+FP_MARGIN_D1 = 400 # Tightened from 400
+FP_MARGIN_D2 = 700 # Tightened from 700
 FP_BASE = 150      # Reduced base
 FP_MULTIPLIER = 180 # Reduced multiplier
 
 # Reverse Futility Pruning
-RFP_MARGIN_D1 = 200 # Tightened from 250
+RFP_MARGIN_D1 = 250 # Tightened from 250
 
 # Late Move Reductions (LMR)
 LMR_MIN_DEPTH = 4           # Minimum depth to apply LMR / 應用 LMR 的最小深度
@@ -506,7 +506,7 @@ LMR_REDUCTION = 1           # Depth reduction for LMR / LMR 的深度減少值
 # 晚期移動剪枝（LMP） - 在搜尋了一定數量的寧靜步後剪枝
 # Updated: Relaxed constraints to search even more moves (20 + 20*depth)
 LMP_MOVE_COUNT = np.array([
-    0 if d == 0 else 20 + 20 * d for d in range(MAX_PLY)
+    0 if d == 0 else 15 + 15 * d for d in range(MAX_PLY)
 ], dtype=np.int32)
 
 # LMR Table (Precomputed)
@@ -530,7 +530,7 @@ PROBCUT_MARGIN = 150 # centipawns
 DELTA_PRUNING_MARGIN = 1200
 
 # --- Static Exchange Evaluation (SEE) Threshold / SEE 閾值 ---
-SEE_THRESHOLD = -100  # centipawns (Relaxed from -50)
+SEE_THRESHOLD = -330  # centipawns (Relaxed from -50)
 ENABLE_SEE_IN_QUIESCENCE = True # Master switch to enable/disable SEE in quiescence search / 啟用/禁用靜態搜尋中 SEE 的總開關
 
 # =============================================================================
