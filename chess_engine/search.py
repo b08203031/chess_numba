@@ -30,9 +30,11 @@ from chess_engine.constants import (
     SCORE_KILLER_2, SCORE_COUNTER_MOVE, SCORE_BAD_CAPTURE_PENALTY, NMP_STATIC_MARGIN,
     ENABLE_SHALLOW_SEE_PRUNING, ENABLE_HISTORY_PRUNING, PRUNING_SHALLOW_DEPTH,
     PRUNING_CAPTURE_SEE_MARGIN, PRUNING_QUIET_SEE_MARGIN, PRUNING_HISTORY_THRESHOLD,
-    WHITE, BLACK
+    WHITE, BLACK, PAWN_KEY_INDEX, CORRECTION_HISTORY_SIZE, CORRECTION_HISTORY_LIMIT,
+    CONTINUATION_HISTORY_FACTOR, MAX_HISTORY
 )
 from chess_engine.bitboard_utils import find_piece_type_on_square, find_piece_type_on_square_side
+from chess_engine.board_operations import find_piece_type_for_square
 from chess_engine.debug_utils import log_info
 from chess_engine.see import see, see_ge, get_pinned_pieces
 from chess_engine.transposition_table import (
@@ -58,6 +60,20 @@ def update_history(history_table, piece_type, to_square, bonus):
     # Gravity formula
     new_value = current_value + clamped_bonus - (current_value * abs(clamped_bonus)) // MAX_HISTORY
     history_table[piece_type, to_square] = new_value
+
+@numba.njit(cache=True, boundscheck=False, fastmath=True)
+def update_continuation_history(context, prev_move, prev_piece, curr_move, curr_piece, bonus):
+    """
+    Updates the continuation history table.
+    """
+    prev_to = get_to_square(prev_move)
+    curr_to = get_to_square(curr_move)
+    
+    current_val = context.continuation_history[prev_piece, prev_to, curr_piece, curr_to]
+    clamped_bonus = min(max(bonus, -MAX_HISTORY), MAX_HISTORY)
+    
+    new_val = current_val + clamped_bonus - (current_val * abs(clamped_bonus)) // MAX_HISTORY
+    context.continuation_history[prev_piece, prev_to, curr_piece, curr_to] = new_val
 
 @numba.njit(cache=True, boundscheck=False, fastmath=True)
 def get_lmr_reduction(depth, move_count, history_score):
@@ -88,10 +104,25 @@ def get_lmr_reduction(depth, move_count, history_score):
     return max(0, int(reduction))
 
 @numba.njit(cache=True, boundscheck=False, fastmath=True)
-def score_moves(piece_bbs, occupancy_bbs, game_state, moves, scores, move_count, tt_move, killer_moves_at_ply, history_table, counter_move, pinned_white, pinned_black):
+def score_moves(piece_bbs, occupancy_bbs, game_state, moves, scores, move_count, tt_move, killer_moves_at_ply, history_table, counter_move, pinned_white, pinned_black, search_context, ply):
     side_to_move = game_state[0]
     opponent_pieces_bb = occupancy_bbs[1] if side_to_move == 0 else occupancy_bbs[0]
     
+    prev_move = NO_MOVE
+    prev_piece = -1
+    
+    if ply > 0:
+        prev_move = search_context.move_stack[ply-1]
+        if prev_move != NO_MOVE:
+            # We need to find what piece was moved in the previous move.
+            # The piece is currently at prev_move.to_square (unless captured, but move_stack tracks moves made)
+            # wait, move_stack tracks moves made on the board.
+            # The previous move was made by the opponent (1-side_to_move).
+            # The piece should be at get_to_square(prev_move).
+            prev_to = get_to_square(prev_move)
+            # Find piece type on square for opponent
+            prev_piece = find_piece_type_for_square(piece_bbs, prev_to, 1 - side_to_move)
+
     for i in range(move_count):
         move = moves[i]
         score = 0
@@ -131,6 +162,11 @@ def score_moves(piece_bbs, occupancy_bbs, game_state, moves, scores, move_count,
                 else:
                     aggressor_type = find_piece_type_on_square_side(piece_bbs, get_from_square(move), side_to_move)
                     score = history_table[aggressor_type, to_square]
+                    
+                    # Continuation History
+                    if prev_move != NO_MOVE and prev_piece != -1:
+                        cont_score = search_context.continuation_history[prev_piece, get_to_square(prev_move), aggressor_type, to_square]
+                        score += cont_score * CONTINUATION_HISTORY_FACTOR
 
         scores[i] = score
 
@@ -212,7 +248,9 @@ def quiescence_search(piece_bbs, occupancy_bbs, game_state, alpha, beta, ply, se
         search_context.history_table, 
         NO_MOVE, # No counter move
         pinned_white,
-        pinned_black
+        pinned_black,
+        search_context,
+        ply
     )
 
     for i in range(move_count):
@@ -498,9 +536,22 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
     # --- Static Evaluation & Improving Flag ---
     static_score = -INFINITY
     improving = False
+    
+    # Correction History Adjustment
+    raw_static_eval = -INFINITY
 
     if not is_currently_in_check:
-        static_score = evaluate_position(piece_bbs, occupancy_bbs, game_state, lazy=True)
+        raw_static_eval = evaluate_position(piece_bbs, occupancy_bbs, game_state, lazy=True)
+        
+        # Apply Correction History
+        pawn_key = game_state[PAWN_KEY_INDEX]
+        correction = search_context.pawn_correction_history[pawn_key % CORRECTION_HISTORY_SIZE]
+        
+        # Clamp correction to limit its effect
+        correction = min(max(correction, -CORRECTION_HISTORY_LIMIT), CORRECTION_HISTORY_LIMIT)
+        
+        static_score = raw_static_eval + correction
+        
         search_context.static_eval_stack[ply] = static_score
 
         if ply >= 2 and static_score > search_context.static_eval_stack[ply - 2]:
@@ -601,7 +652,9 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
         search_context.history_table, 
         counter_move,
         pinned_white,
-        pinned_black
+        pinned_black,
+        search_context,
+        ply
     )
     
     best_move, max_eval = NO_MOVE, -INFINITY
@@ -780,9 +833,19 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
             if is_quiet_move:
                 bonus = depth * depth
                 aggressor_type = find_piece_type_on_square_side(piece_bbs, get_from_square(move), game_state[0])
+                to_sq = get_to_square(move)
                 
                 # Apply Gravity Bonus to the cutoff move
-                update_history(search_context.history_table, aggressor_type, get_to_square(move), bonus)
+                update_history(search_context.history_table, aggressor_type, to_sq, bonus)
+
+                # --- Continuation History Update (Bonus) ---
+                if ply > 0:
+                    prev_move_played = search_context.move_stack[ply - 1]
+                    if prev_move_played != NO_MOVE:
+                        p_to = get_to_square(prev_move_played)
+                        p_piece = find_piece_type_for_square(piece_bbs, p_to, 1 - game_state[0])
+                        if p_piece != -1:
+                            update_continuation_history(search_context, prev_move_played, p_piece, move, aggressor_type, bonus)
 
                 # --- Update Counter Move ---
                 if ply > 0:
@@ -797,6 +860,15 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                     bad_move = quiet_moves_tried[q_idx]
                     bad_aggressor = find_piece_type_on_square_side(piece_bbs, get_from_square(bad_move), game_state[0])
                     update_history(search_context.history_table, bad_aggressor, get_to_square(bad_move), -bonus)
+                    
+                    # --- Continuation History Update (Malus) ---
+                    if ply > 0:
+                        prev_move_played = search_context.move_stack[ply - 1]
+                        if prev_move_played != NO_MOVE:
+                            p_to = get_to_square(prev_move_played)
+                            p_piece = find_piece_type_for_square(piece_bbs, p_to, 1 - game_state[0])
+                            if p_piece != -1:
+                                update_continuation_history(search_context, prev_move_played, p_piece, bad_move, bad_aggressor, -bonus)
 
                 if move != search_context.killer_moves[ply * 2]:
                     search_context.killer_moves[ply * 2 + 1] = search_context.killer_moves[ply * 2]
@@ -813,6 +885,32 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                 best_move = moves[i]
                 break
     
+    # --- Update Correction History ---
+    if not is_currently_in_check and best_move != NO_MOVE and abs(max_eval) < MATE_SCORE - MAX_PLY:
+        # Only update if we have a valid static eval (raw_static_eval != -INFINITY)
+        # And we are not in check
+        if raw_static_eval != -INFINITY:
+            diff = max_eval - raw_static_eval
+            pawn_key = game_state[PAWN_KEY_INDEX]
+            idx = pawn_key % CORRECTION_HISTORY_SIZE
+            current_corr = search_context.pawn_correction_history[idx]
+            
+            # Simple gravity update towards the difference
+            # new_corr = current_corr + (diff - current_corr) / GRAVITY
+            # We use a shift or division for gravity. Using constant 16.
+            # Avoid using floating point if possible, or cast.
+            # Correction history is int16.
+            
+            # Limit diff to avoid extreme swings
+            clamped_diff = min(max(diff, -CORRECTION_HISTORY_LIMIT), CORRECTION_HISTORY_LIMIT)
+            
+            new_corr = current_corr + (clamped_diff - current_corr) // 16
+            
+            # Clamp final result
+            new_corr = min(max(new_corr, -CORRECTION_HISTORY_LIMIT), CORRECTION_HISTORY_LIMIT)
+            
+            search_context.pawn_correction_history[idx] = new_corr
+
     tt_score = max_eval
     if tt_score > MATE_IN_MAX_PLY: tt_score += ply
     elif tt_score < -MATE_IN_MAX_PLY: tt_score -= ply

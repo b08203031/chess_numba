@@ -35,8 +35,8 @@ def parse_fen_to_arrays(fen):
     occupancy_bbs[2] = np.uint64(board.occupied)
     
     # Game State
-    # [side_to_move, castling_rights, en_passant_sq, halfmove_clock, zobrist_key]
-    game_state = np.zeros(5, dtype=np.uint64)
+    # [side_to_move, castling_rights, en_passant_sq, halfmove_clock, zobrist_key, pawn_key]
+    game_state = np.zeros(6, dtype=np.uint64)
     
     # Side to move: 0 for White, 1 for Black
     game_state[0] = np.uint64(0 if board.turn == chess.WHITE else 1)

@@ -436,11 +436,16 @@ ROOK_QUEEN_BATTERY_BONUS = 5000 # Bonus for Rook moving to same file/rank as Que
 
 # History Heuristic Constants
 MAX_HISTORY = 2048 # Max value for history table to prevent overflow and saturation
+CORRECTION_HISTORY_SIZE = 16384
+CORRECTION_HISTORY_LIMIT = 400
+CORRECTION_HISTORY_GRAVITY = 16
+CONTINUATION_HISTORY_FACTOR = 4
 
 # Special value to indicate that the search was stopped due to timeout
 # 特殊值，表示搜尋因超時而停止
 STOP_SEARCH_FLAG = 66666
 
+PAWN_KEY_INDEX = 5
 
 # --- Aspiration Windows / 期望窗口 ---
 ASPIRATION_WINDOW_SIZE = 100 # centipawns

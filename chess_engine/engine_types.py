@@ -2,7 +2,7 @@
 import numba
 import numpy as np
 from chess_engine.transposition_table import numba_tt_entry_type
-from chess_engine.constants import MAX_PLY
+from chess_engine.constants import MAX_PLY, CORRECTION_HISTORY_SIZE
 
 """
 此模組定義了西洋棋引擎中使用的 Numba 類型和類別。
@@ -23,7 +23,7 @@ game_state_signature = numba.uint64[::1]
 piece_counts_signature = numba.types.UniTuple(numba.int32, 12)
 
 unmake_info_signature = numba.types.Tuple([
-    numba.int8, numba.uint8, numba.uint8, numba.uint8, numba.uint64
+    numba.int8, numba.uint8, numba.uint8, numba.uint8, numba.uint64, numba.uint64
 ])
 
 # --- Search Context / 搜尋上下文 ---
@@ -50,6 +50,8 @@ search_context_spec = [
     ('move_scores', numba.int32[:, :]),
     ('moves_buffer', numba.uint16[:, :]),
     ('quiet_moves_tried', numba.uint16[:, :]),
+    ('continuation_history', numba.int16[:, :, :, :]),
+    ('pawn_correction_history', numba.int16[:]),
 ]
 
 @jitclass(search_context_spec)
@@ -75,6 +77,8 @@ class SearchContext:
         see_pruned_captures (numba.uint64): 因 SEE 被剪枝的捕捉次數。
         see_pruned_quiets (numba.uint64): 因 SEE 被剪枝的靜止步次數。
         history_pruned (numba.uint64): 因歷史分數被剪枝的次數。
+        continuation_history (numba.int16[:, :, :, :]): 連續歷史表。
+        pawn_correction_history (numba.int16[:]): 兵型修正歷史表。
     """
     def __init__(self, transposition_table, killer_moves, pv_table, history_table):
         """
@@ -115,5 +119,9 @@ class SearchContext:
         self.see_pruned_captures = np.uint64(0)
         self.see_pruned_quiets = np.uint64(0)
         self.history_pruned = np.uint64(0)
+
+        # Initialize Continuation History and Pawn Correction History
+        self.continuation_history = np.zeros((12, 64, 12, 64), dtype=np.int16)
+        self.pawn_correction_history = np.zeros(CORRECTION_HISTORY_SIZE, dtype=np.int16)
 
 search_context_type = SearchContext.class_type.instance_type

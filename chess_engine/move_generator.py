@@ -280,7 +280,7 @@ def generate_legal_moves_buffer(piece_bbs, occupancy_bbs, game_state, moves_buff
     """
     move_count = 0
     
-    side_to_move, castling_rights, en_passant_square, _, _ = game_state
+    side_to_move, castling_rights, en_passant_square, _, _, _ = game_state
     
     (wp_bb, wn_bb, wb_bb, wr_bb, wq_bb, wk_bb, 
      bp_bb, bn_bb, bb_bb, br_bb, bq_bb, bk_bb) = piece_bbs
@@ -495,7 +495,7 @@ def generate_tactical_moves(piece_bbs, occupancy_bbs, game_state):
     moves = np.zeros(128, dtype=np.uint16)
     move_count = 0
 
-    side_to_move, _, en_passant_square, _, _ = game_state
+    side_to_move, _, en_passant_square, _, _, _ = game_state
     
     (wp_bb, wn_bb, wb_bb, wr_bb, wq_bb, wk_bb, 
      bp_bb, bn_bb, bb_bb, br_bb, bq_bb, bk_bb) = piece_bbs
@@ -691,7 +691,7 @@ def generate_captures_buffer(piece_bbs, occupancy_bbs, game_state, moves_buffer,
     """
     move_count = 0
 
-    side_to_move, _, en_passant_square, _, _ = game_state
+    side_to_move, _, en_passant_square, _, _, _ = game_state
 
     (wp_bb, wn_bb, wb_bb, wr_bb, wq_bb, wk_bb,
      bp_bb, bn_bb, bb_bb, br_bb, bq_bb, bk_bb) = piece_bbs
