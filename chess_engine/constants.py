@@ -1,6 +1,7 @@
 # chess_engine/constants.py
 
 import numpy as np
+import math
 
 """
 此模組定義了西洋棋引擎中使用的所有常量。
@@ -457,6 +458,7 @@ ENABLE_PROBCUT = True       # ProbCut
 ENABLE_DELTA_PRUNING = True # Delta Pruning in Quiescence Search
 ENABLE_IID = True           # Internal Iterative Deepening
 ENABLE_SINGULAR_EXTENSIONS = True # Singular Extensions
+ENABLE_MATE_DISTANCE_PRUNING = True # Mate Distance Pruning
 
 
 # IID and Singular Extension Parameters
@@ -467,11 +469,11 @@ SINGULAR_EXTENSION_MARGIN = 150 # centipawns
 ENABLE_SHALLOW_SEE_PRUNING = True  # Enable SEE pruning for captures/quiets at shallow depth
 ENABLE_HISTORY_PRUNING = True      # Enable pruning based on History Score
 
-# NEW: Pruning Parameters (Loose/Relaxed initially)
+# NEW: Pruning Parameters (Tightened for Performance/Strength Balance)
 PRUNING_SHALLOW_DEPTH = 8         # Prune moves only if depth is below this
-PRUNING_CAPTURE_SEE_MARGIN = -200 # SEE < -200 * depth will be pruned
-PRUNING_QUIET_SEE_MARGIN = -100   # SEE < -100 * depth^2 will be pruned
-PRUNING_HISTORY_THRESHOLD = -1500 # Prune if history < -1500. NOTE: MAX_HISTORY is 2048, so -1500 is ~73% of max penalty.
+PRUNING_CAPTURE_SEE_MARGIN = -150 # Tightened from -200 (More pruning)
+PRUNING_QUIET_SEE_MARGIN = -80    # Tightened from -100 (More pruning)
+PRUNING_HISTORY_THRESHOLD = -1000 # Tightened from -1500 (More pruning, threshold is higher/closer to 0)
 
 # Master switches for existing pruning techniques / 現有剪枝技術的總開關
 ENABLE_NMP = True           # Null Move Pruning
@@ -484,16 +486,16 @@ NULL_MOVE_REDUCTION = 2
 MAX_QUIESCENCE_DEPTH = 5
 
 # Razoring
-RAZORING_MARGIN = 700 # Relaxed from 550
+RAZORING_MARGIN = 600 # Tightened from 700
 
 # Futility Pruning
-FP_MARGIN_D1 = 400 # Relaxed from 300
-FP_MARGIN_D2 = 700 # Relaxed from 600
-FP_BASE = 200
-FP_MULTIPLIER = 200
+FP_MARGIN_D1 = 350 # Tightened from 400
+FP_MARGIN_D2 = 650 # Tightened from 700
+FP_BASE = 150      # Reduced base
+FP_MULTIPLIER = 180 # Reduced multiplier
 
 # Reverse Futility Pruning
-RFP_MARGIN_D1 = 250 # Relaxed from 250
+RFP_MARGIN_D1 = 200 # Tightened from 250
 
 # Late Move Reductions (LMR)
 LMR_MIN_DEPTH = 4           # Minimum depth to apply LMR / 應用 LMR 的最小深度
@@ -506,6 +508,17 @@ LMR_REDUCTION = 1           # Depth reduction for LMR / LMR 的深度減少值
 LMP_MOVE_COUNT = np.array([
     0 if d == 0 else 20 + 20 * d for d in range(MAX_PLY)
 ], dtype=np.int32)
+
+# LMR Table (Precomputed)
+# Formula: int(0.5 + log(depth) * log(move_count) / 2.25)
+# Using 256 as max move count (enough for almost all positions)
+LMR_TABLE = np.zeros((MAX_PLY, 256), dtype=np.int32)
+for d in range(MAX_PLY):
+    for mc in range(256):
+        if d < 2 or mc < 2:
+            LMR_TABLE[d, mc] = 0
+        else:
+            LMR_TABLE[d, mc] = int(0.5 + math.log(d) * math.log(mc) / 2.25)
 
 
 # ProbCut

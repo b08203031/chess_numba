@@ -31,7 +31,8 @@ from chess_engine.constants import (
     ENABLE_SHALLOW_SEE_PRUNING, ENABLE_HISTORY_PRUNING, PRUNING_SHALLOW_DEPTH,
     PRUNING_CAPTURE_SEE_MARGIN, PRUNING_QUIET_SEE_MARGIN, PRUNING_HISTORY_THRESHOLD,
     WHITE, BLACK, PAWN_KEY_INDEX, CORRECTION_HISTORY_SIZE, CORRECTION_HISTORY_LIMIT,
-    CONTINUATION_HISTORY_FACTOR, MAX_HISTORY
+    CONTINUATION_HISTORY_FACTOR, MAX_HISTORY,
+    LMR_TABLE, ENABLE_MATE_DISTANCE_PRUNING
 )
 from chess_engine.bitboard_utils import find_piece_type_on_square, find_piece_type_on_square_side
 from chess_engine.board_operations import find_piece_type_for_square
@@ -104,15 +105,17 @@ def update_continuation_history(context, prev_move, prev_piece, curr_move, curr_
 def get_lmr_reduction(depth, move_count, history_score, improving, is_pv):
     """
     Calculates LMR reduction based on depth, move_count, history score, improving flag and node type.
+    Uses precomputed LMR_TABLE for base reduction.
     """
     if depth < 2 or move_count < 2:
         return 0
-
-    ld = math.log(float(depth))
-    lmc = math.log(float(move_count))
-
-    # Base reduction
-    reduction = 0.5 + (ld * lmc) / 2.25
+    
+    # Clamp indices to table bounds
+    d = min(depth, MAX_PLY - 1)
+    mc = min(move_count, 255)
+    
+    # Base reduction from table
+    reduction = float(LMR_TABLE[d, mc])
     
     # PV adjustment: PV nodes are searched more carefully
     if not is_pv:
@@ -399,6 +402,28 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                 null_move_cutoffs, futility_pruned, razoring_used, rfp_pruned, lmp_pruned, probcut_pruned, qs_delta_pruned, qs_see_pruned,
                 iid_searches, singular_extensions)
 
+    # --- Mate Distance Pruning ---
+    if ENABLE_MATE_DISTANCE_PRUNING:
+        # If we find a mate at 'ply', the score would be MATE_SCORE - ply.
+        # We can't do better than mating at the current ply (MATE_SCORE - ply).
+        # We can't do worse than being mated at the current ply (-MATE_SCORE + ply).
+        
+        # Lower bound: if we are mated in 'ply', score is -MATE_SCORE + ply.
+        # Any score below this is impossible.
+        alpha = max(alpha, -MATE_SCORE + ply)
+        
+        # Upper bound: if we mate in 'ply', score is MATE_SCORE - ply.
+        # But we need to make a move to mate, so technically MATE_SCORE - (ply + 1)?
+        # Actually standard logic is:
+        # We are at ply. The best we can hope for is mate in 1 (at ply+1).
+        # Score: MATE_SCORE - (ply + 1).
+        beta = min(beta, MATE_SCORE - ply - 1)
+        
+        if alpha >= beta:
+            return (np.int32(alpha), NO_MOVE, nodes_searched, quiescence_nodes, cutoffs, tt_hits,
+                    null_move_cutoffs, futility_pruned, razoring_used, rfp_pruned, lmp_pruned, probcut_pruned, qs_delta_pruned, qs_see_pruned,
+                    iid_searches, singular_extensions)
+
     # --- Repetition Detection ---
     # Performance Optimization (Bolt): Use halfmove_clock to limit checks and skip odd plies.
     # Impact: ~1.8% NPS improvement on Kiwipete benchmark.
@@ -606,10 +631,21 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
         original_state_for_null = game_state.copy()
         make_null_move(game_state)
         
+        # Dynamic NMP Reduction
+        # R = 3 + depth / 6
+        nmp_reduction = 3 + depth // 6
+        
         # NOTE: Passing a large value or special flag for previous move might be needed if NMP impacts move ordering logic of sub-search. 
         # For now we pass NO_MOVE as we don't have a "previous move" for null move.
+        # Ensure we don't reduce below 0 (though depth>=3 and reduction>=3 means depth-1-reduction < 0 if depth < 4)
+        # depth - 1 - nmp_reduction = depth - 1 - (3 + depth//6)
+        # If depth=3: 3 - 1 - 3 = -1. _search handles depth < 0? No, usually depth is int.
+        # Let's ensure search_depth >= 0.
+        
+        search_depth = max(0, depth - 1 - nmp_reduction)
+        
         res_nm = _search(
-            piece_bbs, occupancy_bbs, game_state, depth - 1 - NULL_MOVE_REDUCTION,
+            piece_bbs, occupancy_bbs, game_state, search_depth,
             -beta, -beta + 1, search_context, ply + 1, NO_MOVE, False
         )
         null_move_score = res_nm[0]
@@ -648,7 +684,10 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                     null_move_cutoffs, futility_pruned, razoring_used, rfp_pruned, lmp_pruned, probcut_pruned, qs_delta_pruned, qs_see_pruned,
                     iid_searches, singular_extensions)
 
-    if depth <= 2 and not is_currently_in_check:
+    # --- PV Node Safety for Pruning ---
+    # We generally want to avoid risky pruning (RFP, Razoring, LMP) in PV nodes
+    # because these nodes are part of the principal variation and require higher accuracy.
+    if depth <= 2 and not is_currently_in_check and not is_pv:
         if ENABLE_RFP and depth == 1 and static_score - RFP_MARGIN_D1 >= beta:
             rfp_pruned += 1
             return (np.int32(beta), NO_MOVE, nodes_searched, quiescence_nodes, cutoffs, tt_hits,
@@ -788,7 +827,8 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
             quiet_moves_tried[quiet_moves_tried_count] = move
             quiet_moves_tried_count += 1
             
-            if ENABLE_LMP and not is_currently_in_check:
+            # Late Move Pruning (LMP) - Disabled in PV nodes
+            if ENABLE_LMP and not is_currently_in_check and not is_pv:
                 limit = LMP_MOVE_COUNT[depth]
                 if not improving: limit = limit // 2
                 limit = max(limit, 2)
@@ -798,7 +838,8 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                     unmake_move(piece_bbs, occupancy_bbs, game_state, move, unmake_info)
                     break
 
-        if ENABLE_FP and is_quiet_move and not is_currently_in_check and static_score != -INFINITY:
+        # Futility Pruning (FP) - Disabled in PV nodes
+        if ENABLE_FP and is_quiet_move and not is_currently_in_check and not is_pv and static_score != -INFINITY:
             # Dynamic Futility Margin: FP_BASE + FP_MULTIPLIER * depth
             margin = FP_BASE + FP_MULTIPLIER * depth
 
@@ -808,7 +849,15 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                 continue
         
         # --- Determine total extension ---
-        check_extension = 1 if is_giving_check_after_move else 0
+        check_extension = 0
+        if is_giving_check_after_move:
+            # Only extend if the check is not a losing sacrifice (SEE >= 0)
+            # This prevents extending "spite checks" that just delay the inevitable.
+            # Using a slightly negative threshold (-100) to be safe for some tactical checks.
+            # Optimization: Calculate SEE only if it's a check.
+            if see_ge(piece_bbs, occupancy_bbs, game_state[0], from_sq, to_sq, -100, pinned_white, pinned_black):
+                check_extension = 1
+        
         current_extension = check_extension
         if move == tt_move: current_extension = max(current_extension, extension)
         search_depth = depth - 1 + current_extension
@@ -1047,27 +1096,50 @@ def iterative_deepening_search(piece_bbs, occupancy_bbs, game_state, max_depth, 
     search_context.move_stack.fill(NO_MOVE)
 
     for current_depth in range(1, max_depth + 1):
-        alpha, beta = (-INFINITY, INFINITY) if current_depth <= 1 else (last_score - ASPIRATION_WINDOW_SIZE, last_score + ASPIRATION_WINDOW_SIZE)
+        # Aspiration Window Logic
+        alpha = -INFINITY
+        beta = INFINITY
+        delta = ASPIRATION_WINDOW_SIZE
+        
+        if current_depth > 1:
+            alpha = max(-INFINITY, last_score - delta)
+            beta = min(INFINITY, last_score + delta)
 
         search_context.nodes_searched = np.uint64(0)
-
-        res = _search(piece_bbs, occupancy_bbs, game_state, current_depth, alpha, beta, search_context, 0, NO_MOVE, True)
-        score = res[0]
-
-        if not search_context.stop_flag[0] and (score <= alpha or score >= beta):
-            log_info(f"depth {current_depth} aspiration window failed, re-searching...")
-            
-            # Accumulate stats from the failed attempt
-            total_q_nodes += res[3]; total_cutoffs += res[4]; total_tt_hits += res[5]; total_nmc += res[6]; total_fp += res[7]; total_ru += res[8]; total_rfp += res[9]; total_lmp += res[10]; total_pcp += res[11]; total_qdp += res[12]; total_qsp += res[13]; total_iid += res[14]; total_se += res[15]
-            
-            alpha, beta = -INFINITY, INFINITY
-            # Note: We do NOT reset search_context.nodes_searched here, let it accumulate for this depth.
+        
+        while True:
             res = _search(piece_bbs, occupancy_bbs, game_state, current_depth, alpha, beta, search_context, 0, NO_MOVE, True)
             score = res[0]
+            
+            # Always accumulate stats from the search (even if stopped or failed window)
+            # Note: search_context.nodes_searched is reset per depth loop but accumulates inside the while loop effectively
+            # Actually, to get correct NPS, we should probably accumulate into totals here.
+            # But search_context.nodes_searched is reset at the top of the FOR loop, not the WHILE loop.
+            # So if we re-search, search_context.nodes_searched will increase.
+            # We just need to make sure we don't double count if we add to 'total_nodes' inside the loop?
+            # The original code added search_context.nodes_searched to total_nodes AFTER the search call.
+            # Here, we might search multiple times.
+            
+            # Let's accumulate non-node stats here immediately to safe-keep them.
+            total_q_nodes += res[3]; total_cutoffs += res[4]; total_tt_hits += res[5]; total_nmc += res[6]; total_fp += res[7]; total_ru += res[8]; total_rfp += res[9]; total_lmp += res[10]; total_pcp += res[11]; total_qdp += res[12]; total_qsp += res[13]; total_iid += res[14]; total_se += res[15]
 
-        # Always accumulate stats from the search (even if stopped)
+            if search_context.stop_flag[0]:
+                break
+            
+            if score <= alpha:
+                beta = (alpha + beta) // 2
+                alpha = max(-INFINITY, alpha - delta)
+                delta += delta // 2
+                # log_info(f"depth {current_depth} fail low ({score} <= {alpha}), widening to [{alpha}, {beta}]")
+            elif score >= beta:
+                beta = min(INFINITY, beta + delta)
+                delta += delta // 2
+                # log_info(f"depth {current_depth} fail high ({score} >= {beta}), widening to [{alpha}, {beta}]")
+            else:
+                # Score is within window, we are done with this depth
+                break
+        
         total_nodes += search_context.nodes_searched
-        total_q_nodes += res[3]; total_cutoffs += res[4]; total_tt_hits += res[5]; total_nmc += res[6]; total_fp += res[7]; total_ru += res[8]; total_rfp += res[9]; total_lmp += res[10]; total_pcp += res[11]; total_qdp += res[12]; total_qsp += res[13]; total_iid += res[14]; total_se += res[15]
 
         if search_context.stop_flag[0]:
             log_info(f"Search stopped at depth {current_depth} due to time limit.")
