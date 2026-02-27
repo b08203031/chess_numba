@@ -46,26 +46,6 @@ from chess_engine.engine_types import (
 from .move import move_to_uci
 
 @numba.njit(cache=True, boundscheck=False, fastmath=True)
-def _partition(moves, scores, low, high):
-    pivot_score = scores[high]
-    i = low - 1
-    for j in range(low, high):
-        if scores[j] >= pivot_score:
-            i += 1
-            moves[i], moves[j] = moves[j], moves[i]
-            scores[i], scores[j] = scores[j], scores[i]
-    moves[i + 1], moves[high] = moves[high], moves[i + 1]
-    scores[i + 1], scores[high] = scores[high], scores[i + 1]
-    return i + 1
-
-@numba.njit(cache=True, boundscheck=False, fastmath=True)
-def _quicksort_recursive(moves, scores, low, high):
-    if low < high:
-        pi = _partition(moves, scores, low, high)
-        _quicksort_recursive(moves, scores, low, pi - 1)
-        _quicksort_recursive(moves, scores, pi + 1, high)
-
-@numba.njit(cache=True, boundscheck=False, fastmath=True)
 def update_history(history_table, piece_type, to_square, bonus):
     """
     Updates the history table using the gravity formula:
@@ -530,42 +510,38 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
 
     # --- Null Move Pruning ---
     # Update: Dynamic Reduction and Safety Check
-    if ENABLE_NMP and depth >= 3 and not is_currently_in_check and has_sufficient_material(piece_bbs, game_state[0]) and static_score >= beta - NMP_STATIC_MARGIN:
-        # Static Eval Safety Check (Stockfish logic: static_eval >= beta - margin)
-        # Margin roughly 19*depth + 418 in SF. We use a simpler loose margin.
-        # Ensure position is not too bad to skip move.
-        if static_score >= beta:
-            original_state_for_null = game_state.copy()
-            make_null_move(game_state)
-            
-            # NOTE: Passing a large value or special flag for previous move might be needed if NMP impacts move ordering logic of sub-search. 
-            # For now we pass NO_MOVE as we don't have a "previous move" for null move.
-            (null_move_score, _, child_nodes, child_q_nodes, child_cutoffs, child_tt_hits,
-            child_nmc, child_fp, child_ru, child_rfp, child_lmp, child_pcp,
-            child_qdp, child_qsp, child_iid, child_se) = _search(
-                piece_bbs, occupancy_bbs, game_state, depth - 1 - NULL_MOVE_REDUCTION,
-                -beta, -beta + 1, search_context, ply + 1, NO_MOVE
-            )
+    if ENABLE_NMP and depth >= 3 and not is_currently_in_check and has_sufficient_material(piece_bbs, game_state[0]) and static_score >= beta:
+        original_state_for_null = game_state.copy()
+        make_null_move(game_state)
+        
+        # NOTE: Passing a large value or special flag for previous move might be needed if NMP impacts move ordering logic of sub-search. 
+        # For now we pass NO_MOVE as we don't have a "previous move" for null move.
+        (null_move_score, _, child_nodes, child_q_nodes, child_cutoffs, child_tt_hits,
+        child_nmc, child_fp, child_ru, child_rfp, child_lmp, child_pcp,
+        child_qdp, child_qsp, child_iid, child_se) = _search(
+            piece_bbs, occupancy_bbs, game_state, depth - 1 - NULL_MOVE_REDUCTION,
+            -beta, -beta + 1, search_context, ply + 1, NO_MOVE
+        )
 
-            game_state[:] = original_state_for_null
-            null_move_score = -null_move_score
+        game_state[:] = original_state_for_null
+        null_move_score = -null_move_score
 
-            if search_context.stop_flag[0]:
-                return (np.int32(0), NO_MOVE, nodes_searched, quiescence_nodes, cutoffs, tt_hits,
-                        null_move_cutoffs, futility_pruned, razoring_used, rfp_pruned, lmp_pruned, probcut_pruned, qs_delta_pruned, qs_see_pruned,
-                        iid_searches, singular_extensions)
+        if search_context.stop_flag[0]:
+            return (np.int32(0), NO_MOVE, nodes_searched, quiescence_nodes, cutoffs, tt_hits,
+                    null_move_cutoffs, futility_pruned, razoring_used, rfp_pruned, lmp_pruned, probcut_pruned, qs_delta_pruned, qs_see_pruned,
+                    iid_searches, singular_extensions)
 
-            nodes_searched += child_nodes; quiescence_nodes += child_q_nodes; cutoffs += child_cutoffs; tt_hits += child_tt_hits
-            null_move_cutoffs += child_nmc; futility_pruned += child_fp; razoring_used += child_ru; rfp_pruned += child_rfp
-            lmp_pruned += child_lmp; probcut_pruned += child_pcp; qs_delta_pruned += child_qdp; qs_see_pruned += child_qsp
-            iid_searches += child_iid; singular_extensions += child_se
+        nodes_searched += child_nodes; quiescence_nodes += child_q_nodes; cutoffs += child_cutoffs; tt_hits += child_tt_hits
+        null_move_cutoffs += child_nmc; futility_pruned += child_fp; razoring_used += child_ru; rfp_pruned += child_rfp
+        lmp_pruned += child_lmp; probcut_pruned += child_pcp; qs_delta_pruned += child_qdp; qs_see_pruned += child_qsp
+        iid_searches += child_iid; singular_extensions += child_se
 
-            if null_move_score >= beta:
-                null_move_cutoffs += 1
-                search_context.pv_table[ply, ply] = NO_MOVE
-                return (np.int32(beta), NO_MOVE, nodes_searched, quiescence_nodes, cutoffs, tt_hits,
-                        null_move_cutoffs, futility_pruned, razoring_used, rfp_pruned, lmp_pruned, probcut_pruned, qs_delta_pruned, qs_see_pruned,
-                        iid_searches, singular_extensions)
+        if null_move_score >= beta:
+            null_move_cutoffs += 1
+            search_context.pv_table[ply, ply] = NO_MOVE
+            return (np.int32(beta), NO_MOVE, nodes_searched, quiescence_nodes, cutoffs, tt_hits,
+                    null_move_cutoffs, futility_pruned, razoring_used, rfp_pruned, lmp_pruned, probcut_pruned, qs_delta_pruned, qs_see_pruned,
+                    iid_searches, singular_extensions)
 
     if depth <= 2 and not is_currently_in_check:
         if ENABLE_RFP and depth == 1 and static_score - RFP_MARGIN_D1 >= beta:
@@ -763,7 +739,7 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                     dist_after = abs(to_file - k_file) + abs(to_rank - k_rank)
                     
                     if dist_after < dist_before:
-                        lmr = lmr = max(0, lmr - 1) # Reduce reduction by 1 instead of setting to 0 completely
+                        lmr = max(0, lmr - 1) # Reduce reduction by 1 instead of setting to 0 completely
 
             evaluation, _, child_nodes, child_q_nodes, child_cutoffs, child_tt_hits, child_nmc, child_fp, child_ru, child_rfp, child_lmp, child_pcp, child_qdp, child_qsp, child_iid, child_se = _search(
                 piece_bbs, occupancy_bbs, game_state, search_depth - lmr, -alpha - 1, -alpha, search_context, ply + 1, NO_MOVE)
@@ -898,33 +874,31 @@ def iterative_deepening_search(piece_bbs, occupancy_bbs, game_state, max_depth, 
 
         search_context.nodes_searched = np.uint64(0)
 
-        score, _, nodes, q_nodes, cutoffs, tt_hits, nmc, fp, ru, rfp, lmp, pcp, qdp, qsp, iid, se = _search(
-            piece_bbs, occupancy_bbs, game_state, current_depth, alpha, beta, search_context, 0, NO_MOVE)
+        res = _search(piece_bbs, occupancy_bbs, game_state, current_depth, alpha, beta, search_context, 0, NO_MOVE)
+        score = res[0]
+
+        if not search_context.stop_flag[0] and (score <= alpha or score >= beta):
+            log_info(f"depth {current_depth} aspiration window failed, re-searching...")
+            
+            # Accumulate stats from the failed attempt
+            total_q_nodes += res[3]; total_cutoffs += res[4]; total_tt_hits += res[5]; total_nmc += res[6]; total_fp += res[7]; total_ru += res[8]; total_rfp += res[9]; total_lmp += res[10]; total_pcp += res[11]; total_qdp += res[12]; total_qsp += res[13]; total_iid += res[14]; total_se += res[15]
+            
+            alpha, beta = -INFINITY, INFINITY
+            # Note: We do NOT reset search_context.nodes_searched here, let it accumulate for this depth.
+            res = _search(piece_bbs, occupancy_bbs, game_state, current_depth, alpha, beta, search_context, 0, NO_MOVE)
+            score = res[0]
+
+        # Always accumulate stats from the search (even if stopped)
+        total_nodes += search_context.nodes_searched
+        total_q_nodes += res[3]; total_cutoffs += res[4]; total_tt_hits += res[5]; total_nmc += res[6]; total_fp += res[7]; total_ru += res[8]; total_rfp += res[9]; total_lmp += res[10]; total_pcp += res[11]; total_qdp += res[12]; total_qsp += res[13]; total_iid += res[14]; total_se += res[15]
 
         if search_context.stop_flag[0]:
             log_info(f"Search stopped at depth {current_depth} due to time limit.")
             break
 
-        if score <= alpha or score >= beta:
-            log_info(f"depth {current_depth} aspiration window failed, re-searching...")
-            alpha, beta = -INFINITY, INFINITY
-            search_context.nodes_searched = np.uint64(0)
-            score, _, nodes, q_nodes, cutoffs, tt_hits, nmc, fp, ru, rfp, lmp, pcp, qdp, qsp, iid, se = _search(
-                piece_bbs, occupancy_bbs, game_state, current_depth, alpha, beta, search_context, 0, NO_MOVE)
-            
-            if search_context.stop_flag[0]:
-                log_info(f"Search stopped during re-search at depth {current_depth} due to time limit.")
-                break
-
-        # --- This block only runs if the search for the current depth was completed ---
+        # --- This block only runs if the search for the current depth was fully completed ---
         last_completed_depth = current_depth
         last_score = score
-
-        total_nodes += search_context.nodes_searched
-        total_q_nodes += q_nodes
-        total_cutoffs += cutoffs; total_tt_hits += tt_hits
-        total_nmc += nmc; total_fp += fp; total_ru += ru; total_rfp += rfp; total_lmp += lmp; total_pcp += pcp; total_qdp += qdp; total_qsp += qsp
-        total_iid += iid; total_se += se
 
         tt_entry = probe_tt(transposition_table, game_state[4])
         if tt_entry['flag'] != TT_FLAG_NONE and tt_entry['best_move'] != NO_MOVE:

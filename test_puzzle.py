@@ -650,7 +650,7 @@ puzzles = [
         {
             "name": "Lichess Puzzle 008o6",
             "fen": "Q4rk1/p1p3p1/6P1/8/3P4/7P/q3r3/B4RK1 w - - 2 35",
-            "solution": "a8f8",
+            "solution": ["a8f8", "f1f8"],
             "rating": "1017",
             "theme": "endgame mate mateIn1 oneMove"
         },
