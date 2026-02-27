@@ -882,7 +882,9 @@ def run_puzzle_test():
                 "name": puzzle["name"],
                 "fen": puzzle["fen"],
                 "solution": puzzle["solution"],
-                "engine_move": engine_move
+                "engine_move": engine_move,
+                "rating": puzzle["rating"],
+                "theme": puzzle["theme"]
             })
             print(f"Test FAILED: The engine suggested {engine_move}, but the correct move is {puzzle['solution']}.")
 
@@ -912,6 +914,8 @@ def run_puzzle_test():
         for fp in failed_puzzles:
             print(f"Name: {fp['name']}")
             print(f"  FEN: {fp['fen']}")
+            print(f"  Rating: {fp['rating']}")
+            print(f"  Theme: {fp['theme']}")
             print(f"  Correct Answer: {fp['solution']}")
             print(f"  Engine's Answer: {fp['engine_move']}")
             print("-" * 20)
