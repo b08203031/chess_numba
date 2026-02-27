@@ -263,6 +263,8 @@ ROOK_ON_SEMI_OPEN_FILE_BONUS = np.array([15, 10], dtype=np.int32) # MG, EG
 ROOK_ON_OPEN_FILE_BONUS = np.array([25, 15], dtype=np.int32) # MG, EG
 
 ROOK_ON_SEVENTH_BONUS = np.array([20, 50], dtype=np.int32) # MG, EG
+
+ROOK_PAIR_BONUS = np.array([15, 25], dtype=np.int32) # MG, EG
 # =============================================================================
 # --- Pawn Structure Constants / 兵型結構常量 ---
 # =============================================================================
@@ -345,7 +347,15 @@ OUTPOST_HOLE_BONUS = np.array([25, 15], dtype=np.int32) # MG, EG
 # 每個棋子類型的攻擊單位。順序：兵、馬、象、車、后
 # Updated: Aggressive weights for R and Q
 KING_SAFETY_WEAK_UNITS = np.array([0, 1, 1, 2, 3], dtype=np.int32) # P, N, B, R, Q
-KING_SAFETY_ATTACK_UNITS = np.array([1, 2, 2, 5, 8], dtype=np.int32) # P, N, B, R, Q# A non-linear table where the index is the sum of attack units, and the value is the penalty.
+KING_SAFETY_ATTACK_UNITS = np.array([1, 2, 2, 5, 8], dtype=np.int32) # P, N, B, R, Q
+
+# Safe Check Units (Added to total attack units if a safe check is available)
+SAFE_CHECK_KNIGHT = 10
+SAFE_CHECK_BISHOP = 10
+SAFE_CHECK_ROOK = 20
+SAFE_CHECK_QUEEN = 30
+
+# A non-linear table where the index is the sum of attack units, and the value is the penalty.
 # The penalty grows exponentially, rewarding multi-piece attacks.
 # 一個非線性表格，索引是攻擊單位的總和，值是懲罰分數。懲罰呈指數增長，獎勵多子協同攻擊。
 # Updated: Steeper, quadratic-plus growth curve
@@ -391,6 +401,9 @@ EG_SAFETY_SCALE = 0.5 # Scale down endgame king safety impact / 縮減殘局王�
 # Threat By Safe Pawn: Friendly pawn attacks enemy piece (N, B, R, Q).
 # 兵的威脅：己方兵攻擊敵方棋子（N, B, R, Q）。
 THREAT_SAFE_PAWN = np.array([45, 45], dtype=np.int32) # MG, EG
+
+# Piece on Piece Pressure: Non-pawn piece attacking a defended piece of equal or higher value.
+THREAT_PIECE_ON_PIECE = np.array([15, 10], dtype=np.int32)
 
 # Minor Attacking Major: Knight/Bishop attacking Rook/Queen.
 # 輕子攻擊重子：馬/象攻擊車/后。
@@ -471,9 +484,9 @@ ENABLE_HISTORY_PRUNING = True      # Enable pruning based on History Score
 
 # NEW: Pruning Parameters (Tightened for Performance/Strength Balance)
 PRUNING_SHALLOW_DEPTH = 8         # Prune moves only if depth is below this
-PRUNING_CAPTURE_SEE_MARGIN = -200 # Tightened from -200 (More pruning)
-PRUNING_QUIET_SEE_MARGIN = -100    # Tightened from -100 (More pruning)
-PRUNING_HISTORY_THRESHOLD = -1500 # Tightened from -1500 (More pruning, threshold is higher/closer to 0)
+PRUNING_CAPTURE_SEE_MARGIN = -150 # Tightened from -200 (More pruning)
+PRUNING_QUIET_SEE_MARGIN = -80    # Tightened from -100 (More pruning)
+PRUNING_HISTORY_THRESHOLD = -1000 # Tightened from -1500 (More pruning, threshold is higher/closer to 0)
 
 # Master switches for existing pruning techniques / 現有剪枝技術的總開關
 ENABLE_NMP = True           # Null Move Pruning
@@ -486,16 +499,16 @@ NULL_MOVE_REDUCTION = 2
 MAX_QUIESCENCE_DEPTH = 5
 
 # Razoring
-RAZORING_MARGIN = 700 # Tightened from 700
+RAZORING_MARGIN = 600 # Tightened from 700
 
 # Futility Pruning
-FP_MARGIN_D1 = 400 # Tightened from 400
-FP_MARGIN_D2 = 700 # Tightened from 700
+FP_MARGIN_D1 = 350 # Tightened from 400
+FP_MARGIN_D2 = 650 # Tightened from 700
 FP_BASE = 150      # Reduced base
 FP_MULTIPLIER = 180 # Reduced multiplier
 
 # Reverse Futility Pruning
-RFP_MARGIN_D1 = 250 # Tightened from 250
+RFP_MARGIN_D1 = 200 # Tightened from 250
 
 # Late Move Reductions (LMR)
 LMR_MIN_DEPTH = 4           # Minimum depth to apply LMR / 應用 LMR 的最小深度
@@ -530,7 +543,7 @@ PROBCUT_MARGIN = 150 # centipawns
 DELTA_PRUNING_MARGIN = 1200
 
 # --- Static Exchange Evaluation (SEE) Threshold / SEE 閾值 ---
-SEE_THRESHOLD = -330  # centipawns (Relaxed from -50)
+SEE_THRESHOLD = -250  # centipawns (Relaxed from -50)
 ENABLE_SEE_IN_QUIESCENCE = True # Master switch to enable/disable SEE in quiescence search / 啟用/禁用靜態搜尋中 SEE 的總開關
 
 # =============================================================================
