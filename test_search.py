@@ -46,8 +46,10 @@ def run_search_test():
     history_table = np.zeros((12, 64), dtype=np.int32)
     butterfly_history = np.zeros((64, 64), dtype=np.int32)
     continuation_history = np.zeros((12, 64, 12, 64), dtype=np.int16)
+    capture_history = np.zeros((12, 64, 12), dtype=np.int32)
+    pawn_correction_history = np.zeros(16384, dtype=np.int16)
     pv_table = np.zeros((128, 128), dtype=np.uint16)
-    ctx = SearchContext(tt, killer_moves, pv_table, history_table, butterfly_history, continuation_history)
+    ctx = SearchContext(tt, killer_moves, pv_table, history_table, butterfly_history, continuation_history, capture_history, pawn_correction_history)
     
     # Run a quick search
     iterative_deepening_search(p_bbs, o_bbs, g_state, 2, {'optimum_time': 0, 'maximum_time': 0}, ctx)
@@ -87,10 +89,12 @@ def run_search_test():
     history_table = np.zeros((12, 64), dtype=np.int32)
     butterfly_history = np.zeros((64, 64), dtype=np.int32)
     continuation_history = np.zeros((12, 64, 12, 64), dtype=np.int16)
+    capture_history = np.zeros((12, 64, 12), dtype=np.int32)
+    pawn_correction_history = np.zeros(16384, dtype=np.int16)
     
     search_context = SearchContext(
         transposition_table, killer_moves, pv_table, history_table,
-        butterfly_history, continuation_history
+        butterfly_history, continuation_history, capture_history, pawn_correction_history
     )
 
     (best_move, best_eval, nodes_searched, quiescence_nodes, cutoffs, tt_hits,

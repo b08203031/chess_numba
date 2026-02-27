@@ -74,6 +74,19 @@ def update_butterfly_history(butterfly_table, from_sq, to_sq, bonus):
     butterfly_table[from_sq, to_sq] = new_value
 
 @numba.njit(cache=True, boundscheck=False, fastmath=True)
+def update_capture_history(capture_history, piece_type, to_square, victim_type, bonus):
+    """
+    Updates the capture history table using the gravity formula.
+    capture_history: [12, 64, 12] (aggressor_piece, to_square, victim_piece)
+    """
+    current_value = capture_history[piece_type, to_square, victim_type]
+    clamped_bonus = min(max(bonus, -MAX_HISTORY), MAX_HISTORY)
+    
+    # Gravity formula
+    new_value = current_value + clamped_bonus - (current_value * abs(clamped_bonus)) // MAX_HISTORY
+    capture_history[piece_type, to_square, victim_type] = new_value
+
+@numba.njit(cache=True, boundscheck=False, fastmath=True)
 def update_continuation_history(context, prev_move, prev_piece, curr_move, curr_piece, bonus):
     """
     Updates the continuation history table.
@@ -88,31 +101,31 @@ def update_continuation_history(context, prev_move, prev_piece, curr_move, curr_
     context.continuation_history[prev_piece, prev_to, curr_piece, curr_to] = new_val
 
 @numba.njit(cache=True, boundscheck=False, fastmath=True)
-def get_lmr_reduction(depth, move_count, history_score):
+def get_lmr_reduction(depth, move_count, history_score, improving, is_pv):
     """
-    Calculates LMR reduction based on depth, move_count and history score.
-    Structure similar to Stockfish but with looser parameters.
+    Calculates LMR reduction based on depth, move_count, history score, improving flag and node type.
     """
-    # 1. Base Reduction: 1 + log(depth) * log(move_count) / 2.5
-    # Use max(1, ...) to avoid log(0) issues, though depth >= 2 usually.
     if depth < 2 or move_count < 2:
         return 0
 
     ld = math.log(float(depth))
     lmc = math.log(float(move_count))
 
-    reduction = 1.0 + (ld * lmc) / 3.0
+    # Base reduction
+    reduction = 0.5 + (ld * lmc) / 2.25
+    
+    # PV adjustment: PV nodes are searched more carefully
+    if not is_pv:
+        reduction += 0.5
+    
+    # Improving adjustment: If position is not improving, reduce more aggressively
+    if not improving:
+        reduction += 0.5
 
-    # 2. History Adjustment
-    # history_score is in [-MAX_HISTORY, MAX_HISTORY] (e.g. 16384)
-    # If history is good (>0), reduce reduction (search deeper).
-    # If history is bad (<0), increase reduction (search shallower).
-    # Scale: +/- 1.0 reduction for max history.
-    history_adjustment = history_score / float(MAX_HISTORY)
-
+    # History Adjustment: Scale +/- 1.5 reduction for max history
+    history_adjustment = (history_score / float(MAX_HISTORY)) * 1.5
     reduction -= history_adjustment
 
-    # Clamp and cast
     return max(0, int(reduction))
 
 @numba.njit(cache=True, boundscheck=False, fastmath=True)
@@ -160,10 +173,16 @@ def score_moves(piece_bbs, occupancy_bbs, game_state, moves, scores, move_count,
 
                 if is_good_capture:
                     score = SCORE_GOOD_CAPTURE_BONUS + mvv_lva
+                    # Capture History for good captures
+                    if victim_type != -1:
+                        score += search_context.capture_history[aggressor_type, to_square, victim_type]
                 else:
                     # Penalize bad captures. We could calculate exact see for sorting bad captures,
                     # but using MVV_LVA is acceptable for now to save performance.
                     score = SCORE_BAD_CAPTURE_PENALTY + mvv_lva
+                    # Even bad captures might be better if they worked before
+                    if victim_type != -1:
+                        score += search_context.capture_history[aggressor_type, to_square, victim_type]
             else:
                 if move == killer_moves_at_ply[0]:
                     score = SCORE_KILLER_1
@@ -339,12 +358,8 @@ search_return_type = numba.types.Tuple([
     numba.uint64, numba.uint64, numba.uint64, numba.uint64
 ])
 
-# @numba.njit(search_return_type(
-#     piece_bbs_signature, occupancy_bbs_signature, game_state_signature,
-#     numba.int32, numba.int32, numba.int32, search_context_type, numba.int32, numba.uint16
-# ), cache=True)
 @numba.njit(cache=True)
-def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_context, ply, excluded_move: np.uint16 = NO_MOVE):
+def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_context, ply, excluded_move: np.uint16 = NO_MOVE, is_pv: bool = True):
     nodes_searched = np.uint64(1)
     search_context.nodes_searched += 1
 
@@ -477,7 +492,8 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
 
     if ENABLE_IID and depth >= 8 and tt_move == NO_MOVE:
         iid_searches += 1
-        _search(piece_bbs, occupancy_bbs, game_state, depth -5, -INFINITY, INFINITY, search_context, ply + 1, NO_MOVE)
+        # IID is non-PV search
+        _search(piece_bbs, occupancy_bbs, game_state, depth - 5, -INFINITY, INFINITY, search_context, ply + 1, NO_MOVE, False)
 
         if search_context.stop_flag[0]:
             return (np.int32(0), NO_MOVE, nodes_searched, quiescence_nodes, cutoffs, tt_hits,
@@ -491,8 +507,10 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
     if ENABLE_SINGULAR_EXTENSIONS and depth >= MIN_SINGULAR_DEPTH and tt_move != NO_MOVE and tt_entry['flag'] == TT_FLAG_EXACT:
         tt_score = np.int32(tt_entry['score'])
         exclusion_beta = tt_score - SINGULAR_EXTENSION_MARGIN
-        exclusion_score, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _ = _search(
-            piece_bbs, occupancy_bbs, game_state, depth - 3, exclusion_beta - 1, exclusion_beta, search_context, ply + 1, tt_move)
+        # Singular search is non-PV
+        res_ex = _search(
+            piece_bbs, occupancy_bbs, game_state, depth - 3, exclusion_beta - 1, exclusion_beta, search_context, ply + 1, tt_move, False)
+        exclusion_score = res_ex[0]
 
         if search_context.stop_flag[0]:
             return (np.int32(0), NO_MOVE, nodes_searched, quiescence_nodes, cutoffs, tt_hits,
@@ -502,15 +520,19 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
         if exclusion_score < exclusion_beta:
             extension = 1
             singular_extensions += 1
+            # Double Singular Extension: If it fails by a larger margin, extend more
+            if depth >= 8 and exclusion_score < exclusion_beta - SINGULAR_EXTENSION_MARGIN:
+                extension = 2
 
     if ENABLE_PROBCUT and depth >= 6 and tt_entry['flag'] != TT_FLAG_NONE:
         if tt_entry['depth'] >= depth - PROBCUT_R:
             tt_score = np.int32(tt_entry['score'])
             if tt_score + PROBCUT_MARGIN >= beta:
-                probcut_score, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _ = _search(
+                res_pc = _search(
                     piece_bbs, occupancy_bbs, game_state, depth - PROBCUT_R_PRIME,
-                    beta - 1, beta, search_context, ply + 1, NO_MOVE
+                    beta - 1, beta, search_context, ply + 1, NO_MOVE, False
                 )
+                probcut_score = res_pc[0]
 
                 if search_context.stop_flag[0]:
                     return (np.int32(0), NO_MOVE, nodes_searched, quiescence_nodes, cutoffs, tt_hits,
@@ -524,10 +546,11 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                         iid_searches, singular_extensions)
 
             elif tt_score - PROBCUT_MARGIN <= alpha:
-                probcut_score, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _ = _search(
+                res_pc = _search(
                     piece_bbs, occupancy_bbs, game_state, depth - PROBCUT_R_PRIME,
-                    alpha, beta, search_context, ply + 1, NO_MOVE
+                    alpha, beta, search_context, ply + 1, NO_MOVE, False
                 )
+                probcut_score = res_pc[0]
 
                 if search_context.stop_flag[0]:
                     return (np.int32(0), NO_MOVE, nodes_searched, quiescence_nodes, cutoffs, tt_hits,
@@ -585,12 +608,25 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
         
         # NOTE: Passing a large value or special flag for previous move might be needed if NMP impacts move ordering logic of sub-search. 
         # For now we pass NO_MOVE as we don't have a "previous move" for null move.
-        (null_move_score, _, child_nodes, child_q_nodes, child_cutoffs, child_tt_hits,
-        child_nmc, child_fp, child_ru, child_rfp, child_lmp, child_pcp,
-        child_qdp, child_qsp, child_iid, child_se) = _search(
+        res_nm = _search(
             piece_bbs, occupancy_bbs, game_state, depth - 1 - NULL_MOVE_REDUCTION,
-            -beta, -beta + 1, search_context, ply + 1, NO_MOVE
+            -beta, -beta + 1, search_context, ply + 1, NO_MOVE, False
         )
+        null_move_score = res_nm[0]
+        child_nodes = res_nm[2]
+        child_q_nodes = res_nm[3]
+        child_cutoffs = res_nm[4]
+        child_tt_hits = res_nm[5]
+        child_nmc = res_nm[6]
+        child_fp = res_nm[7]
+        child_ru = res_nm[8]
+        child_rfp = res_nm[9]
+        child_lmp = res_nm[10]
+        child_pcp = res_nm[11]
+        child_qdp = res_nm[12]
+        child_qsp = res_nm[13]
+        child_iid = res_nm[14]
+        child_se = res_nm[15]
 
         game_state[:] = original_state_for_null
         null_move_score = -null_move_score
@@ -779,9 +815,12 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
 
         evaluation = 0
         if searched_move_count == 1:
-            evaluation, _, child_nodes, child_q_nodes, child_cutoffs, child_tt_hits, child_nmc, child_fp, child_ru, child_rfp, child_lmp, child_pcp, child_qdp, child_qsp, child_iid, child_se = _search(
-                piece_bbs, occupancy_bbs, game_state, search_depth, -beta, -alpha, search_context, ply + 1, NO_MOVE)
-            evaluation = -evaluation
+            res = _search(
+                piece_bbs, occupancy_bbs, game_state, search_depth, -beta, -alpha, search_context, ply + 1, NO_MOVE, is_pv)
+            evaluation = -res[0]
+            child_nodes = res[2]; child_q_nodes = res[3]; child_cutoffs = res[4]; child_tt_hits = res[5]
+            child_nmc = res[6]; child_fp = res[7]; child_ru = res[8]; child_rfp = res[9]; child_lmp = res[10]
+            child_pcp = res[11]; child_qdp = res[12]; child_qsp = res[13]; child_iid = res[14]; child_se = res[15]
         else:
             # Dynamic LMR Logic
             lmr = 0
@@ -790,7 +829,7 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                 aggressor_type = find_piece_type_on_square_side(piece_bbs, from_sq, game_state[0])
                 history_score = search_context.history_table[aggressor_type, to_sq]
 
-                lmr = get_lmr_reduction(depth, searched_move_count, history_score)
+                lmr = get_lmr_reduction(depth, searched_move_count, history_score, improving, is_pv)
 
                 # Reduce LMR for moves that improve King Tropism (Logic kept from previous version)
                 side_to_move = game_state[0]
@@ -810,15 +849,23 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                     dist_after = abs(to_file - k_file) + abs(to_rank - k_rank)
                     
                     if dist_after < dist_before:
-                        lmr = max(0, lmr - 1) # Reduce reduction by 1 instead of setting to 0 completely
+                        lmr = max(0, lmr - 1)
 
-            evaluation, _, child_nodes, child_q_nodes, child_cutoffs, child_tt_hits, child_nmc, child_fp, child_ru, child_rfp, child_lmp, child_pcp, child_qdp, child_qsp, child_iid, child_se = _search(
-                piece_bbs, occupancy_bbs, game_state, search_depth - lmr, -alpha - 1, -alpha, search_context, ply + 1, NO_MOVE)
-            evaluation = -evaluation
+            res = _search(
+                piece_bbs, occupancy_bbs, game_state, search_depth - lmr, -alpha - 1, -alpha, search_context, ply + 1, NO_MOVE, False)
+            evaluation = -res[0]
+            child_nodes = res[2]; child_q_nodes = res[3]; child_cutoffs = res[4]; child_tt_hits = res[5]
+            child_nmc = res[6]; child_fp = res[7]; child_ru = res[8]; child_rfp = res[9]; child_lmp = res[10]
+            child_pcp = res[11]; child_qdp = res[12]; child_qsp = res[13]; child_iid = res[14]; child_se = res[15]
+
             if evaluation > alpha:
-                evaluation, _, child_nodes, child_q_nodes, child_cutoffs, child_tt_hits, child_nmc, child_fp, child_ru, child_rfp, child_lmp, child_pcp, child_qdp, child_qsp, child_iid, child_se = _search(
-                    piece_bbs, occupancy_bbs, game_state, search_depth, -beta, -alpha, search_context, ply + 1, NO_MOVE)
-                evaluation = -evaluation
+                # Re-search with full window
+                res = _search(
+                    piece_bbs, occupancy_bbs, game_state, search_depth, -beta, -alpha, search_context, ply + 1, NO_MOVE, is_pv)
+                evaluation = -res[0]
+                child_nodes += res[2]; child_q_nodes += res[3]; child_cutoffs += res[4]; child_tt_hits += res[5]
+                child_nmc += res[6]; child_fp += res[7]; child_ru += res[8]; child_rfp += res[9]; child_lmp += res[10]
+                child_pcp += res[11]; child_qdp += res[12]; child_qsp += res[13]; child_iid += res[14]; child_se += res[15]
 
         unmake_move(piece_bbs, occupancy_bbs, game_state, move, unmake_info)
 
@@ -848,6 +895,14 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
         alpha = max(alpha, evaluation)
         if alpha >= beta:
             cutoffs += 1
+            if is_capture:
+                # Update Capture History
+                victim_type = find_piece_type_on_square_side(piece_bbs, to_sq, 1 - game_state[0])
+                if victim_type != -1:
+                    aggressor_type = find_piece_type_on_square_side(piece_bbs, from_sq, game_state[0])
+                    bonus = depth * depth
+                    update_capture_history(search_context.capture_history, aggressor_type, to_sq, victim_type, bonus)
+            
             if is_quiet_move:
                 bonus = depth * depth
                 aggressor_type = find_piece_type_on_square_side(piece_bbs, get_from_square(move), game_state[0])
@@ -949,6 +1004,7 @@ def iterative_deepening_search(piece_bbs, occupancy_bbs, game_state, max_depth, 
     # Divide history values by 2 to prioritize recent successful moves and reduce impact of old history
     search_context.history_table[:] = search_context.history_table[:] // 2
     search_context.butterfly_history[:] = search_context.butterfly_history[:] // 2
+    search_context.capture_history[:] = search_context.capture_history[:] // 2
 
     # --- Setup Game History ---
     if game_history_list is not None:
@@ -995,7 +1051,7 @@ def iterative_deepening_search(piece_bbs, occupancy_bbs, game_state, max_depth, 
 
         search_context.nodes_searched = np.uint64(0)
 
-        res = _search(piece_bbs, occupancy_bbs, game_state, current_depth, alpha, beta, search_context, 0, NO_MOVE)
+        res = _search(piece_bbs, occupancy_bbs, game_state, current_depth, alpha, beta, search_context, 0, NO_MOVE, True)
         score = res[0]
 
         if not search_context.stop_flag[0] and (score <= alpha or score >= beta):
@@ -1006,7 +1062,7 @@ def iterative_deepening_search(piece_bbs, occupancy_bbs, game_state, max_depth, 
             
             alpha, beta = -INFINITY, INFINITY
             # Note: We do NOT reset search_context.nodes_searched here, let it accumulate for this depth.
-            res = _search(piece_bbs, occupancy_bbs, game_state, current_depth, alpha, beta, search_context, 0, NO_MOVE)
+            res = _search(piece_bbs, occupancy_bbs, game_state, current_depth, alpha, beta, search_context, 0, NO_MOVE, True)
             score = res[0]
 
         # Always accumulate stats from the search (even if stopped)

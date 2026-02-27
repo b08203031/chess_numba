@@ -60,6 +60,8 @@ def uci_loop():
     history_table = np.zeros((12, 64), dtype=np.int32)
     butterfly_history = np.zeros((64, 64), dtype=np.int32)
     continuation_history = np.zeros((12, 64, 12, 64), dtype=np.int16)
+    capture_history = np.zeros((12, 64, 12), dtype=np.int32)
+    pawn_correction_history = np.zeros(16384, dtype=np.int16) # CORRECTION_HISTORY_SIZE
     pv_table = np.zeros((MAX_PLY, MAX_PLY), dtype=np.uint16)
 
     # --- Initialize Opening Book / 初始化開局書 ---
@@ -220,7 +222,7 @@ def uci_loop():
                 # Create a new context for this search / 為此搜尋創建新的上下文
                 global_search_context = SearchContext(
                     transposition_table, killer_moves, pv_table, history_table,
-                    butterfly_history, continuation_history
+                    butterfly_history, continuation_history, capture_history, pawn_correction_history
                 )
                 
                 # Update TT Generation
