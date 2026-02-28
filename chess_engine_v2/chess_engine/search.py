@@ -444,26 +444,27 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
         for i in range(ply - 2, max(-1, ply - halfmove_clock - 1), -2):
             if search_context.ply_path_stack[i] == zobrist_key:
                 repetition_count += 1
-                if repetition_count >= 2: break
+                if repetition_count >= 1: break
         
-        if repetition_count < 2:
+        if repetition_count < 1:
             # Check Game History
             # Number of moves in history that are within the halfmove clock
             # halfmove_clock includes moves from both path and history.
             hist_to_check = halfmove_clock - ply
-            if hist_to_check >= 2:
-                # History[count-1] is opponent's last move.
-                # History[count-2] is our last move (same side-to-move as current).
-                start_idx = search_context.game_history_count - 2
+            if hist_to_check >= 1:
+                # If ply is even, it's our turn, same as count-2, count-4, etc.
+                # If ply is odd, it's opponent's turn, same as count-1, count-3, etc.
+                start_offset = 1 if (ply % 2) != 0 else 2
+                start_idx = search_context.game_history_count - start_offset
                 end_idx = max(-1, search_context.game_history_count - hist_to_check - 1)
                 for i in range(start_idx, end_idx, -2):
                     if search_context.game_history[i] == zobrist_key:
                         repetition_count += 1
-                        if repetition_count >= 2: break
+                        if repetition_count >= 1: break
 
-    # Avoid 2nd repetition (3rd occurrence total)
+    # Avoid 1st repetition (2nd occurrence total)
     # Crucial fix: Do not prune at the root (ply 0).
-    if ply > 0 and repetition_count >= 2:
+    if ply > 0 and repetition_count >= 1:
         search_context.pv_table[ply, ply] = NO_MOVE
         return (np.int32(0), NO_MOVE, nodes_searched, quiescence_nodes, cutoffs, tt_hits,
                 null_move_cutoffs, futility_pruned, razoring_used, rfp_pruned, lmp_pruned, probcut_pruned, qs_delta_pruned, qs_see_pruned,
