@@ -99,6 +99,13 @@ def make_move(piece_bbs: np.ndarray, occupancy_bbs: np.ndarray, game_state: np.n
     piece_bbs[moving_piece_bb_idx] ^= move_mask
     occupancy_bbs[side] ^= move_mask
 
+    # --- Pawn Key Update (Movement) ---
+    pawn_key = game_state[5]
+    old_pawn_key = pawn_key
+    if moving_piece_type == PAWN:
+        pawn_key ^= PIECE_SQUARE_KEYS[moving_piece_bb_idx, from_sq]
+        pawn_key ^= PIECE_SQUARE_KEYS[moving_piece_bb_idx, to_sq]
+
     is_capture = False
     # --- Standard Capture / 標準吃子 ---
     if occupancy_bbs[1 - side] & (np.uint64(1) << to_sq):
@@ -112,6 +119,10 @@ def make_move(piece_bbs: np.ndarray, occupancy_bbs: np.ndarray, game_state: np.n
         occupancy_bbs[opponent_color] &= ~capture_mask
         # Update Zobrist key for captured piece (remove) / 更新被吃棋子的 Zobrist 鍵（移除）
         key ^= PIECE_SQUARE_KEYS[captured_piece_bb_idx, to_sq]
+        
+        # --- Pawn Key Update (Capture) ---
+        if captured_piece_type == PAWN:
+            pawn_key ^= PIECE_SQUARE_KEYS[captured_piece_bb_idx, to_sq]
 
     # --- Handle Special Moves / 處理特殊移動 ---
     if flag == SPECIAL_MOVE_FLAG_PROMOTION:
@@ -129,6 +140,11 @@ def make_move(piece_bbs: np.ndarray, occupancy_bbs: np.ndarray, game_state: np.n
         # 鍵值已更新為兵移動到 'to_sq'。我們需要撤銷該操作並應用升變後棋子的鍵值。
         key ^= PIECE_SQUARE_KEYS[moving_piece_bb_idx, to_sq]
         key ^= PIECE_SQUARE_KEYS[promo_piece_bb_idx, to_sq]
+        
+        # --- Pawn Key Update (Promotion) ---
+        # The pawn moved to 'to_sq' (XORed in by standard move logic), but then it was promoted.
+        # So we must remove the pawn from 'to_sq' in the pawn key.
+        pawn_key ^= PIECE_SQUARE_KEYS[moving_piece_bb_idx, to_sq]
 
     elif flag == SPECIAL_MOVE_FLAG_EN_PASSANT:
         is_capture = True
@@ -142,6 +158,10 @@ def make_move(piece_bbs: np.ndarray, occupancy_bbs: np.ndarray, game_state: np.n
         occupancy_bbs[opponent_color] &= ~capture_mask
         # Update Zobrist key for captured pawn (remove) / 更新被吃過路兵的 Zobrist 鍵（移除）
         key ^= PIECE_SQUARE_KEYS[captured_pawn_bb_idx, captured_pawn_sq]
+        
+        # --- Pawn Key Update (En Passant) ---
+        # Captured pawn removed from captured_pawn_sq
+        pawn_key ^= PIECE_SQUARE_KEYS[captured_pawn_bb_idx, captured_pawn_sq]
 
     elif flag == SPECIAL_MOVE_FLAG_CASTLING:
         king_side_castle = to_sq > from_sq
@@ -185,13 +205,15 @@ def make_move(piece_bbs: np.ndarray, occupancy_bbs: np.ndarray, game_state: np.n
     game_state[2] = new_ep_square
     game_state[3] = new_halfmove_clock
     game_state[4] = key
+    game_state[5] = pawn_key
 
     return (
         captured_piece_type,
         np.uint8(current_castling_rights),
         np.uint8(current_ep_square),
         np.uint8(current_halfmove_clock),
-        original_zobrist_key
+        original_zobrist_key,
+        old_pawn_key
     )
 
 @numba.jit(numba.void(
@@ -209,7 +231,7 @@ def unmake_move(piece_bbs: np.ndarray, occupancy_bbs: np.ndarray, game_state: np
         move (np.uint16): 要撤銷的移動。
         unmake_info (tuple): `make_move` 返回的撤銷信息。
     """
-    captured_piece_type, old_castling_rights, old_ep_square, old_halfmove_clock, old_zobrist_key = unmake_info
+    captured_piece_type, old_castling_rights, old_ep_square, old_halfmove_clock, old_zobrist_key, old_pawn_key = unmake_info
 
     side = 1 - game_state[0]
 
@@ -290,6 +312,7 @@ def unmake_move(piece_bbs: np.ndarray, occupancy_bbs: np.ndarray, game_state: np
     game_state[2] = old_ep_square
     game_state[3] = old_halfmove_clock
     game_state[4] = old_zobrist_key
+    game_state[5] = old_pawn_key
 
 @numba.jit(numba.void(game_state_signature), nopython=True, cache=True, boundscheck=False, fastmath=True)
 def make_null_move(game_state: np.ndarray):

@@ -2,184 +2,46 @@
 import numba
 import numpy as np
 from chess_engine.constants import (
-    BB_SQUARES, DE_BRUIJN_SEQUENCE, DE_BRUIJN_INDEX,
+    BB_SQUARES,
     WHITE, BLACK, PAWN, KNIGHT, BISHOP, ROOK, QUEEN, KING,
     MG_MATERIAL_VALUES
 )
 from chess_engine.engine_types import piece_bbs_signature, occupancy_bbs_signature
-from chess_engine.bitboard_utils import find_piece_type_on_square
+from chess_engine.bitboard_utils import find_piece_type_on_square, find_piece_type_on_square_side, SQUARES_BETWEEN, ROOK_RAYS, BISHOP_RAYS
 import numba.types as nbt
+# Import Magic Bitboard functions
+from chess_engine.move_generator import (
+    get_bishop_attacks, get_rook_attacks,
+    PAWN_ATTACKS, KNIGHT_ATTACKS, KING_ATTACKS,
+    get_pinned_pieces
+)
+from chess_engine.bitboard_utils import get_lsb_index, count_bits
+
 
 # Piece Values for SEE (based on Stockfish's internal values for SEE)
 # P=100, N=320, B=330, R=500, Q=900, K=20000
 # Note: King is given a very high value to prevent it from being "captured" in simulation logic.
 # We use local definition to ensure it matches exactly the SEE assumption (King value high)
 
-PIECE_VALUES = MG_MATERIAL_VALUES
-
-@numba.njit(nbt.int32(nbt.uint64), cache=True)
-def get_lsb_index(bitboard):
-    """Returns the index (0-63) of the least significant bit set."""
-    if bitboard == 0:
-        return -1
-    return DE_BRUIJN_INDEX[((bitboard ^ (bitboard - 1)) * DE_BRUIJN_SEQUENCE) >> np.uint64(58)]
+SEE_PIECE_VALUES = np.array([100, 320, 330, 500, 900, 20000], dtype=np.int32)
 
 # Basic Attack Tables (Initialize once if possible, or use logic)
 # Numba caches function compilation, so we can embed logic.
 
-KNIGHT_OFFSETS = np.array([-17, -15, -10, -6, 6, 10, 15, 17], dtype=np.int32)
-KING_OFFSETS = np.array([-9, -8, -7, -1, 1, 7, 8, 9], dtype=np.int32)
 DIAGONAL_DIRECTIONS = np.array([-9, -7, 7, 9], dtype=np.int32)
 ORTHOGONAL_DIRECTIONS = np.array([-8, -1, 1, 8], dtype=np.int32)
 
 @numba.njit(cache=True)
-def get_step_attacks(square, offsets):
-    attacks = np.uint64(0)
-    sq_rank = square // 8
-    sq_file = square % 8
-    for off in offsets:
-        target = square + off
-        if 0 <= target < 64:
-            tr = target // 8
-            tf = target % 8
-            # Check for wrap-around
-            if abs(tr - sq_rank) <= 2 and abs(tf - sq_file) <= 2:
-                attacks |= BB_SQUARES[target]
-    return attacks
-
-@numba.njit(cache=True)
 def get_sliding_attacks(square, occupied, is_diagonal):
-    # Hyperbola Quintessence or similar would be fast, but simple ray casting for now
-    # to avoid complex dependencies. Stockfish uses Magic Bitboards.
-    # We will use a simplified loop for Numba.
-    attacks = np.uint64(0)
-
+    """
+    Get sliding attacks using Magic Bitboards (O(1) lookup).
+    Replaces the previous slow ray-casting loop.
+    """
     if is_diagonal:
-        directions = DIAGONAL_DIRECTIONS
+        return get_bishop_attacks(square, occupied)
     else:
-        directions = ORTHOGONAL_DIRECTIONS
+        return get_rook_attacks(square, occupied)
 
-    for d in directions:
-        curr = square
-        while True:
-            # Check file wrap
-            curr_file = curr % 8
-            if d == 1 and curr_file == 7: break
-            if d == -1 and curr_file == 0: break
-            if d == 9 and curr_file == 7: break # Up-Right
-            if d == -7 and curr_file == 7: break # Down-Right
-            if d == 7 and curr_file == 0: break # Up-Left
-            if d == -9 and curr_file == 0: break # Down-Left
-
-            curr += d
-            if not (0 <= curr < 64):
-                break
-
-            attacks |= BB_SQUARES[curr]
-            if (occupied & BB_SQUARES[curr]) != 0:
-                break
-    return attacks
-
-@numba.njit(cache=True)
-def get_pinned_pieces(piece_bbs, occupancy_bbs, side):
-    """
-    Returns a bitboard of all pieces of 'side' that are pinned to their King
-    by enemy sliding pieces.
-    (Optimized for SEE: Calculate once per call)
-    """
-    pinned = np.uint64(0)
-    king_idx = KING if side == WHITE else (KING + 6)
-    king_sq = get_lsb_index(piece_bbs[king_idx])
-
-    if king_sq == -1: return pinned
-
-    occupied = occupancy_bbs[2]
-    enemy_offset = 6 if side == WHITE else 0
-
-    # Orthogonal Pinners (Rook, Queen)
-    orth_pinners = piece_bbs[ROOK + enemy_offset] | piece_bbs[QUEEN + enemy_offset]
-    # Diagonal Pinners (Bishop, Queen)
-    diag_pinners = piece_bbs[BISHOP + enemy_offset] | piece_bbs[QUEEN + enemy_offset]
-
-    # Check Orthogonal Rays
-    # We trace from King. If we hit a friend, we look further.
-    # If next hit is enemy slider (Orth), the friend is pinned.
-
-    for d in ORTHOGONAL_DIRECTIONS:
-        curr = king_sq
-        friend_sq = -1
-        while True:
-            # Wrap check
-            curr_file = curr % 8
-            if d == 1 and curr_file == 7: break
-            if d == -1 and curr_file == 0: break
-            if d == 8 and curr >= 56: break
-            if d == -8 and curr <= 7: break
-
-            curr += d
-            if not (0 <= curr < 64): break
-
-            sq_bb = BB_SQUARES[curr]
-
-            if (occupied & sq_bb):
-                if friend_sq == -1:
-                    # First piece hit
-                    # Is it ours?
-                    is_us = False
-                    if side == WHITE:
-                         if (occupancy_bbs[WHITE] & sq_bb): is_us = True
-                    else:
-                         if (occupancy_bbs[BLACK] & sq_bb): is_us = True
-
-                    if is_us:
-                        friend_sq = curr
-                    else:
-                        # Enemy piece directly checks king -> Not a pin
-                        break
-                else:
-                    # Second piece hit
-                    # Is it enemy slider?
-                    if (sq_bb & orth_pinners):
-                        pinned |= BB_SQUARES[friend_sq]
-                    break
-
-    # Check Diagonal Rays
-    for d in DIAGONAL_DIRECTIONS:
-        curr = king_sq
-        friend_sq = -1
-        while True:
-            # Wrap check
-            curr_file = curr % 8
-            if d == 9 and (curr_file == 7 or curr >= 56): break
-            if d == -7 and (curr_file == 7 or curr <= 7): break
-            if d == 7 and (curr_file == 0 or curr >= 56): break
-            if d == -9 and (curr_file == 0 or curr <= 7): break
-
-            curr += d
-            if not (0 <= curr < 64): break
-
-            sq_bb = BB_SQUARES[curr]
-
-            if (occupied & sq_bb):
-                if friend_sq == -1:
-                    # First piece hit
-                    is_us = False
-                    if side == WHITE:
-                         if (occupancy_bbs[WHITE] & sq_bb): is_us = True
-                    else:
-                         if (occupancy_bbs[BLACK] & sq_bb): is_us = True
-
-                    if is_us:
-                        friend_sq = curr
-                    else:
-                        break
-                else:
-                    # Second piece hit
-                    if (sq_bb & diag_pinners):
-                        pinned |= BB_SQUARES[friend_sq]
-                    break
-
-    return pinned
 
 @numba.njit(cache=True)
 def get_attackers_for_see(square, occupied, piece_bbs, side_mask):
@@ -188,49 +50,39 @@ def get_attackers_for_see(square, occupied, piece_bbs, side_mask):
     Optimized for SEE loop (uses passed 'occupied' which has holes).
     """
     attackers = np.uint64(0)
-
-    # Note: Stockfish uses lookup tables for everything. We use calculation.
-    # To optimize, we inline as much as possible.
-
-    # 1. Pawns (Inverse logic: Attacked by Pawn means Pawn at Capture Position)
-    if side_mask == WHITE:
-        # White P attacks 'square' from sq-9 or sq-7
-        if square >= 9 and (square % 8) > 0:
-             if (piece_bbs[PAWN] & BB_SQUARES[square - 9]): attackers |= BB_SQUARES[square - 9]
-        if square >= 7 and (square % 8) < 7:
-             if (piece_bbs[PAWN] & BB_SQUARES[square - 7]): attackers |= BB_SQUARES[square - 7]
-    else:
-        # Black P attacks 'square' from sq+9 or sq+7
-        if square <= 54 and (square % 8) < 7:
-             if (piece_bbs[PAWN+6] & BB_SQUARES[square + 9]): attackers |= BB_SQUARES[square + 9]
-        if square <= 56 and (square % 8) > 0:
-             if (piece_bbs[PAWN+6] & BB_SQUARES[square + 7]): attackers |= BB_SQUARES[square + 7]
-
     offset = 0 if side_mask == WHITE else 6
 
-    # 2. Knights
+    # 1. Pawns - Use precomputed attack tables.
+    # Note: PAWN_ATTACKS[side, sq] returns squares where a pawn of 'side' 
+    # must be to attack 'sq'.
+    attackers |= (PAWN_ATTACKS[side_mask, square] & piece_bbs[offset + PAWN])
+
+    # 2. Knights - Use precomputed attack tables
     knights = piece_bbs[KNIGHT + offset]
     if knights:
-        attackers |= (get_step_attacks(square, KNIGHT_OFFSETS) & knights)
+        attackers |= (KNIGHT_ATTACKS[square] & knights)
 
     # 3. Sliders
     # We use the current 'occupied' which has holes where pieces were captured!
     # This allows X-Ray attacks to be found "through" the captured square.
 
+    # Performance optimization: Use ray pre-filters to avoid expensive Magic Bitboard lookups
+    # when no sliding pieces of the given side are on the relevant rays.
+
     # Bishops + Queens
     sliders_diag = piece_bbs[BISHOP + offset] | piece_bbs[QUEEN + offset]
-    if sliders_diag:
+    if sliders_diag & BISHOP_RAYS[square]:
         attackers |= (get_sliding_attacks(square, occupied, True) & sliders_diag)
 
     # Rooks + Queens
     sliders_orth = piece_bbs[ROOK + offset] | piece_bbs[QUEEN + offset]
-    if sliders_orth:
+    if sliders_orth & ROOK_RAYS[square]:
         attackers |= (get_sliding_attacks(square, occupied, False) & sliders_orth)
 
-    # 4. King
+    # 4. King - Use precomputed attack tables
     kings = piece_bbs[KING + offset]
     if kings:
-        attackers |= (get_step_attacks(square, KING_OFFSETS) & kings)
+        attackers |= (KING_ATTACKS[square] & kings)
 
     return attackers
 
@@ -244,11 +96,11 @@ def get_lva_and_remove(attackers, piece_bbs, side_mask):
         subset = attackers & piece_bbs[i + offset]
         if subset:
             sq_bb = subset & -subset
-            return PIECE_VALUES[i], sq_bb, i
+            return SEE_PIECE_VALUES[i], np.uint64(sq_bb), i
     return 0, np.uint64(0), -1
 
-@numba.njit(nbt.int32(piece_bbs_signature, occupancy_bbs_signature, nbt.int64, nbt.int64, nbt.int64, nbt.uint64, nbt.uint64), cache=True)
-def see(piece_bbs, occupancy_bbs, side_to_move, from_sq, to_sq, pinned_white, pinned_black):
+@numba.njit(cache=True)
+def see(piece_bbs, occupancy_bbs, side_to_move, from_sq, to_sq, pinned_white, pinned_black, attacker_type=-1, victim_type=-1):
     """
     Static Exchange Evaluation (SEE).
     Mimics Stockfish's logic:
@@ -265,34 +117,31 @@ def see(piece_bbs, occupancy_bbs, side_to_move, from_sq, to_sq, pinned_white, pi
     # But for 'from_sq', we know side_to_move.
 
     # Initial Attacker Type
-    attacker_type = -1
-    offset = 0 if side_to_move == WHITE else 6
-    for i in range(6):
-        if piece_bbs[i + offset] & BB_SQUARES[from_sq]:
-            attacker_type = i
-            break
-
+    if attacker_type == -1:
+        attacker_type = find_piece_type_on_square_side(piece_bbs, from_sq, side_to_move)
+    
     if attacker_type == -1: return 0 # Should not happen for legal moves
+    attacker_type %= 6
 
     # Initial Victim Type
-    victim_type = -1
-    # Check enemy pieces
-    enemy_offset = 6 if side_to_move == WHITE else 0
-    for i in range(6):
-        if piece_bbs[i + enemy_offset] & BB_SQUARES[to_sq]:
-            victim_type = i
-            break
+    if victim_type == -1:
+        victim_type = find_piece_type_on_square_side(piece_bbs, to_sq, 1 - side_to_move)
+    
+    if victim_type != -1:
+        victim_type %= 6
 
     # Value of initial capture
+    is_ep = False
     if victim_type == -1:
         # En Passant?
         if attacker_type == PAWN and abs((from_sq % 8) - (to_sq % 8)) == 1:
              # Attacker is pawn, diagonal move, empty target -> EP
-             value = PIECE_VALUES[PAWN]
+             value = SEE_PIECE_VALUES[PAWN]
+             is_ep = True
         else:
              value = 0 # Empty square, not EP (e.g. Quiet move)
     else:
-        value = PIECE_VALUES[victim_type]
+        value = SEE_PIECE_VALUES[victim_type]
 
     # Scores stack
     # scores[0] = Capture gain
@@ -300,13 +149,21 @@ def see(piece_bbs, occupancy_bbs, side_to_move, from_sq, to_sq, pinned_white, pi
     scores = np.zeros(32, dtype=np.int32)
     scores[0] = value
 
-    attacker_value = PIECE_VALUES[attacker_type]
+    attacker_value = SEE_PIECE_VALUES[attacker_type]
+    # Pawn Promotion handling
+    if attacker_type == PAWN and (to_sq >= 56 or to_sq < 8):
+        attacker_value = SEE_PIECE_VALUES[QUEEN]
 
     # Setup Occupied Bitboard
     occupied = occupancy_bbs[2]
 
     # Remove the initial attacker from occupied
     occupied &= ~BB_SQUARES[from_sq]
+
+    # If it was an En Passant capture, also remove the captured pawn
+    if is_ep:
+        ep_sq = (from_sq // 8) * 8 + (to_sq % 8)
+        occupied &= ~BB_SQUARES[ep_sq]
 
     # Pinned pieces are now passed as arguments!
     # pinned_white = get_pinned_pieces(piece_bbs, occupancy_bbs, WHITE)
@@ -350,6 +207,10 @@ def see(piece_bbs, occupancy_bbs, side_to_move, from_sq, to_sq, pinned_white, pi
         # Find LVA
         val, bb, type_idx = get_lva_and_remove(stm_attackers, piece_bbs, current_side)
 
+        # Pawn Promotion handling for subsequent captures
+        if type_idx == PAWN and (to_sq >= 56 or to_sq < 8):
+            val = SEE_PIECE_VALUES[QUEEN]
+
         # If King is attacker, check if it steps into check?
         # Stockfish: `if (type == KING) { if (attackers & ~stm) break; }`
         if (type_idx == KING or type_idx == KING + 6):
@@ -373,18 +234,19 @@ def see(piece_bbs, occupancy_bbs, side_to_move, from_sq, to_sq, pinned_white, pi
         # Add X-Ray attackers
         # Stockfish adds: `attackers |= attacks_bb<BISHOP/ROOK>(to, occupied) & pieces(Sliders)`
         # We simulate this.
-        # Check diagonals
-        if type_idx == PAWN or type_idx == BISHOP or type_idx == QUEEN or \
-           type_idx == PAWN+6 or type_idx == BISHOP+6 or type_idx == QUEEN+6:
+        
+        # Check diagonals: revealed by Pawns, Bishops, or Queens
+        if type_idx == PAWN or type_idx == BISHOP or type_idx == QUEEN:
              sliders_diag = piece_bbs[BISHOP] | piece_bbs[QUEEN] | piece_bbs[BISHOP+6] | piece_bbs[QUEEN+6]
-             if sliders_diag:
+             # Optimization: Ray filter
+             if sliders_diag & BISHOP_RAYS[to_sq]:
                  attackers |= (get_sliding_attacks(to_sq, occupied, True) & sliders_diag)
 
-        # Check orthogonals
-        if type_idx == ROOK or type_idx == QUEEN or \
-           type_idx == ROOK+6 or type_idx == QUEEN+6:
+        # Check orthogonals: revealed by Rooks or Queens
+        if type_idx == ROOK or type_idx == QUEEN:
              sliders_orth = piece_bbs[ROOK] | piece_bbs[QUEEN] | piece_bbs[ROOK+6] | piece_bbs[QUEEN+6]
-             if sliders_orth:
+             # Optimization: Ray filter
+             if sliders_orth & ROOK_RAYS[to_sq]:
                  attackers |= (get_sliding_attacks(to_sq, occupied, False) & sliders_orth)
 
         current_attacker_val = val
@@ -399,8 +261,8 @@ def see(piece_bbs, occupancy_bbs, side_to_move, from_sq, to_sq, pinned_white, pi
     return scores[0]
 
 
-@numba.njit(nbt.boolean(piece_bbs_signature, occupancy_bbs_signature, nbt.int64, nbt.int64, nbt.int64, nbt.int32, nbt.uint64, nbt.uint64), cache=True)
-def see_ge(piece_bbs, occupancy_bbs, side_to_move, from_sq, to_sq, threshold, pinned_white, pinned_black):
+@numba.njit(cache=True)
+def see_ge(piece_bbs, occupancy_bbs, side_to_move, from_sq, to_sq, threshold, pinned_white, pinned_black, attacker_type=-1, victim_type=-1):
     """
     SEE >= Threshold.
     Optimized to exit early.
@@ -408,28 +270,27 @@ def see_ge(piece_bbs, occupancy_bbs, side_to_move, from_sq, to_sq, threshold, pi
     """
     # Identical setup to see()
 
-    attacker_type = -1
-    offset = 0 if side_to_move == WHITE else 6
-    for i in range(6):
-        if piece_bbs[i + offset] & BB_SQUARES[from_sq]:
-            attacker_type = i
-            break
+    if attacker_type == -1:
+        attacker_type = find_piece_type_on_square_side(piece_bbs, from_sq, side_to_move)
+    
     if attacker_type == -1: return False # Should not happen
-
-    victim_type = -1
-    enemy_offset = 6 if side_to_move == WHITE else 0
-    for i in range(6):
-        if piece_bbs[i + enemy_offset] & BB_SQUARES[to_sq]:
-            victim_type = i
-            break
+    attacker_type %= 6
 
     if victim_type == -1:
+        victim_type = find_piece_type_on_square_side(piece_bbs, to_sq, 1 - side_to_move)
+    
+    if victim_type != -1:
+        victim_type %= 6
+
+    is_ep = False
+    if victim_type == -1:
         if attacker_type == PAWN and abs((from_sq % 8) - (to_sq % 8)) == 1:
-             value = PIECE_VALUES[PAWN]
+             value = SEE_PIECE_VALUES[PAWN]
+             is_ep = True
         else:
              value = 0
     else:
-        value = PIECE_VALUES[victim_type]
+        value = SEE_PIECE_VALUES[victim_type]
 
     # Swap Algorithm with Balance
     # score = victim - threshold
@@ -442,7 +303,11 @@ def see_ge(piece_bbs, occupancy_bbs, side_to_move, from_sq, to_sq, threshold, pi
 
     # Next: Opponent captures us.
     # balance = attacker_val - balance
-    attacker_val = PIECE_VALUES[attacker_type]
+    attacker_val = SEE_PIECE_VALUES[attacker_type]
+    # Pawn Promotion handling
+    if attacker_type == PAWN and (to_sq >= 56 or to_sq < 8):
+        attacker_val = SEE_PIECE_VALUES[QUEEN]
+        
     balance = attacker_val - balance
 
     if balance <= 0:
@@ -450,6 +315,9 @@ def see_ge(piece_bbs, occupancy_bbs, side_to_move, from_sq, to_sq, threshold, pi
 
     occupied = occupancy_bbs[2]
     occupied &= ~BB_SQUARES[from_sq]
+    if is_ep:
+        ep_sq = (from_sq // 8) * 8 + (to_sq % 8)
+        occupied &= ~BB_SQUARES[ep_sq]
 
     # Pinned pieces are now passed as arguments!
     # pinned_white = get_pinned_pieces(piece_bbs, occupancy_bbs, WHITE)
@@ -478,6 +346,10 @@ def see_ge(piece_bbs, occupancy_bbs, side_to_move, from_sq, to_sq, threshold, pi
 
         val, bb, type_idx = get_lva_and_remove(stm_attackers, piece_bbs, current_side)
 
+        # Pawn Promotion handling for subsequent captures
+        if type_idx == PAWN and (to_sq >= 56 or to_sq < 8):
+            val = SEE_PIECE_VALUES[QUEEN]
+
         # King Check
         if (type_idx == KING or type_idx == KING + 6):
              opp_mask = (piece_bbs[6] | piece_bbs[7] | piece_bbs[8] | piece_bbs[9] | piece_bbs[10] | piece_bbs[11]) \
@@ -493,16 +365,14 @@ def see_ge(piece_bbs, occupancy_bbs, side_to_move, from_sq, to_sq, threshold, pi
         occupied &= ~bb
 
         # X-Ray
-        if type_idx == PAWN or type_idx == BISHOP or type_idx == QUEEN or \
-           type_idx == PAWN+6 or type_idx == BISHOP+6 or type_idx == QUEEN+6:
+        if type_idx == PAWN or type_idx == BISHOP or type_idx == QUEEN:
              sliders_diag = piece_bbs[BISHOP] | piece_bbs[QUEEN] | piece_bbs[BISHOP+6] | piece_bbs[QUEEN+6]
-             if sliders_diag:
+             if sliders_diag & BISHOP_RAYS[to_sq]:
                  attackers |= (get_sliding_attacks(to_sq, occupied, True) & sliders_diag)
 
-        if type_idx == ROOK or type_idx == QUEEN or \
-           type_idx == ROOK+6 or type_idx == QUEEN+6:
+        if type_idx == ROOK or type_idx == QUEEN:
              sliders_orth = piece_bbs[ROOK] | piece_bbs[QUEEN] | piece_bbs[ROOK+6] | piece_bbs[QUEEN+6]
-             if sliders_orth:
+             if sliders_orth & ROOK_RAYS[to_sq]:
                  attackers |= (get_sliding_attacks(to_sq, occupied, False) & sliders_orth)
 
         # Update balance

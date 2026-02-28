@@ -2,7 +2,7 @@
 import numba
 import numpy as np
 from chess_engine.transposition_table import numba_tt_entry_type
-from chess_engine.constants import MAX_PLY
+from chess_engine.constants import MAX_PLY, CORRECTION_HISTORY_SIZE
 
 """
 此模組定義了西洋棋引擎中使用的 Numba 類型和類別。
@@ -20,9 +20,10 @@ PAWN, KNIGHT, BISHOP, ROOK, QUEEN, KING = 0, 1, 2, 3, 4, 5
 piece_bbs_signature = numba.uint64[::1]
 occupancy_bbs_signature = numba.uint64[::1]
 game_state_signature = numba.uint64[::1]
+piece_counts_signature = numba.types.UniTuple(numba.int32, 12)
 
 unmake_info_signature = numba.types.Tuple([
-    numba.int8, numba.uint8, numba.uint8, numba.uint8, numba.uint64
+    numba.int8, numba.uint8, numba.uint8, numba.uint8, numba.uint64, numba.uint64
 ])
 
 # --- Search Context / 搜尋上下文 ---
@@ -46,6 +47,13 @@ search_context_spec = [
     ('see_pruned_captures', numba.uint64),
     ('see_pruned_quiets', numba.uint64),
     ('history_pruned', numba.uint64),
+    ('move_scores', numba.int32[:, :]),
+    ('moves_buffer', numba.uint16[:, :]),
+    ('quiet_moves_tried', numba.uint16[:, :]),
+    ('continuation_history', numba.int16[:, :, :, :]),
+    ('pawn_correction_history', numba.int16[:]),
+    ('butterfly_history', numba.int32[:, :]),
+    ('capture_history', numba.int32[:, :, :]),
 ]
 
 @jitclass(search_context_spec)
@@ -71,8 +79,10 @@ class SearchContext:
         see_pruned_captures (numba.uint64): 因 SEE 被剪枝的捕捉次數。
         see_pruned_quiets (numba.uint64): 因 SEE 被剪枝的靜止步次數。
         history_pruned (numba.uint64): 因歷史分數被剪枝的次數。
+        continuation_history (numba.int16[:, :, :, :]): 連續歷史表。
+        pawn_correction_history (numba.int16[:]): 兵型修正歷史表。
     """
-    def __init__(self, transposition_table, killer_moves, pv_table, history_table):
+    def __init__(self, transposition_table, killer_moves, pv_table, history_table, butterfly_history, continuation_history, capture_history, pawn_correction_history):
         """
         初始化搜尋上下文。
 
@@ -81,11 +91,19 @@ class SearchContext:
             killer_moves: 預先分配的殺手步表。
             pv_table: 預先分配的 PV 表。
             history_table: 預先分配的歷史表。
+            butterfly_history: 預先分配的蝴蝶歷史表。
+            continuation_history: 預先分配的連續歷史表。
+            capture_history: 預先分配的吃子歷史表。
+            pawn_correction_history: 預先分配的兵型修正歷史表。
         """
         self.transposition_table = transposition_table
         self.killer_moves = killer_moves
         self.pv_table = pv_table
         self.history_table = history_table
+        self.butterfly_history = butterfly_history
+        self.continuation_history = continuation_history
+        self.capture_history = capture_history
+        self.pawn_correction_history = pawn_correction_history
         self.nodes_searched = np.uint64(0)
         self.end_time = 0.0
         # 使用陣列來包裝布林值，以便可以作為引用傳遞並在外部修改
@@ -102,9 +120,15 @@ class SearchContext:
         self.move_stack = np.zeros(MAX_PLY, dtype=np.uint16)
         self.static_eval_stack = np.zeros(MAX_PLY, dtype=np.int32)
         
+        # Pre-allocated move scores buffer to avoid allocation in hot loop
+        self.move_scores = np.zeros((MAX_PLY, 256), dtype=np.int32)
+        self.moves_buffer = np.zeros((MAX_PLY, 256), dtype=np.uint16)
+        self.quiet_moves_tried = np.zeros((MAX_PLY, 256), dtype=np.uint16)
+
         # Initialize new stats
         self.see_pruned_captures = np.uint64(0)
         self.see_pruned_quiets = np.uint64(0)
         self.history_pruned = np.uint64(0)
+
 
 search_context_type = SearchContext.class_type.instance_type

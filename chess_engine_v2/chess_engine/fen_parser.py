@@ -94,12 +94,31 @@ def parse_fen(fen_string: str):
     # Pass NumPy arrays directly to the JIT'd function / 直接將 NumPy 陣列傳遞給 JIT 函數
     zobrist_key = compute_initial_hash(piece_bbs, temp_game_state_arr)
 
+    # Compute initial pawn key (Zobrist hash of only pawns)
+    pawn_key = np.uint64(0)
+    from chess_engine.zobrist import PIECE_SQUARE_KEYS, get_lsb_index
+    
+    # White Pawns (Index 0)
+    wp = piece_bbs[0]
+    while wp:
+        sq = get_lsb_index(wp)
+        pawn_key ^= PIECE_SQUARE_KEYS[0, sq]
+        wp &= wp - np.uint64(1)
+        
+    # Black Pawns (Index 6)
+    bp = piece_bbs[6]
+    while bp:
+        sq = get_lsb_index(bp)
+        pawn_key ^= PIECE_SQUARE_KEYS[6, sq]
+        bp &= bp - np.uint64(1)
+
     game_state = np.array([
         side_to_move,
         castling_rights,
         en_passant_square,
         halfmove_clock,
-        zobrist_key
+        zobrist_key,
+        pawn_key
     ], dtype=np.uint64)
 
     # --- Sanity Checks / 健全性檢查 ---

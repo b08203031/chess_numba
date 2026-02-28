@@ -1,6 +1,7 @@
 # chess_engine/constants.py
 
 import numpy as np
+import math
 
 """
 此模組定義了西洋棋引擎中使用的所有常量。
@@ -252,7 +253,7 @@ QUEEN_MOBILITY_WEIGHT = np.array([2, 1], dtype=np.int32) # MG, EG
 # --- Bishop Pair / 雙象優勢 ---
 # Bonus for having both bishops. This bonus is generally stronger in open positions.
 # 擁有雙象的獎勵。這個獎勵在開放局面中通常更強。
-BISHOP_PAIR_BONUS = np.array([10, 20], dtype=np.int32) # MG, EG
+BISHOP_PAIR_BONUS = np.array([20, 30], dtype=np.int32) # MG, EG
 
 # --- Rook on Open/Semi-Open File / 車在開放線/半開放線 ---
 # Bonus for a rook on a file with no friendly pawns (semi-open)
@@ -262,6 +263,8 @@ ROOK_ON_SEMI_OPEN_FILE_BONUS = np.array([15, 10], dtype=np.int32) # MG, EG
 ROOK_ON_OPEN_FILE_BONUS = np.array([25, 15], dtype=np.int32) # MG, EG
 
 ROOK_ON_SEVENTH_BONUS = np.array([20, 50], dtype=np.int32) # MG, EG
+
+ROOK_PAIR_BONUS = np.array([15, 25], dtype=np.int32) # MG, EG
 # =============================================================================
 # --- Pawn Structure Constants / 兵型結構常量 ---
 # =============================================================================
@@ -274,9 +277,9 @@ ROOK_ON_SEVENTH_BONUS = np.array([20, 50], dtype=np.int32) # MG, EG
 PASSED_PAWN_BONUS = np.array([
     # MG, EG
     [  0,   0], # Rank 1
-    [ 10,  20], # Rank 2
-    [ 20,  30], # Rank 3
-    [ 35, 50], # Rank 4
+    [ 0,  0], # Rank 2
+    [ 10,  20], # Rank 3
+    [ 30, 50], # Rank 4
     [ 50, 80], # Rank 5
     [ 80, 150], # Rank 6
     [150, 250], # Rank 7
@@ -296,8 +299,44 @@ DOUBLED_PAWN_PENALTY = np.array([-15, -10], dtype=np.int32) # MG, EG
 # --- Connected Passed Pawns / 連結通路兵 ---
 # Bonus for each passed pawn that is connected to another passed pawn.
 # 每個連結通路兵的獎勵。
-CONNECTED_PASSED_PAWN_BONUS = np.array([40, 80], dtype=np.int32) # MG, EG
+CONNECTED_PASSED_PAWN_BONUS = np.array([15, 35], dtype=np.int32) # MG, EG
 
+# =============================================================================
+# --- Outpost Constants / 前哨常量 ---
+# =============================================================================
+# Bonus for knights and bishops on outpost squares (supported by pawn, not attacked by pawn).
+# 前哨方格上的騎士和主教的獎勵（由兵支持，且未被兵攻擊）。
+
+# Outpost Bonuses by Rank (0-7).
+# Indices: Rank 0 to Rank 7.
+# Values: [MG, EG]
+# 騎士前哨獎勵
+OUTPOST_BONUS_KNIGHT = np.array([
+    [0, 0],    # Rank 1
+    [0, 0],    # Rank 2
+    [10, 5],   # Rank 3
+    [30, 15],  # Rank 4
+    [50, 40],  # Rank 5
+    [40, 30],  # Rank 6 (Octopus)
+    [20, 10],  # Rank 7
+    [0, 0]     # Rank 8
+], dtype=np.int32)
+
+# 主教前哨獎勵
+OUTPOST_BONUS_BISHOP = np.array([
+    [0, 0],    # Rank 1
+    [0, 0],    # Rank 2
+    [10, 5],   # Rank 3
+    [20, 15],  # Rank 4
+    [30, 25],  # Rank 5
+    [20, 15],  # Rank 6
+    [10, 5],   # Rank 7
+    [0, 0]     # Rank 8
+], dtype=np.int32)
+
+# Bonus if the outpost is a "Hole" (cannot be attacked by enemy pawns at all).
+# 如果前哨是“洞”（完全無法被敵方兵攻擊），則給予額外獎勵。
+OUTPOST_HOLE_BONUS = np.array([25, 15], dtype=np.int32) # MG, EG
 
 # =============================================================================
 # --- King Safety Constants (NEW - based on Chessprogramming Wiki) / 王的安全常量 ---
@@ -307,19 +346,27 @@ CONNECTED_PASSED_PAWN_BONUS = np.array([40, 80], dtype=np.int32) # MG, EG
 # Attack units for each piece type. Order: P, N, B, R, Q
 # 每個棋子類型的攻擊單位。順序：兵、馬、象、車、后
 # Updated: Aggressive weights for R and Q
-KING_SAFETY_WEAK_UNITS = np.array([2, 5, 5, 10, 16], dtype=np.int32) # P, N, B, R, Q
-KING_SAFETY_ATTACK_UNITS = np.array([2, 5, 5, 10, 16], dtype=np.int32) # P, N, B, R, Q
+KING_SAFETY_WEAK_UNITS = np.array([0, 1, 1, 2, 3], dtype=np.int32) # P, N, B, R, Q
+KING_SAFETY_ATTACK_UNITS = np.array([1, 2, 2, 5, 8], dtype=np.int32) # P, N, B, R, Q
+
+# Safe Check Units (Added to total attack units if a safe check is available)
+# Reduced values to prevent explosive king safety scores from static evaluation
+SAFE_CHECK_KNIGHT = 4
+SAFE_CHECK_BISHOP = 4
+SAFE_CHECK_ROOK = 7
+SAFE_CHECK_QUEEN = 12
+
 # A non-linear table where the index is the sum of attack units, and the value is the penalty.
 # The penalty grows exponentially, rewarding multi-piece attacks.
 # 一個非線性表格，索引是攻擊單位的總和，值是懲罰分數。懲罰呈指數增長，獎勵多子協同攻擊。
-# Updated: Steeper, quadratic-plus growth curve
+# Updated: Using i^2 / 4 for a more balanced king safety penalty (similar to Stockfish's curve).
 KING_SAFETY_TABLE = np.array([
-    min(int(i**2) / 2, 1000) for i in range(100)
+    min(int(i**2) / 4, 1200) for i in range(100)
 ], dtype=np.int32)
 
 # --- Phase 3: King Tropism / 王的向性 ---
 KING_TROPISM_MAX_DISTANCE = 14 # Max MANHATTAN distance / 最大曼哈頓距離
-KING_TROPISM_WEIGHTS = np.array([1, 2, 3, 5, 8], dtype=np.int32) # P, N, B, R, Q
+KING_TROPISM_WEIGHTS = np.array([0, 1, 1, 2, 3], dtype=np.int32) # P, N, B, R, Q
 
 # --- Phase 4: Advanced & Dynamic / 進階與動態 ---
 # REMOVED: Flat penalty
@@ -337,12 +384,12 @@ PAWN_STORM_PENALTY_BY_RANK = np.array([0, 0, 80, 50, 30, 10, 5, 0], dtype=np.int
 SCALING_WEIGHTS = np.array([0, 4, 4, 6, 10], dtype=np.int32) # N, B, R, Q - for scaling factor / 用於縮放因子的權重
 MAX_SCALING_MATERIAL = (2*4 + 2*4 + 2*6 + 1*10) # Sum of all weights for one side / 一方所有權重的總和
 
-PAWN_SHIELD_MISSING_PENALTY = 60
-PAWN_SHIELD_INTACT_BONUS = 20
-PAWN_SHIELD_ADVANCED_BONUS = 10
-PAWN_SHIELD_PUSHED_PENALTY = 20
-KING_OPEN_FILE_PENALTY = 50
-KING_SEMI_OPEN_FILE_PENALTY = 25
+PAWN_SHIELD_MISSING_PENALTY = 15
+PAWN_SHIELD_INTACT_BONUS = 10
+PAWN_SHIELD_ADVANCED_BONUS = 5
+PAWN_SHIELD_PUSHED_PENALTY = 10
+KING_OPEN_FILE_PENALTY = 10
+KING_SEMI_OPEN_FILE_PENALTY = 5
 KING_SAFETY_WEAK_SQUARE_PENALTY = 20
 
 EG_SAFETY_SCALE = 0.5 # Scale down endgame king safety impact / 縮減殘局王的安全影響
@@ -354,7 +401,10 @@ EG_SAFETY_SCALE = 0.5 # Scale down endgame king safety impact / 縮減殘局王�
 
 # Threat By Safe Pawn: Friendly pawn attacks enemy piece (N, B, R, Q).
 # 兵的威脅：己方兵攻擊敵方棋子（N, B, R, Q）。
-THREAT_SAFE_PAWN = np.array([60, 60], dtype=np.int32) # MG, EG
+THREAT_SAFE_PAWN = np.array([45, 45], dtype=np.int32) # MG, EG
+
+# Piece on Piece Pressure: Non-pawn piece attacking a defended piece of equal or higher value.
+THREAT_PIECE_ON_PIECE = np.array([15, 10], dtype=np.int32)
 
 # Minor Attacking Major: Knight/Bishop attacking Rook/Queen.
 # 輕子攻擊重子：馬/象攻擊車/后。
@@ -368,7 +418,7 @@ THREAT_ROOK_ON_QUEEN = np.array([20, 10], dtype=np.int32) # MG, EG
 # 懸掛子：敵方棋子被攻擊且未被防守。
 # This is a bonus for the ATTACKER.
 # 這是給攻擊者的獎勵。
-THREAT_HANGING = np.array([35, 20], dtype=np.int32) # MG, EG
+THREAT_HANGING = np.array([25, 15], dtype=np.int32) # MG, EG
 
 
 # =============================================================================
@@ -401,11 +451,16 @@ ROOK_QUEEN_BATTERY_BONUS = 5000 # Bonus for Rook moving to same file/rank as Que
 
 # History Heuristic Constants
 MAX_HISTORY = 2048 # Max value for history table to prevent overflow and saturation
+CORRECTION_HISTORY_SIZE = 16384
+CORRECTION_HISTORY_LIMIT = 400
+CORRECTION_HISTORY_GRAVITY = 16
+CONTINUATION_HISTORY_FACTOR = 4
 
 # Special value to indicate that the search was stopped due to timeout
 # 特殊值，表示搜尋因超時而停止
 STOP_SEARCH_FLAG = 66666
 
+PAWN_KEY_INDEX = 5
 
 # --- Aspiration Windows / 期望窗口 ---
 ASPIRATION_WINDOW_SIZE = 100 # centipawns
@@ -417,6 +472,7 @@ ENABLE_PROBCUT = True       # ProbCut
 ENABLE_DELTA_PRUNING = True # Delta Pruning in Quiescence Search
 ENABLE_IID = True           # Internal Iterative Deepening
 ENABLE_SINGULAR_EXTENSIONS = True # Singular Extensions
+ENABLE_MATE_DISTANCE_PRUNING = True # Mate Distance Pruning
 
 
 # IID and Singular Extension Parameters
@@ -427,11 +483,11 @@ SINGULAR_EXTENSION_MARGIN = 150 # centipawns
 ENABLE_SHALLOW_SEE_PRUNING = True  # Enable SEE pruning for captures/quiets at shallow depth
 ENABLE_HISTORY_PRUNING = True      # Enable pruning based on History Score
 
-# NEW: Pruning Parameters (Loose/Relaxed initially)
+# NEW: Pruning Parameters (Tightened for Performance/Strength Balance)
 PRUNING_SHALLOW_DEPTH = 8         # Prune moves only if depth is below this
-PRUNING_CAPTURE_SEE_MARGIN = -200 # SEE < -200 * depth will be pruned
-PRUNING_QUIET_SEE_MARGIN = -100   # SEE < -100 * depth^2 will be pruned
-PRUNING_HISTORY_THRESHOLD = -1500 # Prune if history < -1500. NOTE: MAX_HISTORY is 2048, so -1500 is ~73% of max penalty.
+PRUNING_CAPTURE_SEE_MARGIN = -150 # Tightened from -200 (More pruning)
+PRUNING_QUIET_SEE_MARGIN = -80    # Tightened from -100 (More pruning)
+PRUNING_HISTORY_THRESHOLD = -1000 # Tightened from -1500 (More pruning, threshold is higher/closer to 0)
 
 # Master switches for existing pruning techniques / 現有剪枝技術的總開關
 ENABLE_NMP = True           # Null Move Pruning
@@ -444,16 +500,16 @@ NULL_MOVE_REDUCTION = 2
 MAX_QUIESCENCE_DEPTH = 5
 
 # Razoring
-RAZORING_MARGIN = 700 # Relaxed from 550
+RAZORING_MARGIN = 600 # Tightened from 700
 
 # Futility Pruning
-FP_MARGIN_D1 = 400 # Relaxed from 300
-FP_MARGIN_D2 = 700 # Relaxed from 600
-FP_BASE = 200
-FP_MULTIPLIER = 200
+FP_MARGIN_D1 = 350 # Tightened from 400
+FP_MARGIN_D2 = 650 # Tightened from 700
+FP_BASE = 150      # Reduced base
+FP_MULTIPLIER = 180 # Reduced multiplier
 
 # Reverse Futility Pruning
-RFP_MARGIN_D1 = 250 # Relaxed from 250
+RFP_MARGIN_D1 = 200 # Tightened from 250
 
 # Late Move Reductions (LMR)
 LMR_MIN_DEPTH = 4           # Minimum depth to apply LMR / 應用 LMR 的最小深度
@@ -464,8 +520,19 @@ LMR_REDUCTION = 1           # Depth reduction for LMR / LMR 的深度減少值
 # 晚期移動剪枝（LMP） - 在搜尋了一定數量的寧靜步後剪枝
 # Updated: Relaxed constraints to search even more moves (20 + 20*depth)
 LMP_MOVE_COUNT = np.array([
-    0 if d == 0 else 20 + 20 * d for d in range(MAX_PLY)
+    0 if d == 0 else 15 + 15 * d for d in range(MAX_PLY)
 ], dtype=np.int32)
+
+# LMR Table (Precomputed)
+# Formula: int(0.5 + log(depth) * log(move_count) / 2.25)
+# Using 256 as max move count (enough for almost all positions)
+LMR_TABLE = np.zeros((MAX_PLY, 256), dtype=np.int32)
+for d in range(MAX_PLY):
+    for mc in range(256):
+        if d < 2 or mc < 2:
+            LMR_TABLE[d, mc] = 0
+        else:
+            LMR_TABLE[d, mc] = int(0.5 + math.log(d) * math.log(mc) / 2.25)
 
 
 # ProbCut
@@ -477,7 +544,7 @@ PROBCUT_MARGIN = 150 # centipawns
 DELTA_PRUNING_MARGIN = 1200
 
 # --- Static Exchange Evaluation (SEE) Threshold / SEE 閾值 ---
-SEE_THRESHOLD = -100  # centipawns (Relaxed from -50)
+SEE_THRESHOLD = -250  # centipawns (Relaxed from -50)
 ENABLE_SEE_IN_QUIESCENCE = True # Master switch to enable/disable SEE in quiescence search / 啟用/禁用靜態搜尋中 SEE 的總開關
 
 # =============================================================================

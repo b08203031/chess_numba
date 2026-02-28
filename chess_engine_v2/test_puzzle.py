@@ -71,7 +71,6 @@ puzzles = [
             "rating": "2286",
             "theme": "attraction crushing defensiveMove exposedKing long middlegame queensideAttack sacrifice"
         },
-        
         {
             "name": "Lichess Puzzle 000mr",
             "fen": "5r1k/5rp1/p7/1b2B2p/1P1P1Pq1/2R3Q1/P3p1P1/2R3K1 b - - 1 41",
@@ -650,7 +649,7 @@ puzzles = [
         {
             "name": "Lichess Puzzle 008o6",
             "fen": "Q4rk1/p1p3p1/6P1/8/3P4/7P/q3r3/B4RK1 w - - 2 35",
-            "solution": "a8f8",
+            "solution": ["a8f8", "f1f8"],
             "rating": "1017",
             "theme": "endgame mate mateIn1 oneMove"
         },
@@ -775,15 +774,19 @@ def run_puzzle_test():
     tt = create_transposition_table(16)
     killer_moves = np.zeros(256, dtype=np.uint16)
     history_table = np.zeros((12, 64), dtype=np.int32)
+    butterfly_history = np.zeros((64, 64), dtype=np.int32)
+    continuation_history = np.zeros((12, 64, 12, 64), dtype=np.int16)
+    capture_history = np.zeros((12, 64, 12), dtype=np.int32)
+    pawn_correction_history = np.zeros(16384, dtype=np.int16)
     pv_table = np.zeros((128, 128), dtype=np.uint16)
-    ctx = SearchContext(tt, killer_moves, pv_table, history_table)
+    ctx = SearchContext(tt, killer_moves, pv_table, history_table, butterfly_history, continuation_history, capture_history, pawn_correction_history)
     
     # Run a quick search
     iterative_deepening_search(p_bbs, o_bbs, g_state, 2, {'optimum_time': 0, 'maximum_time': 0}, ctx)
     print("--- WARM-UP COMPLETE ---\n")
 
 
-    depth = 30  # Set a high depth, will be stopped by time
+    depth = 40  # Set a high depth, will be stopped by time
     time_limit_ms = 3000
 
     total_tests = len(puzzles)
@@ -810,13 +813,20 @@ def run_puzzle_test():
         killer_moves = np.zeros(MAX_PLY * 2, dtype=np.uint16)
         pv_table = np.zeros((MAX_PLY, MAX_PLY), dtype=np.uint16)
         history_table = np.zeros((12, 64), dtype=np.int32) # Note: history_table size is 12x64 in search.py
+        butterfly_history = np.zeros((64, 64), dtype=np.int32)
+        continuation_history = np.zeros((12, 64, 12, 64), dtype=np.int16)
+        capture_history = np.zeros((12, 64, 12), dtype=np.int32)
+        pawn_correction_history = np.zeros(16384, dtype=np.int16)
         
         # Clear TT before each search
         clear_transposition_table(transposition_table)
         ctx.killer_moves.fill(0)
         ctx.history_table.fill(0)
         
-        search_context = SearchContext(transposition_table, killer_moves, pv_table, history_table)
+        search_context = SearchContext(
+            transposition_table, killer_moves, pv_table, history_table,
+            butterfly_history, continuation_history, capture_history, pawn_correction_history
+        )
 
         start_time = time.time()
 
@@ -882,7 +892,9 @@ def run_puzzle_test():
                 "name": puzzle["name"],
                 "fen": puzzle["fen"],
                 "solution": puzzle["solution"],
-                "engine_move": engine_move
+                "engine_move": engine_move,
+                "rating": puzzle["rating"],
+                "theme": puzzle["theme"]
             })
             print(f"Test FAILED: The engine suggested {engine_move}, but the correct move is {puzzle['solution']}.")
 
@@ -912,6 +924,8 @@ def run_puzzle_test():
         for fp in failed_puzzles:
             print(f"Name: {fp['name']}")
             print(f"  FEN: {fp['fen']}")
+            print(f"  Rating: {fp['rating']}")
+            print(f"  Theme: {fp['theme']}")
             print(f"  Correct Answer: {fp['solution']}")
             print(f"  Engine's Answer: {fp['engine_move']}")
             print("-" * 20)
