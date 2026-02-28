@@ -5,6 +5,18 @@ from numba import types
 from chess_engine.constants import BB_SQUARES
 from chess_engine.engine_types import piece_bbs_signature
 
+# hardware intrinsic for leading zeros
+@intrinsic
+def count_leading_zeros(typingctx, val):
+    def codegen(context, builder, signature, args):
+        val_arg = args[0]
+        # llvm.ctlz.i64(i64 <src>, i1 <is_zero_undef>)
+        # We pass False for is_zero_undef, so it is defined for 0 (returns 64).
+        return builder.ctlz(val_arg, context.get_constant(types.boolean, False))
+
+    sig = types.int64(types.uint64)
+    return sig, codegen
+
 # hardware intrinsic for trailing zeros
 @intrinsic
 def count_trailing_zeros(typingctx, val):
@@ -35,6 +47,15 @@ def get_lsb_index(bitboard: np.uint64) -> int:
     if bitboard == 0:
         return -1
     return nb.int8(count_trailing_zeros(bitboard))
+
+@nb.njit(nb.int8(nb.uint64), cache=True, inline='always')
+def get_msb_index(bitboard: np.uint64) -> int:
+    """
+    Uses hardware CLZ (Count Leading Zeros) intrinsic via LLVM to find MSB index.
+    """
+    if bitboard == 0:
+        return -1
+    return nb.int8(63 - count_leading_zeros(bitboard))
 
 def _init_king_attack_zones(color):
     """

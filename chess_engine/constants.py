@@ -264,7 +264,6 @@ ROOK_ON_OPEN_FILE_BONUS = np.array([25, 15], dtype=np.int32) # MG, EG
 
 ROOK_ON_SEVENTH_BONUS = np.array([20, 50], dtype=np.int32) # MG, EG
 
-ROOK_PAIR_BONUS = np.array([15, 25], dtype=np.int32) # MG, EG
 # =============================================================================
 # --- Pawn Structure Constants / 兵型結構常量 ---
 # =============================================================================
@@ -349,12 +348,6 @@ OUTPOST_HOLE_BONUS = np.array([25, 15], dtype=np.int32) # MG, EG
 KING_SAFETY_WEAK_UNITS = np.array([0, 1, 1, 2, 3], dtype=np.int32) # P, N, B, R, Q
 KING_SAFETY_ATTACK_UNITS = np.array([1, 2, 2, 5, 8], dtype=np.int32) # P, N, B, R, Q
 
-# Safe Check Units (Added to total attack units if a safe check is available)
-SAFE_CHECK_KNIGHT = 10
-SAFE_CHECK_BISHOP = 10
-SAFE_CHECK_ROOK = 20
-SAFE_CHECK_QUEEN = 30
-
 # A non-linear table where the index is the sum of attack units, and the value is the penalty.
 # The penalty grows exponentially, rewarding multi-piece attacks.
 # 一個非線性表格，索引是攻擊單位的總和，值是懲罰分數。懲罰呈指數增長，獎勵多子協同攻擊。
@@ -401,9 +394,6 @@ EG_SAFETY_SCALE = 0.5 # Scale down endgame king safety impact / 縮減殘局王�
 # Threat By Safe Pawn: Friendly pawn attacks enemy piece (N, B, R, Q).
 # 兵的威脅：己方兵攻擊敵方棋子（N, B, R, Q）。
 THREAT_SAFE_PAWN = np.array([45, 45], dtype=np.int32) # MG, EG
-
-# Piece on Piece Pressure: Non-pawn piece attacking a defended piece of equal or higher value.
-THREAT_PIECE_ON_PIECE = np.array([15, 10], dtype=np.int32)
 
 # Minor Attacking Major: Knight/Bishop attacking Rook/Queen.
 # 輕子攻擊重子：馬/象攻擊車/后。
