@@ -371,7 +371,7 @@ KING_TROPISM_WEIGHTS = np.array([0, 1, 1, 2, 3], dtype=np.int32) # P, N, B, R, Q
 # For White King (Rank 0), enemy Black pawn at Rank 2 is index 2.
 # For Black King (Rank 7), enemy White pawn at Rank 5 is index 2 (7-5=2).
 # Values: [Dummy, Dummy, Rank2, Rank3, Rank4, Rank5, Rank6, Rank7]
-PAWN_STORM_PENALTY_BY_RANK = np.array([0, 0, 80, 50, 30, 10, 5, 0], dtype=np.int32)
+PAWN_STORM_PENALTY_BY_RANK = np.array([0, 120, 80, 50, 30, 10, 5, 0], dtype=np.int32)
 
 SCALING_WEIGHTS = np.array([0, 4, 4, 6, 10], dtype=np.int32) # N, B, R, Q - for scaling factor / 用於縮放因子的權重
 MAX_SCALING_MATERIAL = (2*4 + 2*4 + 2*6 + 1*10) # Sum of all weights for one side / 一方所有權重的總和

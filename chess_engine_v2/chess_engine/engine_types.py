@@ -54,7 +54,6 @@ search_context_spec = [
     ('pawn_correction_history', numba.int16[:]),
     ('butterfly_history', numba.int32[:, :]),
     ('capture_history', numba.int32[:, :, :]),
-    ('pawn_move_history', numba.int32[:, :, :]),
 ]
 
 @jitclass(search_context_spec)
@@ -83,7 +82,7 @@ class SearchContext:
         continuation_history (numba.int16[:, :, :, :]): 連續歷史表。
         pawn_correction_history (numba.int16[:]): 兵型修正歷史表。
     """
-    def __init__(self, transposition_table, killer_moves, pv_table, history_table, butterfly_history, continuation_history, capture_history, pawn_correction_history, pawn_move_history):
+    def __init__(self, transposition_table, killer_moves, pv_table, history_table, butterfly_history, continuation_history, capture_history, pawn_correction_history):
         """
         初始化搜尋上下文。
 
@@ -96,7 +95,6 @@ class SearchContext:
             continuation_history: 預先分配的連續歷史表。
             capture_history: 預先分配的吃子歷史表。
             pawn_correction_history: 預先分配的兵型修正歷史表。
-            pawn_move_history: 預先分配的兵型引導歷史表。
         """
         self.transposition_table = transposition_table
         self.killer_moves = killer_moves
@@ -106,7 +104,6 @@ class SearchContext:
         self.continuation_history = continuation_history
         self.capture_history = capture_history
         self.pawn_correction_history = pawn_correction_history
-        self.pawn_move_history = pawn_move_history
         self.nodes_searched = np.uint64(0)
         self.end_time = 0.0
         # 使用陣列來包裝布林值，以便可以作為引用傳遞並在外部修改

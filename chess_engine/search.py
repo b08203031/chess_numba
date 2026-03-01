@@ -662,6 +662,16 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
     else:
         search_context.static_eval_stack[ply] = -INFINITY
 
+    # --- Dissonance Calculation (DGP Algorithm) ---
+    dissonance = 0
+    if tt_entry['flag'] != TT_FLAG_NONE and not is_currently_in_check and static_score != -INFINITY:
+        # Check if depth is reasonably close to current depth to trust the TT score
+        if tt_entry['depth'] >= depth - 2:
+            tt_score = np.int32(tt_entry['score'])
+            # Avoid using mate scores for dissonance calculation
+            if abs(tt_score) < MATE_IN_MAX_PLY and abs(static_score) < MATE_IN_MAX_PLY:
+                dissonance = abs(tt_score - static_score)
+
     # --- Null Move Pruning ---
     # Update: Dynamic Reduction and Safety Check
     if ENABLE_NMP and depth >= 3 and not is_currently_in_check and has_sufficient_material(piece_bbs, game_state[0]) and static_score >= beta:
@@ -731,7 +741,7 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                     null_move_cutoffs, futility_pruned, razoring_used, rfp_pruned, lmp_pruned, probcut_pruned, qs_delta_pruned, qs_see_pruned,
                     iid_searches, singular_extensions)
 
-        if ENABLE_RAZORING and static_score + RAZORING_MARGIN < alpha:
+        if ENABLE_RAZORING and static_score + RAZORING_MARGIN < alpha and dissonance < 250:
             razor_score, child_q_nodes, child_delta_pruned, child_see_pruned = quiescence_search(piece_bbs, occupancy_bbs, game_state, alpha, alpha + 1, ply, search_context, 0)
             quiescence_nodes += child_q_nodes
             qs_delta_pruned += child_delta_pruned
@@ -891,6 +901,10 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
         if ENABLE_FP and is_quiet_move and not is_currently_in_check and not is_pv and static_score != -INFINITY:
             # Dynamic Futility Margin: FP_BASE + FP_MULTIPLIER * depth
             margin = FP_BASE + FP_MULTIPLIER * depth
+            
+            # DGP Adjustment
+            if dissonance > 150:
+                margin += dissonance // 2
 
             if margin > 0 and static_score + margin < alpha:
                 futility_pruned += 1
@@ -955,6 +969,10 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                 if is_king_penetration:
                     lmr = max(0, lmr - 1)
                 if is_proactive_masking:
+                    lmr = max(0, lmr - 1)
+                    
+                # Dissonance-Guided Pruning (DGP)
+                if dissonance > 200:
                     lmr = max(0, lmr - 1)
 
             res = _search(

@@ -240,8 +240,8 @@ def evaluate_pawn_structure(piece_bbs):
                  stop_sq = sq + 8
                  if stop_sq < 64:
                      # Check if black pawns attack stop_sq
-                     # PAWN_ATTACKS[1, stop_sq] gives squares occupied by Black pawns that attack stop_sq.
-                     if (PAWN_ATTACKS[1, stop_sq] & black_pawns):
+                     # PAWN_ATTACKS[0, stop_sq] gives squares occupied by Black pawns that attack stop_sq.
+                     if (PAWN_ATTACKS[0, stop_sq] & black_pawns):
                          mg_score -= BACKWARD_PAWN_PENALTY[0]
                          eg_score -= BACKWARD_PAWN_PENALTY[1]
 
@@ -318,8 +318,8 @@ def evaluate_pawn_structure(piece_bbs):
                  stop_sq = sq - 8
                  if stop_sq >= 0:
                      # Check if white pawns attack stop_sq
-                     # PAWN_ATTACKS[0, stop_sq] gives squares occupied by White pawns that attack stop_sq.
-                     if (PAWN_ATTACKS[0, stop_sq] & white_pawns):
+                     # PAWN_ATTACKS[1, stop_sq] gives squares occupied by White pawns that attack stop_sq.
+                     if (PAWN_ATTACKS[1, stop_sq] & white_pawns):
                          mg_score += BACKWARD_PAWN_PENALTY[0]
                          eg_score += BACKWARD_PAWN_PENALTY[1]
 
@@ -696,7 +696,7 @@ def evaluate_attacks_mobility_threats(piece_bbs, occupancy_bbs):
         
         # Outpost Logic (White Knight)
         if not (black_pawn_attacks & BB_SQUARES[sq]):
-            if (PAWN_ATTACKS[WHITE, sq] & wp_bb):
+            if (PAWN_ATTACKS[BLACK, sq] & wp_bb):
                 rank = sq // 8
                 mg_outpost += OUTPOST_BONUS_KNIGHT[rank, 0]
                 eg_outpost += OUTPOST_BONUS_KNIGHT[rank, 1]
@@ -723,7 +723,7 @@ def evaluate_attacks_mobility_threats(piece_bbs, occupancy_bbs):
 
         # Outpost Logic (White Bishop)
         if not (black_pawn_attacks & BB_SQUARES[sq]):
-            if (PAWN_ATTACKS[WHITE, sq] & wp_bb):
+            if (PAWN_ATTACKS[BLACK, sq] & wp_bb):
                 rank = sq // 8
                 mg_outpost += OUTPOST_BONUS_BISHOP[rank, 0]
                 eg_outpost += OUTPOST_BONUS_BISHOP[rank, 1]
@@ -765,10 +765,6 @@ def evaluate_attacks_mobility_threats(piece_bbs, occupancy_bbs):
 
         temp_bb &= temp_bb - np.uint64(1)
 
-    if wk_bb:
-        white_attacks |= KING_ATTACKS[get_lsb_index(wk_bb)]
-
-
     # --- Black Pieces ---
     temp_bb = bn_bb
     while temp_bb:
@@ -786,7 +782,7 @@ def evaluate_attacks_mobility_threats(piece_bbs, occupancy_bbs):
 
         # Outpost Logic (Black Knight)
         if not (white_pawn_attacks & BB_SQUARES[sq]):
-            if (PAWN_ATTACKS[BLACK, sq] & bp_bb):
+            if (PAWN_ATTACKS[WHITE, sq] & bp_bb):
                 rank = sq // 8
                 rel_rank = 7 - rank
                 mg_outpost -= OUTPOST_BONUS_KNIGHT[rel_rank, 0]
@@ -814,7 +810,7 @@ def evaluate_attacks_mobility_threats(piece_bbs, occupancy_bbs):
 
         # Outpost Logic (Black Bishop)
         if not (white_pawn_attacks & BB_SQUARES[sq]):
-            if (PAWN_ATTACKS[BLACK, sq] & bp_bb):
+            if (PAWN_ATTACKS[WHITE, sq] & bp_bb):
                 rank = sq // 8
                 rel_rank = 7 - rank
                 mg_outpost -= OUTPOST_BONUS_BISHOP[rel_rank, 0]
@@ -856,10 +852,6 @@ def evaluate_attacks_mobility_threats(piece_bbs, occupancy_bbs):
         black_piece_tropism += KING_TROPISM_WEIGHTS[4] * (KING_TROPISM_MAX_DISTANCE - distance)
 
         temp_bb &= temp_bb - np.uint64(1)
-
-    if bk_bb:
-        black_attacks |= KING_ATTACKS[get_lsb_index(bk_bb)]
-
 
     # --- Threats Evaluation ---
     mg_threats = np.int32(0)
@@ -957,8 +949,8 @@ def _evaluate_king_pawn_endgame(piece_bbs, side_to_move):
             king_dist = CHEBYSHEV_DISTANCE[black_king_sq, promotion_sq]
             
             adjusted_pawn_steps = steps_to_promote
-            if side_to_move == 0: # White to move
-                adjusted_pawn_steps -= 1
+            if side_to_move == 1: # Black to move (enemy's turn)
+                adjusted_pawn_steps += 1
             
             # If King is too far -> Unstoppable
             if king_dist > adjusted_pawn_steps:
@@ -982,8 +974,8 @@ def _evaluate_king_pawn_endgame(piece_bbs, side_to_move):
             king_dist = CHEBYSHEV_DISTANCE[white_king_sq, promotion_sq]
             
             adjusted_pawn_steps = steps_to_promote
-            if side_to_move == 1: # Black to move
-                adjusted_pawn_steps -= 1
+            if side_to_move == 0: # White to move (enemy's turn)
+                adjusted_pawn_steps += 1
                 
             if king_dist > adjusted_pawn_steps:
                 score -= 800
