@@ -10,7 +10,10 @@ from chess_engine.move_generator import (
     generate_legal_moves, is_in_check, has_sufficient_material, generate_captures,
     generate_legal_moves_buffer, generate_captures_buffer
 )
-from chess_engine.bitboard_utils import get_lsb_index
+from chess_engine.bitboard_utils import (
+    get_lsb_index, WHITE_KING_ZONES, BLACK_KING_ZONES,
+    ROOK_RAYS, BISHOP_RAYS, SQUARES_BETWEEN
+)
 from chess_engine.board_operations import make_move, unmake_move, make_null_move
 from chess_engine.move import (
     get_to_square, get_from_square, get_special_move_flag,
@@ -452,19 +455,21 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
             # halfmove_clock includes moves from both path and history.
             hist_to_check = halfmove_clock - ply
             if hist_to_check >= 1:
-                # If ply is even, it's our turn, same as count-2, count-4, etc.
-                # If ply is odd, it's opponent's turn, same as count-1, count-3, etc.
-                start_offset = 1 if (ply % 2) != 0 else 2
+                # Same side to move:
+                # If ply is even, we match game_history[count-3, count-5, ...]
+                # If ply is odd, we match game_history[count-2, count-4, ...]
+                start_offset = 2 if (ply % 2) != 0 else 3
                 start_idx = search_context.game_history_count - start_offset
                 end_idx = max(-1, search_context.game_history_count - hist_to_check - 1)
-                for i in range(start_idx, end_idx, -2):
+                for i in range(start_idx, end_idx - 1, -2):
+                    if i < 0: break
                     if search_context.game_history[i] == zobrist_key:
                         repetition_count += 1
                         if repetition_count >= 1: break
 
-    # Avoid 1st repetition (2nd occurrence total)
+    # Avoid 1st repetition (2nd occurrence total) or 50-move rule
     # Crucial fix: Do not prune at the root (ply 0).
-    if ply > 0 and repetition_count >= 1:
+    if ply > 0 and (repetition_count >= 1 or halfmove_clock >= 100):
         search_context.pv_table[ply, ply] = NO_MOVE
         return (np.int32(0), NO_MOVE, nodes_searched, quiescence_nodes, cutoffs, tt_hits,
                 null_move_cutoffs, futility_pruned, razoring_used, rfp_pruned, lmp_pruned, probcut_pruned, qs_delta_pruned, qs_see_pruned,
@@ -472,6 +477,37 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
     
     # Initialize PV for this ply to avoid ghost moves from previous searches
     search_context.pv_table[ply, ply] = NO_MOVE
+
+    # --- DTR-LMR: Strategic Bitmask Pre-calculation ---
+    side_to_move = game_state[0]
+    friendly_king_bb = piece_bbs[5] if side_to_move == WHITE else piece_bbs[11]
+    enemy_king_bb = piece_bbs[11] if side_to_move == WHITE else piece_bbs[5]
+    
+    enemy_king_zone = np.uint64(0)
+    if enemy_king_bb:
+        enemy_king_sq = get_lsb_index(enemy_king_bb)
+        enemy_king_zone = BLACK_KING_ZONES[enemy_king_sq] if side_to_move == WHITE else WHITE_KING_ZONES[enemy_king_sq]
+    
+    friendly_danger_rays = np.uint64(0)
+    if friendly_king_bb:
+        friendly_king_sq = get_lsb_index(friendly_king_bb)
+        enemy_offset = 6 if side_to_move == WHITE else 0
+        enemy_rooks = piece_bbs[3 + enemy_offset] | piece_bbs[4 + enemy_offset]
+        enemy_bishops = piece_bbs[2 + enemy_offset] | piece_bbs[4 + enemy_offset]
+        
+        # Orthogonal danger rays
+        temp_rays = ROOK_RAYS[friendly_king_sq] & enemy_rooks
+        while temp_rays:
+            pinner_sq = get_lsb_index(temp_rays)
+            friendly_danger_rays |= SQUARES_BETWEEN[friendly_king_sq, pinner_sq]
+            temp_rays &= temp_rays - np.uint64(1)
+            
+        # Diagonal danger rays
+        temp_rays = BISHOP_RAYS[friendly_king_sq] & enemy_bishops
+        while temp_rays:
+            pinner_sq = get_lsb_index(temp_rays)
+            friendly_danger_rays |= SQUARES_BETWEEN[friendly_king_sq, pinner_sq]
+            temp_rays &= temp_rays - np.uint64(1)
 
     original_alpha = alpha
     
@@ -822,6 +858,18 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
         # Final determination of quiet move
         is_quiet_move = is_pseudo_quiet and not is_giving_check_after_move
 
+        # --- DTR-LMR: Strategic Move Properties ---
+        is_king_penetration = False
+        is_proactive_masking = False
+        if is_quiet_move:
+            # Check for King Zone Penetration
+            if BB_SQUARES[to_sq] & enemy_king_zone:
+                is_king_penetration = True
+            
+            # Check for Proactive Masking (blocking an enemy ray to our king)
+            if BB_SQUARES[to_sq] & friendly_danger_rays:
+                is_proactive_masking = True
+
         if is_quiet_move:
             quiet_move_counter += 1
             # Add to tried list for potential malus
@@ -856,8 +904,10 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
             # This prevents extending "spite checks" that just delay the inevitable.
             # Using a more relaxed negative threshold (-300) to allow for tactical sacrifices (e.g. Rook sac).
             # Optimization: Calculate SEE only if it's a check.
+            unmake_move(piece_bbs, occupancy_bbs, game_state, move, unmake_info)
             if see_ge(piece_bbs, occupancy_bbs, game_state[0], from_sq, to_sq, SEE_THRESHOLD, pinned_white, pinned_black):
                 check_extension = 1
+            unmake_info = make_move(piece_bbs, occupancy_bbs, game_state, move)
         
         current_extension = check_extension
         if move == tt_move: current_extension = max(current_extension, extension)
@@ -900,6 +950,12 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                     
                     if dist_after < dist_before:
                         lmr = max(0, lmr - 1)
+                        
+                # Dynamic Threat-Response LMR (DTR-LMR)
+                if is_king_penetration:
+                    lmr = max(0, lmr - 1)
+                if is_proactive_masking:
+                    lmr = max(0, lmr - 1)
 
             res = _search(
                 piece_bbs, occupancy_bbs, game_state, search_depth - lmr, -alpha - 1, -alpha, search_context, ply + 1, NO_MOVE, False)

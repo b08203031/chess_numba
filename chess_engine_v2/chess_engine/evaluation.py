@@ -414,57 +414,6 @@ def evaluate_piece_coordination(piece_bbs, piece_counts):
     return mg_score, eg_score
 
 
-@numba.njit(numba.types.UniTuple(numba.int32, 2)(piece_counts_signature), cache=True, boundscheck=False, fastmath=True)
-def evaluate_material_imbalance(piece_counts):
-    """
-    評估雙方的材質不平衡（如雙車對后、三輕子對后、雙車獎勵等）。
-    """
-    mg_score = np.int32(0)
-    eg_score = np.int32(0)
-
-    # White pieces indices: 0:P, 1:N, 2:B, 3:R, 4:Q, 5:K
-    # Black pieces indices: 6:P, 7:N, 8:B, 9:R, 10:Q, 11:K
-
-    wn, wb, wr, wq = piece_counts[1], piece_counts[2], piece_counts[3], piece_counts[4]
-    bn, bb, br, bq = piece_counts[7], piece_counts[8], piece_counts[9], piece_counts[10]
-
-    # --- 1. Rook Pair Bonus / 雙車獎勵 ---
-    if wr >= 2:
-        mg_score += ROOK_PAIR_BONUS[0]
-        eg_score += ROOK_PAIR_BONUS[1]
-    if br >= 2:
-        mg_score -= ROOK_PAIR_BONUS[0]
-        eg_score -= ROOK_PAIR_BONUS[1]
-
-    # --- 2. Knight Pair Penalty (Endgame) / 馬對懲罰（殘局） ---
-    # Knights are generally weaker in pairs in the endgame compared to bishops or rooks.
-    if wn >= 2:
-        eg_score -= 10
-    if bn >= 2:
-        eg_score += 10
-
-    # --- 3. Queen vs 2 Rooks / 后對雙車 ---
-    # If one side has 2 rooks and no queen, and the other has a queen and no rooks.
-    if wr == 2 and wq == 0 and br == 0 and bq == 1:
-        mg_score += 30
-        eg_score += 30
-    elif br == 2 and bq == 0 and wr == 0 and wq == 1:
-        mg_score -= 30
-        eg_score -= 30
-
-    # --- 4. Queen vs 3 Minor Pieces / 后對三輕子 ---
-    w_minors = wn + wb
-    b_minors = bn + bb
-    if w_minors >= 3 and wq == 0 and b_minors <= 1 and bq == 1:
-        mg_score += 40
-        eg_score += 40
-    elif b_minors >= 3 and bq == 0 and w_minors <= 1 and wq == 1:
-        mg_score -= 40
-        eg_score -= 40
-
-    return mg_score, eg_score
-
-
 @numba.njit(numba.int32(numba.int32, numba.uint64, numba.uint64, numba.int32), cache=True, boundscheck=False, fastmath=True)
 def _evaluate_pawn_shield_for_color(king_sq, friendly_pawns, enemy_pawns, color):
     """
@@ -506,21 +455,41 @@ def _evaluate_pawn_shield_for_color(king_sq, friendly_pawns, enemy_pawns, color)
 
     return score
 
-@numba.njit(numba.int32(numba.int32, numba.int32, piece_bbs_signature, occupancy_bbs_signature, numba.uint64, numba.uint64, numba.uint64, numba.int32), cache=True, boundscheck=False, fastmath=True)
-def _evaluate_king_attackers(king_sq, color, piece_bbs, occupancy_bbs, enemy_attacks_bb, friendly_attacks_bb, king_zone, safe_check_units):
+@numba.njit(numba.int32(numba.int32, numba.int32, piece_bbs_signature, occupancy_bbs_signature, numba.uint64, numba.uint64, numba.uint64), cache=True, boundscheck=False, fastmath=True)
+def _evaluate_king_attackers(king_sq, color, piece_bbs, occupancy_bbs, enemy_attacks_bb, friendly_attacks_bb, king_zone):
     """
     (Phase 2) Calculates the threat score based on pieces attacking the king zone using a non-linear model.
     (階段 2) 根據攻擊國王區域的棋子，使用非線性模型計算威脅分數。
     """
     # king_zone is now passed as an argument
 
-    total_attack_units = np.int32(safe_check_units)
+    # Optimization: If no enemy piece attacks the king zone, we can skip individual piece checks.
+    if not (enemy_attacks_bb & king_zone):
+        return np.int32(0)
+
+    total_attack_units = np.int32(0)
     attacker_count = np.int32(0)
 
     enemy_start_idx = 6 if color == 0 else 0
     (en_p, en_n, en_b, en_r, en_q, _) = piece_bbs[enemy_start_idx : enemy_start_idx + 6]
 
     all_pieces_occupancy = occupancy_bbs[2]
+
+    # Pawns - Find all enemy pawns that attack any square in the king zone
+    # 兵 - 尋找所有攻擊國王區域內任何方格的敵兵
+    # pawn_attack_sources_bb = np.uint64(0)
+    # temp_king_zone = king_zone
+    # while temp_king_zone:
+    #     zone_sq = get_lsb_index(temp_king_zone)
+    #     # PAWN_ATTACKS[color_of_king, zone_sq] gives squares from which enemy pawns would attack zone_sq
+    #     pawn_attack_sources_bb |= PAWN_ATTACKS[color, zone_sq]
+    #     temp_king_zone &= temp_king_zone - np.uint64(1)
+
+    # actual_pawn_attackers = pawn_attack_sources_bb & en_p
+    # if actual_pawn_attackers:
+    #     num_pawn_attackers = count_bits(actual_pawn_attackers)
+    #     total_attack_units += num_pawn_attackers * KING_SAFETY_ATTACK_UNITS[0]
+    #     attacker_count += num_pawn_attackers
 
     # Knights
     temp_bb = en_n
@@ -589,7 +558,7 @@ def _evaluate_king_attackers(king_sq, color, piece_bbs, occupancy_bbs, enemy_att
 
         temp_bb &= temp_bb - np.uint64(1)
 
-    if attacker_count < 2 and safe_check_units == 0:
+    if attacker_count < 2:
        return np.int32(0)
     
     # --- Weak Squares Logic (Stockfish 11) ---
@@ -615,8 +584,8 @@ def _evaluate_king_attackers(king_sq, color, piece_bbs, occupancy_bbs, enemy_att
     # The score from the table is a penalty, so it should be negative.
     return -KING_SAFETY_TABLE[min(total_attack_units, len(KING_SAFETY_TABLE) - 1)]
 
-@numba.njit(numba.types.UniTuple(numba.int32, 2)(piece_bbs_signature, occupancy_bbs_signature, numba.uint64, numba.uint64, numba.int32, numba.int32, numba.int32, numba.int32, piece_counts_signature, numba.int32, numba.int32), cache=True, boundscheck=False, fastmath=True)
-def evaluate_king_safety(piece_bbs, occupancy_bbs, white_attacks, black_attacks, white_tropism, black_tropism, white_pawn_storm_score, black_pawn_storm_score, piece_counts, white_safe_check_units, black_safe_check_units):
+@numba.njit(numba.types.UniTuple(numba.int32, 2)(piece_bbs_signature, occupancy_bbs_signature, numba.uint64, numba.uint64, numba.int32, numba.int32, numba.int32, numba.int32, piece_counts_signature), cache=True, boundscheck=False, fastmath=True)
+def evaluate_king_safety(piece_bbs, occupancy_bbs, white_attacks, black_attacks, white_tropism, black_tropism, white_pawn_storm_score, black_pawn_storm_score, piece_counts):
     """
     Refactored King Safety evaluation based on Chess Programming Wiki.
     重構的國王安全評估，基於 Chess Programming Wiki。
@@ -629,12 +598,10 @@ def evaluate_king_safety(piece_bbs, occupancy_bbs, white_attacks, black_attacks,
 
     # --- Calculate raw scores for each component / 計算每個組件的原始分數 ---
     white_shield = _evaluate_pawn_shield_for_color(white_king_sq, wp_bb, bp_bb, 0)
-    # white_safe_check_units is danger TO white king, so use black's check units
-    white_attackers = _evaluate_king_attackers(white_king_sq, 0, piece_bbs, occupancy_bbs, black_attacks, white_attacks, WHITE_KING_ZONES[white_king_sq], black_safe_check_units)
+    white_attackers = _evaluate_king_attackers(white_king_sq, 0, piece_bbs, occupancy_bbs, black_attacks, white_attacks, WHITE_KING_ZONES[white_king_sq])
 
     black_shield = _evaluate_pawn_shield_for_color(black_king_sq, bp_bb, wp_bb, 1)
-    # black_safe_check_units is danger TO black king, so use white's check units
-    black_attackers = _evaluate_king_attackers(black_king_sq, 1, piece_bbs, occupancy_bbs, white_attacks, black_attacks, BLACK_KING_ZONES[black_king_sq], white_safe_check_units)
+    black_attackers = _evaluate_king_attackers(black_king_sq, 1, piece_bbs, occupancy_bbs, white_attacks, black_attacks, BLACK_KING_ZONES[black_king_sq])
 
     # --- Sum raw scores / 加總原始分數 ---
     white_raw_safety = white_shield + white_attackers + white_tropism + white_pawn_storm_score
@@ -669,7 +636,7 @@ def evaluate_king_safety(piece_bbs, occupancy_bbs, white_attacks, black_attacks,
     return mg_safety_score, eg_safety_score
 
 
-@numba.njit(numba.types.Tuple((numba.uint64, numba.uint64, numba.uint64, numba.uint64, numba.int32, numba.int32, numba.int32, numba.int32, numba.int32, numba.int32, numba.int32, numba.int32, numba.int32, numba.int32))(piece_bbs_signature, occupancy_bbs_signature), cache=True, boundscheck=False, fastmath=True)
+@numba.njit(numba.types.Tuple((numba.uint64, numba.uint64, numba.uint64, numba.uint64, numba.int32, numba.int32, numba.int32, numba.int32, numba.int32, numba.int32, numba.int32, numba.int32))(piece_bbs_signature, occupancy_bbs_signature), cache=True, boundscheck=False, fastmath=True)
 def evaluate_attacks_mobility_threats(piece_bbs, occupancy_bbs):
     (wp_bb, wn_bb, wb_bb, wr_bb, wq_bb, wk_bb,
      bp_bb, bn_bb, bb_bb, br_bb, bq_bb, bk_bb) = piece_bbs
@@ -686,49 +653,8 @@ def evaluate_attacks_mobility_threats(piece_bbs, occupancy_bbs):
     white_pawn_attacks = ((wp_bb & NOT_A_FILE) << np.uint64(7)) | ((wp_bb & NOT_H_FILE) << np.uint64(9))
     black_pawn_attacks = ((bp_bb & NOT_H_FILE) >> np.uint64(7)) | ((bp_bb & NOT_A_FILE) >> np.uint64(9))
 
-    # --- Compute full attack maps first to avoid asymmetry and improve accuracy ---
     white_attacks = white_pawn_attacks
     black_attacks = black_pawn_attacks
-
-    # White pieces full attacks
-    temp_at = wn_bb
-    while temp_at:
-        white_attacks |= KNIGHT_ATTACKS[get_lsb_index(temp_at)]
-        temp_at &= temp_at - np.uint64(1)
-    temp_at = wb_bb
-    while temp_at:
-        white_attacks |= get_bishop_attacks(get_lsb_index(temp_at), all_occupancy)
-        temp_at &= temp_at - np.uint64(1)
-    temp_at = wr_bb
-    while temp_at:
-        white_attacks |= get_rook_attacks(get_lsb_index(temp_at), all_occupancy)
-        temp_at &= temp_at - np.uint64(1)
-    temp_at = wq_bb
-    while temp_at:
-        white_attacks |= get_queen_attacks(get_lsb_index(temp_at), all_occupancy)
-        temp_at &= temp_at - np.uint64(1)
-    if wk_bb:
-        white_attacks |= KING_ATTACKS[get_lsb_index(wk_bb)]
-
-    # Black pieces full attacks
-    temp_at = bn_bb
-    while temp_at:
-        black_attacks |= KNIGHT_ATTACKS[get_lsb_index(temp_at)]
-        temp_at &= temp_at - np.uint64(1)
-    temp_at = bb_bb
-    while temp_at:
-        black_attacks |= get_bishop_attacks(get_lsb_index(temp_at), all_occupancy)
-        temp_at &= temp_at - np.uint64(1)
-    temp_at = br_bb
-    while temp_at:
-        black_attacks |= get_rook_attacks(get_lsb_index(temp_at), all_occupancy)
-        temp_at &= temp_at - np.uint64(1)
-    temp_at = bq_bb
-    while temp_at:
-        black_attacks |= get_queen_attacks(get_lsb_index(temp_at), all_occupancy)
-        temp_at &= temp_at - np.uint64(1)
-    if bk_bb:
-        black_attacks |= KING_ATTACKS[get_lsb_index(bk_bb)]
 
     # --- Safe Masks for Mobility ---
     # Safe mask excludes squares attacked by enemy pawns. 
@@ -753,15 +679,12 @@ def evaluate_attacks_mobility_threats(piece_bbs, occupancy_bbs):
     mg_outpost = np.int32(0)
     eg_outpost = np.int32(0)
 
-    # --- Safe Check Units Accumulators ---
-    white_safe_check_units = np.int32(0)
-    black_safe_check_units = np.int32(0)
-
     # --- White Pieces ---
     temp_bb = wn_bb
     while temp_bb:
         sq = get_lsb_index(temp_bb)
         att = KNIGHT_ATTACKS[sq]
+        white_attacks |= att
         white_minor_attacks |= att
         moves = count_bits(att & ~white_occupancy & white_safe_mask)
         mg_mobility += (moves - KNIGHT_MOBILITY_BASE_MOVES) * KNIGHT_MOBILITY_WEIGHT[0]
@@ -771,14 +694,6 @@ def evaluate_attacks_mobility_threats(piece_bbs, occupancy_bbs):
         distance = MANHATTAN_DISTANCE[sq, black_king_sq]
         white_piece_tropism += KING_TROPISM_WEIGHTS[1] * (KING_TROPISM_MAX_DISTANCE - distance)
         
-        # Safe Checks (White Knight)
-        checks = att & BLACK_KING_ZONES[black_king_sq]
-        if checks:
-            # Square is safe if not attacked by black pieces
-            is_safe = (BB_SQUARES[sq] & ~black_attacks) != 0
-            if is_safe:
-                white_safe_check_units += SAFE_CHECK_KNIGHT
-
         # Outpost Logic (White Knight)
         if not (black_pawn_attacks & BB_SQUARES[sq]):
             if (PAWN_ATTACKS[WHITE, sq] & wp_bb):
@@ -796,6 +711,7 @@ def evaluate_attacks_mobility_threats(piece_bbs, occupancy_bbs):
     while temp_bb:
         sq = get_lsb_index(temp_bb)
         att = get_bishop_attacks(sq, all_occupancy)
+        white_attacks |= att
         white_minor_attacks |= att
         moves = count_bits(att & ~white_occupancy & white_safe_mask)
         mg_mobility += (moves - BISHOP_MOBILITY_BASE_MOVES) * BISHOP_MOBILITY_WEIGHT[0]
@@ -804,13 +720,6 @@ def evaluate_attacks_mobility_threats(piece_bbs, occupancy_bbs):
         # Tropism
         distance = MANHATTAN_DISTANCE[sq, black_king_sq]
         white_piece_tropism += KING_TROPISM_WEIGHTS[2] * (KING_TROPISM_MAX_DISTANCE - distance)
-
-        # Safe Checks (White Bishop)
-        checks = att & BLACK_KING_ZONES[black_king_sq]
-        if checks:
-            is_safe = (BB_SQUARES[sq] & ~black_attacks) != 0
-            if is_safe:
-                white_safe_check_units += SAFE_CHECK_BISHOP
 
         # Outpost Logic (White Bishop)
         if not (black_pawn_attacks & BB_SQUARES[sq]):
@@ -829,6 +738,7 @@ def evaluate_attacks_mobility_threats(piece_bbs, occupancy_bbs):
     while temp_bb:
         sq = get_lsb_index(temp_bb)
         att = get_rook_attacks(sq, all_occupancy)
+        white_attacks |= att
         white_rook_attacks |= att
         moves = count_bits(att & ~white_occupancy & white_safe_mask)
         mg_mobility += (moves - ROOK_MOBILITY_BASE_MOVES) * ROOK_MOBILITY_WEIGHT[0]
@@ -838,19 +748,13 @@ def evaluate_attacks_mobility_threats(piece_bbs, occupancy_bbs):
         distance = MANHATTAN_DISTANCE[sq, black_king_sq]
         white_piece_tropism += KING_TROPISM_WEIGHTS[3] * (KING_TROPISM_MAX_DISTANCE - distance)
 
-        # Safe Checks (White Rook)
-        checks = att & BLACK_KING_ZONES[black_king_sq]
-        if checks:
-            is_safe = (BB_SQUARES[sq] & ~black_attacks) != 0
-            if is_safe:
-                white_safe_check_units += SAFE_CHECK_ROOK
-
         temp_bb &= temp_bb - np.uint64(1)
 
     temp_bb = wq_bb
     while temp_bb:
         sq = get_lsb_index(temp_bb)
         att = get_queen_attacks(sq, all_occupancy)
+        white_attacks |= att
         moves = count_bits(att & ~white_occupancy & white_safe_mask)
         mg_mobility += (moves - QUEEN_MOBILITY_BASE_MOVES) * QUEEN_MOBILITY_WEIGHT[0]
         eg_mobility += (moves - QUEEN_MOBILITY_BASE_MOVES) * QUEEN_MOBILITY_WEIGHT[1]
@@ -858,13 +762,6 @@ def evaluate_attacks_mobility_threats(piece_bbs, occupancy_bbs):
         # Tropism
         distance = MANHATTAN_DISTANCE[sq, black_king_sq]
         white_piece_tropism += KING_TROPISM_WEIGHTS[4] * (KING_TROPISM_MAX_DISTANCE - distance)
-
-        # Safe Checks (White Queen)
-        checks = att & BLACK_KING_ZONES[black_king_sq]
-        if checks:
-            is_safe = (BB_SQUARES[sq] & ~black_attacks) != 0
-            if is_safe:
-                white_safe_check_units += SAFE_CHECK_QUEEN
 
         temp_bb &= temp_bb - np.uint64(1)
 
@@ -877,6 +774,7 @@ def evaluate_attacks_mobility_threats(piece_bbs, occupancy_bbs):
     while temp_bb:
         sq = get_lsb_index(temp_bb)
         att = KNIGHT_ATTACKS[sq]
+        black_attacks |= att
         black_minor_attacks |= att
         moves = count_bits(att & ~black_occupancy & black_safe_mask)
         mg_mobility -= (moves - KNIGHT_MOBILITY_BASE_MOVES) * KNIGHT_MOBILITY_WEIGHT[0]
@@ -885,13 +783,6 @@ def evaluate_attacks_mobility_threats(piece_bbs, occupancy_bbs):
         # Tropism: Distance to White King
         distance = MANHATTAN_DISTANCE[sq, white_king_sq]
         black_piece_tropism += KING_TROPISM_WEIGHTS[1] * (KING_TROPISM_MAX_DISTANCE - distance)
-
-        # Safe Checks (Black Knight)
-        checks = att & WHITE_KING_ZONES[white_king_sq]
-        if checks:
-            is_safe = (BB_SQUARES[sq] & ~white_attacks) != 0
-            if is_safe:
-                black_safe_check_units += SAFE_CHECK_KNIGHT
 
         # Outpost Logic (Black Knight)
         if not (white_pawn_attacks & BB_SQUARES[sq]):
@@ -911,6 +802,7 @@ def evaluate_attacks_mobility_threats(piece_bbs, occupancy_bbs):
     while temp_bb:
         sq = get_lsb_index(temp_bb)
         att = get_bishop_attacks(sq, all_occupancy)
+        black_attacks |= att
         black_minor_attacks |= att
         moves = count_bits(att & ~black_occupancy & black_safe_mask)
         mg_mobility -= (moves - BISHOP_MOBILITY_BASE_MOVES) * BISHOP_MOBILITY_WEIGHT[0]
@@ -919,13 +811,6 @@ def evaluate_attacks_mobility_threats(piece_bbs, occupancy_bbs):
         # Tropism
         distance = MANHATTAN_DISTANCE[sq, white_king_sq]
         black_piece_tropism += KING_TROPISM_WEIGHTS[2] * (KING_TROPISM_MAX_DISTANCE - distance)
-
-        # Safe Checks (Black Bishop)
-        checks = att & WHITE_KING_ZONES[white_king_sq]
-        if checks:
-            is_safe = (BB_SQUARES[sq] & ~white_attacks) != 0
-            if is_safe:
-                black_safe_check_units += SAFE_CHECK_BISHOP
 
         # Outpost Logic (Black Bishop)
         if not (white_pawn_attacks & BB_SQUARES[sq]):
@@ -945,6 +830,7 @@ def evaluate_attacks_mobility_threats(piece_bbs, occupancy_bbs):
     while temp_bb:
         sq = get_lsb_index(temp_bb)
         att = get_rook_attacks(sq, all_occupancy)
+        black_attacks |= att
         black_rook_attacks |= att
         moves = count_bits(att & ~black_occupancy & black_safe_mask)
         mg_mobility -= (moves - ROOK_MOBILITY_BASE_MOVES) * ROOK_MOBILITY_WEIGHT[0]
@@ -954,19 +840,13 @@ def evaluate_attacks_mobility_threats(piece_bbs, occupancy_bbs):
         distance = MANHATTAN_DISTANCE[sq, white_king_sq]
         black_piece_tropism += KING_TROPISM_WEIGHTS[3] * (KING_TROPISM_MAX_DISTANCE - distance)
 
-        # Safe Checks (Black Rook)
-        checks = att & WHITE_KING_ZONES[white_king_sq]
-        if checks:
-            is_safe = (BB_SQUARES[sq] & ~white_attacks) != 0
-            if is_safe:
-                black_safe_check_units += SAFE_CHECK_ROOK
-
         temp_bb &= temp_bb - np.uint64(1)
 
     temp_bb = bq_bb
     while temp_bb:
         sq = get_lsb_index(temp_bb)
         att = get_queen_attacks(sq, all_occupancy)
+        black_attacks |= att
         moves = count_bits(att & ~black_occupancy & black_safe_mask)
         mg_mobility -= (moves - QUEEN_MOBILITY_BASE_MOVES) * QUEEN_MOBILITY_WEIGHT[0]
         eg_mobility -= (moves - QUEEN_MOBILITY_BASE_MOVES) * QUEEN_MOBILITY_WEIGHT[1]
@@ -975,15 +855,10 @@ def evaluate_attacks_mobility_threats(piece_bbs, occupancy_bbs):
         distance = MANHATTAN_DISTANCE[sq, white_king_sq]
         black_piece_tropism += KING_TROPISM_WEIGHTS[4] * (KING_TROPISM_MAX_DISTANCE - distance)
 
-        # Safe Checks (Black Queen)
-        checks = att & WHITE_KING_ZONES[white_king_sq]
-        if checks:
-            is_safe = (BB_SQUARES[sq] & ~white_attacks) != 0
-            if is_safe:
-                black_safe_check_units += SAFE_CHECK_QUEEN
-
         temp_bb &= temp_bb - np.uint64(1)
 
+    if bk_bb:
+        black_attacks |= KING_ATTACKS[get_lsb_index(bk_bb)]
 
 
     # --- Threats Evaluation ---
@@ -1047,28 +922,8 @@ def evaluate_attacks_mobility_threats(piece_bbs, occupancy_bbs):
         mg_threats -= THREAT_ROOK_ON_QUEEN[0] * count
         eg_threats -= THREAT_ROOK_ON_QUEEN[1] * count
 
-    # 5. Piece on Piece Pressure
-    # Bonus for non-pawn pieces attacking defended enemy pieces of equal or higher value.
-    # Note: Hanging pieces are already covered in Step 2.
-    white_non_pawn_attacks = white_attacks & ~white_pawn_attacks
-    black_defended = black_attacks & all_black_pieces
-    white_pressure = white_non_pawn_attacks & black_defended & (bn_bb | bb_bb | br_bb | bq_bb)
-    if white_pressure:
-        count = count_bits(white_pressure)
-        mg_threats += THREAT_PIECE_ON_PIECE[0] * count
-        eg_threats += THREAT_PIECE_ON_PIECE[1] * count
-
-    black_non_pawn_attacks = black_attacks & ~black_pawn_attacks
-    white_defended = white_attacks & all_white_pieces
-    black_pressure = black_non_pawn_attacks & white_defended & (wn_bb | wb_bb | wr_bb | wq_bb)
-    if black_pressure:
-        count = count_bits(black_pressure)
-        mg_threats -= THREAT_PIECE_ON_PIECE[0] * count
-        eg_threats -= THREAT_PIECE_ON_PIECE[1] * count
-
     return (white_attacks, black_attacks, white_pawn_attacks, black_pawn_attacks, 
-            mg_mobility, eg_mobility, mg_threats, eg_threats, white_piece_tropism, black_piece_tropism, mg_outpost, eg_outpost,
-            white_safe_check_units, black_safe_check_units)
+            mg_mobility, eg_mobility, mg_threats, eg_threats, white_piece_tropism, black_piece_tropism, mg_outpost, eg_outpost)
 
 
 @numba.njit(numba.int32(piece_bbs_signature, numba.uint64), cache=True, boundscheck=False, fastmath=True)
@@ -1253,8 +1108,7 @@ def evaluate_position(piece_bbs, occupancy_bbs, game_state, lazy: bool = False):
     # --- Compute Attacks, Mobility, Threats (Optimized Single Pass) ---
     (white_attacks, black_attacks, white_pawn_attacks, black_pawn_attacks,
      mg_mobility, eg_mobility, mg_threats, eg_threats,
-     white_piece_tropism, black_piece_tropism, mg_outpost, eg_outpost,
-     white_safe_check_units, black_safe_check_units) = evaluate_attacks_mobility_threats(piece_bbs, occupancy_bbs)
+     white_piece_tropism, black_piece_tropism, mg_outpost, eg_outpost) = evaluate_attacks_mobility_threats(piece_bbs, occupancy_bbs)
 
     # --- 4. 加入兵形結構分數 (Moved up for King Safety dependency) ---
     mg_pawn_structure, eg_pawn_structure, white_pawn_tropism, black_pawn_tropism, white_pawn_storm, black_pawn_storm = evaluate_pawn_structure(piece_bbs)
@@ -1267,7 +1121,7 @@ def evaluate_position(piece_bbs, occupancy_bbs, game_state, lazy: bool = False):
     
     # Pass 'black_attack_tropism' to White King Safety (because it represents danger TO White King)
     # Pass 'white_attack_tropism' to Black King Safety (because it represents danger TO Black King)
-    mg_king_safety, eg_king_safety = evaluate_king_safety(piece_bbs, occupancy_bbs, white_attacks, black_attacks, black_attack_tropism, white_attack_tropism, white_pawn_storm, black_pawn_storm, piece_counts, white_safe_check_units, black_safe_check_units)
+    mg_king_safety, eg_king_safety = evaluate_king_safety(piece_bbs, occupancy_bbs, white_attacks, black_attacks, black_attack_tropism, white_attack_tropism, white_pawn_storm, black_pawn_storm, piece_counts)
     mg_score += mg_king_safety
     eg_score += eg_king_safety
 
@@ -1275,11 +1129,6 @@ def evaluate_position(piece_bbs, occupancy_bbs, game_state, lazy: bool = False):
     mg_coord, eg_coord = evaluate_piece_coordination(piece_bbs, piece_counts)
     mg_score += mg_coord
     eg_score += eg_coord
-
-    # --- 5b. 加入材質不平衡分數 ---
-    mg_imb, eg_imb = evaluate_material_imbalance(piece_counts)
-    mg_score += mg_imb
-    eg_score += eg_imb
 
     # --- 6. 加入棋子機動性分數 ---
     mg_score += mg_mobility

@@ -492,7 +492,7 @@ class ChessVisionApp(tk.Tk):
                     # Reconstruct FEN
                     parts = fen_raw.split()
                     parts[2] = new_rights
-                    parts[3] = "-"
+                    parts[3] = sanitize_fen_input(self.ep_var.get(), 'ep')
                     fen_final = " ".join(parts)
                 except Exception as e:
                     print(f"Auto-detect rights failed: {e}")

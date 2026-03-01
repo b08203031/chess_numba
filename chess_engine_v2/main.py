@@ -222,7 +222,8 @@ def uci_loop():
                 # Create a new context for this search / 為此搜尋創建新的上下文
                 global_search_context = SearchContext(
                     transposition_table, killer_moves, pv_table, history_table,
-                    butterfly_history, continuation_history, capture_history, pawn_correction_history
+                    butterfly_history, continuation_history, capture_history, pawn_correction_history,
+                    np.zeros((512, 12, 64), dtype=np.int32)
                 )
                 
                 # Update TT Generation

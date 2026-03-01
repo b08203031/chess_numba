@@ -231,7 +231,7 @@ def run_tournament(engine1_path, engine2_path, games_count, time_ms, engine1_nam
         # 追蹤 Engine 1 的詳細戰績以計算 Elo 誤差
         e1_stats = {"wins": 0, "draws": 0, "losses": 0}
 
-        pgn_file = "tournament_results.pgn"
+        pgn_file = "tournament_analysis/tournament_results.pgn"
         # Clear existing PGN file
         with open(pgn_file, "w") as f:
             pass
