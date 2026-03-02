@@ -194,21 +194,7 @@ def evaluate_pawn_structure(piece_bbs):
                 dist_friendly = CHEBYSHEV_DISTANCE[white_king_sq, block_sq]
                 dist_enemy = CHEBYSHEV_DISTANCE[black_king_sq, block_sq]
 
-                # Rule 1: Pawn Blocked by Enemy King
-                # If enemy King is on the stop square or directly blocking
-                # For white pawn, stop sq is sq+8.
-                # If enemy king is ON sq+8, distance is 0.
-                is_blocked_by_king = (dist_enemy <= 1) and (dist_friendly > dist_enemy)
-                
-                if is_blocked_by_king:
-                     # Reduce the passed pawn bonus significantly if blocked by King and undefended/unsupported
-                     # Remove most of the bonus we just added
-                     # e.g., reduce by 90%
-                     penalty = np.int32(PASSED_PAWN_BONUS[rank, 1] * 0.9)
-                     eg_score -= penalty
-                     mg_score -= np.int32(PASSED_PAWN_BONUS[rank, 0] * 0.9)
-
-                # Rule 2: Unstoppable Pawn (Simple Logic)
+                # Unstoppable Pawn (Simple Logic)
                 # If Friendly King is closer or supports, and Enemy King is far
                 # (TODO: Full Rule of the Square is complex with turn logic, this is a proxy)
                 
@@ -293,13 +279,6 @@ def evaluate_pawn_structure(piece_bbs):
                 dist_enemy = CHEBYSHEV_DISTANCE[white_king_sq, block_sq]
 
                 # Rule 1: Pawn Blocked by Enemy King
-                is_blocked_by_king = (dist_enemy <= 1) and (dist_friendly > dist_enemy)
-                
-                if is_blocked_by_king:
-                     penalty = np.int32(PASSED_PAWN_BONUS[relative_rank, 1] * 0.9)
-                     eg_score += penalty # Add penalty because we subtracted bonus earlier (for black)
-                     mg_score += np.int32(PASSED_PAWN_BONUS[relative_rank, 0] * 0.9)
-
                 if relative_rank > 3:
                     proximity_bonus = (dist_enemy * 5 - dist_friendly * 2) * relative_rank
                     proximity_bonus = max(-150, min(150, proximity_bonus))
@@ -475,21 +454,9 @@ def _evaluate_king_attackers(king_sq, color, piece_bbs, occupancy_bbs, enemy_att
 
     all_pieces_occupancy = occupancy_bbs[2]
 
-    # Pawns - Find all enemy pawns that attack any square in the king zone
-    # 兵 - 尋找所有攻擊國王區域內任何方格的敵兵
-    # pawn_attack_sources_bb = np.uint64(0)
-    # temp_king_zone = king_zone
-    # while temp_king_zone:
-    #     zone_sq = get_lsb_index(temp_king_zone)
-    #     # PAWN_ATTACKS[color_of_king, zone_sq] gives squares from which enemy pawns would attack zone_sq
-    #     pawn_attack_sources_bb |= PAWN_ATTACKS[color, zone_sq]
-    #     temp_king_zone &= temp_king_zone - np.uint64(1)
-
-    # actual_pawn_attackers = pawn_attack_sources_bb & en_p
-    # if actual_pawn_attackers:
-    #     num_pawn_attackers = count_bits(actual_pawn_attackers)
-    #     total_attack_units += num_pawn_attackers * KING_SAFETY_ATTACK_UNITS[0]
-    #     attacker_count += num_pawn_attackers
+    # 構造「除了國王以外的己方防守掩碼」
+    # 這是為了避免國王在面臨貼臉攻擊時，誤認自己防守了該弱點格
+    friendly_attacks_without_king = friendly_attacks_bb & ~KING_ATTACKS[king_sq]
 
     # Knights
     temp_bb = en_n
@@ -502,7 +469,7 @@ def _evaluate_king_attackers(king_sq, color, piece_bbs, occupancy_bbs, enemy_att
             attacker_count += 1
 
             # Check for weak squares attacked by this knight
-            undefended_in_zone = knight_attacks_in_zone & ~friendly_attacks_bb
+            undefended_in_zone = knight_attacks_in_zone & ~friendly_attacks_without_king
             weak_count = count_bits(undefended_in_zone)
             total_attack_units += weak_count * KING_SAFETY_WEAK_UNITS[1] # Each weak square adds more units
 
@@ -519,7 +486,7 @@ def _evaluate_king_attackers(king_sq, color, piece_bbs, occupancy_bbs, enemy_att
             attacker_count += 1
 
             # Check for weak squares attacked by this bishop
-            undefended_in_zone = attacks_in_zone & ~friendly_attacks_bb
+            undefended_in_zone = attacks_in_zone & ~friendly_attacks_without_king
             weak_count = count_bits(undefended_in_zone)
             total_attack_units += weak_count * KING_SAFETY_WEAK_UNITS[2] # Each weak square adds more units
         temp_bb &= temp_bb - np.uint64(1)
@@ -535,7 +502,7 @@ def _evaluate_king_attackers(king_sq, color, piece_bbs, occupancy_bbs, enemy_att
             attacker_count += 1
 
             # Check for weak squares attacked by this rook
-            undefended_in_zone = attack_in_zone & ~friendly_attacks_bb
+            undefended_in_zone = attack_in_zone & ~friendly_attacks_without_king
             weak_count = count_bits(undefended_in_zone)
             total_attack_units += weak_count * KING_SAFETY_WEAK_UNITS[3] # Each weak square adds more units
 
@@ -552,7 +519,7 @@ def _evaluate_king_attackers(king_sq, color, piece_bbs, occupancy_bbs, enemy_att
             attacker_count += 1
 
             # Check for weak squares attacked by this queen
-            undefended_in_zone = attack_in_zone & ~friendly_attacks_bb
+            undefended_in_zone = attack_in_zone & ~friendly_attacks_without_king
             weak_count = count_bits(undefended_in_zone)
             total_attack_units += weak_count * KING_SAFETY_WEAK_UNITS[4] # Each weak square adds more units
 
@@ -653,8 +620,8 @@ def evaluate_attacks_mobility_threats(piece_bbs, occupancy_bbs):
     white_pawn_attacks = ((wp_bb & NOT_A_FILE) << np.uint64(7)) | ((wp_bb & NOT_H_FILE) << np.uint64(9))
     black_pawn_attacks = ((bp_bb & NOT_H_FILE) >> np.uint64(7)) | ((bp_bb & NOT_A_FILE) >> np.uint64(9))
 
-    white_attacks = white_pawn_attacks
-    black_attacks = black_pawn_attacks
+    white_attacks = white_pawn_attacks | KING_ATTACKS[white_king_sq]
+    black_attacks = black_pawn_attacks | KING_ATTACKS[black_king_sq]
 
     # --- Safe Masks for Mobility ---
     # Safe mask excludes squares attacked by enemy pawns. 

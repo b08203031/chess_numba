@@ -500,6 +500,8 @@ FP_MULTIPLIER = 180 # Reduced multiplier
 # Reverse Futility Pruning
 RFP_MARGIN_D1 = 200 # Tightened from 250
 
+NMP_STATIC_MARGIN = 150
+
 # Late Move Reductions (LMR)
 LMR_MIN_DEPTH = 4           # Minimum depth to apply LMR / 應用 LMR 的最小深度
 LMR_MIN_QUIET_MOVE_INDEX = 4 # Minimum number of quiet moves before LMR / LMR 前的最小寧靜步數
@@ -509,7 +511,7 @@ LMR_REDUCTION = 1           # Depth reduction for LMR / LMR 的深度減少值
 # 晚期移動剪枝（LMP） - 在搜尋了一定數量的寧靜步後剪枝
 # Updated: Relaxed constraints to search even more moves (20 + 20*depth)
 LMP_MOVE_COUNT = np.array([
-    0 if d == 0 else 15 + 15 * d for d in range(MAX_PLY)
+    0 if d == 0 else 3 + 2 * d * d for d in range(MAX_PLY)
 ], dtype=np.int32)
 
 # LMR Table (Precomputed)
@@ -530,7 +532,7 @@ PROBCUT_R_PRIME = 4
 PROBCUT_MARGIN = 150 # centipawns
 
 # Delta Pruning
-DELTA_PRUNING_MARGIN = 1200
+DELTA_PRUNING_MARGIN = 400
 
 # --- Static Exchange Evaluation (SEE) Threshold / SEE 閾值 ---
 SEE_THRESHOLD = -250  # centipawns (Relaxed from -50)
@@ -580,4 +582,3 @@ BACKWARD_PAWN_PENALTY = np.array([10, 25], dtype=np.int32) # MG, EG
 NOT_A_FILE = ~np.uint64(0x0101010101010101)
 NOT_H_FILE = ~np.uint64(0x8080808080808080)
 
-NMP_STATIC_MARGIN = 600

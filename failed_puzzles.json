@@ -40,11 +40,27 @@
         "theme": "crushing kingsideAttack long middlegame pin"
     },
     {
-        "name": "Lichess Puzzle 004RF",
-        "fen": "5rk1/5ppp/1p6/1q3P1Q/2pp3P/6R1/6PK/8 w - - 0 31",
-        "solution": "g3g7",
-        "engine_move": "h5h6",
-        "rating": "1788",
-        "theme": "attraction crushing discoveredAttack endgame long sacrifice"
+        "name": "Lichess Puzzle 0048h",
+        "fen": "4r3/p5k1/2R4p/2Pp4/1P1pr1P1/P6P/8/3R3K b - - 0 35",
+        "solution": "e4e1",
+        "engine_move": "e8f8",
+        "rating": "1137",
+        "theme": "crushing endgame exposedKing long rookEndgame"
+    },
+    {
+        "name": "Lichess Puzzle 004Op",
+        "fen": "2kr2r1/1bp4n/1pq1p2p/p1P5/1P3B2/P6P/5RP1/RB3QK1 b - - 4 26",
+        "solution": "d8d1",
+        "engine_move": "h7f6",
+        "rating": "2164",
+        "theme": "crushing deflection kingsideAttack middlegame pin sacrifice skewer veryLong"
+    },
+    {
+        "name": "Lichess Puzzle 006NL",
+        "fen": "1r6/k2qn1b1/p1N1p1p1/2PpPpN1/2n2P1P/p4B2/1PP2Q2/1K1R3R b - - 0 32",
+        "solution": "e7c6",
+        "engine_move": "d7c6",
+        "rating": "2279",
+        "theme": "advancedPawn advantage middlegame pin veryLong"
     }
 ]
