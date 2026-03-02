@@ -566,7 +566,7 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
         if tt_entry['flag'] != TT_FLAG_NONE: tt_move = tt_entry['best_move']
 
     extension = 0
-    if ENABLE_SINGULAR_EXTENSIONS and depth >= MIN_SINGULAR_DEPTH and tt_move != NO_MOVE and tt_entry['flag'] == TT_FLAG_EXACT:
+    if ENABLE_SINGULAR_EXTENSIONS and depth >= MIN_SINGULAR_DEPTH and tt_move != NO_MOVE and (tt_entry['flag'] == TT_FLAG_EXACT or tt_entry['flag'] == TT_FLAG_BETA) and tt_entry['depth'] >= depth - 3:        
         tt_score = np.int32(tt_entry['score'])
         exclusion_beta = tt_score - SINGULAR_EXTENSION_MARGIN
         # Singular search is non-PV
@@ -689,7 +689,7 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
         # If depth=3: 3 - 1 - 3 = -1. _search handles depth < 0? No, usually depth is int.
         # Let's ensure search_depth >= 0.
         
-        search_depth = max(0, depth - 1 - nmp_reduction)
+        search_depth = max(0, depth - nmp_reduction)
         
         res_nm = _search(
             piece_bbs, occupancy_bbs, game_state, search_depth,
@@ -735,7 +735,7 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
     # We generally want to avoid risky pruning (RFP, Razoring, LMP) in PV nodes
     # because these nodes are part of the principal variation and require higher accuracy.
     if depth <= 2 and not is_currently_in_check and not is_pv:
-        if ENABLE_RFP and depth == 1 and static_score - RFP_MARGIN_D1 >= beta:
+        if ENABLE_RFP and depth <= 5 and static_score - (depth * RFP_MARGIN_D1) >= beta:
             rfp_pruned += 1
             return (np.int32(beta), NO_MOVE, nodes_searched, quiescence_nodes, cutoffs, tt_hits,
                     null_move_cutoffs, futility_pruned, razoring_used, rfp_pruned, lmp_pruned, probcut_pruned, qs_delta_pruned, qs_see_pruned,
@@ -837,7 +837,7 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                  # Capture Pruning
                  # Threshold: -200 * depth
                  threshold = PRUNING_CAPTURE_SEE_MARGIN * depth
-                 if not see_ge(piece_bbs, occupancy_bbs, side_to_move, from_sq, to_sq, threshold, pinned_white, pinned_black):
+                 if move != tt_move and not see_ge(piece_bbs, occupancy_bbs, side_to_move, from_sq, to_sq, threshold, pinned_white, pinned_black):
                      search_context.see_pruned_captures += 1
                      continue
              elif is_pseudo_quiet:
@@ -845,16 +845,19 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
 
                  # History Pruning
                  if ENABLE_HISTORY_PRUNING:
-                     aggressor_type = find_piece_type_on_square_side(piece_bbs, from_sq, side_to_move)
-                     history_score = search_context.history_table[aggressor_type, to_sq]
-                     if history_score < PRUNING_HISTORY_THRESHOLD:
-                         search_context.history_pruned += 1
-                         continue
+                     # 保護 Killer Moves 不被全域 History 覆蓋
+                     is_killer = (move == search_context.killer_moves[safe_ply * 2]) or (move == search_context.killer_moves[safe_ply * 2 + 1])
+                     if not is_killer and move != tt_move:
+                        aggressor_type = find_piece_type_on_square_side(piece_bbs, from_sq, side_to_move)
+                        history_score = search_context.history_table[aggressor_type, to_sq]
+                        if history_score < PRUNING_HISTORY_THRESHOLD:
+                            search_context.history_pruned += 1
+                            continue
 
                  # Quiet SEE Pruning (e.g. moving into attack)
                  # Threshold: -100 * depth * depth
                  threshold = PRUNING_QUIET_SEE_MARGIN * depth * depth
-                 if not see_ge(piece_bbs, occupancy_bbs, side_to_move, from_sq, to_sq, threshold, pinned_white, pinned_black):
+                 if move != tt_move and not see_ge(piece_bbs, occupancy_bbs, side_to_move, from_sq, to_sq, threshold, pinned_white, pinned_black):
                      search_context.see_pruned_quiets += 1
                      continue
                  
@@ -898,7 +901,7 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                     break
 
         # Futility Pruning (FP) - Disabled in PV nodes
-        if ENABLE_FP and is_quiet_move and not is_currently_in_check and not is_pv and static_score != -INFINITY:
+        if ENABLE_FP and is_quiet_move and not is_currently_in_check and not is_pv and move != tt_move and static_score != -INFINITY:
             # Dynamic Futility Margin: FP_BASE + FP_MULTIPLIER * depth
             margin = FP_BASE + FP_MULTIPLIER * depth
             
@@ -983,13 +986,30 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
             child_pcp = res[11]; child_qdp = res[12]; child_qsp = res[13]; child_iid = res[14]; child_se = res[15]
 
             if evaluation > alpha:
-                # Re-search with full window
-                res = _search(
-                    piece_bbs, occupancy_bbs, game_state, search_depth, -beta, -alpha, search_context, ply + 1, NO_MOVE, is_pv)
-                evaluation = -res[0]
-                child_nodes += res[2]; child_q_nodes += res[3]; child_cutoffs += res[4]; child_tt_hits += res[5]
-                child_nmc += res[6]; child_fp += res[7]; child_ru += res[8]; child_rfp += res[9]; child_lmp += res[10]
-                child_pcp += res[11]; child_qdp += res[12]; child_qsp += res[13]; child_iid += res[14]; child_se += res[15]
+                do_full_pv_search = is_pv and evaluation < beta
+                
+                if lmr > 0:
+                    # LMR failed high on zero window. Verify at full depth with zero window.
+                    res = _search(
+                        piece_bbs, occupancy_bbs, game_state, search_depth, -alpha - 1, -alpha, search_context, ply + 1, NO_MOVE, False)
+                    evaluation = -res[0]
+                    child_nodes += res[2]; child_q_nodes += res[3]; child_cutoffs += res[4]; child_tt_hits += res[5]
+                    child_nmc += res[6]; child_fp += res[7]; child_ru += res[8]; child_rfp += res[9]; child_lmp += res[10]
+                    child_pcp += res[11]; child_qdp += res[12]; child_qsp += res[13]; child_iid += res[14]; child_se += res[15]
+                    
+                    if is_pv and evaluation > alpha and evaluation < beta:
+                        do_full_pv_search = True
+                    else:
+                        do_full_pv_search = False
+                
+                if do_full_pv_search:
+                    # Re-search with full window
+                    res = _search(
+                        piece_bbs, occupancy_bbs, game_state, search_depth, -beta, -alpha, search_context, ply + 1, NO_MOVE, is_pv)
+                    evaluation = -res[0]
+                    child_nodes += res[2]; child_q_nodes += res[3]; child_cutoffs += res[4]; child_tt_hits += res[5]
+                    child_nmc += res[6]; child_fp += res[7]; child_ru += res[8]; child_rfp += res[9]; child_lmp += res[10]
+                    child_pcp += res[11]; child_qdp += res[12]; child_qsp += res[13]; child_iid += res[14]; child_se += res[15]
 
         unmake_move(piece_bbs, occupancy_bbs, game_state, move, unmake_info)
 
@@ -1019,16 +1039,16 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
         alpha = max(alpha, evaluation)
         if alpha >= beta:
             cutoffs += 1
+            bonus = depth * depth
+            
             if is_capture:
                 # Update Capture History
                 victim_type = find_piece_type_on_square_side(piece_bbs, to_sq, 1 - game_state[0])
                 if victim_type != -1:
                     aggressor_type = find_piece_type_on_square_side(piece_bbs, from_sq, game_state[0])
-                    bonus = depth * depth
                     update_capture_history(search_context.capture_history, aggressor_type, to_sq, victim_type, bonus)
             
             if is_quiet_move:
-                bonus = depth * depth
                 aggressor_type = find_piece_type_on_square_side(piece_bbs, get_from_square(move), game_state[0])
                 to_sq = get_to_square(move)
                 
@@ -1202,7 +1222,6 @@ def iterative_deepening_search(piece_bbs, occupancy_bbs, game_state, max_depth, 
                 break
             
             if score <= alpha:
-                beta = (alpha + beta) // 2
                 alpha = max(-INFINITY, alpha - delta)
                 delta += delta // 2
                 # log_info(f"depth {current_depth} fail low ({score} <= {alpha}), widening to [{alpha}, {beta}]")
