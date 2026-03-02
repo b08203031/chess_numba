@@ -837,7 +837,7 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                  # Capture Pruning
                  # Threshold: -200 * depth
                  threshold = PRUNING_CAPTURE_SEE_MARGIN * depth
-                 if move != tt_move and not see_ge(piece_bbs, occupancy_bbs, side_to_move, from_sq, to_sq, threshold, pinned_white, pinned_black):
+                 if not see_ge(piece_bbs, occupancy_bbs, side_to_move, from_sq, to_sq, threshold, pinned_white, pinned_black):
                      search_context.see_pruned_captures += 1
                      continue
              elif is_pseudo_quiet:
@@ -845,19 +845,16 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
 
                  # History Pruning
                  if ENABLE_HISTORY_PRUNING:
-                     # 保護 Killer Moves 不被全域 History 覆蓋
-                     is_killer = (move == search_context.killer_moves[safe_ply * 2]) or (move == search_context.killer_moves[safe_ply * 2 + 1])
-                     if not is_killer and move != tt_move:
-                        aggressor_type = find_piece_type_on_square_side(piece_bbs, from_sq, side_to_move)
-                        history_score = search_context.history_table[aggressor_type, to_sq]
-                        if history_score < PRUNING_HISTORY_THRESHOLD:
-                            search_context.history_pruned += 1
-                            continue
+                     aggressor_type = find_piece_type_on_square_side(piece_bbs, from_sq, side_to_move)
+                     history_score = search_context.history_table[aggressor_type, to_sq]
+                     if history_score < PRUNING_HISTORY_THRESHOLD:
+                         search_context.history_pruned += 1
+                         continue
 
                  # Quiet SEE Pruning (e.g. moving into attack)
                  # Threshold: -100 * depth * depth
                  threshold = PRUNING_QUIET_SEE_MARGIN * depth * depth
-                 if move != tt_move and not see_ge(piece_bbs, occupancy_bbs, side_to_move, from_sq, to_sq, threshold, pinned_white, pinned_black):
+                 if not see_ge(piece_bbs, occupancy_bbs, side_to_move, from_sq, to_sq, threshold, pinned_white, pinned_black):
                      search_context.see_pruned_quiets += 1
                      continue
                  
@@ -901,7 +898,7 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                     break
 
         # Futility Pruning (FP) - Disabled in PV nodes
-        if ENABLE_FP and is_quiet_move and not is_currently_in_check and not is_pv and move != tt_move and static_score != -INFINITY:
+        if ENABLE_FP and is_quiet_move and not is_currently_in_check and not is_pv and static_score != -INFINITY:
             # Dynamic Futility Margin: FP_BASE + FP_MULTIPLIER * depth
             margin = FP_BASE + FP_MULTIPLIER * depth
             
