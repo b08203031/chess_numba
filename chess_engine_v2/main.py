@@ -110,6 +110,8 @@ def uci_loop():
                 history_table.fill(0)
                 butterfly_history.fill(0)
                 continuation_history.fill(0)
+                capture_history.fill(0)
+                pawn_correction_history.fill(0)
                 pv_table.fill(0)
                 game_history = []
                 global_tt_generation = 0 # Reset generation on new game

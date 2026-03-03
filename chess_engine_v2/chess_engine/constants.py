@@ -452,7 +452,7 @@ STOP_SEARCH_FLAG = 66666
 PAWN_KEY_INDEX = 5
 
 # --- Aspiration Windows / 期望窗口 ---
-ASPIRATION_WINDOW_SIZE = 100 # centipawns
+ASPIRATION_WINDOW_SIZE = 25 # centipawns (H8: tightened from 100 to detect score instability)
 
 # --- Pruning Techniques / 剪枝技術 ---
 # Master switches for new pruning techniques / 新剪枝技術的總開關
@@ -503,8 +503,8 @@ RFP_MARGIN_D1 = 200 # Tightened from 250
 NMP_STATIC_MARGIN = 150
 
 # Late Move Reductions (LMR)
-LMR_MIN_DEPTH = 4           # Minimum depth to apply LMR / 應用 LMR 的最小深度
-LMR_MIN_QUIET_MOVE_INDEX = 4 # Minimum number of quiet moves before LMR / LMR 前的最小寧靜步數
+LMR_MIN_DEPTH = 3           # Minimum depth to apply LMR (H4: lowered from 4 to match Stockfish)
+LMR_MIN_QUIET_MOVE_INDEX = 3 # Minimum number of quiet moves before LMR (H4: lowered from 4)
 LMR_REDUCTION = 1           # Depth reduction for LMR / LMR 的深度減少值
 
 # Late Move Pruning (LMP) - Prune moves after a certain number of quiet moves have been searched
@@ -515,7 +515,7 @@ LMP_MOVE_COUNT = np.array([
 ], dtype=np.int32)
 
 # LMR Table (Precomputed)
-# Formula: int(0.5 + log(depth) * log(move_count) / 2.25)
+# A1: Formula tuned — divisor 2.25→2.0, offset 0.5→0.77 (matching modern Stockfish)
 # Using 256 as max move count (enough for almost all positions)
 LMR_TABLE = np.zeros((MAX_PLY, 256), dtype=np.int32)
 for d in range(MAX_PLY):
@@ -523,7 +523,7 @@ for d in range(MAX_PLY):
         if d < 2 or mc < 2:
             LMR_TABLE[d, mc] = 0
         else:
-            LMR_TABLE[d, mc] = int(0.5 + math.log(d) * math.log(mc) / 2.25)
+            LMR_TABLE[d, mc] = int(0.77 + math.log(d) * math.log(mc) / 2.0)
 
 
 # ProbCut
@@ -535,7 +535,7 @@ PROBCUT_MARGIN = 150 # centipawns
 DELTA_PRUNING_MARGIN = 400
 
 # --- Static Exchange Evaluation (SEE) Threshold / SEE 閾值 ---
-SEE_THRESHOLD = -250  # centipawns (Relaxed from -50)
+SEE_THRESHOLD = -100  # centipawns (H6: tightened from -200, only search non-losing captures in QSearch)
 ENABLE_SEE_IN_QUIESCENCE = True # Master switch to enable/disable SEE in quiescence search / 啟用/禁用靜態搜尋中 SEE 的總開關
 
 # =============================================================================

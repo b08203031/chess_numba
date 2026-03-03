@@ -1,42 +1,10 @@
 [
     {
-        "name": "Lichess Puzzle 006of",
-        "fen": "r2qr2k/1pp2Qp1/1b4np/pP2P3/P4n2/B1N2N1P/5PP1/R3R1K1 b - - 0 20",
-        "solution": "d8d3",
-        "engine_move": "f4d3",
-        "rating": "2500",
-        "theme": "advantage kingsideAttack long middlegame"
-    },
-    {
         "name": "Lichess Puzzle 0078T",
         "fen": "rk5r/1b3R2/pp2p2q/4P2p/B6B/4p2P/PP4P1/5Q1K w - - 0 28",
         "solution": "f7b7",
         "engine_move": "f1d3",
         "rating": "2286",
         "theme": "attraction crushing defensiveMove exposedKing long middlegame queensideAttack sacrifice"
-    },
-    {
-        "name": "Lichess Puzzle 002rd",
-        "fen": "r6k/q1p2p1p/1b2bPr1/p1ppP2Q/3P2p1/4B3/PP2NRPP/3R2K1 w - - 2 26",
-        "solution": "e2f4",
-        "engine_move": "d4c5",
-        "rating": "1776",
-        "theme": "crushing kingsideAttack long middlegame pin"
-    },
-    {
-        "name": "Lichess Puzzle 0068D",
-        "fen": "7r/pppk4/2pN1r2/8/3P2p1/2P5/PP2RPP1/4R1K1 b - - 0 26",
-        "solution": "f6h6",
-        "engine_move": "d7d6",
-        "rating": "1901",
-        "theme": "crushing endgame veryLong"
-    },
-    {
-        "name": "Lichess Puzzle 008LT",
-        "fen": "r4r1k/6p1/b3p1nN/p1pp4/1p3P1q/3P1Q1B/PPP2PK1/R6R w - - 1 27",
-        "solution": "h6f7",
-        "engine_move": "h3e6",
-        "rating": "1752",
-        "theme": "crushing kingsideAttack middlegame pin sacrifice short"
     }
 ]
