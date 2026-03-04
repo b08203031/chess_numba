@@ -74,8 +74,8 @@ def clear_transposition_table(tt):
 @nb.njit(cache=True)
 def probe_tt(tt, zobrist_key):
     """
-    在置換表中查找項目。如果鍵值匹配，則返回該項目。
-    使用位元與運算 (&) 代替取模運算 (%) 以提高效能。
+    在置換表 (Bucket=4) 中查找項目。
+    使用位元與運算 (&) 提取雜湊桶索引以提高效能。
     
     Args:
         tt (np.ndarray): 置換表。
@@ -84,20 +84,23 @@ def probe_tt(tt, zobrist_key):
     Returns:
         tuple: 置換表項目。如果未命中，則返回空項目。
     """
-    if len(tt) == 0:
+    if len(tt) < 4:
         return _EMPTY_TT_ENTRY
         
-    index = zobrist_key & np.uint64(len(tt) - 1)
-    entry = tt[index]
-    if entry['key'] == zobrist_key:
-        return entry
-    else:
-        return _EMPTY_TT_ENTRY
+    num_buckets = len(tt) // 4
+    base_index = (zobrist_key & np.uint64(num_buckets - 1)) * 4
+    
+    for i in range(4):
+        entry = tt[base_index + i]
+        if entry['key'] == zobrist_key:
+            return entry
+            
+    return _EMPTY_TT_ENTRY
 
 @nb.njit(cache=True)
 def store_tt(tt, zobrist_key, depth, score, flag, best_move, current_generation):
     """
-    使用深度優先替換策略將項目存儲在置換表中。
+    使用 Stockfish 風格的 4-Way Set Associative (四路組相聯) 策略存取置換表，並套用智能替換決策。
     
     Args:
         tt (np.ndarray): 置換表。
@@ -108,37 +111,64 @@ def store_tt(tt, zobrist_key, depth, score, flag, best_move, current_generation)
         best_move (int): 最佳移動。
         current_generation (int): 當前搜尋世代。
     """
-    if len(tt) == 0:
+    if len(tt) < 4:
         return
         
-    index = zobrist_key & np.uint64(len(tt) - 1)
-    existing_entry = tt[index]
-
-    # Replacement Strategy / 替換策略:
-    # 1. If the key matches (update same position), replace if new depth is >= existing depth OR existing entry is old.
-    # 2. If the key is different (collision), replace if new depth is >= existing depth OR existing entry is old.
-    # Simply put: If existing entry is from an old generation, we always replace it (it's effectively empty/stale).
+    num_buckets = len(tt) // 4
+    base_index = (zobrist_key & np.uint64(num_buckets - 1)) * 4
     
-    replace = False
+    # 1. 尋找完全相同的局面 (Exact Match)
+    for i in range(4):
+        idx = base_index + i
+        existing_entry = tt[idx]
+        if existing_entry['key'] == zobrist_key:
+            # 決定是否覆寫：舊世代或當前世代但深度更深
+            replace = False
+            if existing_entry['generation'] != current_generation:
+                replace = True
+            elif depth >= existing_entry['depth']:
+                replace = True
+                
+            if replace:
+                final_best_move = np.uint16(best_move)
+                if final_best_move == 0:
+                    final_best_move = existing_entry['best_move']
+
+                tt[idx]['key'] = zobrist_key
+                tt[idx]['depth'] = np.uint8(depth)
+                tt[idx]['score'] = np.int16(score)
+                tt[idx]['flag'] = np.uint8(flag)
+                tt[idx]['generation'] = np.uint8(current_generation)
+                tt[idx]['best_move'] = final_best_move
+            return # 找到並處理完相符局面，直接退出
+            
+    # 2. 如果沒有找到完全相同的局 (雜湊碰撞 Collision)，進入替換評估 (Replacement Strategy)
+    replace_idx = base_index
+    min_depth = 255
     
-    if existing_entry['generation'] != current_generation:
-        # Existing entry is old, replace it!
-        replace = True
-    else:
-        # Entry is from current generation, apply standard depth check
-        if depth >= existing_entry['depth']:
-            replace = True
+    for i in range(4):
+        idx = base_index + i
+        existing_entry = tt[idx]
+        
+        # 優先權 1: 尋找完全沒有資料的空位
+        if existing_entry['key'] == 0:
+            replace_idx = idx
+            break
+            
+        # 優先權 2: 尋找舊世代 (過期) 的資料
+        if existing_entry['generation'] != current_generation:
+            replace_idx = idx
+            break
+            
+        # 優先權 3: 同世代中尋找深度最淺的拿來犧牲
+        if existing_entry['depth'] < min_depth:
+            min_depth = existing_entry['depth']
+            replace_idx = idx
 
-    if replace:
-        # Best move preservation: If we are not storing a new best move, but the keys match,
-        # we keep the best move already in the table.
-        final_best_move = np.uint16(best_move)
-        if final_best_move == 0 and existing_entry['key'] == zobrist_key:
-            final_best_move = existing_entry['best_move']
-
-        tt[index]['key'] = zobrist_key
-        tt[index]['depth'] = np.uint8(depth)
-        tt[index]['score'] = np.int16(score)
-        tt[index]['flag'] = np.uint8(flag)
-        tt[index]['generation'] = np.uint8(current_generation)
-        tt[index]['best_move'] = final_best_move
+    # 執行最終替換 (因為非吻合點，不保留舊的最佳步)
+    tt[replace_idx]['key'] = zobrist_key
+    tt[replace_idx]['depth'] = np.uint8(depth)
+    tt[replace_idx]['score'] = np.int16(score)
+    tt[replace_idx]['flag'] = np.uint8(flag)
+    tt[replace_idx]['generation'] = np.uint8(current_generation)
+    tt[replace_idx]['best_move'] = np.uint16(best_move)

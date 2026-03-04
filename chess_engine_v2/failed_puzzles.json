@@ -16,6 +16,14 @@
         "theme": "attraction crushing defensiveMove exposedKing long middlegame queensideAttack sacrifice"
     },
     {
+        "name": "Lichess Puzzle 002rd",
+        "fen": "r6k/q1p2p1p/1b2bPr1/p1ppP2Q/3P2p1/4B3/PP2NRPP/3R2K1 w - - 2 26",
+        "solution": "e2f4",
+        "engine_move": "d4c5",
+        "rating": "1776",
+        "theme": "crushing kingsideAttack long middlegame pin"
+    },
+    {
         "name": "Lichess Puzzle 004Op",
         "fen": "2kr2r1/1bp4n/1pq1p2p/p1P5/1P3B2/P6P/5RP1/RB3QK1 b - - 4 26",
         "solution": "d8d1",
