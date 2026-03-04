@@ -154,16 +154,13 @@ def see(piece_bbs, occupancy_bbs, side_to_move, from_sq, to_sq, pinned_white, pi
     if attacker_type == PAWN and (to_sq >= 56 or to_sq < 8):
         attacker_value = SEE_PIECE_VALUES[QUEEN]
 
-    # Setup Occupied Bitboard
-    occupied = occupancy_bbs[2]
-
-    # Remove the initial attacker from occupied
-    occupied &= ~BB_SQUARES[from_sq]
+    # Setup Occupied Bitboard (XOR is faster than AND-NOT when bit is guaranteed set)
+    occupied = occupancy_bbs[2] ^ BB_SQUARES[from_sq]
 
     # If it was an En Passant capture, also remove the captured pawn
     if is_ep:
         ep_sq = (from_sq // 8) * 8 + (to_sq % 8)
-        occupied &= ~BB_SQUARES[ep_sq]
+        occupied ^= BB_SQUARES[ep_sq]
 
     # Pinned pieces are now passed as arguments!
     # pinned_white = get_pinned_pieces(piece_bbs, occupancy_bbs, WHITE)
@@ -175,6 +172,10 @@ def see(piece_bbs, occupancy_bbs, side_to_move, from_sq, to_sq, pinned_white, pi
 
     current_side = side_to_move
     current_attacker_val = attacker_value
+
+    # Pre-compute slider masks outside loop (avoid recomputation each iteration)
+    sliders_diag = piece_bbs[BISHOP] | piece_bbs[QUEEN] | piece_bbs[BISHOP+6] | piece_bbs[QUEEN+6]
+    sliders_orth = piece_bbs[ROOK] | piece_bbs[QUEEN] | piece_bbs[ROOK+6] | piece_bbs[QUEEN+6]
 
     depth = 1
 
@@ -193,9 +194,8 @@ def see(piece_bbs, occupancy_bbs, side_to_move, from_sq, to_sq, pinned_white, pi
         # 1. Must belong to current_side
         # 2. Must not be pinned (Stockfish simplification)
 
-        stm_attackers = attackers & (piece_bbs[0] | piece_bbs[1] | piece_bbs[2] | piece_bbs[3] | piece_bbs[4] | piece_bbs[5]) \
-                        if current_side == WHITE else \
-                        attackers & (piece_bbs[6] | piece_bbs[7] | piece_bbs[8] | piece_bbs[9] | piece_bbs[10] | piece_bbs[11])
+        # Use pre-stored occupancy bitboards instead of 6-OR
+        stm_attackers = attackers & (occupancy_bbs[0] if current_side == WHITE else occupancy_bbs[1])
 
         # Remove pinned pieces
         pinned_mask = pinned_white if current_side == WHITE else pinned_black
@@ -211,41 +211,22 @@ def see(piece_bbs, occupancy_bbs, side_to_move, from_sq, to_sq, pinned_white, pi
         if type_idx == PAWN and (to_sq >= 56 or to_sq < 8):
             val = SEE_PIECE_VALUES[QUEEN]
 
-        # If King is attacker, check if it steps into check?
-        # Stockfish: `if (type == KING) { if (attackers & ~stm) break; }`
-        if (type_idx == KING or type_idx == KING + 6):
-             # Check if opponent still has attackers
-             # Opponent is `1 - current_side`
-             # Opponent attackers in `attackers`
-             opp_mask = (piece_bbs[6] | piece_bbs[7] | piece_bbs[8] | piece_bbs[9] | piece_bbs[10] | piece_bbs[11]) \
-                        if current_side == WHITE else \
-                        (piece_bbs[0] | piece_bbs[1] | piece_bbs[2] | piece_bbs[3] | piece_bbs[4] | piece_bbs[5])
+        # King check (Stockfish-style: use occupancy_bbs for opponent mask)
+        if type_idx == KING:
+             opp_side = 1 - current_side
+             if attackers & occupancy_bbs[opp_side]:
+                 break  # King cannot capture into check
+             val = 0  # Safe King capture
 
-             if (attackers & opp_mask):
-                 break # King cannot capture into check
+        # Remove this attacker from occupied (XOR is faster)
+        occupied ^= bb
 
-             # If King captures safely, its risk value is 0 (it won't be captured)
-             val = 0
-
-        # Remove this attacker from occupied
-        # This "reveals" pieces behind it (X-Ray)
-        occupied &= ~bb
-
-        # Add X-Ray attackers
-        # Stockfish adds: `attackers |= attacks_bb<BISHOP/ROOK>(to, occupied) & pieces(Sliders)`
-        # We simulate this.
-        
-        # Check diagonals: revealed by Pawns, Bishops, or Queens
+        # X-Ray attack discovery (using pre-computed slider masks)
         if type_idx == PAWN or type_idx == BISHOP or type_idx == QUEEN:
-             sliders_diag = piece_bbs[BISHOP] | piece_bbs[QUEEN] | piece_bbs[BISHOP+6] | piece_bbs[QUEEN+6]
-             # Optimization: Ray filter
              if sliders_diag & BISHOP_RAYS[to_sq]:
                  attackers |= (get_sliding_attacks(to_sq, occupied, True) & sliders_diag)
 
-        # Check orthogonals: revealed by Rooks or Queens
         if type_idx == ROOK or type_idx == QUEEN:
-             sliders_orth = piece_bbs[ROOK] | piece_bbs[QUEEN] | piece_bbs[ROOK+6] | piece_bbs[QUEEN+6]
-             # Optimization: Ray filter
              if sliders_orth & ROOK_RAYS[to_sq]:
                  attackers |= (get_sliding_attacks(to_sq, occupied, False) & sliders_orth)
 
@@ -264,16 +245,15 @@ def see(piece_bbs, occupancy_bbs, side_to_move, from_sq, to_sq, pinned_white, pi
 @numba.njit(cache=True)
 def see_ge(piece_bbs, occupancy_bbs, side_to_move, from_sq, to_sq, threshold, pinned_white, pinned_black, attacker_type=-1, victim_type=-1):
     """
-    SEE >= Threshold.
-    Optimized to exit early.
+    SEE >= Threshold (Stockfish-style).
+    Uses res ^= 1 toggle + swap variable for efficient early exit.
     Updated: Accepts pre-calculated pinned_white and pinned_black bitboards.
     """
-    # Identical setup to see()
-
+    # 1. Identify attacker and victim types
     if attacker_type == -1:
         attacker_type = find_piece_type_on_square_side(piece_bbs, from_sq, side_to_move)
     
-    if attacker_type == -1: return False # Should not happen
+    if attacker_type == -1: return False
     attacker_type %= 6
 
     if victim_type == -1:
@@ -282,6 +262,7 @@ def see_ge(piece_bbs, occupancy_bbs, side_to_move, from_sq, to_sq, threshold, pi
     if victim_type != -1:
         victim_type %= 6
 
+    # 2. Handle en passant and compute initial value
     is_ep = False
     if victim_type == -1:
         if attacker_type == PAWN and abs((from_sq % 8) - (to_sq % 8)) == 1:
@@ -292,94 +273,84 @@ def see_ge(piece_bbs, occupancy_bbs, side_to_move, from_sq, to_sq, threshold, pi
     else:
         value = SEE_PIECE_VALUES[victim_type]
 
-    # Swap Algorithm with Balance
-    # score = victim - threshold
-    balance = value - threshold
-
-    # If initial capture already fails (e.g. capturing nothing with big threshold?), return False
-    # But usually threshold is negative.
-    if balance < 0:
+    # 3. Stockfish-style early exit with swap variable
+    swap = value - threshold
+    if swap < 0:
         return False
 
-    # Next: Opponent captures us.
-    # balance = attacker_val - balance
     attacker_val = SEE_PIECE_VALUES[attacker_type]
     # Pawn Promotion handling
     if attacker_type == PAWN and (to_sq >= 56 or to_sq < 8):
         attacker_val = SEE_PIECE_VALUES[QUEEN]
         
-    balance = attacker_val - balance
-
-    if balance <= 0:
+    swap = attacker_val - swap
+    if swap <= 0:
         return True
 
-    occupied = occupancy_bbs[2]
-    occupied &= ~BB_SQUARES[from_sq]
+    # 4. Setup occupied (XOR style)
+    occupied = occupancy_bbs[2] ^ BB_SQUARES[from_sq]
     if is_ep:
         ep_sq = (from_sq // 8) * 8 + (to_sq % 8)
-        occupied &= ~BB_SQUARES[ep_sq]
+        occupied ^= BB_SQUARES[ep_sq]
 
-    # Pinned pieces are now passed as arguments!
-    # pinned_white = get_pinned_pieces(piece_bbs, occupancy_bbs, WHITE)
-    # pinned_black = get_pinned_pieces(piece_bbs, occupancy_bbs, BLACK)
-
+    # 5. Get all attackers to target square
     attackers = get_attackers_for_see(to_sq, occupied, piece_bbs, WHITE) | \
                 get_attackers_for_see(to_sq, occupied, piece_bbs, BLACK)
 
     current_side = side_to_move
+    res = 1
+
+    # Pre-compute slider masks outside loop
+    sliders_diag = piece_bbs[BISHOP] | piece_bbs[QUEEN] | piece_bbs[BISHOP+6] | piece_bbs[QUEEN+6]
+    sliders_orth = piece_bbs[ROOK] | piece_bbs[QUEEN] | piece_bbs[ROOK+6] | piece_bbs[QUEEN+6]
 
     while True:
-        current_side = 1 - current_side
-
-        # New: Filter attackers
+        current_side = numba.int32(1 - current_side)
         attackers &= occupied
 
-        stm_attackers = attackers & (piece_bbs[0] | piece_bbs[1] | piece_bbs[2] | piece_bbs[3] | piece_bbs[4] | piece_bbs[5]) \
-                        if current_side == WHITE else \
-                        attackers & (piece_bbs[6] | piece_bbs[7] | piece_bbs[8] | piece_bbs[9] | piece_bbs[10] | piece_bbs[11])
+        # Use pre-stored occupancy bitboards instead of 6-OR
+        stm_attackers = attackers & (occupancy_bbs[0] if current_side == WHITE else occupancy_bbs[1])
 
+        # Remove pinned pieces
         pinned_mask = pinned_white if current_side == WHITE else pinned_black
         stm_attackers &= ~pinned_mask
 
         if stm_attackers == 0:
-            return (current_side != side_to_move)
+            break
 
+        # Toggle result bit (Stockfish-style null-window alpha-beta)
+        res ^= 1
+
+        # Find LVA (Least Valuable Attacker)
         val, bb, type_idx = get_lva_and_remove(stm_attackers, piece_bbs, current_side)
 
         # Pawn Promotion handling for subsequent captures
         if type_idx == PAWN and (to_sq >= 56 or to_sq < 8):
             val = SEE_PIECE_VALUES[QUEEN]
 
-        # King Check
-        if (type_idx == KING or type_idx == KING + 6):
-             opp_mask = (piece_bbs[6] | piece_bbs[7] | piece_bbs[8] | piece_bbs[9] | piece_bbs[10] | piece_bbs[11]) \
-                        if current_side == WHITE else \
-                        (piece_bbs[0] | piece_bbs[1] | piece_bbs[2] | piece_bbs[3] | piece_bbs[4] | piece_bbs[5])
-             if (attackers & opp_mask):
-                 # King cannot capture. Treat as no moves.
-                 return (current_side != side_to_move)
+        # King check (Stockfish-style: direct return)
+        if type_idx == KING:
+             opp_side = numba.int32(1 - current_side)
+             # If opponent still has attackers, king can't capture
+             if attackers & occupancy_bbs[opp_side]:
+                 return bool(res ^ 1)  # Undo toggle, opponent wins
+             return bool(res)  # Safe king capture, we win
 
-             # Safe King capture.
-             val = 0
+        # Update swap and check for early cutoff
+        swap = val - swap
+        if swap < res:
+            break
 
-        occupied &= ~bb
+        # Remove attacker from occupied (XOR)
+        occupied ^= bb
 
-        # X-Ray
+        # X-Ray attack discovery (using pre-computed slider masks)
         if type_idx == PAWN or type_idx == BISHOP or type_idx == QUEEN:
-             sliders_diag = piece_bbs[BISHOP] | piece_bbs[QUEEN] | piece_bbs[BISHOP+6] | piece_bbs[QUEEN+6]
              if sliders_diag & BISHOP_RAYS[to_sq]:
                  attackers |= (get_sliding_attacks(to_sq, occupied, True) & sliders_diag)
 
         if type_idx == ROOK or type_idx == QUEEN:
-             sliders_orth = piece_bbs[ROOK] | piece_bbs[QUEEN] | piece_bbs[ROOK+6] | piece_bbs[QUEEN+6]
              if sliders_orth & ROOK_RAYS[to_sq]:
                  attackers |= (get_sliding_attacks(to_sq, occupied, False) & sliders_orth)
 
-        # Update balance
-        balance = val - balance
-
-        # Check cutoff
-        if balance <= 0:
-            return (current_side == side_to_move)
-
-    return True # Fallback
+    return bool(res)
