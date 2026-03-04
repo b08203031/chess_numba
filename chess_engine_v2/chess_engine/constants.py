@@ -504,14 +504,13 @@ NMP_STATIC_MARGIN = 150
 
 # Late Move Reductions (LMR)
 LMR_MIN_DEPTH = 3           # Minimum depth to apply LMR (H4: lowered from 4 to match Stockfish)
-LMR_MIN_QUIET_MOVE_INDEX = 3 # Minimum number of quiet moves before LMR (H4: lowered from 4)
+LMR_MIN_QUIET_MOVE_INDEX = 4 # Minimum number of quiet moves before LMR (H4: lowered from 4)
 LMR_REDUCTION = 1           # Depth reduction for LMR / LMR 的深度減少值
 
 # Late Move Pruning (LMP) - Prune moves after a certain number of quiet moves have been searched
 # 晚期移動剪枝（LMP） - 在搜尋了一定數量的寧靜步後剪枝
-# Updated: Relaxed constraints to search even more moves (20 + 20*depth)
 LMP_MOVE_COUNT = np.array([
-    0 if d == 0 else 3 + 2 * d * d for d in range(MAX_PLY)
+    0 if d == 0 else 3 + 2 * d * d for d in range(8)
 ], dtype=np.int32)
 
 # LMR Table (Precomputed)

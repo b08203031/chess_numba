@@ -124,11 +124,11 @@ def get_lmr_reduction(depth, move_count, history_score, improving, is_pv):
     
     # PV adjustment: PV nodes are searched more carefully
     if not is_pv:
-        reduction += 0.5
+        reduction += 1.0
     
     # Improving adjustment: If position is not improving, reduce more aggressively
     if not improving:
-        reduction += 0.5
+        reduction += 1.0
 
     # History Adjustment: Scale +/- 1.5 reduction for max history
     history_adjustment = (history_score / float(MAX_HISTORY)) * 1.5
@@ -268,6 +268,12 @@ def quiescence_search(piece_bbs, occupancy_bbs, game_state, alpha, beta, ply, se
     move_count = 0
     if is_currently_in_check:
         # If in check, we must evade. No stand_pat (can't stand pat in check).
+        # H9 Fix: Add depth limit for check evasion in QSearch to prevent infinite loops.
+        # Check evasions are very forcing, so we allow them to go deeper than normal QSearch.
+        # (e.g., 2x MAX_QUIESCENCE_DEPTH)
+        if q_ply >= MAX_QUIESCENCE_DEPTH * 2:
+            return evaluate_position(piece_bbs, occupancy_bbs, game_state, lazy=False), q_nodes, delta_pruned, see_pruned
+
         # We must generate ALL legal moves (evasions).
         move_count = generate_pseudo_legal_moves_buffer(piece_bbs, occupancy_bbs, game_state, search_context.moves_buffer, ply)
         if move_count == 0:
@@ -941,7 +947,7 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                     continue  # H7: was 'break', changed to 'continue' to not skip bad captures
 
         # Futility Pruning (FP) - Disabled in PV nodes
-        if ENABLE_FP and is_quiet_move and not is_currently_in_check and not is_pv and static_score != -INFINITY:
+        if ENABLE_FP and is_quiet_move and depth <= 8 and not is_currently_in_check and not is_pv and static_score != -INFINITY:
             # Dynamic Futility Margin: FP_BASE + FP_MULTIPLIER * depth
             margin = FP_BASE + FP_MULTIPLIER * depth
             # C1: Tighter margin when not improving
@@ -1014,10 +1020,6 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
 
                 lmr = get_lmr_reduction(depth, legal_moves_tried, history_score, improving, is_pv)
 
-                # H5: CUT node bonus — non-PV, non-first moves get extra reduction
-                if not is_pv and legal_moves_tried > 2:
-                    lmr += 2
-                
                 # No TT move bonus
                 if tt_move == NO_MOVE:
                     lmr += 1
@@ -1233,12 +1235,18 @@ def iterative_deepening_search(piece_bbs, occupancy_bbs, game_state, max_depth, 
     
     # --- Decay History Tables ---
     # H11: Decay history to prioritize recent data and reduce stale information
-    # Note: Integer division by 2. Small negative values may stick at -1, which is acceptable.
-    search_context.history_table[:] = search_context.history_table[:] // 2
-    search_context.butterfly_history[:] = search_context.butterfly_history[:] // 2
-    search_context.capture_history[:] = search_context.capture_history[:] // 2
+    # Fix H8: Use truncation towards zero instead of floor division.
+    # Python's // 2 is floor division: -1 // 2 = -1 (sticks forever).
+    # np.sign * (abs // 2) truncates towards zero: -1 → 0, -3 → -1, etc.
+    h = search_context.history_table
+    search_context.history_table[:] = np.sign(h) * (np.abs(h) // 2)
+    b = search_context.butterfly_history
+    search_context.butterfly_history[:] = np.sign(b) * (np.abs(b) // 2)
+    c = search_context.capture_history
+    search_context.capture_history[:] = np.sign(c) * (np.abs(c) // 2)
     # H10: Continuation history decay (was missing entirely — caused cross-game state pollution)
-    search_context.continuation_history[:] = search_context.continuation_history[:] // 2
+    ch = search_context.continuation_history
+    search_context.continuation_history[:] = np.sign(ch) * (np.abs(ch) // 2)
 
     # --- Setup Game History ---
     if game_history_list is not None:
@@ -1351,9 +1359,6 @@ def iterative_deepening_search(piece_bbs, occupancy_bbs, game_state, max_depth, 
 
         nps = int(total_nodes / (elapsed_time_ms / 1000)) if elapsed_time_ms > 0 else 0
         print(f"info depth {current_depth} score {uci_score_string} nodes {total_nodes} nps {nps} time {int(elapsed_time_ms)} pv {pv_string}")
-
-        if "mate" in uci_score_string:
-            break
 
         # Predictive soft time limit
         if maximum_time_ms > 0:
