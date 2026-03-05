@@ -262,8 +262,10 @@ def quiescence_search(piece_bbs, occupancy_bbs, game_state, alpha, beta, ply, se
             should_cutoff = True
         if should_cutoff:
             return qs_tt_score, q_nodes, delta_pruned, see_pruned
-
     is_currently_in_check = is_in_check(piece_bbs, occupancy_bbs, game_state)
+
+    original_alpha = alpha
+    best_move = NO_MOVE
 
     move_count = 0
     if is_currently_in_check:
@@ -286,6 +288,10 @@ def quiescence_search(piece_bbs, occupancy_bbs, game_state, alpha, beta, ply, se
 
         stand_pat = evaluate_position(piece_bbs, occupancy_bbs, game_state, lazy=False)
         if stand_pat >= beta:
+            tt_store_score = stand_pat
+            if tt_store_score > MATE_IN_MAX_PLY: tt_store_score += ply
+            elif tt_store_score < -MATE_IN_MAX_PLY: tt_store_score -= ply
+            store_tt(search_context.transposition_table, zobrist_key, 0, tt_store_score, TT_FLAG_BETA, NO_MOVE, search_context.tt_generation)
             return beta, q_nodes, delta_pruned, see_pruned
         alpha = max(alpha, stand_pat)
 
@@ -381,14 +387,24 @@ def quiescence_search(piece_bbs, occupancy_bbs, game_state, alpha, beta, ply, se
         q_nodes += child_q_nodes
         delta_pruned += child_delta_pruned
         see_pruned += child_see_pruned
-        score = -score
-
         if score >= beta:
+            tt_store_score = score
+            if tt_store_score > MATE_IN_MAX_PLY: tt_store_score += ply
+            elif tt_store_score < -MATE_IN_MAX_PLY: tt_store_score -= ply
+            store_tt(search_context.transposition_table, zobrist_key, 0, tt_store_score, TT_FLAG_BETA, move, search_context.tt_generation)
             return beta, q_nodes, delta_pruned, see_pruned
-        alpha = max(alpha, score)
+        if score > alpha:
+            alpha = score
+            best_move = move
 
     if is_currently_in_check and legal_moves_tried == 0:
         return np.int32(-MATE_SCORE + ply), q_nodes, delta_pruned, see_pruned
+
+    flag = TT_FLAG_EXACT if alpha > original_alpha else TT_FLAG_ALPHA
+    tt_store_score = alpha
+    if tt_store_score > MATE_IN_MAX_PLY: tt_store_score += ply
+    elif tt_store_score < -MATE_IN_MAX_PLY: tt_store_score -= ply
+    store_tt(search_context.transposition_table, zobrist_key, 0, tt_store_score, flag, best_move, search_context.tt_generation)
 
     return alpha, q_nodes, delta_pruned, see_pruned
 
@@ -623,6 +639,19 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
         correction = min(max(correction, -CORRECTION_HISTORY_LIMIT), CORRECTION_HISTORY_LIMIT)
         
         static_score = raw_static_eval + correction
+        
+        # --- NEW: TT Static Evaluation Refinement ---
+        if tt_entry['flag'] != TT_FLAG_NONE:
+            tt_cv = np.int32(tt_entry['score'])
+            if tt_cv > MATE_IN_MAX_PLY: tt_cv -= ply
+            elif tt_cv < -MATE_IN_MAX_PLY: tt_cv += ply
+
+            if tt_entry['flag'] == TT_FLAG_EXACT:
+                static_score = tt_cv
+            elif tt_entry['flag'] == TT_FLAG_BETA and tt_cv > static_score:
+                static_score = tt_cv
+            elif tt_entry['flag'] == TT_FLAG_ALPHA and tt_cv < static_score:
+                static_score = tt_cv
         
         search_context.static_eval_stack[ply] = static_score
 

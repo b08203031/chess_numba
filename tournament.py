@@ -300,11 +300,11 @@ def run_tournament(engine1_path, engine2_path, games_count, time_ms, engine1_nam
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Run a tournament between two versions of the engine.")
     parser.add_argument("--engine1", default="main.py", help="Path to the first engine's main.py (default: main.py)")
-    parser.add_argument("--engine2", default="chess_engine_v2/main.py", help="Path to the second engine's main.py (default: chess_engine_v2/main.py)")
+    parser.add_argument("--engine2", default="chess_engine_v3/main.py", help="Path to the second engine's main.py (default: chess_engine_v2/main.py)")
     parser.add_argument("--name1", default="chess_engine", help="Name of the first engine (default: chess_engine)")
-    parser.add_argument("--name2", default="chess_engine_v2", help="Name of the second engine (default: chess_engine_v2)")
+    parser.add_argument("--name2", default="chess_engine_v3", help="Name of the second engine (default: chess_engine_v2)")
     parser.add_argument("--games", type=int, default=500, help="Number of games to play (default: 20)")
-    parser.add_argument("--time", type=int, default=100, help="Time per move in ms (default: 100)")
+    parser.add_argument("--time", type=int, default=500, help="Time per move in ms (default: 100)")
 
     args = parser.parse_args()
 

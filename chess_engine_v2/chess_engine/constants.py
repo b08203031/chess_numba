@@ -224,26 +224,41 @@ INITIATIVE_PHASE_THRESHOLD = MAX_PHASE * 0.4 # Apply only when phase is above 40
 # =============================================================================
 # --- Mobility Constants / 機動性常量 ---
 # =============================================================================
-# Bonus for piece mobility, calculated as: (move_count - base_moves) * weight.
-# This rewards active pieces and penalizes pieces that are blocked or restricted.
-# 棋子機動性獎勵，計算方式為：(移動次數 - 基礎移動數) * 權重。
-# 這獎勵活躍的棋子，懲罰被阻擋或受限的棋子。
+# Non-linear lookup tables for piece mobility bonuses.
+# Derived from Stockfish 11, scaled by ~0.78 (our pawn=100cp vs SF's ~128cp).
+# Index = number of safe squares attacked. Columns = [MG, EG].
+# 基於 Stockfish 11 的非線性機動性查表。索引 = 安全攻擊格數，列 = [MG, EG]。
+# 這比線性公式更準確：被困棋子受嚴厲懲罰，高機動性遞減邊際效益。
 
-# --- Knight Mobility ---
-KNIGHT_MOBILITY_BASE_MOVES = 4
-KNIGHT_MOBILITY_WEIGHT = np.array([4, 2], dtype=np.int32) # MG, EG
+# --- Knight Mobility (9 entries, 0-8 squares) ---
+KNIGHT_MOBILITY_BONUS = np.array([
+    [-48, -63], [-41, -44], [-9, -23], [-3, -11], [2, 6],
+    [10, 12], [17, 18], [22, 21], [26, 26]
+], dtype=np.int32)
 
-# --- Bishop Mobility ---
-BISHOP_MOBILITY_BASE_MOVES = 5
-BISHOP_MOBILITY_WEIGHT = np.array([4, 2], dtype=np.int32) # MG, EG
+# --- Bishop Mobility (14 entries, 0-13 squares) ---
+BISHOP_MOBILITY_BONUS = np.array([
+    [-37, -46], [-16, -18], [12, -2], [20, 10], [30, 19],
+    [40, 33], [43, 42], [49, 44], [49, 51], [53, 57],
+    [63, 61], [63, 67], [71, 69], [76, 76]
+], dtype=np.int32)
 
-# --- Rook Mobility ---
-ROOK_MOBILITY_BASE_MOVES = 6
-ROOK_MOBILITY_WEIGHT = np.array([3, 1], dtype=np.int32) # MG, EG
+# --- Rook Mobility (15 entries, 0-14 squares) ---
+ROOK_MOBILITY_BONUS = np.array([
+    [-45, -59], [-21, -14], [-12, 22], [-8, 43], [-4, 54],
+    [-2, 64], [7, 87], [12, 92], [23, 103], [23, 111],
+    [25, 121], [30, 129], [36, 130], [37, 132], [45, 133]
+], dtype=np.int32)
 
-# --- Queen Mobility ---
-QUEEN_MOBILITY_BASE_MOVES = 8
-QUEEN_MOBILITY_WEIGHT = np.array([2, 1], dtype=np.int32) # MG, EG
+# --- Queen Mobility (28 entries, 0-27 squares) ---
+QUEEN_MOBILITY_BONUS = np.array([
+    [-30, -28], [-16, -12], [2, 6], [2, 14], [11, 27],
+    [17, 42], [22, 48], [32, 57], [34, 62], [37, 72],
+    [44, 73], [47, 81], [47, 88], [51, 94], [52, 96],
+    [55, 98], [55, 104], [57, 106], [62, 109], [69, 112],
+    [69, 115], [77, 130], [80, 133], [80, 137], [83, 144],
+    [85, 149], [88, 161], [90, 165]
+], dtype=np.int32)
 
 
 # =============================================================================
@@ -263,6 +278,31 @@ ROOK_ON_SEMI_OPEN_FILE_BONUS = np.array([15, 10], dtype=np.int32) # MG, EG
 ROOK_ON_OPEN_FILE_BONUS = np.array([25, 15], dtype=np.int32) # MG, EG
 
 ROOK_ON_SEVENTH_BONUS = np.array([20, 50], dtype=np.int32) # MG, EG
+
+# --- Trapped Rook / 受困車 ---
+# Penalty when a rook has <= 3 mobility and is trapped by its own king on the same side.
+# Doubled if the king has no castling rights. (SF11: S(52,10) → scaled)
+# 受困車懲罰：車機動性<=3且被國王困在同一側。國王無法易位時加倍。
+TRAPPED_ROOK_PENALTY = np.array([40, 8], dtype=np.int32) # MG, EG
+
+# --- Minor Behind Pawn / 輕子在兵後方 ---
+# Bonus for a knight or bishop standing directly behind a pawn (protected).
+# (SF11: S(18,3) → scaled)
+MINOR_BEHIND_PAWN_BONUS = np.array([14, 2], dtype=np.int32) # MG, EG
+
+# --- Bad Bishop / 壞象懲罰 ---
+# Penalty for each friendly pawn on the same color square as the bishop.
+# Worse when center files are blocked. (SF11: S(3,7) → scaled)
+BISHOP_PAWNS_PENALTY = np.array([2, 5], dtype=np.int32) # MG, EG per pawn
+
+# --- Space Evaluation / 空間評估 ---
+# Only computed when total non-pawn material > threshold.
+# Measures safe squares in center files (D,E,F,G) on ranks 2-4 for pieces.
+SPACE_THRESHOLD = 12222  # Minimum non-pawn material to compute space
+
+# --- Passed Pawn File Correction / 通路兵邊線修正 ---
+# Penalty for passed pawns far from center (edge pawns are less valuable).
+PASSED_FILE_PENALTY = np.array([9, 6], dtype=np.int32) # MG, EG per file distance from center
 
 # =============================================================================
 # --- Pawn Structure Constants / 兵型結構常量 ---
@@ -338,23 +378,34 @@ OUTPOST_BONUS_BISHOP = np.array([
 OUTPOST_HOLE_BONUS = np.array([25, 15], dtype=np.int32) # MG, EG
 
 # =============================================================================
-# --- King Safety Constants (NEW - based on Chessprogramming Wiki) / 王的安全常量 ---
+# --- King Safety Constants (Enhanced - based on Stockfish 11) / 王的安全常量 ---
 # =============================================================================
 
-# --- Phase 2: Attacking the King Zone (Non-Linear Model) / 攻擊王翼區域（非線性模型） ---
-# Attack units for each piece type. Order: P, N, B, R, Q
-# 每個棋子類型的攻擊單位。順序：兵、馬、象、車、后
-# Updated: Aggressive weights for R and Q
-KING_SAFETY_WEAK_UNITS = np.array([0, 1, 1, 2, 3], dtype=np.int32) # P, N, B, R, Q
-KING_SAFETY_ATTACK_UNITS = np.array([1, 2, 2, 5, 8], dtype=np.int32) # P, N, B, R, Q
+# --- Safe Check Penalties (Added to kingDanger when enemy can safely check king) ---
+# These are the highest-impact king safety parameters in Stockfish.
+# Scaled from SF11 by ~0.78 for our value system (100cp pawn vs SF's ~128cp).
+# 安全將軍懲罰：當敵方能在安全的格子上將軍時加入 kingDanger。
+QUEEN_SAFE_CHECK  = 608   # SF11: 780
+ROOK_SAFE_CHECK   = 842   # SF11: 1080
+BISHOP_SAFE_CHECK = 495   # SF11: 635
+KNIGHT_SAFE_CHECK = 616   # SF11: 790
 
-# A non-linear table where the index is the sum of attack units, and the value is the penalty.
-# The penalty grows exponentially, rewarding multi-piece attacks.
-# 一個非線性表格，索引是攻擊單位的總和，值是懲罰分數。懲罰呈指數增長，獎勵多子協同攻擊。
-# Updated: Steeper, quadratic-plus growth curve
-KING_SAFETY_TABLE = np.array([
-    min(int(i**2) / 2, 1000) for i in range(100)
-], dtype=np.int32)
+# --- KingAttackWeights: Weight per attacking piece type (SF11 × 0.78) ---
+# Higher = more dangerous attacker. Accumulated as attackers_count * weight.
+# 每種攻擊棋子的權重。
+KING_ATTACK_WEIGHTS = np.array([0, 63, 41, 34, 8], dtype=np.int32)  # P, N, B, R, Q
+
+# --- KingDanger Formula Parameters (SF11-inspired, scaled) ---
+KING_DANGER_WEAK_SQUARE = 144   # SF11: 185, scaled
+KING_DANGER_UNSAFE_CHECK = 115  # SF11: 148, scaled
+KING_DANGER_ATTACK_COUNT = 54   # SF11: 69, scaled
+KING_DANGER_NO_QUEEN = 680      # SF11: 873, scaled
+KING_DANGER_KNIGHT_DEFENSE = 78 # SF11: 100, scaled
+KING_DANGER_OFFSET = 29         # SF11: 37, scaled
+KING_DANGER_THRESHOLD = 100     # Below this, no penalty applied (SF11 threshold)
+
+# --- Old parameters retained for pawn shield / pawn storm ---
+KING_SAFETY_WEAK_UNITS = np.array([0, 1, 1, 2, 3], dtype=np.int32) # P, N, B, R, Q (retained for compatibility)
 
 # --- Phase 3: King Tropism / 王的向性 ---
 KING_TROPISM_MAX_DISTANCE = 14 # Max MANHATTAN distance / 最大曼哈頓距離
@@ -384,30 +435,44 @@ KING_OPEN_FILE_PENALTY = 10
 KING_SEMI_OPEN_FILE_PENALTY = 5
 KING_SAFETY_WEAK_SQUARE_PENALTY = 20
 
-EG_SAFETY_SCALE = 0.5 # Scale down endgame king safety impact / 縮減殘局王的安全影響
+EG_SAFETY_SCALE = 0.3 # Scale down endgame king safety impact / 縮減殘局王的安全影響
 
 # =============================================================================
 # --- Threat Evaluation Constants / 威脅評估常量 ---
 # =============================================================================
-# Derived from Stockfish 11 but simplified and scaled.
+# Calibrated from Stockfish 11, scaled to our value system (~0.78x).
+# 基於 Stockfish 11 校準，按比例縮放到我們的材質系統。
 
-# Threat By Safe Pawn: Friendly pawn attacks enemy piece (N, B, R, Q).
-# 兵的威脅：己方兵攻擊敵方棋子（N, B, R, Q）。
-THREAT_SAFE_PAWN = np.array([45, 45], dtype=np.int32) # MG, EG
+# ThreatByMinor[attacked_piece_type]: Bonus when a Knight or Bishop attacks
+# an enemy piece of the given type. Index: 0=None, 1=Pawn, 2=Knight, 3=Bishop, 4=Rook, 5=Queen
+# 輕子（馬/象）攻擊敵方棋子的獎勵，按被攻擊棋子類型細分
+THREAT_BY_MINOR_MG = np.array([0, 5, 46, 62, 70, 62], dtype=np.int32)
+THREAT_BY_MINOR_EG = np.array([0, 25, 32, 44, 93, 126], dtype=np.int32)
 
-# Minor Attacking Major: Knight/Bishop attacking Rook/Queen.
-# 輕子攻擊重子：馬/象攻擊車/后。
-THREAT_MINOR_ON_MAJOR = np.array([25, 15], dtype=np.int32) # MG, EG
+# ThreatByRook[attacked_piece_type]: Bonus when a Rook attacks an enemy piece.
+# 車攻擊敵方棋子的獎勵，按被攻擊棋子類型細分
+THREAT_BY_ROOK_MG = np.array([0, 2, 30, 30, 0, 40], dtype=np.int32)
+THREAT_BY_ROOK_EG = np.array([0, 34, 55, 48, 30, 30], dtype=np.int32)
 
-# Rook Attacking Queen: Rook attacking Queen.
-# 車捉后：車攻擊后。
-THREAT_ROOK_ON_QUEEN = np.array([20, 10], dtype=np.int32) # MG, EG
+# Threat By Safe Pawn: Friendly pawn attacks enemy non-pawn piece.
+# 安全兵威脅：己方兵攻擊敵方非兵棋子。(SF11: S(173,94) → scaled)
+THREAT_SAFE_PAWN = np.array([135, 73], dtype=np.int32) # MG, EG
 
 # Hanging Pieces: Enemy piece is attacked and undefended.
-# 懸掛子：敵方棋子被攻擊且未被防守。
-# This is a bonus for the ATTACKER.
-# 這是給攻擊者的獎勵。
-THREAT_HANGING = np.array([25, 15], dtype=np.int32) # MG, EG
+# 懸掛子：敵方棋子被攻擊且未被防守。(SF11: S(69,36) → scaled)
+THREAT_HANGING = np.array([54, 28], dtype=np.int32) # MG, EG
+
+# Threat By Pawn Push: Safe pawn push threatens enemy non-pawn piece.
+# 兵推進威脅：安全的兵推進威脅敵方非兵子。(SF11: S(48,39) → scaled)
+THREAT_BY_PAWN_PUSH = np.array([37, 30], dtype=np.int32) # MG, EG
+
+# Restricted Piece: Enemy piece movement is restricted (attacked by us, not strongly protected).
+# 限制棋子：敵方棋子的移動受限。(SF11: S(7,7) → scaled)
+THREAT_RESTRICTED_PIECE = np.array([5, 5], dtype=np.int32) # MG, EG
+
+# Threat By King: King attacks weak enemy piece.
+# 王攻擊弱子。(SF11: S(24,89) → scaled)
+THREAT_BY_KING = np.array([19, 69], dtype=np.int32) # MG, EG
 
 
 # =============================================================================
