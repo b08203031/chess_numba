@@ -13,13 +13,15 @@ TT_FLAG_BETA = 3   # Lower bound (score >= beta), a CUT-node / 下界（分數 >
 # Total size: 8 (key) + 2 (score) + 1 (depth) + 1 (flag) + 1 (generation) + 2 (best_move) + 1 (padding) = 16 bytes
 # Using 16 bytes ensures optimal memory alignment on 64-bit systems.
 tt_entry_dtype = np.dtype([
-    ('key', np.uint64),       # Zobrist hash key / Zobrist 哈希鍵值
-    ('score', np.int16),      # Evaluation score / 評估分數
-    ('depth', np.uint8),      # Search depth / 搜尋深度
-    ('flag', np.uint8),       # Node type flag (Exact, Alpha, Beta) / 節點類型標誌
-    ('generation', np.uint8), # Generation ID for aging / 用於老化的世代 ID
-    ('best_move', np.uint16), # Best move found at this node / 此節點找到的最佳移動
-    ('padding', np.uint8)     # Padding for 16-byte alignment / 用於 16 字節對齊的填充
+    ('key', np.uint32),        # 32-bit Zobrist hash key (compressed) / 32位 Zobrist 哈希鍵值
+    ('score', np.int16),       # Evaluation score / 評估分數
+    ('static_eval', np.int16), # Static evaluation / 靜態評估分數
+    ('depth', np.uint8),       # Search depth / 搜尋深度
+    ('flag', np.uint8),        # Node type flag (Exact, Alpha, Beta) / 節點類型標誌
+    ('generation', np.uint8),  # Generation ID for aging / 用於老化的世代 ID
+    ('best_move', np.uint16),  # Best move found at this node / 此節點找到的最佳移動
+    ('is_pv', np.bool_),       # PV node flag / 主變例節點標誌
+    ('padding', np.uint8, 2)   # Padding for exactly 16-byte alignment / 用於完全 16 字節對齊的填充 (2 bytes)
 ])
 
 # Convert the NumPy dtype to a Numba-compatible type / 將 NumPy dtype 轉換為 Numba 兼容類型
@@ -29,6 +31,8 @@ numba_tt_entry_type = nb.from_dtype(tt_entry_dtype)
 # 創建一個全局的「空」項目，以便在未命中置換表時返回，確保 Numba 類型穩定性
 _EMPTY_TT_ENTRY = np.zeros(1, dtype=tt_entry_dtype)[0]
 _EMPTY_TT_ENTRY['flag'] = TT_FLAG_NONE
+_EMPTY_TT_ENTRY['static_eval'] = 32767 # Use maximum int16 to represent "no static eval recorded"
+_EMPTY_TT_ENTRY['is_pv'] = False
 
 def create_transposition_table(size_mb):
     """
@@ -64,12 +68,14 @@ def clear_transposition_table(tt):
         tt (np.ndarray): 置換表。
     """
     for i in range(len(tt)):
-        tt[i]['key'] = np.uint64(0)
+        tt[i]['key'] = np.uint32(0)
         tt[i]['score'] = np.int16(0)
+        tt[i]['static_eval'] = np.int16(32767)
         tt[i]['depth'] = np.uint8(0)
         tt[i]['flag'] = np.uint8(0)
         tt[i]['generation'] = np.uint8(0)
         tt[i]['best_move'] = np.uint16(0)
+        tt[i]['is_pv'] = False
 
 @nb.njit(cache=True)
 def probe_tt(tt, zobrist_key):
@@ -90,15 +96,16 @@ def probe_tt(tt, zobrist_key):
     num_buckets = len(tt) // 4
     base_index = (zobrist_key & np.uint64(num_buckets - 1)) * 4
     
+    key32 = np.uint32(zobrist_key)
     for i in range(4):
         entry = tt[base_index + i]
-        if entry['key'] == zobrist_key:
+        if entry['key'] == key32:
             return entry
             
     return _EMPTY_TT_ENTRY
 
 @nb.njit(cache=True)
-def store_tt(tt, zobrist_key, depth, score, flag, best_move, current_generation):
+def store_tt(tt, zobrist_key, depth, score, static_eval, flag, best_move, current_generation, is_pv=False):
     """
     使用 Stockfish 風格的 4-Way Set Associative (四路組相聯) 策略存取置換表，並套用智能替換決策。
     
@@ -107,68 +114,84 @@ def store_tt(tt, zobrist_key, depth, score, flag, best_move, current_generation)
         zobrist_key (np.uint64): Zobrist 哈希鍵值。
         depth (int): 當前搜尋深度。
         score (int): 評估分數。
+        static_eval (int): 靜態評估分數。
         flag (int): 節點標誌（EXACT, ALPHA, BETA）。
         best_move (int): 最佳移動。
         current_generation (int): 當前搜尋世代。
+        is_pv (bool): 是否為主變例節點。
     """
     if len(tt) < 4:
         return
         
     num_buckets = len(tt) // 4
     base_index = (zobrist_key & np.uint64(num_buckets - 1)) * 4
+    key32 = np.uint32(zobrist_key)
     
     # 1. 尋找完全相同的局面 (Exact Match)
     for i in range(4):
         idx = base_index + i
         existing_entry = tt[idx]
-        if existing_entry['key'] == zobrist_key:
-            # 決定是否覆寫：舊世代或當前世代但深度更深
+        if existing_entry['key'] == key32:
+            # 優先保留舊有最佳步，如果新的沒有的話
+            final_best_move = np.uint16(best_move)
+            if final_best_move == 0:
+                final_best_move = existing_entry['best_move']
+                
+            # 決定是否覆寫：Stockfish 覆寫規則
             replace = False
-            if existing_entry['generation'] != current_generation:
+            if flag == TT_FLAG_EXACT:
                 replace = True
-            elif depth >= existing_entry['depth']:
+            elif existing_entry['generation'] != current_generation:
                 replace = True
+            else:
+                # PV nodes get a +2 virtual depth bonus to protect them from being overwritten
+                existing_pv_bonus = 2 if existing_entry['is_pv'] else 0
+                new_pv_bonus = 2 if is_pv else 0
+                if depth + new_pv_bonus > existing_entry['depth'] + existing_pv_bonus - 4:
+                    replace = True
                 
             if replace:
-                final_best_move = np.uint16(best_move)
-                if final_best_move == 0:
-                    final_best_move = existing_entry['best_move']
-
-                tt[idx]['key'] = zobrist_key
+                tt[idx]['key'] = key32
                 tt[idx]['depth'] = np.uint8(depth)
                 tt[idx]['score'] = np.int16(score)
+                if static_eval != 32767:
+                    tt[idx]['static_eval'] = np.int16(static_eval)
                 tt[idx]['flag'] = np.uint8(flag)
                 tt[idx]['generation'] = np.uint8(current_generation)
                 tt[idx]['best_move'] = final_best_move
+                tt[idx]['is_pv'] = is_pv
             return # 找到並處理完相符局面，直接退出
             
-    # 2. 如果沒有找到完全相同的局 (雜湊碰撞 Collision)，進入替換評估 (Replacement Strategy)
+    # 2. 如果沒有找到完全相同的局面 (雜湊碰撞 Collision)，進入替換評估 (Replacement Strategy)
     replace_idx = base_index
-    min_depth = 255
+    min_replace_value = 999999
     
     for i in range(4):
         idx = base_index + i
         existing_entry = tt[idx]
         
-        # 優先權 1: 尋找完全沒有資料的空位
-        if existing_entry['key'] == 0:
-            replace_idx = idx
-            break
+        # 計算相對老化程度
+        age = (current_generation - existing_entry['generation'] + 256) % 256
+        if age > 0:
+            age = 1  # 簡化的世代老化權重
             
-        # 優先權 2: 尋找舊世代 (過期) 的資料
-        if existing_entry['generation'] != current_generation:
-            replace_idx = idx
-            break
-            
-        # 優先權 3: 同世代中尋找深度最淺的拿來犧牲
-        if existing_entry['depth'] < min_depth:
-            min_depth = existing_entry['depth']
+        # PV nodes get a virtual depth bonus of 2, making them harder to replace
+        existing_pv_bonus = 2 if existing_entry['is_pv'] else 0
+        
+        # 由於深度是無符號整數(uint8)，計算 replace_value 時需轉為有符號整數(int)處理負數情況
+        replace_value = int(existing_entry['depth']) + existing_pv_bonus - age * 8
+        
+        # 找到取代價值最小的項目（包含空位，因其深度為 0，能自然獲得極低的 replace_value）
+        if replace_value < min_replace_value:
+            min_replace_value = replace_value
             replace_idx = idx
 
     # 執行最終替換 (因為非吻合點，不保留舊的最佳步)
-    tt[replace_idx]['key'] = zobrist_key
+    tt[replace_idx]['key'] = key32
     tt[replace_idx]['depth'] = np.uint8(depth)
     tt[replace_idx]['score'] = np.int16(score)
+    tt[replace_idx]['static_eval'] = np.int16(static_eval)
     tt[replace_idx]['flag'] = np.uint8(flag)
     tt[replace_idx]['generation'] = np.uint8(current_generation)
     tt[replace_idx]['best_move'] = np.uint16(best_move)
+    tt[replace_idx]['is_pv'] = is_pv

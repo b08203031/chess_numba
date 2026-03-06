@@ -776,10 +776,11 @@ def run_puzzle_test():
     history_table = np.zeros((12, 64), dtype=np.int32)
     butterfly_history = np.zeros((64, 64), dtype=np.int32)
     continuation_history = np.zeros((12, 64, 12, 64), dtype=np.int16)
+    continuation_history_2ply = np.zeros((12, 64, 12, 64), dtype=np.int16)
     capture_history = np.zeros((12, 64, 12), dtype=np.int32)
     pawn_correction_history = np.zeros(16384, dtype=np.int16)
     pv_table = np.zeros((128, 128), dtype=np.uint16)
-    ctx = SearchContext(tt, killer_moves, pv_table, history_table, butterfly_history, continuation_history, capture_history, pawn_correction_history)
+    ctx = SearchContext(tt, killer_moves, pv_table, history_table, butterfly_history, continuation_history, continuation_history_2ply, capture_history, pawn_correction_history)
     
     # Run a quick search
     iterative_deepening_search(p_bbs, o_bbs, g_state, 2, {'optimum_time': 0, 'maximum_time': 0}, ctx)
@@ -815,6 +816,7 @@ def run_puzzle_test():
         history_table = np.zeros((12, 64), dtype=np.int32) # Note: history_table size is 12x64 in search.py
         butterfly_history = np.zeros((64, 64), dtype=np.int32)
         continuation_history = np.zeros((12, 64, 12, 64), dtype=np.int16)
+        continuation_history_2ply = np.zeros((12, 64, 12, 64), dtype=np.int16)
         capture_history = np.zeros((12, 64, 12), dtype=np.int32)
         pawn_correction_history = np.zeros(16384, dtype=np.int16)
         
@@ -825,7 +827,7 @@ def run_puzzle_test():
         
         search_context = SearchContext(
             transposition_table, killer_moves, pv_table, history_table,
-            butterfly_history, continuation_history, capture_history, pawn_correction_history
+            butterfly_history, continuation_history, continuation_history_2ply, capture_history, pawn_correction_history
         )
 
         start_time = time.time()
@@ -856,6 +858,22 @@ def run_puzzle_test():
         tt_hit_rate = (tt_hits / total_nodes) * 100 if total_nodes > 0 else 0
 
         print("--- Search Statistics ---")
+        print(f"Returns:")
+        print(f"  nodes_searched ({type(nodes_searched)}): {nodes_searched}")
+        print(f"  quiescence_nodes ({type(quiescence_nodes)}): {quiescence_nodes}")
+        print(f"  cutoffs ({type(cutoffs)}): {cutoffs}")
+        print(f"  tt_hits ({type(tt_hits)}): {tt_hits}")
+        print(f"  last_completed_depth ({type(last_completed_depth)}): {last_completed_depth}")
+        print(f"  total_nmc ({type(total_nmc)}): {total_nmc}")
+        print(f"  total_fp ({type(total_fp)}): {total_fp}")
+        print(f"  total_ru ({type(total_ru)}): {total_ru}")
+        print(f"  total_rfp ({type(total_rfp)}): {total_rfp}")
+        print(f"  total_lmp ({type(total_lmp)}): {total_lmp}")
+        print(f"  total_pcp ({type(total_pcp)}): {total_pcp}")
+        print(f"  total_qdp ({type(total_qdp)}): {total_qdp}")
+        print(f"  total_qsp ({type(total_qsp)}): {total_qsp}")
+        print(f"  total_iid ({type(total_iid)}): {total_iid}")
+        print(f"  total_se ({type(total_se)}): {total_se}")
         print(f"Total Time: {elapsed_time:.2f}s")
         print(f"Nodes Searched: {total_nodes} ({nps} NPS)")
         print(f"- Quiescence Nodes: {quiescence_nodes} ({q_node_percentage:.1f}%)")

@@ -1,11 +1,11 @@
 [
     {
-        "name": "Lichess Puzzle 005qG",
-        "fen": "8/8/1p1k1p1p/3np3/2B2p2/PP1K1PP1/7P/8 w - - 0 37",
-        "solution": "c4d5",
-        "engine_move": "d3e4",
-        "rating": "2244",
-        "theme": "crushing defensiveMove endgame long"
+        "name": "Lichess Puzzle 006of",
+        "fen": "r2qr2k/1pp2Qp1/1b4np/pP2P3/P4n2/B1N2N1P/5PP1/R3R1K1 b - - 0 20",
+        "solution": "d8d3",
+        "engine_move": "f4d3",
+        "rating": "2500",
+        "theme": "advantage kingsideAttack long middlegame"
     },
     {
         "name": "Lichess Puzzle 0078T",
@@ -19,8 +19,16 @@
         "name": "Lichess Puzzle 0018S",
         "fen": "2kr3r/p4p2/1p2p2p/1N1p2p1/3Q4/1P1P4/2q2PPP/5RK1 w - - 0 21",
         "solution": "d4a1",
-        "engine_move": "f1a1",
+        "engine_move": "b5d6",
         "rating": "2652",
         "theme": "advantage endgame pin short"
+    },
+    {
+        "name": "Lichess Puzzle 0055Y",
+        "fen": "r1b2rk1/p3pp2/2B5/2Qpq3/3N2pp/4b3/2P2PPP/1R2K2R w K - 0 24",
+        "solution": "f2e3",
+        "engine_move": "c5d5",
+        "rating": "2089",
+        "theme": "advantage defensiveMove middlegame short"
     }
 ]

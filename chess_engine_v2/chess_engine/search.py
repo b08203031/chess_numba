@@ -124,11 +124,11 @@ def get_lmr_reduction(depth, move_count, history_score, improving, is_pv):
     
     # PV adjustment: PV nodes are searched more carefully
     if not is_pv:
-        reduction += 1.0
+        reduction += 0.5
     
     # Improving adjustment: If position is not improving, reduce more aggressively
     if not improving:
-        reduction += 1.0
+        reduction += 0.5
 
     # History Adjustment: Scale +/- 1.5 reduction for max history
     history_adjustment = (history_score / float(MAX_HISTORY)) * 1.5
@@ -262,10 +262,8 @@ def quiescence_search(piece_bbs, occupancy_bbs, game_state, alpha, beta, ply, se
             should_cutoff = True
         if should_cutoff:
             return qs_tt_score, q_nodes, delta_pruned, see_pruned
-    is_currently_in_check = is_in_check(piece_bbs, occupancy_bbs, game_state)
 
-    original_alpha = alpha
-    best_move = NO_MOVE
+    is_currently_in_check = is_in_check(piece_bbs, occupancy_bbs, game_state)
 
     move_count = 0
     if is_currently_in_check:
@@ -288,10 +286,6 @@ def quiescence_search(piece_bbs, occupancy_bbs, game_state, alpha, beta, ply, se
 
         stand_pat = evaluate_position(piece_bbs, occupancy_bbs, game_state, lazy=False)
         if stand_pat >= beta:
-            tt_store_score = stand_pat
-            if tt_store_score > MATE_IN_MAX_PLY: tt_store_score += ply
-            elif tt_store_score < -MATE_IN_MAX_PLY: tt_store_score -= ply
-            store_tt(search_context.transposition_table, zobrist_key, 0, tt_store_score, TT_FLAG_BETA, NO_MOVE, search_context.tt_generation)
             return beta, q_nodes, delta_pruned, see_pruned
         alpha = max(alpha, stand_pat)
 
@@ -387,24 +381,14 @@ def quiescence_search(piece_bbs, occupancy_bbs, game_state, alpha, beta, ply, se
         q_nodes += child_q_nodes
         delta_pruned += child_delta_pruned
         see_pruned += child_see_pruned
+        score = -score
+
         if score >= beta:
-            tt_store_score = score
-            if tt_store_score > MATE_IN_MAX_PLY: tt_store_score += ply
-            elif tt_store_score < -MATE_IN_MAX_PLY: tt_store_score -= ply
-            store_tt(search_context.transposition_table, zobrist_key, 0, tt_store_score, TT_FLAG_BETA, move, search_context.tt_generation)
             return beta, q_nodes, delta_pruned, see_pruned
-        if score > alpha:
-            alpha = score
-            best_move = move
+        alpha = max(alpha, score)
 
     if is_currently_in_check and legal_moves_tried == 0:
         return np.int32(-MATE_SCORE + ply), q_nodes, delta_pruned, see_pruned
-
-    flag = TT_FLAG_EXACT if alpha > original_alpha else TT_FLAG_ALPHA
-    tt_store_score = alpha
-    if tt_store_score > MATE_IN_MAX_PLY: tt_store_score += ply
-    elif tt_store_score < -MATE_IN_MAX_PLY: tt_store_score -= ply
-    store_tt(search_context.transposition_table, zobrist_key, 0, tt_store_score, flag, best_move, search_context.tt_generation)
 
     return alpha, q_nodes, delta_pruned, see_pruned
 
@@ -594,6 +578,10 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
             if tt_score > MATE_IN_MAX_PLY: tt_score -= ply
             elif tt_score < -MATE_IN_MAX_PLY: tt_score += ply
 
+            # NEW: Apply 50-move scale down immediately to TT scores to avoid overlooking impending draws
+            if fifty_move_scale < 256 and abs(tt_score) < MATE_IN_MAX_PLY:
+                tt_score = tt_score * fifty_move_scale // 256
+
             should_cutoff = False
             if tt_entry['flag'] == TT_FLAG_EXACT:
                 should_cutoff = True
@@ -629,7 +617,11 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
     raw_static_eval = -INFINITY
 
     if not is_currently_in_check:
-        raw_static_eval = evaluate_position(piece_bbs, occupancy_bbs, game_state, lazy=True)
+        # Retrieve from TT if available
+        if tt_entry['flag'] != TT_FLAG_NONE and tt_entry['static_eval'] != 32767:
+            raw_static_eval = np.int16(tt_entry['static_eval'])
+        else:
+            raw_static_eval = evaluate_position(piece_bbs, occupancy_bbs, game_state, lazy=True)
         
         # Apply Correction History
         pawn_key = game_state[PAWN_KEY_INDEX]
@@ -640,18 +632,23 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
         
         static_score = raw_static_eval + correction
         
-        # --- NEW: TT Static Evaluation Refinement ---
+        # --- H2 Enhancement: Refine static_score using TT Score Bound ---
         if tt_entry['flag'] != TT_FLAG_NONE:
-            tt_cv = np.int32(tt_entry['score'])
-            if tt_cv > MATE_IN_MAX_PLY: tt_cv -= ply
-            elif tt_cv < -MATE_IN_MAX_PLY: tt_cv += ply
-
-            if tt_entry['flag'] == TT_FLAG_EXACT:
-                static_score = tt_cv
-            elif tt_entry['flag'] == TT_FLAG_BETA and tt_cv > static_score:
-                static_score = tt_cv
-            elif tt_entry['flag'] == TT_FLAG_ALPHA and tt_cv < static_score:
-                static_score = tt_cv
+            tt_score = np.int32(tt_entry['score'])
+            
+            # Adjust mate scores relative to current ply
+            if tt_score > MATE_IN_MAX_PLY: tt_score -= ply
+            elif tt_score < -MATE_IN_MAX_PLY: tt_score += ply
+            
+            # If TT says score is at least tt_score (LOWER), and tt_score > static_score
+            if tt_entry['flag'] == TT_FLAG_BETA and tt_score > static_score:
+                static_score = tt_score
+            # If TT says score is at most tt_score (UPPER), and tt_score < static_score
+            elif tt_entry['flag'] == TT_FLAG_ALPHA and tt_score < static_score:
+                static_score = tt_score
+            # If TT has EXACT score, trust it completely
+            elif tt_entry['flag'] == TT_FLAG_EXACT:
+                static_score = tt_score
         
         search_context.static_eval_stack[ply] = static_score
 
@@ -748,60 +745,117 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                     null_move_cutoffs, futility_pruned, razoring_used, rfp_pruned, lmp_pruned, probcut_pruned, qs_delta_pruned, qs_see_pruned,
                     iid_searches, singular_extensions)
 
-    # --- ProbCut (guarded by H3: not in check) ---
-    # Rewritten: No TT dependency. Generate captures, filter by SEE, do shallow verification.
-    if ENABLE_PROBCUT and depth >= 5 and not is_currently_in_check and not is_pv and abs(beta) < MATE_IN_MAX_PLY:
+    # --- ProbCut (must be before NMP, guarded by H3) ---
+    if depth >= 5 and abs(beta) < MATE_IN_MAX_PLY and not is_currently_in_check:
         probcut_beta = beta + PROBCUT_MARGIN
-        # Use ply buffer for capture generation (safe: main move gen happens later and overwrites)
-        pc_cap_count = generate_pseudo_legal_captures_buffer(piece_bbs, occupancy_bbs, game_state, search_context.moves_buffer, ply)
-        pc_moves = search_context.moves_buffer[ply]
-        pc_side = game_state[0]
-        pc_pinned_w = get_pinned_pieces(piece_bbs, occupancy_bbs, WHITE)
-        pc_pinned_b = get_pinned_pieces(piece_bbs, occupancy_bbs, BLACK)
-
-        for pc_i in range(pc_cap_count):
-            pc_move = pc_moves[pc_i]
-            pc_from = get_from_square(pc_move)
-            pc_to = get_to_square(pc_move)
-
-            # SEE filter: only try captures whose SEE >= probcut_beta - static_eval
-            see_threshold_pc = probcut_beta - static_score if static_score != -INFINITY else 0
-            if not see_ge(piece_bbs, occupancy_bbs, pc_side, pc_from, pc_to, see_threshold_pc, pc_pinned_w, pc_pinned_b):
-                continue
-
-            pc_unmake = make_move(piece_bbs, occupancy_bbs, game_state, pc_move)
-
-            # Legality check
-            pc_king_bb = piece_bbs[5] if (1 - game_state[0]) == 0 else piece_bbs[11]
-            pc_king_sq = get_lsb_index(pc_king_bb) if pc_king_bb else 0
-            if is_square_attacked(piece_bbs, occupancy_bbs, pc_king_sq, game_state[0]):
-                unmake_move(piece_bbs, occupancy_bbs, game_state, pc_move, pc_unmake)
-                continue
-
-            # Shallow verification search
-            res_pc = _search(
-                piece_bbs, occupancy_bbs, game_state, depth - PROBCUT_R_PRIME,
-                -probcut_beta, -probcut_beta + 1, search_context, ply + 1, NO_MOVE, False, not cut_node
+        
+        # --- NEW: ProbCut TT Defense ---
+        # If TT bound is UPPER (Alpha) and TT score is less than probcut_beta,
+        # it is highly unlikely a reduced depth search will exceed probcut_beta. Skip ProbCut.
+        skip_probcut = False
+        if tt_entry['flag'] != TT_FLAG_NONE:
+            tt_score_pc = np.int32(tt_entry['score'])
+            if tt_score_pc > MATE_IN_MAX_PLY: tt_score_pc -= ply
+            elif tt_score_pc < -MATE_IN_MAX_PLY: tt_score_pc += ply
+            
+            if tt_entry['flag'] == TT_FLAG_ALPHA and tt_score_pc < probcut_beta:
+                skip_probcut = True
+            elif tt_entry['flag'] == TT_FLAG_EXACT and tt_score_pc < probcut_beta:
+                skip_probcut = True
+                
+        if not skip_probcut:
+            # We must only try captures.
+            pc_move_count = generate_pseudo_legal_captures_buffer(piece_bbs, occupancy_bbs, game_state, search_context.moves_buffer, ply)
+            
+            # Safe access to killers:
+            safe_ply = min(ply, MAX_PLY - 1)
+    
+            # Use score_moves to get SEE order. NO killer/history since these are captures only.
+            score_moves(
+                piece_bbs, occupancy_bbs, game_state, 
+                search_context.moves_buffer[ply], 
+                search_context.move_scores[ply], 
+                pc_move_count,
+                tt_move, 
+                search_context.killer_moves[safe_ply*2:safe_ply*2+2], # Pass normal slice to satisfy Numba compiler (killers won't match captures anyway)
+                search_context.history_table, 
+                NO_MOVE,
+                0, 0, # Pinned pieces not critically needed for ordering here, or we can use 0
+                search_context,
+                ply
             )
-            pc_score = -res_pc[0]
+            
+            pc_moves = search_context.moves_buffer[ply]
+            pc_scores = search_context.move_scores[ply]
+            
+            pc_side = game_state[0]
+            pc_pinned_w = get_pinned_pieces(piece_bbs, occupancy_bbs, WHITE)
+            pc_pinned_b = get_pinned_pieces(piece_bbs, occupancy_bbs, BLACK)
+    
+            for i in range(pc_move_count):
+                # Selection sort
+                best_idx = i
+                for j in range(i + 1, pc_move_count):
+                    if pc_scores[j] > pc_scores[best_idx]:
+                        best_idx = j
+                pc_moves[i], pc_moves[best_idx] = pc_moves[best_idx], pc_moves[i]
+                pc_scores[i], pc_scores[best_idx] = pc_scores[best_idx], pc_scores[i]
+    
+                pc_move = pc_moves[i]
+                pc_from = get_from_square(pc_move)
+                pc_to = get_to_square(pc_move)
+    
+                # SEE filter: only try captures whose SEE >= probcut_beta - static_eval
+                see_threshold_pc = probcut_beta - static_score if static_score != -INFINITY else 0
+                if not see_ge(piece_bbs, occupancy_bbs, pc_side, pc_from, pc_to, see_threshold_pc, pc_pinned_w, pc_pinned_b):
+                    continue
+    
+                pc_unmake = make_move(piece_bbs, occupancy_bbs, game_state, pc_move)
+    
+                # Legality check
+                pc_king_bb = piece_bbs[5] if (1 - game_state[0]) == 0 else piece_bbs[11]
+                pc_king_sq = get_lsb_index(pc_king_bb) if pc_king_bb else 0
+                if is_square_attacked(piece_bbs, occupancy_bbs, pc_king_sq, game_state[0]):
+                    unmake_move(piece_bbs, occupancy_bbs, game_state, pc_move, pc_unmake)
+                    continue
+    
+                # Shallow verification search
+                res_pc = _search(
+                    piece_bbs, occupancy_bbs, game_state, depth - PROBCUT_R_PRIME,
+                    -probcut_beta, -probcut_beta + 1, search_context, ply + 1, NO_MOVE, False, not cut_node
+                )
+                pc_score = -res_pc[0]
+                
+                # IMPORTANT: Must aggregate the search stats from ProbCut back into the parent
+                child_pc_nodes = res_pc[2]; child_pc_q_nodes = res_pc[3]; child_pc_cutoffs = res_pc[4]
+                child_pc_tth = res_pc[5]; child_pc_nmc = res_pc[6]; child_pc_fp = res_pc[7]
+                child_pc_ru = res_pc[8]; child_pc_rfp = res_pc[9]; child_pc_lmp = res_pc[10]
+                child_pc_pcp = res_pc[11]; child_pc_qdp = res_pc[12]; child_pc_qsp = res_pc[13]
+                child_pc_iid = res_pc[14]; child_pc_se = res_pc[15]
+                
+                nodes_searched += child_pc_nodes; quiescence_nodes += child_pc_q_nodes; cutoffs += child_pc_cutoffs
+                tt_hits += child_pc_tth; null_move_cutoffs += child_pc_nmc; futility_pruned += child_pc_fp
+                razoring_used += child_pc_ru; rfp_pruned += child_pc_rfp; lmp_pruned += child_pc_lmp
+                probcut_pruned += child_pc_pcp; qs_delta_pruned += child_pc_qdp; qs_see_pruned += child_pc_qsp
+                iid_searches += child_pc_iid; singular_extensions += child_pc_se
 
-            unmake_move(piece_bbs, occupancy_bbs, game_state, pc_move, pc_unmake)
+                unmake_move(piece_bbs, occupancy_bbs, game_state, pc_move, pc_unmake)
 
-            if search_context.stop_flag[0]:
-                return (np.int32(0), NO_MOVE, nodes_searched, quiescence_nodes, cutoffs, tt_hits,
+                if search_context.stop_flag[0]:
+                    return (np.int32(0), NO_MOVE, nodes_searched, quiescence_nodes, cutoffs, tt_hits,
+                            null_move_cutoffs, futility_pruned, razoring_used, rfp_pruned, lmp_pruned, probcut_pruned, qs_delta_pruned, qs_see_pruned,
+                            iid_searches, singular_extensions)
+    
+                if pc_score >= probcut_beta:
+                    probcut_pruned += 1
+                    # Store in TT for future use
+                    tt_store_score_pc = pc_score
+                    if tt_store_score_pc > MATE_IN_MAX_PLY: tt_store_score_pc += ply
+                    elif tt_store_score_pc < -MATE_IN_MAX_PLY: tt_store_score_pc -= ply
+                    store_tt(search_context.transposition_table, zobrist_key, depth - 3, tt_store_score_pc, np.int16(32767), TT_FLAG_BETA, pc_move, search_context.tt_generation, False)
+                    return (np.int32(pc_score), pc_move, nodes_searched, quiescence_nodes, cutoffs, tt_hits,
                         null_move_cutoffs, futility_pruned, razoring_used, rfp_pruned, lmp_pruned, probcut_pruned, qs_delta_pruned, qs_see_pruned,
                         iid_searches, singular_extensions)
-
-            if pc_score >= probcut_beta:
-                probcut_pruned += 1
-                # Store in TT for future use
-                tt_store_score_pc = pc_score
-                if tt_store_score_pc > MATE_IN_MAX_PLY: tt_store_score_pc += ply
-                elif tt_store_score_pc < -MATE_IN_MAX_PLY: tt_store_score_pc -= ply
-                store_tt(search_context.transposition_table, zobrist_key, depth - 3, tt_store_score_pc, TT_FLAG_BETA, pc_move, search_context.tt_generation)
-                return (np.int32(pc_score), pc_move, nodes_searched, quiescence_nodes, cutoffs, tt_hits,
-                    null_move_cutoffs, futility_pruned, razoring_used, rfp_pruned, lmp_pruned, probcut_pruned, qs_delta_pruned, qs_see_pruned,
-                    iid_searches, singular_extensions)
 
     # --- Razoring (must be after NMP, guarded by H3) ---
     if not is_currently_in_check and not is_pv and depth <= 7:
@@ -1272,7 +1326,12 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
     tt_score = max_eval
     if tt_score > MATE_IN_MAX_PLY: tt_score += ply
     elif tt_score < -MATE_IN_MAX_PLY: tt_score -= ply
-    store_tt(search_context.transposition_table, zobrist_key, depth, tt_score, final_flag, best_move, search_context.tt_generation)
+    # Determine static eval to store logic
+    tt_static_eval_to_store = np.int16(32767)
+    if raw_static_eval != -INFINITY and abs(raw_static_eval) < MATE_SCORE - MAX_PLY:
+        tt_static_eval_to_store = np.int16(raw_static_eval)
+
+    store_tt(search_context.transposition_table, zobrist_key, depth, tt_score, tt_static_eval_to_store, final_flag, best_move, search_context.tt_generation, is_pv)
 
     return (max_eval, best_move, nodes_searched, quiescence_nodes, cutoffs, tt_hits,
             null_move_cutoffs, futility_pruned, razoring_used, rfp_pruned, lmp_pruned, probcut_pruned, qs_delta_pruned, qs_see_pruned,

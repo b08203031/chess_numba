@@ -439,7 +439,7 @@ KING_ATTACK_BONUS = 2000 # Bonus for quiet moves attacking the opponent's King z
 ROOK_QUEEN_BATTERY_BONUS = 5000 # Bonus for Rook moving to same file/rank as Queen
 
 # History Heuristic Constants
-MAX_HISTORY = 2048 # Max value for history table to prevent overflow and saturation
+MAX_HISTORY = 16384 # Max value for history table to prevent overflow and saturation
 CORRECTION_HISTORY_SIZE = 16384
 CORRECTION_HISTORY_LIMIT = 400
 CORRECTION_HISTORY_GRAVITY = 16
@@ -509,9 +509,8 @@ LMR_REDUCTION = 1           # Depth reduction for LMR / LMR 的深度減少值
 
 # Late Move Pruning (LMP) - Prune moves after a certain number of quiet moves have been searched
 # 晚期移動剪枝（LMP） - 在搜尋了一定數量的寧靜步後剪枝
-# Updated: Relaxed constraints to search even more moves (20 + 20*depth)
 LMP_MOVE_COUNT = np.array([
-    0 if d == 0 else 3 + 2 * d * d for d in range(MAX_PLY)
+    0 if d == 0 else 3 + 2 * d * d for d in range(8)
 ], dtype=np.int32)
 
 # LMR Table (Precomputed)
@@ -535,7 +534,7 @@ PROBCUT_MARGIN = 150 # centipawns
 DELTA_PRUNING_MARGIN = 400
 
 # --- Static Exchange Evaluation (SEE) Threshold / SEE 閾值 ---
-SEE_THRESHOLD = -100  # centipawns (H6: tightened from -200, only search non-losing captures in QSearch)
+SEE_THRESHOLD = 0  # centipawns (H6: tightened from -200, only search non-losing captures in QSearch)
 ENABLE_SEE_IN_QUIESCENCE = True # Master switch to enable/disable SEE in quiescence search / 啟用/禁用靜態搜尋中 SEE 的總開關
 
 # =============================================================================
