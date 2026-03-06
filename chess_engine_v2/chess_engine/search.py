@@ -221,7 +221,7 @@ quiescence_search_return_type = numba.types.Tuple([
 #     piece_bbs_signature, occupancy_bbs_signature, game_state_signature,
 #     numba.int32, numba.int32, numba.int32, search_context_type
 # ), cache=True)
-@numba.njit(cache=True)
+@numba.njit(quiescence_search_return_type(piece_bbs_signature, occupancy_bbs_signature, game_state_signature, numba.int32, numba.int32, numba.int32, search_context_type, numba.int32), cache=True)
 def quiescence_search(piece_bbs, occupancy_bbs, game_state, alpha, beta, ply, search_context, q_ply):
     q_nodes = np.uint64(1)
     search_context.nodes_searched += 1
@@ -348,7 +348,7 @@ def quiescence_search(piece_bbs, occupancy_bbs, game_state, alpha, beta, ply, se
                 potential_gain = victim_value + promotion_gain
                 
                 if stand_pat + potential_gain + DELTA_PRUNING_MARGIN < alpha:
-                    delta_pruned += 1
+                    delta_pruned += np.uint64(1)
                     continue
 
         if not is_currently_in_check:
@@ -356,7 +356,7 @@ def quiescence_search(piece_bbs, occupancy_bbs, game_state, alpha, beta, ply, se
                 # Stockfish Alignment: Since SEE_THRESHOLD is 0, any move with score < SCORE_GOOD_CAPTURE_BONUS
                 # has already failed see_ge(..., 0) inside score_moves. We can just prune it directly!
                 if score_val < SCORE_GOOD_CAPTURE_BONUS:
-                    see_pruned += 1
+                    see_pruned += np.uint64(1)
                     continue
 
         unmake_info = make_move(piece_bbs, occupancy_bbs, game_state, move)
@@ -398,7 +398,7 @@ search_return_type = numba.types.Tuple([
     numba.uint64, numba.uint64, numba.uint64, numba.uint64
 ])
 
-@numba.njit(cache=True)
+@numba.njit(search_return_type(piece_bbs_signature, occupancy_bbs_signature, game_state_signature, numba.int32, numba.int32, numba.int32, search_context_type, numba.int32, numba.uint16, numba.boolean, numba.boolean), cache=True)
 def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_context, ply, excluded_move: np.uint16 = NO_MOVE, is_pv: bool = True, cut_node: bool = False):
     nodes_searched = np.uint64(1)
     search_context.nodes_searched += 1
@@ -571,7 +571,7 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
         #    e. We are NOT in a singular extension search (excluded_move == NO_MOVE)
         #       OR the TT move is NOT the excluded move.
         if ply > 0 and not is_pv and tt_entry['depth'] >= depth and (excluded_move == NO_MOVE or tt_move != excluded_move):
-            tt_hits += 1
+            tt_hits += np.uint64(1)
             tt_score = np.int32(tt_entry['score'])
 
             # Adjust mate scores relative to the current ply
@@ -677,7 +677,7 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
         if not improving:
             rfp_margin = rfp_margin * 3 // 4  # 25% tighter when not improving
         if ENABLE_RFP and depth <= 5 and static_score - rfp_margin >= beta:
-            rfp_pruned += 1
+            rfp_pruned += np.uint64(1)
             return (np.int32(static_score), NO_MOVE, nodes_searched, quiescence_nodes, cutoffs, tt_hits,
                     null_move_cutoffs, futility_pruned, razoring_used, rfp_pruned, lmp_pruned, probcut_pruned, qs_delta_pruned, qs_see_pruned,
                     iid_searches, singular_extensions)
@@ -739,7 +739,7 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
             # M6: Don't trust mate scores from NMP
             if null_move_score >= MATE_IN_MAX_PLY:
                 null_move_score = beta
-            null_move_cutoffs += 1
+            null_move_cutoffs += np.uint64(1)
             search_context.pv_table[ply, ply] = NO_MOVE
             return (np.int32(null_move_score), NO_MOVE, nodes_searched, quiescence_nodes, cutoffs, tt_hits,
                     null_move_cutoffs, futility_pruned, razoring_used, rfp_pruned, lmp_pruned, probcut_pruned, qs_delta_pruned, qs_see_pruned,
@@ -847,7 +847,7 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                             iid_searches, singular_extensions)
     
                 if pc_score >= probcut_beta:
-                    probcut_pruned += 1
+                    probcut_pruned += np.uint64(1)
                     # Store in TT for future use
                     tt_store_score_pc = pc_score
                     if tt_store_score_pc > MATE_IN_MAX_PLY: tt_store_score_pc += ply
@@ -865,7 +865,7 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
             qs_delta_pruned += child_delta_pruned
             qs_see_pruned += child_see_pruned
             if razor_score + RAZORING_MARGIN < alpha:
-                razoring_used += 1
+                razoring_used += np.uint64(1)
                 return (np.int32(alpha), NO_MOVE, nodes_searched, quiescence_nodes, cutoffs, tt_hits,
                         null_move_cutoffs, futility_pruned, razoring_used, rfp_pruned, lmp_pruned, probcut_pruned, qs_delta_pruned, qs_see_pruned,
                         iid_searches, singular_extensions)
@@ -1037,7 +1037,7 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                 limit = max(limit, 2)
 
                 if quiet_move_counter >= limit:
-                    lmp_pruned += 1
+                    lmp_pruned += np.uint64(1)
                     unmake_move(piece_bbs, occupancy_bbs, game_state, move, unmake_info)
                     continue  # H7: was 'break', changed to 'continue' to not skip bad captures
 
@@ -1054,7 +1054,7 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                 margin += dissonance // 2
 
             if margin > 0 and static_score + margin < alpha:
-                futility_pruned += 1
+                futility_pruned += np.uint64(1)
                 unmake_move(piece_bbs, occupancy_bbs, game_state, move, unmake_info)
                 continue
         
@@ -1082,6 +1082,13 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                 res_ex = _search(
                     piece_bbs, occupancy_bbs, game_state, (depth - 1) // 2, exclusion_beta - 1, exclusion_beta, search_context, ply, tt_move, False, cut_node)
                 exclusion_score = res_ex[0]
+                
+                nodes_searched += res_ex[2]; quiescence_nodes += res_ex[3]; cutoffs += res_ex[4]
+                tt_hits += res_ex[5]; null_move_cutoffs += res_ex[6]; futility_pruned += res_ex[7]
+                razoring_used += res_ex[8]; rfp_pruned += res_ex[9]; lmp_pruned += res_ex[10]
+                probcut_pruned += res_ex[11]; qs_delta_pruned += res_ex[12]; qs_see_pruned += res_ex[13]
+                iid_searches += res_ex[14]; singular_extensions += res_ex[15]
+                
                 # Re-make the move
                 unmake_info = make_move(piece_bbs, occupancy_bbs, game_state, move)
 
@@ -1093,7 +1100,7 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
 
                 if exclusion_score < exclusion_beta:
                     current_extension = max(current_extension, 1)
-                    singular_extensions += 1
+                    singular_extensions += np.uint64(1)
                     # Double extension for big margin
                     if depth >= 8 and exclusion_score < exclusion_beta - SINGULAR_EXTENSION_MARGIN:
                         current_extension = max(current_extension, 2)
@@ -1213,7 +1220,7 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
 
         alpha = max(alpha, evaluation)
         if alpha >= beta:
-            cutoffs += 1
+            cutoffs += np.uint64(1)
             bonus = depth * depth
             
             if is_capture:
@@ -1421,7 +1428,7 @@ def iterative_deepening_search(piece_bbs, occupancy_bbs, game_state, max_depth, 
             # Here, we might search multiple times.
             
             # Let's accumulate non-node stats here immediately to safe-keep them.
-            total_q_nodes += res[3]; total_cutoffs += res[4]; total_tt_hits += res[5]; total_nmc += res[6]; total_fp += res[7]; total_ru += res[8]; total_rfp += res[9]; total_lmp += res[10]; total_pcp += res[11]; total_qdp += res[12]; total_qsp += res[13]; total_iid += res[14]; total_se += res[15]
+            total_q_nodes += res[3]; total_cutoffs += np.uint64(max(0, int(res[4]))); total_tt_hits += res[5]; total_nmc += res[6]; total_fp += res[7]; total_ru += res[8]; total_rfp += res[9]; total_lmp += res[10]; total_pcp += res[11]; total_qdp += res[12]; total_qsp += res[13]; total_iid += res[14]; total_se += res[15]
 
             if search_context.stop_flag[0]:
                 break

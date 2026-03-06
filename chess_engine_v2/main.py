@@ -60,7 +60,6 @@ def uci_loop():
     history_table = np.zeros((12, 64), dtype=np.int32)
     butterfly_history = np.zeros((64, 64), dtype=np.int32)
     continuation_history = np.zeros((12, 64, 12, 64), dtype=np.int16)
-    continuation_history_2ply = np.zeros((12, 64, 12, 64), dtype=np.int16)
     capture_history = np.zeros((12, 64, 12), dtype=np.int32)
     pawn_correction_history = np.zeros(16384, dtype=np.int16) # CORRECTION_HISTORY_SIZE
     pv_table = np.zeros((MAX_PLY, MAX_PLY), dtype=np.uint16)
@@ -111,9 +110,6 @@ def uci_loop():
                 history_table.fill(0)
                 butterfly_history.fill(0)
                 continuation_history.fill(0)
-                continuation_history_2ply.fill(0)
-                capture_history.fill(0)
-                pawn_correction_history.fill(0)
                 pv_table.fill(0)
                 game_history = []
                 global_tt_generation = 0 # Reset generation on new game
@@ -226,7 +222,7 @@ def uci_loop():
                 # Create a new context for this search / 為此搜尋創建新的上下文
                 global_search_context = SearchContext(
                     transposition_table, killer_moves, pv_table, history_table,
-                    butterfly_history, continuation_history, continuation_history_2ply, capture_history, pawn_correction_history
+                    butterfly_history, continuation_history, capture_history, pawn_correction_history
                 )
                 
                 # Update TT Generation

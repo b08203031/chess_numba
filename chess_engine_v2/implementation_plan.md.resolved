@@ -1,0 +1,117 @@
+# Staged Move Generation 優化實作計畫
+
+將 engine_v2 的 move generation 從「一次性全生成 + 全域 SEE 計分」重構為 Stockfish 風格的「分階段延遲生成 + 延遲 SEE」。
+
+## Proposed Changes
+
+### Constants 組件
+
+#### [MODIFY] [constants.py](file:///c:/Users/ren%20cian/OneDrive/%E6%A1%8C%E9%9D%A2/chess/chess_numba/chess_numba/chess_engine_v2/chess_engine/constants.py)
+
+新增 MovePicker 階段常量：
+```python
+# --- MovePicker Stages ---
+STAGE_TT_MOVE       = 0
+STAGE_GEN_CAPTURES  = 1
+STAGE_GOOD_CAPTURES = 2
+STAGE_KILLER_1      = 3
+STAGE_KILLER_2      = 4
+STAGE_COUNTER_MOVE  = 5
+STAGE_GEN_QUIETS    = 6
+STAGE_QUIETS        = 7
+STAGE_BAD_CAPTURES  = 8
+STAGE_DONE          = 9
+```
+
+---
+
+### Move Generator 組件
+
+#### [MODIFY] [move_generator.py](file:///c:/Users/ren%20cian/OneDrive/%E6%A1%8C%E9%9D%A2/chess/chess_numba/chess_numba/chess_engine_v2/chess_engine/move_generator.py)
+
+新增 `generate_pseudo_legal_quiets_buffer` 函數：
+- 生成所有非吃子步（Quiet Moves），不含 Captures 和 Promotions
+- 包含：Pawn Single/Double pushes（非升變）、非吃子的 Knight/Bishop/Rook/Queen/King 移動、Castling
+- 簽名：`generate_pseudo_legal_quiets_buffer(piece_bbs, occupancy_bbs, game_state, moves_buffer, ply, start_idx) → int32`
+- `start_idx` 參數讓 Quiets 可以接續 Captures 寫入同一個 buffer
+
+---
+
+### Search Scoring 組件
+
+#### [MODIFY] [search.py](file:///c:/Users/ren%20cian/OneDrive/%E6%A1%8C%E9%9D%A2/chess/chess_numba/chess_numba/chess_engine_v2/chess_engine/search.py)
+
+**新增兩個輕量計分函數**取代單體 [score_moves](file:///c:/Users/ren%20cian/OneDrive/%E6%A1%8C%E9%9D%A2/chess/chess_numba/chess_numba/chess_engine_v2/chess_engine/search.py#139-215)：
+
+1. **`score_captures`**：僅用 MVV-LVA + CaptureHistory 打分，**不呼叫 SEE**
+   - `score = MG_MATERIAL_VALUES[victim % 6] * 7 + capture_history`
+   - 目的：快速排出最可能是好 Capture 的順序
+
+2. **`score_quiets`**：用 History + Butterfly + Continuation History 打分
+   - 與原 [score_moves](file:///c:/Users/ren%20cian/OneDrive/%E6%A1%8C%E9%9D%A2/chess/chess_numba/chess_numba/chess_engine_v2/chess_engine/search.py#139-215) 中 Quiet 部分相同但獨立
+
+**保留原 [score_moves](file:///c:/Users/ren%20cian/OneDrive/%E6%A1%8C%E9%9D%A2/chess/chess_numba/chess_numba/chess_engine_v2/chess_engine/search.py#139-215) 不刪除**（ProbCut 等仍在使用，可日後再重構）
+
+---
+
+### Search Loop 組件（核心）
+
+#### [MODIFY] [search.py](file:///c:/Users/ren%20cian/OneDrive/%E6%A1%8C%E9%9D%A2/chess/chess_numba/chess_numba/chess_engine_v2/chess_engine/search.py)
+
+**重構 [_search](file:///c:/Users/ren%20cian/OneDrive/%E6%A1%8C%E9%9D%A2/chess/chess_numba/chess_numba/chess_engine_v2/chess_engine/search.py#401-1346) 中第 882-936 行的 move generation loop**，從 [for](file:///c:/Users/ren%20cian/OneDrive/%E6%A1%8C%E9%9D%A2/chess/chess_numba/chess_numba/chess_engine_v2/chess_engine/search.py#1491-1500) 改為 `while` 狀態機：
+
+```
+while mp_stage < STAGE_DONE:
+    if mp_stage == STAGE_TT_MOVE:
+        → 直接回傳 tt_move（如有）
+    elif mp_stage == STAGE_GEN_CAPTURES:
+        → 呼叫 generate_pseudo_legal_captures_buffer
+        → 呼叫 score_captures（MVV+CaptureHistory，不含 SEE）
+    elif mp_stage == STAGE_GOOD_CAPTURES:
+        → Selection Sort 取最佳 Capture
+        → 跳過 tt_move（已試過）
+        → **延遲 SEE**: see_ge(move, 0)，失敗則存入 bad_captures
+    elif mp_stage == STAGE_KILLER_1:
+        → 回傳 killer1（跳過 tt_move 和已有的 capture）
+    elif mp_stage == STAGE_KILLER_2:
+        → 回傳 killer2
+    elif mp_stage == STAGE_COUNTER_MOVE:
+        → 回傳 counter_move
+    elif mp_stage == STAGE_GEN_QUIETS:
+        → 呼叫 generate_pseudo_legal_quiets_buffer
+        → 呼叫 score_quiets
+    elif mp_stage == STAGE_QUIETS:
+        → Selection Sort 取最佳 Quiet（跳過 tt/killer/counter）
+    elif mp_stage == STAGE_BAD_CAPTURES:
+        → 逐一回傳暫存的壞吃子步
+```
+
+搜尋邏輯（make_move、legality check、LMR、FP、extensions、PVS）**完全不變**，只是供應棋步的方式改為 staged。
+
+**QSearch 暫不修改**（第二階段優化），因為改動風險較大。
+
+---
+
+## Verification Plan
+
+### Automated Tests
+
+測試命令：
+```bash
+cd "c:\Users\ren cian\OneDrive\桌面\chess\chess_numba\chess_numba\chess_engine_v2"
+python test_puzzle.py
+```
+
+**驗證標準**：
+1. **戰術準確度**：通過率不低於改動前的基準（目前約 85-90%）
+2. **NPS（Nodes Per Second）**：應有顯著提升（預期 10-25%）
+3. **無崩潰**：所有 80+ 個 puzzles 都能正常完成搜尋
+4. **Numba 編譯**：清除快取後首次執行不報錯
+
+### Manual Verification
+
+在跑完 [test_puzzle.py](file:///c:/Users/ren%20cian/OneDrive/%E6%A1%8C%E9%9D%A2/chess/chess_numba/chess_numba/chess_engine_v2/test_puzzle.py) 後，檢查輸出中的：
+- `Passed` 數量是否維持
+- `Average NPS` 是否提升
+- `Average Depth` 是否維持或提升
+- 無 `ERROR` 或 `traceback` 輸出
