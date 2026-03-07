@@ -98,11 +98,11 @@ def run_all_benchmarks():
 
     # Benchmark 1: Standard starting position
     startpos_fen = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
-    run_benchmark_for_fen(startpos_fen, depth=10, name="Start Position")
+    run_benchmark_for_fen(startpos_fen, depth=15, name="Start Position")
 
     # Benchmark 2: Kiwipete position
     kiwipete_fen = "r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1"
-    run_benchmark_for_fen(kiwipete_fen, depth=10, name="Kiwipete")
+    run_benchmark_for_fen(kiwipete_fen, depth=15, name="Kiwipete")
 
 
 if __name__ == "__main__":

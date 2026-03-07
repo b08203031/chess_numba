@@ -49,6 +49,12 @@ search_context_spec = [
     ('moves_buffer', numba.uint16[:, :]),
     ('quiet_moves_tried', numba.uint16[:, :]),
     ('bad_captures', numba.uint16[:, :]),
+    ('mp_stage', numba.int32[::1]),
+    ('mp_current_idx', numba.int32[::1]),
+    ('mp_captures_end', numba.int32[::1]),
+    ('mp_quiets_end', numba.int32[::1]),
+    ('mp_bad_captures_count', numba.int32[::1]),
+    ('mp_bad_captures_idx', numba.int32[::1]),
     ('continuation_history', numba.int16[:, :, :, :]),
     ('pawn_correction_history', numba.int16[:]),
     ('butterfly_history', numba.int32[:, :]),
@@ -117,11 +123,18 @@ class SearchContext:
         self.move_stack = np.zeros(MAX_PLY, dtype=np.uint16)
         self.static_eval_stack = np.zeros(MAX_PLY, dtype=np.int32)
         
-        # Pre-allocated move scores buffer to avoid allocation in hot loop
         self.move_scores = np.zeros((MAX_PLY, 256), dtype=np.int32)
         self.moves_buffer = np.zeros((MAX_PLY, 256), dtype=np.uint16)
         self.quiet_moves_tried = np.zeros((MAX_PLY, 256), dtype=np.uint16)
         self.bad_captures = np.zeros((MAX_PLY, 256), dtype=np.uint16)
+        
+        # Move Picker state arrays
+        self.mp_stage = np.zeros(MAX_PLY, dtype=np.int32)
+        self.mp_current_idx = np.zeros(MAX_PLY, dtype=np.int32)
+        self.mp_captures_end = np.zeros(MAX_PLY, dtype=np.int32)
+        self.mp_quiets_end = np.zeros(MAX_PLY, dtype=np.int32)
+        self.mp_bad_captures_count = np.zeros(MAX_PLY, dtype=np.int32)
+        self.mp_bad_captures_idx = np.zeros(MAX_PLY, dtype=np.int32)
 
 
 

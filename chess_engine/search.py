@@ -76,6 +76,315 @@ def quiescence_search(piece_bbs, occupancy_bbs, game_state, alpha, beta, ply, se
     q_nodes = np.uint64(1)
     search_context.nodes_searched += 1
 
+    # Check for stop flag every 2048 nodes
+    if (search_context.nodes_searched & 2047) == 0:
+        if search_context.stop_flag[0]:
+            return np.int32(0), q_nodes
+
+        if search_context.end_time > 0.0:
+            current_time = 0.0
+            with numba.objmode(current_time='float64'):
+                current_time = time.time()
+            if current_time >= search_context.end_time:
+                search_context.stop_flag[0] = True
+                return np.int32(0), q_nodes
+
+    if ply >= MAX_PLY:
+        return evaluate_position(piece_bbs, occupancy_bbs, game_state, lazy=False), q_nodes
+
+    # M4: TT Probe in QSearch — avoids re-evaluating positions already in TT
+    zobrist_key = game_state[4]
+    tt_entry = probe_tt(search_context.transposition_table, zobrist_key)
+    if tt_entry['flag'] != TT_FLAG_NONE and tt_entry['depth'] >= 0:
+        qs_tt_score = np.int32(tt_entry['score'])
+        if qs_tt_score > MATE_IN_MAX_PLY: qs_tt_score -= ply
+        elif qs_tt_score < -MATE_IN_MAX_PLY: qs_tt_score += ply
+        
+        should_cutoff = False
+        if tt_entry['flag'] == TT_FLAG_EXACT:
+            should_cutoff = True
+        elif tt_entry['flag'] == TT_FLAG_ALPHA and qs_tt_score <= alpha:
+            should_cutoff = True
+        elif tt_entry['flag'] == TT_FLAG_BETA and qs_tt_score >= beta:
+            should_cutoff = True
+        if should_cutoff:
+            return qs_tt_score, q_nodes
+
+    is_currently_in_check = is_in_check(piece_bbs, occupancy_bbs, game_state)
+
+    move_count = 0
+    if is_currently_in_check:
+        # If in check, we must evade. No stand_pat (can't stand pat in check).
+        # H9 Fix: Add depth limit for check evasion in QSearch to prevent infinite loops.
+        # Check evasions are very forcing, so we allow them to go deeper than normal QSearch.
+        # (e.g., 2x MAX_QUIESCENCE_DEPTH)
+        if q_ply >= MAX_QUIESCENCE_DEPTH * 2:
+            return evaluate_position(piece_bbs, occupancy_bbs, game_state, lazy=False), q_nodes
+
+        # We must generate ALL legal moves (evasions).
+        move_count = generate_pseudo_legal_moves_buffer(piece_bbs, occupancy_bbs, game_state, search_context.moves_buffer, ply)
+        if move_count == 0:
+            # Checkmate
+            return np.int32(-MATE_SCORE + ply), q_nodes
+    else:
+        # If not in check, we can stand pat (static evaluation)
+        if q_ply >= MAX_QUIESCENCE_DEPTH:
+            return evaluate_position(piece_bbs, occupancy_bbs, game_state, lazy=False), q_nodes
+
+        stand_pat = evaluate_position(piece_bbs, occupancy_bbs, game_state, lazy=False)
+        if stand_pat >= beta:
+            return beta, q_nodes
+        alpha = max(alpha, stand_pat)
+
+        move_count = generate_pseudo_legal_captures_buffer(piece_bbs, occupancy_bbs, game_state, search_context.moves_buffer, ply)
+        if move_count == 0:
+            return stand_pat, q_nodes
+
+    # --- Sort moves in QSearch ---
+    moves = search_context.moves_buffer[ply]
+    scores = search_context.move_scores[ply]
+
+    # Safe access to killers:
+    safe_ply = min(ply, MAX_PLY - 1)
+
+    # Optimization: Calculate pinned pieces once for QS pruning logic and score_moves
+    pinned_white = get_pinned_pieces(piece_bbs, occupancy_bbs, WHITE)
+    pinned_black = get_pinned_pieces(piece_bbs, occupancy_bbs, BLACK)
+
+    # B1: Use TT best move for QSearch ordering (since we already probe TT above)
+    qs_tt_move = tt_entry['best_move'] if tt_entry['flag'] != TT_FLAG_NONE else NO_MOVE
+
+    # Use score_moves to sort captures (SEE >= 0 first).
+    score_moves(
+        piece_bbs, occupancy_bbs, game_state, 
+        moves, 
+        scores, 
+        move_count,
+        qs_tt_move,  # B1: was NO_MOVE, now uses TT best move for better ordering
+        search_context.killer_moves[safe_ply*2:safe_ply*2+2], 
+        search_context.history_table, 
+        NO_MOVE, # No counter move
+        pinned_white,
+        pinned_black,
+        search_context,
+        ply
+    )
+
+    legal_moves_tried = 0
+    for i in range(move_count):
+        # Lazy Selection Sort: find the best remaining move
+        best_idx = i
+        for j in range(i + 1, move_count):
+            if scores[j] > scores[best_idx]:
+                best_idx = j
+        
+        # Swap moves and scores in the pre-allocated buffers
+        moves[i], moves[best_idx] = moves[best_idx], moves[i]
+        scores[i], scores[best_idx] = scores[best_idx], scores[i]
+
+        move = moves[i]
+        score_val = scores[i]
+        
+        if not is_currently_in_check:
+            if ENABLE_DELTA_PRUNING:
+                is_promotion = get_special_move_flag(move) == SPECIAL_MOVE_FLAG_PROMOTION
+                promotion_gain = MG_MATERIAL_VALUES[4] - MG_MATERIAL_VALUES[0] if is_promotion else 0
+                side_to_move = game_state[0]
+                victim_type = find_piece_type_on_square_side(piece_bbs, get_to_square(move), 1 - side_to_move)
+                victim_value = MG_MATERIAL_VALUES[victim_type % 6] if victim_type != -1 else 0
+                potential_gain = victim_value + promotion_gain
+                
+                if stand_pat + potential_gain + DELTA_PRUNING_MARGIN < alpha:
+                    continue
+
+        if not is_currently_in_check:
+            if ENABLE_SEE_IN_QUIESCENCE:
+                # Stockfish Alignment: Since SEE_THRESHOLD is 0, any move with score < SCORE_GOOD_CAPTURE_BONUS
+                # has already failed see_ge(..., 0) inside score_moves. We can just prune it directly!
+                if score_val < SCORE_GOOD_CAPTURE_BONUS:
+                    continue
+
+        unmake_info = make_move(piece_bbs, occupancy_bbs, game_state, move)
+        
+        # --- Lazy Legality Check ---
+        king_bb_after_move = piece_bbs[5] if (1 - game_state[0]) == 0 else piece_bbs[11]
+        king_sq = get_lsb_index(king_bb_after_move) if king_bb_after_move else 0
+        if is_square_attacked(piece_bbs, occupancy_bbs, king_sq, game_state[0]):
+            unmake_move(piece_bbs, occupancy_bbs, game_state, move, unmake_info)
+            continue
+            
+        legal_moves_tried += 1
+
+        score, child_q_nodes = quiescence_search(
+            piece_bbs, occupancy_bbs, game_state, -beta, -alpha, ply + 1, search_context, q_ply + 1
+        )
+        unmake_move(piece_bbs, occupancy_bbs, game_state, move, unmake_info)
+
+        if search_context.stop_flag[0]:
+            return np.int32(0), q_nodes
+
+        q_nodes += child_q_nodes
+        score = -score
+
+        if score >= beta:
+            return beta, q_nodes
+        alpha = max(alpha, score)
+
+    if is_currently_in_check and legal_moves_tried == 0:
+        return np.int32(-MATE_SCORE + ply), q_nodes
+
+    return alpha, q_nodes
+
+search_return_type = numba.types.Tuple([
+    numba.int32, numba.uint16, numba.uint64, numba.uint64, numba.uint64
+])
+
+get_next_move_return_type = numba.uint16
+
+@numba.njit(get_next_move_return_type(piece_bbs_signature, occupancy_bbs_signature, game_state_signature, search_context_type, numba.int32, numba.uint16, numba.uint16, numba.uint16, numba.uint16, numba.uint16, numba.uint64, numba.uint64), cache=True)
+def get_next_move(piece_bbs, occupancy_bbs, game_state, search_context, ply, tt_move, excluded_move, killer_1, killer_2, counter_move, pinned_white, pinned_black):
+    moves = search_context.moves_buffer[ply]
+    scores = search_context.move_scores[ply]
+    bad_captures = search_context.bad_captures[ply]
+
+    while search_context.mp_stage[ply] < STAGE_DONE:
+        move = NO_MOVE
+        mp_stage = search_context.mp_stage[ply]
+        
+        if mp_stage == STAGE_TT_MOVE:
+            if tt_move != NO_MOVE and tt_move != excluded_move:
+                if is_move_pseudo_legal(piece_bbs, occupancy_bbs, game_state, tt_move):
+                    move = tt_move
+            search_context.mp_stage[ply] = STAGE_GEN_CAPTURES
+            if move != NO_MOVE:
+                return move
+            
+        elif mp_stage == STAGE_GEN_CAPTURES:
+            search_context.mp_captures_end[ply] = generate_pseudo_legal_captures_buffer(piece_bbs, occupancy_bbs, game_state, search_context.moves_buffer, ply)
+            score_captures(piece_bbs, occupancy_bbs, game_state, moves, scores, 0, search_context.mp_captures_end[ply], search_context)
+            search_context.mp_current_idx[ply] = 0
+            search_context.mp_stage[ply] = STAGE_GOOD_CAPTURES
+            continue
+            
+        elif mp_stage == STAGE_GOOD_CAPTURES:
+            captures_end = search_context.mp_captures_end[ply]
+            current_idx = search_context.mp_current_idx[ply]
+            if current_idx < captures_end:
+                best_idx = current_idx
+                for j in range(current_idx + 1, captures_end):
+                    if scores[j] > scores[best_idx]:
+                        best_idx = j
+                moves[current_idx], moves[best_idx] = moves[best_idx], moves[current_idx]
+                scores[current_idx], scores[best_idx] = scores[best_idx], scores[current_idx]
+                
+                candidate_move = moves[current_idx]
+                search_context.mp_current_idx[ply] += 1
+                
+                if candidate_move == tt_move or candidate_move == excluded_move:
+                    continue
+                    
+                from_sq = get_from_square(candidate_move)
+                to_sq = get_to_square(candidate_move)
+                side_to_move = game_state[0]
+                
+                if see_ge(piece_bbs, occupancy_bbs, side_to_move, from_sq, to_sq, 0, pinned_white, pinned_black):
+                    move = candidate_move
+                    return move
+                else:
+                    bad_captures[search_context.mp_bad_captures_count[ply]] = candidate_move
+                    search_context.mp_bad_captures_count[ply] += 1
+                    continue
+            else:
+                search_context.mp_stage[ply] = STAGE_KILLER_1
+                continue
+                
+        elif mp_stage == STAGE_KILLER_1:
+            search_context.mp_stage[ply] = STAGE_KILLER_2
+            if killer_1 != NO_MOVE and killer_1 != tt_move and killer_1 != excluded_move:
+                if is_move_pseudo_legal(piece_bbs, occupancy_bbs, game_state, killer_1):
+                    to_sq = get_to_square(killer_1)
+                    opponent_pieces_bb = occupancy_bbs[1] if game_state[0] == 0 else occupancy_bbs[0]
+                    is_capture = (opponent_pieces_bb & BB_SQUARES[to_sq]) != 0
+                    if not is_capture:
+                        move = killer_1
+                        return move
+            
+        elif mp_stage == STAGE_KILLER_2:
+            search_context.mp_stage[ply] = STAGE_COUNTER_MOVE
+            if killer_2 != NO_MOVE and killer_2 != tt_move and killer_2 != excluded_move and killer_2 != killer_1:
+                if is_move_pseudo_legal(piece_bbs, occupancy_bbs, game_state, killer_2):
+                    to_sq = get_to_square(killer_2)
+                    opponent_pieces_bb = occupancy_bbs[1] if game_state[0] == 0 else occupancy_bbs[0]
+                    is_capture = (opponent_pieces_bb & BB_SQUARES[to_sq]) != 0
+                    if not is_capture:
+                        move = killer_2
+                        return move
+                    
+        elif mp_stage == STAGE_COUNTER_MOVE:
+            search_context.mp_stage[ply] = STAGE_GEN_QUIETS
+            if counter_move != NO_MOVE and counter_move != tt_move and counter_move != excluded_move and counter_move != killer_1 and counter_move != killer_2:
+                if is_move_pseudo_legal(piece_bbs, occupancy_bbs, game_state, counter_move):
+                    to_sq = get_to_square(counter_move)
+                    opponent_pieces_bb = occupancy_bbs[1] if game_state[0] == 0 else occupancy_bbs[0]
+                    is_capture = (opponent_pieces_bb & BB_SQUARES[to_sq]) != 0
+                    if not is_capture:
+                        move = counter_move
+                        return move
+                    
+        elif mp_stage == STAGE_GEN_QUIETS:
+            captures_end = search_context.mp_captures_end[ply]
+            search_context.mp_quiets_end[ply] = generate_pseudo_legal_quiets_buffer(piece_bbs, occupancy_bbs, game_state, search_context.moves_buffer, ply, captures_end)
+            score_quiets(piece_bbs, occupancy_bbs, game_state, moves, scores, captures_end, search_context.mp_quiets_end[ply], search_context, ply)
+            search_context.mp_current_idx[ply] = captures_end
+            search_context.mp_stage[ply] = STAGE_QUIETS
+            continue
+            
+        elif mp_stage == STAGE_QUIETS:
+            quiets_end = search_context.mp_quiets_end[ply]
+            current_idx = search_context.mp_current_idx[ply]
+            if current_idx < quiets_end:
+                best_idx = current_idx
+                for j in range(current_idx + 1, quiets_end):
+                    if scores[j] > scores[best_idx]:
+                        best_idx = j
+                moves[current_idx], moves[best_idx] = moves[best_idx], moves[current_idx]
+                scores[current_idx], scores[best_idx] = scores[best_idx], scores[current_idx]
+                
+                candidate_move = moves[current_idx]
+                search_context.mp_current_idx[ply] += 1
+                
+                if candidate_move == tt_move or candidate_move == excluded_move or candidate_move == killer_1 or candidate_move == killer_2 or candidate_move == counter_move:
+                    continue
+                move = candidate_move
+                return move
+            else:
+                search_context.mp_stage[ply] = STAGE_BAD_CAPTURES
+                continue
+                
+        elif mp_stage == STAGE_BAD_CAPTURES:
+            if search_context.mp_bad_captures_idx[ply] < search_context.mp_bad_captures_count[ply]:
+                move = bad_captures[search_context.mp_bad_captures_idx[ply]]
+                search_context.mp_bad_captures_idx[ply] += 1
+                return move
+            else:
+                search_context.mp_stage[ply] = STAGE_DONE
+                continue
+
+    return NO_MOVE
+
+search_return_type = numba.types.Tuple([
+    numba.int32, numba.uint64
+])
+
+# @numba.njit(quiescence_search_return_type(
+#     piece_bbs_signature, occupancy_bbs_signature, game_state_signature,
+#     numba.int32, numba.int32, numba.int32, search_context_type
+# ), cache=True)
+@numba.njit(quiescence_search_return_type(piece_bbs_signature, occupancy_bbs_signature, game_state_signature, numba.int32, numba.int32, numba.int32, search_context_type, numba.int32), cache=True)
+def quiescence_search(piece_bbs, occupancy_bbs, game_state, alpha, beta, ply, search_context, q_ply):
+    q_nodes = np.uint64(1)
+    search_context.nodes_searched += 1
+
 
 
     # Check for stop flag every 2048 nodes
@@ -236,6 +545,140 @@ def quiescence_search(piece_bbs, occupancy_bbs, game_state, alpha, beta, ply, se
         return np.int32(-MATE_SCORE + ply), q_nodes
 
     return alpha, q_nodes
+
+
+get_next_move_return_type = numba.uint16
+
+@numba.njit(get_next_move_return_type(piece_bbs_signature, occupancy_bbs_signature, game_state_signature, search_context_type, numba.int32, numba.uint16, numba.uint16, numba.uint16, numba.uint16, numba.uint16, numba.uint64, numba.uint64), cache=True)
+def get_next_move(piece_bbs, occupancy_bbs, game_state, search_context, ply, tt_move, excluded_move, killer_1, killer_2, counter_move, pinned_white, pinned_black):
+    moves = search_context.moves_buffer[ply]
+    scores = search_context.move_scores[ply]
+    bad_captures = search_context.bad_captures[ply]
+
+    while search_context.mp_stage[ply] < STAGE_DONE:
+        move = NO_MOVE
+        mp_stage = search_context.mp_stage[ply]
+        
+        if mp_stage == STAGE_TT_MOVE:
+            if tt_move != NO_MOVE and tt_move != excluded_move:
+                if is_move_pseudo_legal(piece_bbs, occupancy_bbs, game_state, tt_move):
+                    move = tt_move
+            search_context.mp_stage[ply] = STAGE_GEN_CAPTURES
+            if move != NO_MOVE:
+                return move
+            
+        elif mp_stage == STAGE_GEN_CAPTURES:
+            search_context.mp_captures_end[ply] = generate_pseudo_legal_captures_buffer(piece_bbs, occupancy_bbs, game_state, search_context.moves_buffer, ply)
+            score_captures(piece_bbs, occupancy_bbs, game_state, moves, scores, 0, search_context.mp_captures_end[ply], search_context)
+            search_context.mp_current_idx[ply] = 0
+            search_context.mp_stage[ply] = STAGE_GOOD_CAPTURES
+            continue
+            
+        elif mp_stage == STAGE_GOOD_CAPTURES:
+            captures_end = search_context.mp_captures_end[ply]
+            current_idx = search_context.mp_current_idx[ply]
+            if current_idx < captures_end:
+                best_idx = current_idx
+                for j in range(current_idx + 1, captures_end):
+                    if scores[j] > scores[best_idx]:
+                        best_idx = j
+                moves[current_idx], moves[best_idx] = moves[best_idx], moves[current_idx]
+                scores[current_idx], scores[best_idx] = scores[best_idx], scores[current_idx]
+                
+                candidate_move = moves[current_idx]
+                search_context.mp_current_idx[ply] += 1
+                
+                if candidate_move == tt_move or candidate_move == excluded_move:
+                    continue
+                    
+                from_sq = get_from_square(candidate_move)
+                to_sq = get_to_square(candidate_move)
+                side_to_move = game_state[0]
+                
+                if see_ge(piece_bbs, occupancy_bbs, side_to_move, from_sq, to_sq, 0, pinned_white, pinned_black):
+                    move = candidate_move
+                    return move
+                else:
+                    bad_captures[search_context.mp_bad_captures_count[ply]] = candidate_move
+                    search_context.mp_bad_captures_count[ply] += 1
+                    continue
+            else:
+                search_context.mp_stage[ply] = STAGE_KILLER_1
+                continue
+                
+        elif mp_stage == STAGE_KILLER_1:
+            search_context.mp_stage[ply] = STAGE_KILLER_2
+            if killer_1 != NO_MOVE and killer_1 != tt_move and killer_1 != excluded_move:
+                if is_move_pseudo_legal(piece_bbs, occupancy_bbs, game_state, killer_1):
+                    to_sq = get_to_square(killer_1)
+                    opponent_pieces_bb = occupancy_bbs[1] if game_state[0] == 0 else occupancy_bbs[0]
+                    is_capture = (opponent_pieces_bb & BB_SQUARES[to_sq]) != 0
+                    if not is_capture:
+                        move = killer_1
+                        return move
+            
+        elif mp_stage == STAGE_KILLER_2:
+            search_context.mp_stage[ply] = STAGE_COUNTER_MOVE
+            if killer_2 != NO_MOVE and killer_2 != tt_move and killer_2 != excluded_move and killer_2 != killer_1:
+                if is_move_pseudo_legal(piece_bbs, occupancy_bbs, game_state, killer_2):
+                    to_sq = get_to_square(killer_2)
+                    opponent_pieces_bb = occupancy_bbs[1] if game_state[0] == 0 else occupancy_bbs[0]
+                    is_capture = (opponent_pieces_bb & BB_SQUARES[to_sq]) != 0
+                    if not is_capture:
+                        move = killer_2
+                        return move
+                    
+        elif mp_stage == STAGE_COUNTER_MOVE:
+            search_context.mp_stage[ply] = STAGE_GEN_QUIETS
+            if counter_move != NO_MOVE and counter_move != tt_move and counter_move != excluded_move and counter_move != killer_1 and counter_move != killer_2:
+                if is_move_pseudo_legal(piece_bbs, occupancy_bbs, game_state, counter_move):
+                    to_sq = get_to_square(counter_move)
+                    opponent_pieces_bb = occupancy_bbs[1] if game_state[0] == 0 else occupancy_bbs[0]
+                    is_capture = (opponent_pieces_bb & BB_SQUARES[to_sq]) != 0
+                    if not is_capture:
+                        move = counter_move
+                        return move
+                    
+        elif mp_stage == STAGE_GEN_QUIETS:
+            captures_end = search_context.mp_captures_end[ply]
+            search_context.mp_quiets_end[ply] = generate_pseudo_legal_quiets_buffer(piece_bbs, occupancy_bbs, game_state, search_context.moves_buffer, ply, captures_end)
+            score_quiets(piece_bbs, occupancy_bbs, game_state, moves, scores, captures_end, search_context.mp_quiets_end[ply], search_context, ply)
+            search_context.mp_current_idx[ply] = captures_end
+            search_context.mp_stage[ply] = STAGE_QUIETS
+            continue
+            
+        elif mp_stage == STAGE_QUIETS:
+            quiets_end = search_context.mp_quiets_end[ply]
+            current_idx = search_context.mp_current_idx[ply]
+            if current_idx < quiets_end:
+                best_idx = current_idx
+                for j in range(current_idx + 1, quiets_end):
+                    if scores[j] > scores[best_idx]:
+                        best_idx = j
+                moves[current_idx], moves[best_idx] = moves[best_idx], moves[current_idx]
+                scores[current_idx], scores[best_idx] = scores[best_idx], scores[current_idx]
+                
+                candidate_move = moves[current_idx]
+                search_context.mp_current_idx[ply] += 1
+                
+                if candidate_move == tt_move or candidate_move == excluded_move or candidate_move == killer_1 or candidate_move == killer_2 or candidate_move == counter_move:
+                    continue
+                move = candidate_move
+                return move
+            else:
+                search_context.mp_stage[ply] = STAGE_BAD_CAPTURES
+                continue
+                
+        elif mp_stage == STAGE_BAD_CAPTURES:
+            if search_context.mp_bad_captures_idx[ply] < search_context.mp_bad_captures_count[ply]:
+                move = bad_captures[search_context.mp_bad_captures_idx[ply]]
+                search_context.mp_bad_captures_idx[ply] += 1
+                return move
+            else:
+                search_context.mp_stage[ply] = STAGE_DONE
+                continue
+
+    return NO_MOVE
 
 search_return_type = numba.types.Tuple([
     numba.int32, numba.uint16, numba.uint64, numba.uint64, numba.uint64
@@ -693,129 +1136,22 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
     quiet_moves_tried = search_context.quiet_moves_tried[ply]
     quiet_moves_tried_count = 0
 
-    # Staged Move Generation State
-    mp_stage = STAGE_TT_MOVE
-    captures_end = 0
-    quiets_end = 0
-    current_idx = 0
-    
-    bad_captures = search_context.bad_captures[ply]
-    bad_captures_count = 0
-    bad_captures_idx = 0
+    # Staged Move Generation State Init
+    search_context.mp_stage[ply] = STAGE_TT_MOVE
+    search_context.mp_current_idx[ply] = 0
+    search_context.mp_captures_end[ply] = 0
+    search_context.mp_quiets_end[ply] = 0
+    search_context.mp_bad_captures_count[ply] = 0
+    search_context.mp_bad_captures_idx[ply] = 0
 
-    while mp_stage < STAGE_DONE:
-        move = NO_MOVE
-        
-        if mp_stage == STAGE_TT_MOVE:
-            if tt_move != NO_MOVE and tt_move != excluded_move:
-                if is_move_pseudo_legal(piece_bbs, occupancy_bbs, game_state, tt_move):
-                    move = tt_move
-            mp_stage = STAGE_GEN_CAPTURES
-            
-        elif mp_stage == STAGE_GEN_CAPTURES:
-            captures_end = generate_pseudo_legal_captures_buffer(piece_bbs, occupancy_bbs, game_state, search_context.moves_buffer, ply)
-            score_captures(piece_bbs, occupancy_bbs, game_state, moves, scores, 0, captures_end, search_context)
-            current_idx = 0
-            mp_stage = STAGE_GOOD_CAPTURES
-            continue # Go to next stage to pick moves
-            
-        elif mp_stage == STAGE_GOOD_CAPTURES:
-            if current_idx < captures_end:
-                # Selection sort best capture
-                best_idx = current_idx
-                for j in range(current_idx + 1, captures_end):
-                    if scores[j] > scores[best_idx]:
-                        best_idx = j
-                moves[current_idx], moves[best_idx] = moves[best_idx], moves[current_idx]
-                scores[current_idx], scores[best_idx] = scores[best_idx], scores[current_idx]
-                
-                candidate_move = moves[current_idx]
-                current_idx += 1
-                
-                if candidate_move == tt_move or candidate_move == excluded_move:
-                    continue
-                    
-                # Lazy SEE
-                from_sq = get_from_square(candidate_move)
-                to_sq = get_to_square(candidate_move)
-                side_to_move = game_state[0]
-                
-                if see_ge(piece_bbs, occupancy_bbs, side_to_move, from_sq, to_sq, 0, pinned_white, pinned_black):
-                    move = candidate_move
-                else:
-                    bad_captures[bad_captures_count] = candidate_move
-                    bad_captures_count += 1
-                    continue
-            else:
-                mp_stage = STAGE_KILLER_1
-                continue
-                
-        elif mp_stage == STAGE_KILLER_1:
-            mp_stage = STAGE_KILLER_2
-            if killer_1 != NO_MOVE and killer_1 != tt_move and killer_1 != excluded_move:
-                if is_move_pseudo_legal(piece_bbs, occupancy_bbs, game_state, killer_1):
-                    to_sq = get_to_square(killer_1)
-                    opponent_pieces_bb = occupancy_bbs[1] if game_state[0] == 0 else occupancy_bbs[0]
-                    is_capture = (opponent_pieces_bb & BB_SQUARES[to_sq]) != 0
-                    if not is_capture:
-                        move = killer_1
-            
-        elif mp_stage == STAGE_KILLER_2:
-            mp_stage = STAGE_COUNTER_MOVE
-            if killer_2 != NO_MOVE and killer_2 != tt_move and killer_2 != excluded_move and killer_2 != killer_1:
-                if is_move_pseudo_legal(piece_bbs, occupancy_bbs, game_state, killer_2):
-                    to_sq = get_to_square(killer_2)
-                    opponent_pieces_bb = occupancy_bbs[1] if game_state[0] == 0 else occupancy_bbs[0]
-                    is_capture = (opponent_pieces_bb & BB_SQUARES[to_sq]) != 0
-                    if not is_capture:
-                        move = killer_2
-                    
-        elif mp_stage == STAGE_COUNTER_MOVE:
-            mp_stage = STAGE_GEN_QUIETS
-            if counter_move != NO_MOVE and counter_move != tt_move and counter_move != excluded_move and counter_move != killer_1 and counter_move != killer_2:
-                if is_move_pseudo_legal(piece_bbs, occupancy_bbs, game_state, counter_move):
-                    to_sq = get_to_square(counter_move)
-                    opponent_pieces_bb = occupancy_bbs[1] if game_state[0] == 0 else occupancy_bbs[0]
-                    is_capture = (opponent_pieces_bb & BB_SQUARES[to_sq]) != 0
-                    if not is_capture:
-                        move = counter_move
-                    
-        elif mp_stage == STAGE_GEN_QUIETS:
-            quiets_end = generate_pseudo_legal_quiets_buffer(piece_bbs, occupancy_bbs, game_state, search_context.moves_buffer, ply, captures_end)
-            score_quiets(piece_bbs, occupancy_bbs, game_state, moves, scores, captures_end, quiets_end, search_context, ply)
-            current_idx = captures_end
-            mp_stage = STAGE_QUIETS
-            continue
-            
-        elif mp_stage == STAGE_QUIETS:
-            if current_idx < quiets_end:
-                best_idx = current_idx
-                for j in range(current_idx + 1, quiets_end):
-                    if scores[j] > scores[best_idx]:
-                        best_idx = j
-                moves[current_idx], moves[best_idx] = moves[best_idx], moves[current_idx]
-                scores[current_idx], scores[best_idx] = scores[best_idx], scores[current_idx]
-                
-                candidate_move = moves[current_idx]
-                current_idx += 1
-                
-                if candidate_move == tt_move or candidate_move == excluded_move or candidate_move == killer_1 or candidate_move == killer_2 or candidate_move == counter_move:
-                    continue
-                move = candidate_move
-            else:
-                mp_stage = STAGE_BAD_CAPTURES
-                continue
-                
-        elif mp_stage == STAGE_BAD_CAPTURES:
-            if bad_captures_idx < bad_captures_count:
-                move = bad_captures[bad_captures_idx]
-                bad_captures_idx += 1
-            else:
-                mp_stage = STAGE_DONE
-                continue
-
+    while True:
+        move = get_next_move(
+            piece_bbs, occupancy_bbs, game_state, search_context, ply,
+            tt_move, excluded_move, killer_1, killer_2, counter_move,
+            pinned_white, pinned_black
+        )
         if move == NO_MOVE:
-            continue
+            break
         searched_move_count += 1
         
         opponent_pieces_bb = occupancy_bbs[1] if game_state[0] == 0 else occupancy_bbs[0]
@@ -942,6 +1278,14 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
             if tt_entry['flag'] != TT_FLAG_NONE and (tt_entry['flag'] == TT_FLAG_EXACT or tt_entry['flag'] == TT_FLAG_BETA) and tt_entry['depth'] >= depth - 3:
                 se_tt_score = np.int32(tt_entry['score'])
                 exclusion_beta = se_tt_score - SINGULAR_EXTENSION_MARGIN
+                # Save MovePicker State to prevent Singular Extension from clobbering the parent
+                saved_mp_stage = search_context.mp_stage[ply]
+                saved_mp_idx = search_context.mp_current_idx[ply]
+                saved_mp_captures = search_context.mp_captures_end[ply]
+                saved_mp_quiets = search_context.mp_quiets_end[ply]
+                saved_mp_bad_cap = search_context.mp_bad_captures_count[ply]
+                saved_mp_bad_idx = search_context.mp_bad_captures_idx[ply]
+
                 # Unmake to search position without this move
                 unmake_move(piece_bbs, occupancy_bbs, game_state, move, unmake_info)
                 res_ex = _search(
@@ -951,6 +1295,14 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                 nodes_searched += res_ex[2]; quiescence_nodes += res_ex[3]
                 tt_hits += res_ex[4]
                 
+                # Restore MovePicker State
+                search_context.mp_stage[ply] = saved_mp_stage
+                search_context.mp_current_idx[ply] = saved_mp_idx
+                search_context.mp_captures_end[ply] = saved_mp_captures
+                search_context.mp_quiets_end[ply] = saved_mp_quiets
+                search_context.mp_bad_captures_count[ply] = saved_mp_bad_cap
+                search_context.mp_bad_captures_idx[ply] = saved_mp_bad_idx
+
                 # Re-make the move
                 unmake_info = make_move(piece_bbs, occupancy_bbs, game_state, move)
 
@@ -1013,7 +1365,7 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
 
             # A3: LMR for bad captures (only reduce when it's a bad capture, not a good one)
             elif ENABLE_LMR and depth >= LMR_MIN_DEPTH and is_capture and not is_promotion and legal_moves_tried > 1:
-                if mp_stage == STAGE_BAD_CAPTURES or mp_stage == STAGE_DONE:
+                if search_context.mp_stage[ply] == STAGE_BAD_CAPTURES or search_context.mp_stage[ply] == STAGE_DONE:
                     lmr = 1 + depth // 6
                     lmr = max(0, min(lmr, search_depth - 1))
 
@@ -1142,9 +1494,9 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
     # M3: Apply 50-move scale-down to non-mate evaluations
     if fifty_move_scale < 256 and abs(max_eval) < MATE_IN_MAX_PLY:
         max_eval = max_eval * fifty_move_scale // 256
-    if best_move == NO_MOVE and captures_end + quiets_end > 0:
+    if best_move == NO_MOVE and search_context.mp_captures_end[ply] + search_context.mp_quiets_end[ply] > 0:
         # Fallback to first move that is not excluded
-        for i in range(captures_end + quiets_end):
+        for i in range(search_context.mp_captures_end[ply] + search_context.mp_quiets_end[ply]):
             if moves[i] != excluded_move:
                 best_move = moves[i]
                 break
