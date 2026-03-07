@@ -233,7 +233,7 @@ def uci_loop():
 
                 # Start Search Thread / 啟動搜尋線程
                 def search_worker():
-                    best_move, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _ = iterative_deepening_search(
+                    best_move, _, _, _, _, _ = iterative_deepening_search(
                         board_state[0], board_state[1], board_state[2], max_depth, time_config, global_search_context,
                         game_history_list=current_game_history, tt_generation=global_tt_generation
                     )

@@ -38,8 +38,7 @@ def clear_numba_cache():
         if cache_dir.is_dir():
             shutil.rmtree(cache_dir)
 
-# Clear cache before importing the engine to avoid stale cache issues / 在導入引擎之前清除緩存以避免過時的緩存問題
-clear_numba_cache()
+# clear_numba_cache()
 
 from chess_engine.fen_parser import parse_fen
 from chess_engine.search import iterative_deepening_search
@@ -71,9 +70,7 @@ def run_benchmark_for_fen(fen, depth, name):
 
     start_time = time.time()
 
-    (best_move, best_eval, nodes_searched, quiescence_nodes, cutoffs, tt_hits,
-     last_completed_depth, total_nmc, total_fp, total_ru, total_rfp, total_lmp, total_pcp, total_qdp, total_qsp,
-     total_iid, total_se) = iterative_deepening_search(
+    (best_move, best_eval, nodes_searched, quiescence_nodes, tt_hits, last_completed_depth) = iterative_deepening_search(
         piece_bbs, occupancy_bbs, game_state, depth, time_config, search_context
     )
 
@@ -88,19 +85,6 @@ def run_benchmark_for_fen(fen, depth, name):
     log_info(f"Total Nodes Searched: {total_nodes}")
     log_info(f"Nodes Per Second (NPS): {nps}")
     log_info(f"Quiescence Nodes: {quiescence_nodes}")
-    log_info(f"Cutoffs: {cutoffs}")
-    log_info(f"TT Hits: {tt_hits}")
-    log_info(f"Last Completed Depth: {last_completed_depth}")
-    log_info(f"Total NMC: {total_nmc}")
-    log_info(f"Total FP: {total_fp}")
-    log_info(f"Total RU: {total_ru}")
-    log_info(f"Total RFP: {total_rfp}")
-    log_info(f"Total LMP: {total_lmp}")
-    log_info(f"Total PCP: {total_pcp}")
-    log_info(f"Total QDP: {total_qdp}")
-    log_info(f"Total QSP: {total_qsp}")
-    log_info(f"Total IID: {total_iid}")
-    log_info(f"Total SE: {total_se}")
     log_info(f"Best move: {move_to_uci(best_move)}")
     log_info(f"Evaluation: {best_eval}")
     log_info("----------------------------------------\n")

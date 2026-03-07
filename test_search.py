@@ -97,9 +97,7 @@ def run_search_test():
         butterfly_history, continuation_history, capture_history, pawn_correction_history
     )
 
-    (best_move, best_eval, nodes_searched, quiescence_nodes, cutoffs, tt_hits,
-     last_completed_depth, total_nmc, total_fp, total_ru, total_rfp, total_lmp, total_pcp, total_qdp, total_qsp,
-     total_iid, total_se) = iterative_deepening_search(
+    (best_move, best_eval, nodes_searched, quiescence_nodes, tt_hits, last_completed_depth) = iterative_deepening_search(
         piece_bbs, occupancy_bbs, game_state, depth, time_config, search_context
     )
     
@@ -122,19 +120,6 @@ def run_search_test():
     log_info("--- Statistics ---")
     log_info(f"1. Nodes Searched:      {total_nodes}")
     log_info(f"2. Quiescence Nodes:    {quiescence_nodes} ({q_node_percentage:.2f}%)")
-    log_info(f"3. Cutoffs:             {cutoffs}")
-    log_info(f"4. NPS (Nodes/Sec):     {nps}")
-    log_info("--- Pruning Stats ---")
-    log_info(f"5. Null Move Cutoffs:   {total_nmc}")
-    log_info(f"6.  QS Delta Pruned:   {total_qdp}")
-    log_info(f"7.  QS SEE Pruned:   {total_qsp}")  
-    log_info(f"8. Futility Pruned:     {total_fp}")
-    log_info(f"9. Razoring Pruned:     {total_ru}")
-    log_info(f"10. RFP Pruned:          {total_rfp}")
-    log_info(f"11. LMP Pruned:          {total_lmp}")
-    log_info(f"12. ProbCut Pruned:     {total_pcp}")
-    log_info(f"13. IID Searches:       {total_iid}")
-    log_info(f"14. Singular Extensions:{total_se}")
     log_info("----------------------------------------")
 
 if __name__ == "__main__":

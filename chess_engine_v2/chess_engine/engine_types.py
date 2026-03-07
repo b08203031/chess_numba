@@ -44,12 +44,11 @@ search_context_spec = [
     ('counter_moves', numba.uint16[:, :]), # Counter moves table [64][64]
     ('move_stack', numba.uint16[::1]), # Stack of moves for current search path
     ('static_eval_stack', numba.int32[::1]), # Stack of static evaluations for improving heuristic
-    ('see_pruned_captures', numba.uint64),
-    ('see_pruned_quiets', numba.uint64),
-    ('history_pruned', numba.uint64),
+
     ('move_scores', numba.int32[:, :]),
     ('moves_buffer', numba.uint16[:, :]),
     ('quiet_moves_tried', numba.uint16[:, :]),
+    ('bad_captures', numba.uint16[:, :]),
     ('continuation_history', numba.int16[:, :, :, :]),
     ('pawn_correction_history', numba.int16[:]),
     ('butterfly_history', numba.int32[:, :]),
@@ -76,9 +75,7 @@ class SearchContext:
         counter_moves (numba.uint16[:, :]): 反制走法表，索引為 [prev_src][prev_dst]。
         move_stack (numba.uint16[::1]): 當前搜尋路徑的走法堆疊，用於查找上一手棋。
         static_eval_stack (numba.int32[::1]): 靜態評估值堆疊，用於判斷 Improving。
-        see_pruned_captures (numba.uint64): 因 SEE 被剪枝的捕捉次數。
-        see_pruned_quiets (numba.uint64): 因 SEE 被剪枝的靜止步次數。
-        history_pruned (numba.uint64): 因歷史分數被剪枝的次數。
+
         continuation_history (numba.int16[:, :, :, :]): 連續歷史表。
         pawn_correction_history (numba.int16[:]): 兵型修正歷史表。
     """
@@ -124,11 +121,9 @@ class SearchContext:
         self.move_scores = np.zeros((MAX_PLY, 256), dtype=np.int32)
         self.moves_buffer = np.zeros((MAX_PLY, 256), dtype=np.uint16)
         self.quiet_moves_tried = np.zeros((MAX_PLY, 256), dtype=np.uint16)
+        self.bad_captures = np.zeros((MAX_PLY, 256), dtype=np.uint16)
 
-        # Initialize new stats
-        self.see_pruned_captures = np.uint64(0)
-        self.see_pruned_quiets = np.uint64(0)
-        self.history_pruned = np.uint64(0)
+
 
 
 search_context_type = SearchContext.class_type.instance_type

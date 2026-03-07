@@ -41,7 +41,7 @@ def run_debug():
     print(f"Running search up to depth {max_depth}...")
     
     start_time = time.time()
-    best_move, score, nodes, _, _, _, _, _, _, _, _, _, _, _, _, _, _ = iterative_deepening_search(
+    best_move, score, nodes_searched, quiescence_nodes, tt_hits, last_completed_depth = iterative_deepening_search(
         piece_bbs, occupancy_bbs, game_state,
         max_depth, {'optimum_time': 0, 'maximum_time': 0}, ctx
     )

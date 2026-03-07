@@ -836,9 +836,7 @@ def run_puzzle_test():
             'maximum_time': time_limit_ms,
         }
 
-        (best_move, best_eval, nodes_searched, quiescence_nodes, cutoffs, tt_hits,
-        last_completed_depth, total_nmc, total_fp, total_ru, total_rfp, total_lmp, total_pcp, total_qdp, total_qsp,
-        total_iid, total_se) = iterative_deepening_search(
+        (best_move, best_eval, nodes_searched, quiescence_nodes, tt_hits, last_completed_depth) = iterative_deepening_search(
             piece_bbs, occupancy_bbs, game_state, depth, time_config, search_context
         )
 
@@ -860,12 +858,6 @@ def run_puzzle_test():
         print(f"Nodes Searched: {total_nodes} ({nps} NPS)")
         print(f"- Quiescence Nodes: {quiescence_nodes} ({q_node_percentage:.1f}%)")
         print(f"Transposition Table Hits: {tt_hits} ({tt_hit_rate:.1f}%)")
-        print(f"Beta Cutoffs: {cutoffs} ")
-        print(f"Null Move Cutoffs: {total_nmc}")
-        print(f"Futility Pruned: {total_fp}")
-        print(f"Razoring Used: {total_ru}")
-        print(f"QS Delta Pruned: {total_qdp}")
-        print(f"QS SEE Pruned: {total_qsp}")
         print("-------------------------")
         print("")
         print(f"FEN: {puzzle['fen']}")

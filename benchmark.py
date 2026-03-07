@@ -71,9 +71,7 @@ def run_benchmark_for_fen(fen, depth, name):
 
     start_time = time.time()
 
-    (best_move, best_eval, nodes_searched, quiescence_nodes, cutoffs, tt_hits,
-     last_completed_depth, total_nmc, total_fp, total_ru, total_rfp, total_lmp, total_pcp, total_qdp, total_qsp,
-     total_iid, total_se) = iterative_deepening_search(
+    (best_move, best_eval, nodes_searched, quiescence_nodes, tt_hits, last_completed_depth) = iterative_deepening_search(
         piece_bbs, occupancy_bbs, game_state, depth, time_config, search_context
     )
 
