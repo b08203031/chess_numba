@@ -12,6 +12,18 @@ import math
 # --- Basic Definitions / 基本定義 ---
 # =============================================================================
 
+# --- MovePicker Stages ---
+STAGE_TT_MOVE       = 0
+STAGE_GEN_CAPTURES  = 1
+STAGE_GOOD_CAPTURES = 2
+STAGE_KILLER_1      = 3
+STAGE_KILLER_2      = 4
+STAGE_COUNTER_MOVE  = 5
+STAGE_GEN_QUIETS    = 6
+STAGE_QUIETS        = 7
+STAGE_BAD_CAPTURES  = 8
+STAGE_DONE          = 9
+
 WHITE, BLACK = 0, 1
 PAWN, KNIGHT, BISHOP, ROOK, QUEEN, KING = 0, 1, 2, 3, 4, 5
 

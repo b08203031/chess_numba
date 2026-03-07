@@ -5,11 +5,11 @@ import numba
 from chess_engine.move import (
     encode_move, SPECIAL_MOVE_FLAG_NORMAL, SPECIAL_MOVE_FLAG_PROMOTION, SPECIAL_MOVE_FLAG_EN_PASSANT, SPECIAL_MOVE_FLAG_CASTLING,
     PROMO_QUEEN, PROMO_ROOK, PROMO_BISHOP, PROMO_KNIGHT,
-    get_from_square, get_special_move_flag
+    get_from_square, get_to_square, get_special_move_flag
 )
 from chess_engine.board_operations import make_move, unmake_move
 # from chess_engine.engine_types import board_state_flat_signature # This is no longer needed
-from chess_engine.constants import BB_SQUARES, ROOK, QUEEN, BISHOP, KING
+from chess_engine.constants import BB_SQUARES, ROOK, QUEEN, BISHOP, KING, KNIGHT, PAWN
 import numba.types as nbt
 
 # =============================================================================
@@ -271,6 +271,159 @@ def get_pinned_pieces(piece_bbs, occupancy_bbs, side):
         pinners &= pinners - np.uint64(1)
 
     return pinned
+
+@numba.njit(numba.boolean(piece_bbs_signature, occupancy_bbs_signature, game_state_signature, numba.uint16), cache=True, boundscheck=False, fastmath=True)
+def is_move_pseudo_legal(piece_bbs, occupancy_bbs, game_state, move):
+    """
+    Checks if a given move is pseudo-legal in the current position.
+    This is much faster than generating all moves and checking if it's in the list.
+    """
+    if move == 0:
+        return False
+
+    from_sq = get_from_square(move)
+    to_sq = get_to_square(move)
+    special_flag = get_special_move_flag(move)
+    side_to_move = game_state[0]
+
+    # Optimization: Unpack occupancy
+    white_pieces_bb = occupancy_bbs[0]
+    black_pieces_bb = occupancy_bbs[1]
+    all_pieces_bb = occupancy_bbs[2]
+
+    own_pieces_bb = white_pieces_bb if side_to_move == WHITE else black_pieces_bb
+    opponent_pieces_bb = black_pieces_bb if side_to_move == WHITE else white_pieces_bb
+
+    from_bb = BB_SQUARES[from_sq]
+    to_bb = BB_SQUARES[to_sq]
+
+    # The piece must belong to the side to move
+    if not (from_bb & own_pieces_bb):
+        return False
+
+    # Cannot capture own piece
+    if to_bb & own_pieces_bb:
+        return False
+
+    # Find the piece type
+    piece_type = -1
+    offset = 0 if side_to_move == WHITE else 6
+    for pt in range(6):
+        if from_bb & piece_bbs[pt + offset]:
+            piece_type = pt
+            break
+            
+    if piece_type == -1:
+        return False
+
+    # --- Castling ---
+    if special_flag == SPECIAL_MOVE_FLAG_CASTLING:
+        if piece_type != KING:
+            return False
+            
+        castling_rights = game_state[1]
+        if side_to_move == WHITE:
+            if from_sq != 4: return False
+            if to_sq == 6: # Kingside
+                if not (castling_rights & 1): return False
+                if all_pieces_bb & 0x60: return False
+                if is_square_attacked(piece_bbs, occupancy_bbs, 4, BLACK): return False
+                if is_square_attacked(piece_bbs, occupancy_bbs, 5, BLACK): return False
+                if is_square_attacked(piece_bbs, occupancy_bbs, 6, BLACK): return False
+                return True
+            elif to_sq == 2: # Queenside
+                if not (castling_rights & 2): return False
+                if all_pieces_bb & 0xe: return False
+                if is_square_attacked(piece_bbs, occupancy_bbs, 4, BLACK): return False
+                if is_square_attacked(piece_bbs, occupancy_bbs, 3, BLACK): return False
+                if is_square_attacked(piece_bbs, occupancy_bbs, 2, BLACK): return False
+                return True
+            else:
+                return False
+        else: # BLACK
+            if from_sq != 60: return False
+            if to_sq == 62: # Kingside
+                if not (castling_rights & 4): return False
+                if all_pieces_bb & 0x6000000000000000: return False
+                if is_square_attacked(piece_bbs, occupancy_bbs, 60, WHITE): return False
+                if is_square_attacked(piece_bbs, occupancy_bbs, 61, WHITE): return False
+                if is_square_attacked(piece_bbs, occupancy_bbs, 62, WHITE): return False
+                return True
+            elif to_sq == 58: # Queenside
+                if not (castling_rights & 8): return False
+                if all_pieces_bb & 0xe00000000000000: return False
+                if is_square_attacked(piece_bbs, occupancy_bbs, 60, WHITE): return False
+                if is_square_attacked(piece_bbs, occupancy_bbs, 59, WHITE): return False
+                if is_square_attacked(piece_bbs, occupancy_bbs, 58, WHITE): return False
+                return True
+            else:
+                return False
+
+    # --- Pawns ---
+    if piece_type == PAWN:
+        if side_to_move == WHITE:
+            dir = 8
+            start_rank = 1
+            promo_rank = 7
+            attacks = PAWN_ATTACKS[WHITE, to_sq] # These are backwards attacks, meaning from where pawn could have come
+        else:
+            dir = -8
+            start_rank = 6
+            promo_rank = 0
+            attacks = PAWN_ATTACKS[BLACK, to_sq]
+            
+        is_promo = (to_sq // 8 == promo_rank)
+        
+        # Check promotion flag matches destination rank
+        if is_promo and special_flag != SPECIAL_MOVE_FLAG_PROMOTION: return False
+        if not is_promo and special_flag == SPECIAL_MOVE_FLAG_PROMOTION: return False
+
+        if special_flag == SPECIAL_MOVE_FLAG_EN_PASSANT:
+            ep_sq = game_state[2]
+            if to_sq != ep_sq: return False
+            # Check if pawn can attack ep square
+            return (attacks & from_bb) != 0
+
+        # Push
+        if from_sq + dir == to_sq:
+            if to_bb & all_pieces_bb: return False
+            return True
+            
+        # Double push
+        if from_sq // 8 == start_rank and from_sq + dir * 2 == to_sq:
+            if (BB_SQUARES[from_sq + dir] | to_bb) & all_pieces_bb: return False
+            return True
+
+        # Capture
+        if (attacks & from_bb):
+            if to_bb & opponent_pieces_bb: return True
+            return False
+
+        return False
+
+    # --- En Passant flag on non-pawn ---
+    if special_flag == SPECIAL_MOVE_FLAG_EN_PASSANT:
+        return False
+        
+    # --- Promotion flag on non-pawn ---
+    if special_flag == SPECIAL_MOVE_FLAG_PROMOTION:
+        return False
+
+    # --- Leapers ---
+    if piece_type == KNIGHT:
+        return (KNIGHT_ATTACKS[from_sq] & to_bb) != 0
+    if piece_type == KING:
+        return (KING_ATTACKS[from_sq] & to_bb) != 0
+
+    # --- Sliders ---
+    if piece_type == BISHOP:
+        return (get_bishop_attacks(from_sq, all_pieces_bb) & to_bb) != 0
+    if piece_type == ROOK:
+        return (get_rook_attacks(from_sq, all_pieces_bb) & to_bb) != 0
+    if piece_type == QUEEN:
+        return (get_queen_attacks(from_sq, all_pieces_bb) & to_bb) != 0
+
+    return False
 
 @numba.njit(numba.int32(piece_bbs_signature, occupancy_bbs_signature, game_state_signature, numba.uint16[:, :], numba.int32), cache=True, boundscheck=False, fastmath=True)
 def generate_pseudo_legal_moves_buffer(piece_bbs, occupancy_bbs, game_state, moves_buffer, ply):
@@ -703,6 +856,109 @@ def has_sufficient_material(piece_bbs, side_to_move):
     else: # BLACK
         return (piece_bbs[9] | piece_bbs[10]) != 0
 
+
+@numba.njit(numba.int32(piece_bbs_signature, occupancy_bbs_signature, game_state_signature, numba.uint16[:, :], numba.int32, numba.int32), cache=True, boundscheck=False, fastmath=True)
+def generate_pseudo_legal_quiets_buffer(piece_bbs, occupancy_bbs, game_state, moves_buffer, ply, start_idx):
+    """
+    Generates all pseudo-legal quiet moves (non-captures, non-promotions) for the current position into the provided buffer starting at start_idx.
+    Returns the updated total move count.
+    """
+    move_count = start_idx
+    
+    side_to_move, castling_rights, en_passant_square, _, _, _ = game_state
+    
+    (wp_bb, wn_bb, wb_bb, wr_bb, wq_bb, wk_bb, 
+     bp_bb, bn_bb, bb_bb, br_bb, bq_bb, bk_bb) = piece_bbs
+     
+    # Optimization: Unpack all 3 elements. occupancy_bbs[2] is the pre-calculated union of white and black pieces.
+    white_pieces_bb, black_pieces_bb, all_pieces_bb = occupancy_bbs
+
+    own_pieces_bb = white_pieces_bb if side_to_move == WHITE else black_pieces_bb
+    empty_squares = ~all_pieces_bb
+    WK, WQ, BK, BQ = 1, 2, 4, 8
+
+    # --- Pseudo-legal quiet move generation ---
+    if side_to_move == WHITE:
+        # --- Pawn Moves ---
+        single_pushes = (wp_bb << 8) & empty_squares
+        double_pushes = ((single_pushes & RANK_3) << 8) & empty_squares
+
+        # Single Pushes (including quiet promotions)
+        pushes = single_pushes
+        while pushes:
+            to_sq = get_lsb_index(pushes)
+            from_sq = to_sq - 8
+            if to_sq >= 56: # Promotion
+                for p_type in [PROMO_QUEEN, PROMO_ROOK, PROMO_BISHOP, PROMO_KNIGHT]:
+                    moves_buffer[ply, move_count] = encode_move(from_sq, to_sq, p_type, SPECIAL_MOVE_FLAG_PROMOTION)
+                    move_count += 1
+            else:
+                moves_buffer[ply, move_count] = encode_move(from_sq, to_sq, 0, SPECIAL_MOVE_FLAG_NORMAL)
+                move_count += 1
+            pushes &= (pushes - np.uint64(1))
+        
+        # Double Pushes
+        pushes = double_pushes
+        while pushes:
+            to_sq = get_lsb_index(pushes)
+            from_sq = to_sq - 16
+            moves_buffer[ply, move_count] = encode_move(from_sq, to_sq, 0, SPECIAL_MOVE_FLAG_NORMAL); move_count += 1
+            pushes &= (pushes - np.uint64(1))
+
+        # --- Castling ---
+        if (castling_rights & WK) and not(all_pieces_bb & 0x60) and not is_square_attacked(piece_bbs, occupancy_bbs, 4, BLACK) and not is_square_attacked(piece_bbs, occupancy_bbs, 5, BLACK) and not is_square_attacked(piece_bbs, occupancy_bbs, 6, BLACK): moves_buffer[ply, move_count]=encode_move(4,6,0,SPECIAL_MOVE_FLAG_CASTLING); move_count+=1
+        if (castling_rights & WQ) and not(all_pieces_bb & 0xe) and not is_square_attacked(piece_bbs, occupancy_bbs, 4, BLACK) and not is_square_attacked(piece_bbs, occupancy_bbs, 3, BLACK) and not is_square_attacked(piece_bbs, occupancy_bbs, 2, BLACK): moves_buffer[ply, move_count]=encode_move(4,2,0,SPECIAL_MOVE_FLAG_CASTLING); move_count+=1
+
+    else: # BLACK
+        # --- Pawn Moves ---
+        single_pushes = (bp_bb >> 8) & empty_squares
+        double_pushes = ((single_pushes & RANK_6) >> 8) & empty_squares
+
+        # Single Pushes (including quiet promotions)
+        pushes = single_pushes
+        while pushes:
+            to_sq = get_lsb_index(pushes)
+            from_sq = to_sq + 8
+            if to_sq <= 7: # Promotion
+                for p_type in [PROMO_QUEEN, PROMO_ROOK, PROMO_BISHOP, PROMO_KNIGHT]:
+                    moves_buffer[ply, move_count] = encode_move(from_sq, to_sq, p_type, SPECIAL_MOVE_FLAG_PROMOTION)
+                    move_count += 1
+            else:
+                moves_buffer[ply, move_count] = encode_move(from_sq, to_sq, 0, SPECIAL_MOVE_FLAG_NORMAL)
+                move_count += 1
+            pushes &= (pushes - np.uint64(1))
+        
+        # Double Pushes
+        pushes = double_pushes
+        while pushes:
+            to_sq = get_lsb_index(pushes)
+            from_sq = to_sq + 16
+            moves_buffer[ply, move_count] = encode_move(from_sq, to_sq, 0, SPECIAL_MOVE_FLAG_NORMAL); move_count += 1
+            pushes &= (pushes - np.uint64(1))
+
+        # --- Castling ---
+        if (castling_rights & BK) and not(all_pieces_bb & 0x6000000000000000) and not is_square_attacked(piece_bbs, occupancy_bbs, 60, WHITE) and not is_square_attacked(piece_bbs, occupancy_bbs, 61, WHITE) and not is_square_attacked(piece_bbs, occupancy_bbs, 62, WHITE): moves_buffer[ply, move_count]=encode_move(60,62,0,SPECIAL_MOVE_FLAG_CASTLING); move_count+=1
+        if (castling_rights & BQ) and not(all_pieces_bb & 0xe00000000000000) and not is_square_attacked(piece_bbs, occupancy_bbs, 60, WHITE) and not is_square_attacked(piece_bbs, occupancy_bbs, 59, WHITE) and not is_square_attacked(piece_bbs, occupancy_bbs, 58, WHITE): moves_buffer[ply, move_count]=encode_move(60,58,0,SPECIAL_MOVE_FLAG_CASTLING); move_count+=1
+
+    # --- Leaper Moves (Knights, Bishops, Rooks, Queens, Kings) ---
+    leaper_bbs = (wn_bb, wb_bb, wr_bb, wq_bb, wk_bb) if side_to_move == WHITE else (bn_bb, bb_bb, br_bb, bq_bb, bk_bb)
+    for piece_type in range(5):
+        bb = leaper_bbs[piece_type]
+        while bb:
+            from_sq = get_lsb_index(bb)
+            if piece_type == 0: targets = KNIGHT_ATTACKS[from_sq] & empty_squares
+            elif piece_type == 1: targets = get_bishop_attacks(from_sq, all_pieces_bb) & empty_squares
+            elif piece_type == 2: targets = get_rook_attacks(from_sq, all_pieces_bb) & empty_squares
+            elif piece_type == 3: targets = get_queen_attacks(from_sq, all_pieces_bb) & empty_squares
+            else: targets = KING_ATTACKS[from_sq] & empty_squares
+            
+            while targets:
+                to_sq = get_lsb_index(targets)
+                moves_buffer[ply, move_count] = encode_move(from_sq, to_sq, 0, SPECIAL_MOVE_FLAG_NORMAL); move_count+=1
+                targets &= (targets - np.uint64(1))
+            bb &= (bb - np.uint64(1))
+    
+    return move_count
 
 @numba.njit(numba.int32(piece_bbs_signature, occupancy_bbs_signature, game_state_signature, numba.uint16[:, :], numba.int32), cache=True, boundscheck=False, fastmath=True)
 def generate_pseudo_legal_captures_buffer(piece_bbs, occupancy_bbs, game_state, moves_buffer, ply):
