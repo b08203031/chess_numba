@@ -56,7 +56,7 @@ search_context_spec = [
     ('mp_quiets_end', numba.int32[::1]),
     ('mp_bad_captures_count', numba.int32[::1]),
     ('mp_bad_captures_idx', numba.int32[::1]),
-    ('continuation_history', numba.int16[:, :, :, :]),
+    ('continuation_history', numba.int16[:, :, :, :, :]),
     ('pawn_correction_history', numba.int16[:]),
     ('butterfly_history', numba.int32[:, :]),
     ('capture_history', numba.int32[:, :, :]),
@@ -84,7 +84,7 @@ class SearchContext:
         piece_stack (numba.int8[::1]): 當前搜尋路徑的棋子堆疊，用於歷史紀錄。
         static_eval_stack (numba.int32[::1]): 靜態評估值堆疊，用於判斷 Improving。
 
-        continuation_history (numba.int16[:, :, :, :]): 連續歷史表。
+        continuation_history (numba.int16[:, :, :, :, :]): 連續歷史表。
         pawn_correction_history (numba.int16[:]): 兵型修正歷史表。
     """
     def __init__(self, transposition_table, killer_moves, pv_table, history_table, butterfly_history, continuation_history, capture_history, pawn_correction_history):

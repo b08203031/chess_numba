@@ -20,7 +20,7 @@ from chess_engine.bitboard_utils import (
 from chess_engine.board_operations import make_move, unmake_move, make_null_move
 from chess_engine.move import (
     get_to_square, get_from_square, get_special_move_flag,
-    SPECIAL_MOVE_FLAG_PROMOTION
+    SPECIAL_MOVE_FLAG_PROMOTION, SPECIAL_MOVE_FLAG_EN_PASSANT
 )
 from chess_engine.constants import (
     BB_SQUARES, MG_MATERIAL_VALUES, INFINITY, MAX_QUIESCENCE_DEPTH, ASPIRATION_WINDOW_SIZE,
@@ -581,9 +581,15 @@ def get_next_move(piece_bbs, occupancy_bbs, game_state, search_context, ply, tt_
                 to_sq = get_to_square(candidate_move)
                 side_to_move = game_state[0]
                 
-                # Dynamic SEE threshold: allow slightly negative captures if they have a very high history score
-                # scores[current_idx] can be up to ~20000. DIV 32 means we can forgive up to ~-600.
-                threshold = -(scores[current_idx] // 32)
+                # Fetch capture history strictly (ignore MVV-LVA score which could be 6300+)
+                aggressor_type_see = find_piece_type_on_square_side(piece_bbs, from_sq, side_to_move)
+                victim_type_see = find_piece_type_on_square_side(piece_bbs, to_sq, 1 - side_to_move)
+                hist_score = 0
+                if victim_type_see != -1:
+                    hist_score = search_context.capture_history[aggressor_type_see, to_sq, victim_type_see]
+                
+                # Dynamic SEE threshold: clamp to avoid allowing massive blunders
+                threshold = min(0, -(hist_score // 512)) # Max relaxation of ~-32cp
                 
                 if see_ge(piece_bbs, occupancy_bbs, side_to_move, from_sq, to_sq, threshold, pinned_white, pinned_black):
                     move = candidate_move
@@ -940,6 +946,11 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
             has_non_pawn = (piece_bbs[7] | piece_bbs[8] | piece_bbs[9] | piece_bbs[10]) != 0
     if ENABLE_NMP and depth >= 3 and not is_currently_in_check and has_non_pawn and static_score >= beta:
         original_state_for_null = game_state.copy()
+        
+        # M7 Stack Pollution Fix for NMP
+        search_context.move_stack[ply] = NO_MOVE
+        search_context.piece_stack[ply] = -1
+        
         make_null_move(game_state)
         
         # Dynamic NMP Reduction: R = 3 + depth / 6 + min(3, (static_score - beta) / 200)
@@ -1048,6 +1059,8 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                     continue
     
                 # Shallow verification search
+                search_context.move_stack[ply] = NO_MOVE
+                search_context.piece_stack[ply] = -1
                 res_pc = _search(
                     piece_bbs, occupancy_bbs, game_state, depth - PROBCUT_R_PRIME,
                     -probcut_beta, -probcut_beta + 1, search_context, ply + 1, NO_MOVE, False, not cut_node
@@ -1141,7 +1154,7 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
         # --- Pre-move checks for extensions and move type ---
         from_sq = get_from_square(move)
         to_sq = get_to_square(move)
-        is_capture = (opponent_pieces_bb & BB_SQUARES[to_sq]) != 0
+        is_capture = ((opponent_pieces_bb & BB_SQUARES[to_sq]) != 0) or (get_special_move_flag(move) == SPECIAL_MOVE_FLAG_EN_PASSANT)
         is_promotion = get_special_move_flag(move) == SPECIAL_MOVE_FLAG_PROMOTION
         is_pseudo_quiet = not is_capture and not is_promotion
         
@@ -1323,17 +1336,17 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                     p1_move = search_context.move_stack[ply - 1]
                     p1_piece = search_context.piece_stack[ply - 1]
                     if p1_move != NO_MOVE and p1_piece != -1:
-                        history_score += search_context.continuation_history[p1_piece, get_to_square(p1_move), aggressor_type, to_sq] * 2
+                        history_score += search_context.continuation_history[0, p1_piece, get_to_square(p1_move), aggressor_type, to_sq] * 2
                 if ply > 1:
                     p2_move = search_context.move_stack[ply - 2]
                     p2_piece = search_context.piece_stack[ply - 2]
                     if p2_move != NO_MOVE and p2_piece != -1:
-                        history_score += search_context.continuation_history[p2_piece, get_to_square(p2_move), aggressor_type, to_sq] * CONTINUATION_HISTORY_FACTOR
+                        history_score += search_context.continuation_history[1, p2_piece, get_to_square(p2_move), aggressor_type, to_sq]
                 if ply > 3:
                     p4_move = search_context.move_stack[ply - 4]
                     p4_piece = search_context.piece_stack[ply - 4]
                     if p4_move != NO_MOVE and p4_piece != -1:
-                        history_score += search_context.continuation_history[p4_piece, get_to_square(p4_move), aggressor_type, to_sq] * CONTINUATION_HISTORY_FACTOR
+                        history_score += search_context.continuation_history[2, p4_piece, get_to_square(p4_move), aggressor_type, to_sq]
 
                 lmr = get_lmr_reduction(depth, legal_moves_tried, history_score, improving, is_pv)
 
@@ -1359,7 +1372,7 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                         p_to = get_to_square(prev_mv)
                         p_piece = find_piece_type_for_square(piece_bbs, p_to, 1 - game_state[0])
                         if p_piece != -1:
-                            cont_score = search_context.continuation_history[p_piece, p_to, aggressor_type, to_sq]
+                            cont_score = search_context.continuation_history[0, p_piece, p_to, aggressor_type, to_sq]
                             # Scale: ±1 reduction for max history
                             lmr -= int(float(cont_score) / float(MAX_HISTORY) * 1.0)
 
@@ -1443,19 +1456,19 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                     prev_move_played = search_context.move_stack[ply - 1]
                     prev_piece_played = search_context.piece_stack[ply - 1]
                     if prev_move_played != NO_MOVE and prev_piece_played != -1:
-                        update_continuation_history(search_context, prev_move_played, prev_piece_played, move, aggressor_type, bonus)
+                        update_continuation_history(search_context, 0, prev_move_played, prev_piece_played, move, aggressor_type, bonus)
 
                 if ply > 1:
                     prev_move_played = search_context.move_stack[ply - 2]
                     prev_piece_played = search_context.piece_stack[ply - 2]
                     if prev_move_played != NO_MOVE and prev_piece_played != -1:
-                        update_continuation_history(search_context, prev_move_played, prev_piece_played, move, aggressor_type, bonus)
+                        update_continuation_history(search_context, 1, prev_move_played, prev_piece_played, move, aggressor_type, bonus)
 
                 if ply > 3:
                     prev_move_played = search_context.move_stack[ply - 4]
                     prev_piece_played = search_context.piece_stack[ply - 4]
                     if prev_move_played != NO_MOVE and prev_piece_played != -1:
-                        update_continuation_history(search_context, prev_move_played, prev_piece_played, move, aggressor_type, bonus)
+                        update_continuation_history(search_context, 2, prev_move_played, prev_piece_played, move, aggressor_type, bonus)
 
                 # --- Update Counter Move ---
                 if ply > 0:
@@ -1479,19 +1492,19 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                         prev_move_played = search_context.move_stack[ply - 1]
                         prev_piece_played = search_context.piece_stack[ply - 1]
                         if prev_move_played != NO_MOVE and prev_piece_played != -1:
-                            update_continuation_history(search_context, prev_move_played, prev_piece_played, bad_move, bad_aggressor, -bonus)
+                            update_continuation_history(search_context, 0, prev_move_played, prev_piece_played, bad_move, bad_aggressor, -bonus)
 
                     if ply > 1:
                         prev_move_played = search_context.move_stack[ply - 2]
                         prev_piece_played = search_context.piece_stack[ply - 2]
                         if prev_move_played != NO_MOVE and prev_piece_played != -1:
-                            update_continuation_history(search_context, prev_move_played, prev_piece_played, bad_move, bad_aggressor, -bonus)
+                            update_continuation_history(search_context, 1, prev_move_played, prev_piece_played, bad_move, bad_aggressor, -bonus)
 
                     if ply > 3:
                         prev_move_played = search_context.move_stack[ply - 4]
                         prev_piece_played = search_context.piece_stack[ply - 4]
                         if prev_move_played != NO_MOVE and prev_piece_played != -1:
-                            update_continuation_history(search_context, prev_move_played, prev_piece_played, bad_move, bad_aggressor, -bonus)
+                            update_continuation_history(search_context, 2, prev_move_played, prev_piece_played, bad_move, bad_aggressor, -bonus)
 
                 if move != search_context.killer_moves[ply * 2]:
                     search_context.killer_moves[ply * 2 + 1] = search_context.killer_moves[ply * 2]

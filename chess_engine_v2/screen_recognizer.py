@@ -17,6 +17,8 @@ class ScreenRecognizer:
             templates_path (str): 存放棋子模板圖片的資料夾路徑。
         """
         self.piece_templates = self._load_templates(templates_path)
+        self.inv_M = None # To store inverse perspective matrix for coordinate mapping
+        self.board_side_length = 800
 
     def _load_templates(self, path):
         """
@@ -148,9 +150,11 @@ class ScreenRecognizer:
         # debug_screenshot = screenshot.copy()
         # cv2.drawContours(debug_screenshot, [sorted_rect.astype(np.int32)], -1, (0, 255, 0), 3)
 
-        side_length = 800
+        side_length = self.board_side_length
         dst = np.array([[0,0], [side_length-1,0], [side_length-1,side_length-1], [0,side_length-1]], dtype="float32")
         M = cv2.getPerspectiveTransform(sorted_rect, dst)
+        self.inv_M = cv2.getPerspectiveTransform(dst, sorted_rect) # Store inverse matrix
+        
         warped = cv2.warpPerspective(screenshot, M, (side_length, side_length))
         
         return warped
@@ -281,6 +285,55 @@ class ScreenRecognizer:
         
         full_fen = f"{piece_fen} {active_player} {castling} {en_passant} {halfmove} {fullmove}"
         return full_fen
+
+    def get_move_screen_coords(self, uci_move, player_color='w'):
+        """
+        將 UCI 格式的步法 (例如 "e2e4") 轉換為螢幕上的起點與終點絕對座標。
+        需要在呼叫過 get_fen_from_screen (保存了 inv_M) 之後調用。
+        
+        Returns:
+            ((start_x, start_y), (end_x, end_y))
+        """
+        if self.inv_M is None:
+            print("找不到棋盤座標映射矩陣。請確保已成功辨識過一次棋盤。")
+            return None
+            
+        if len(uci_move) < 4:
+            return None
+            
+        start_sq = uci_move[0:2]
+        end_sq = uci_move[2:4]
+        
+        def sq_to_center_pt(sq_str):
+            file_idx = ord(sq_str[0]) - ord('a') # 0-7
+            rank_idx = int(sq_str[1]) - 1        # 0-7
+            
+            if player_color == 'b':
+                # 如果以黑方視角，a1 在右上角
+                display_file = 7 - file_idx
+                display_rank = rank_idx
+            else:
+                # 預設白方視角，a1 在左下角，對應圖像矩陣左下即 y=大小，所以 rank 要顛倒
+                display_file = file_idx
+                display_rank = 7 - rank_idx
+                
+            square_size = self.board_side_length / 8
+            # 取得格子中心的戰圖坐標 (相對於 800x800 的扭曲後圖像)
+            x_warped = display_file * square_size + square_size / 2
+            y_warped = display_rank * square_size + square_size / 2
+            
+            # 使用反向透視矩陣轉換回螢幕絕對坐標
+            pt = np.array([[[x_warped, y_warped]]], dtype="float32")
+            pt_screen = cv2.perspectiveTransform(pt, self.inv_M)
+            return int(pt_screen[0][0][0]), int(pt_screen[0][0][1])
+            
+        try:
+            start_coord = sq_to_center_pt(start_sq)
+            end_coord = sq_to_center_pt(end_sq)
+            return (start_coord, end_coord)
+        except Exception as e:
+            print(f"轉換座標失敗: {e}")
+            return None
 
 if __name__ == '__main__':
     try:

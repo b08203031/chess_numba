@@ -775,7 +775,7 @@ def run_puzzle_test():
     killer_moves = np.zeros(256, dtype=np.uint16)
     history_table = np.zeros((12, 64), dtype=np.int32)
     butterfly_history = np.zeros((64, 64), dtype=np.int32)
-    continuation_history = np.zeros((12, 64, 12, 64), dtype=np.int16)
+    continuation_history = np.zeros((3, 12, 64, 12, 64), dtype=np.int16)
     capture_history = np.zeros((12, 64, 12), dtype=np.int32)
     pawn_correction_history = np.zeros(16384, dtype=np.int16)
     pv_table = np.zeros((128, 128), dtype=np.uint16)
@@ -814,7 +814,7 @@ def run_puzzle_test():
         pv_table = np.zeros((MAX_PLY, MAX_PLY), dtype=np.uint16)
         history_table = np.zeros((12, 64), dtype=np.int32) # Note: history_table size is 12x64 in search.py
         butterfly_history = np.zeros((64, 64), dtype=np.int32)
-        continuation_history = np.zeros((12, 64, 12, 64), dtype=np.int16)
+        continuation_history = np.zeros((3, 12, 64, 12, 64), dtype=np.int16)
         capture_history = np.zeros((12, 64, 12), dtype=np.int32)
         pawn_correction_history = np.zeros(16384, dtype=np.int16)
         

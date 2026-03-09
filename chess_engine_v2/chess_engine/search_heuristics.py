@@ -3,7 +3,7 @@ import numpy as np
 
 from chess_engine.move import (
     get_to_square, get_from_square, get_special_move_flag,
-    SPECIAL_MOVE_FLAG_PROMOTION
+    SPECIAL_MOVE_FLAG_PROMOTION, SPECIAL_MOVE_FLAG_EN_PASSANT
 )
 from chess_engine.constants import (
     MAX_HISTORY, CONTINUATION_HISTORY_FACTOR, LMR_TABLE,
@@ -62,18 +62,18 @@ def update_capture_history(capture_history, piece_type, to_square, victim_type, 
     capture_history[piece_type, to_square, victim_type] = new_value
 
 @numba.njit(cache=True, boundscheck=False, fastmath=True)
-def update_continuation_history(context, prev_move, prev_piece, curr_move, curr_piece, bonus):
+def update_continuation_history(context, ply_offset, prev_move, prev_piece, curr_move, curr_piece, bonus):
     """
     Updates the continuation history table.
     """
     prev_to = get_to_square(prev_move)
     curr_to = get_to_square(curr_move)
     
-    current_val = context.continuation_history[prev_piece, prev_to, curr_piece, curr_to]
+    current_val = context.continuation_history[ply_offset, prev_piece, prev_to, curr_piece, curr_to]
     clamped_bonus = min(max(bonus, -MAX_HISTORY), MAX_HISTORY)
     
     new_val = current_val + clamped_bonus - (current_val * abs(clamped_bonus)) // MAX_HISTORY
-    context.continuation_history[prev_piece, prev_to, curr_piece, curr_to] = new_val
+    context.continuation_history[ply_offset, prev_piece, prev_to, curr_piece, curr_to] = new_val
 
 @numba.njit(cache=True, boundscheck=False, fastmath=True)
 def score_captures(piece_bbs, occupancy_bbs, game_state, moves, scores, start_idx, end_idx, search_context):
@@ -87,6 +87,9 @@ def score_captures(piece_bbs, occupancy_bbs, game_state, moves, scores, start_id
         victim_type = find_piece_type_on_square_side(piece_bbs, to_square, 1 - side_to_move)
         aggressor_type = find_piece_type_on_square_side(piece_bbs, from_sq, side_to_move)
         
+        if victim_type == -1 and get_special_move_flag(move) == SPECIAL_MOVE_FLAG_EN_PASSANT:
+            victim_type = 0 # Pawn value for En Passant
+            
         # MVV-LVA without SEE
         score = 0
         if victim_type != -1:
@@ -134,15 +137,15 @@ def score_quiets(piece_bbs, occupancy_bbs, game_state, moves, scores, start_idx,
         
         # Continuation History
         if prev_move_1 != NO_MOVE and prev_piece_1 != -1:
-            cont_score = search_context.continuation_history[prev_piece_1, get_to_square(prev_move_1), aggressor_type, to_square]
+            cont_score = search_context.continuation_history[0, prev_piece_1, get_to_square(prev_move_1), aggressor_type, to_square]
             score += cont_score * 2
 
         if prev_move_2 != NO_MOVE and prev_piece_2 != -1:
-            cont_score = search_context.continuation_history[prev_piece_2, get_to_square(prev_move_2), aggressor_type, to_square]
+            cont_score = search_context.continuation_history[1, prev_piece_2, get_to_square(prev_move_2), aggressor_type, to_square]
             score += cont_score
 
         if prev_move_4 != NO_MOVE and prev_piece_4 != -1:
-            cont_score = search_context.continuation_history[prev_piece_4, get_to_square(prev_move_4), aggressor_type, to_square]
+            cont_score = search_context.continuation_history[2, prev_piece_4, get_to_square(prev_move_4), aggressor_type, to_square]
             score += cont_score
 
         # Static Check Bonus
@@ -165,6 +168,30 @@ def score_quiets(piece_bbs, occupancy_bbs, game_state, moves, scores, start_idx,
             
             if is_check:
                 score += 15000
+
+        # Threat Avoidance (New)
+        opponent_side = 1 - side_to_move
+        opp_offset = 6 if opponent_side == 1 else 0
+        is_threatened_by_pawn = False
+        is_threatened_by_minor = False
+        
+        # Check if destination is attacked by opponent pawns
+        if PAWN_ATTACKS[opponent_side, to_square] & piece_bbs[opp_offset + 0]: 
+            is_threatened_by_pawn = True
+            
+        if not is_threatened_by_pawn:
+            # Check if destination is attacked by opponent minor pieces
+            if KNIGHT_ATTACKS[to_square] & piece_bbs[opp_offset + 1]: 
+                is_threatened_by_minor = True
+            elif get_bishop_attacks(to_square, occupancy_bbs[2]) & piece_bbs[opp_offset + 2]: 
+                is_threatened_by_minor = True
+                
+        # Only penalize if we are moving a piece into a lesser attacker
+        ptype = aggressor_type % 6
+        if is_threatened_by_pawn and ptype > 0: # Non-pawn threatened by pawn
+            score -= 10000
+        elif is_threatened_by_minor and ptype > 2: # Rook/Queen/King threatened by minor
+            score -= 10000
 
         if move == killer_1:
             score += 50000
@@ -236,7 +263,7 @@ def score_moves(piece_bbs, occupancy_bbs, game_state, moves, scores, move_count,
             score = SCORE_TT_MOVE
         else:
             to_square = get_to_square(move)
-            is_capture = (opponent_pieces_bb & BB_SQUARES[to_square]) != 0
+            is_capture = ((opponent_pieces_bb & BB_SQUARES[to_square]) != 0) or (get_special_move_flag(move) == SPECIAL_MOVE_FLAG_EN_PASSANT)
             if is_capture:
                 # Use SEE to distinguish Good vs Bad captures
                 from_sq = get_from_square(move)
@@ -244,6 +271,9 @@ def score_moves(piece_bbs, occupancy_bbs, game_state, moves, scores, move_count,
                 # Optimization: Lookup piece types once and reuse them in see_ge and MVV_LVA
                 victim_type = find_piece_type_on_square_side(piece_bbs, to_square, 1 - side_to_move)
                 aggressor_type = find_piece_type_on_square_side(piece_bbs, from_sq, side_to_move)
+                
+                if victim_type == -1 and get_special_move_flag(move) == SPECIAL_MOVE_FLAG_EN_PASSANT:
+                    victim_type = 0 # Pawn
 
                 # Optimization: Use see_ge(0) instead of full see()
                 is_good_capture = see_ge(piece_bbs, occupancy_bbs, side_to_move, from_sq, to_square, 0, pinned_white, pinned_black, aggressor_type, victim_type)
@@ -281,17 +311,17 @@ def score_moves(piece_bbs, occupancy_bbs, game_state, moves, scores, move_count,
                     
                     # Continuation History
                     if prev_move_1 != NO_MOVE and prev_piece_1 != -1:
-                        cont_score = search_context.continuation_history[prev_piece_1, get_to_square(prev_move_1), aggressor_type, to_square]
+                        cont_score = search_context.continuation_history[0, prev_piece_1, get_to_square(prev_move_1), aggressor_type, to_square]
                         if cont_score != 0:
                             score += cont_score * 2
 
                     if prev_move_2 != NO_MOVE and prev_piece_2 != -1:
-                        cont_score = search_context.continuation_history[prev_piece_2, get_to_square(prev_move_2), aggressor_type, to_square]
+                        cont_score = search_context.continuation_history[1, prev_piece_2, get_to_square(prev_move_2), aggressor_type, to_square]
                         if cont_score != 0:
                             score += cont_score
 
                     if prev_move_4 != NO_MOVE and prev_piece_4 != -1:
-                        cont_score = search_context.continuation_history[prev_piece_4, get_to_square(prev_move_4), aggressor_type, to_square]
+                        cont_score = search_context.continuation_history[2, prev_piece_4, get_to_square(prev_move_4), aggressor_type, to_square]
                         if cont_score != 0:
                             score += cont_score
 

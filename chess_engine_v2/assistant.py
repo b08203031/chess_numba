@@ -9,6 +9,8 @@ import time
 import chess
 import traceback
 import re
+import ctypes
+
 try:
     from PIL import Image, ImageTk
     HAS_PIL = True
@@ -211,10 +213,24 @@ class EngineProcess:
                 if idx + 1 < len(parts):
                     info_data["depth"] = parts[idx+1]
 
-            # Parse PV
+            # Parse PV and map FRC castling to Standard Castling for display
+            castling_map = {"e1h1": "e1g1", "e1a1": "e1c1", "e8h8": "e8g8", "e8a8": "e8c8"}
             if "pv" in parts:
                 idx = parts.index("pv")
-                info_data["pv"] = " ".join(parts[idx+1:])
+                pv_moves = parts[idx+1:]
+                
+                # We do a simple string replacement for the first move if it's a King move
+                # This could be more robust using chess.Board, but for display purposes this is usually sufficient
+                mapped_pv = []
+                for move in pv_moves:
+                    # Very simple heuristic: if the move is in castling_map and starts with e1/e8
+                    # we just replace it. A true robust way requires board state tracking through the PV.
+                    if move in castling_map:
+                        mapped_pv.append(castling_map[move])
+                    else:
+                        mapped_pv.append(move)
+                        
+                info_data["pv"] = " ".join(mapped_pv)
 
             self.callback_queue.put(info_data)
 
@@ -228,7 +244,9 @@ class ChessVisionApp(tk.Tk):
         super().__init__()
         self.title("西洋棋視覺助理 (Chess Vision App)")
         self.geometry("600x850") # Increased height for new controls
-        self.attributes('-topmost', True) # Keep window on top
+        
+        # Defer topmost to avoid locking the window on startup
+        self.after(500, lambda: self.attributes('-topmost', True))
         
         # State
         self.board = chess.Board()
@@ -239,6 +257,9 @@ class ChessVisionApp(tk.Tk):
         self.analyzing = False
         self.warming_up = False
         self.is_first_analysis = True
+        self.auto_detecting_opponent = False
+        self.last_detected_fen = ""
+        self.autoplay_mode_var = tk.StringVar(value="fixed") # "fixed" or "self"
         
         # UI Components
         self._create_ui()
@@ -305,6 +326,26 @@ class ChessVisionApp(tk.Tk):
         self.always_on_top_var = tk.BooleanVar(value=True)
         chk_top = ttk.Checkbutton(control_frame, text="視窗置頂 (Always on Top)", variable=self.always_on_top_var, command=self.toggle_topmost)
         chk_top.grid(row=row_idx, column=0, columnspan=2, sticky="w", pady=5)
+        row_idx += 1
+
+        # Auto-Play Checkbox and Mode
+        auto_play_frame = ttk.Frame(control_frame)
+        auto_play_frame.grid(row=row_idx, column=0, columnspan=2, sticky="w", pady=5)
+        
+        self.auto_play_var = tk.BooleanVar(value=False)
+        chk_autoplay = ttk.Checkbutton(auto_play_frame, text="自動下棋 (Auto-Play)", variable=self.auto_play_var)
+        chk_autoplay.pack(side="left")
+        ToolTip(chk_autoplay, "自動在螢幕上點擊滑鼠下棋 (Auto-click best move)")
+        
+        ttk.Radiobutton(auto_play_frame, text="固定方 (Fixed)", variable=self.autoplay_mode_var, value="fixed").pack(side="left", padx=(10, 0))
+        ttk.Radiobutton(auto_play_frame, text="自己對戰 (Self-Play)", variable=self.autoplay_mode_var, value="self").pack(side="left")
+        row_idx += 1
+
+        # Auto-Detect Checkbox
+        self.auto_detect_opponent_var = tk.BooleanVar(value=False)
+        chk_autodetect_opp = ttk.Checkbutton(control_frame, text="自動偵測對手 (Auto-Detect Opponent)", variable=self.auto_detect_opponent_var)
+        chk_autodetect_opp.grid(row=row_idx, column=0, columnspan=2, sticky="w", pady=5)
+        ToolTip(chk_autodetect_opp, "對手下棋後自動開始分析 (Auto-start on opponent move)")
         row_idx += 1
 
         # Buttons Frame
@@ -426,6 +467,12 @@ class ChessVisionApp(tk.Tk):
         if self.warming_up:
              messagebox.showwarning("Warning", "引擎正在熱機中，請稍候... (Engine Warming Up)")
              return
+             
+        # Prevent starting analysis if in fixed mode and it's not our turn
+        if self.autoplay_mode_var.get() == "fixed" and self.side_var.get() != self.my_color_var.get() and self.auto_detect_opponent_var.get():
+             print("[INFO] 目前為固定方對戰模式且輪到對手，不主動進行分析。")
+             return
+             
         if self.analyzing:
             return
         
@@ -441,7 +488,164 @@ class ChessVisionApp(tk.Tk):
     def stop_analysis(self):
         if self.analyzing:
             self.engine.stop_calculation()
-            # We don't enable buttons here; we wait for 'bestmove' from engine
+            self.analyzing = False # Stop immediately internally
+            
+        self.auto_detecting_opponent = False
+        self.lbl_status.config(text="狀態 (Status): 準備就緒 (Ready) [停止]", foreground="green")
+        self.btn_analyze.config(state="normal")
+        self.btn_stop.config(state="disabled")
+
+    def toggle_side_to_move(self):
+        current = self.side_var.get()
+        self.side_var.set('b' if current == 'w' else 'w')
+
+    def execute_auto_play(self, move_uci):
+        """Simulate mouse clicks to play the move on screen using Windows API."""
+        if not self.recognizer:
+            return
+
+        coords = self.recognizer.get_move_screen_coords(move_uci, player_color=self.my_color_var.get())
+        if not coords:
+            print("[WARN] 無法計算自動下棋的螢幕座標")
+            return
+
+        start_pt, end_pt = coords
+        print(f"[INFO] Auto-playing {move_uci}: clicking {start_pt} then {end_pt}")
+
+        # Mouse event constants
+        MOUSEEVENTF_LEFTDOWN = 0x0002
+        MOUSEEVENTF_LEFTUP = 0x0004
+
+        def click(x, y):
+            ctypes.windll.user32.SetCursorPos(x, y)
+            time.sleep(0.05)
+            ctypes.windll.user32.mouse_event(MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0)
+            time.sleep(0.05)
+            ctypes.windll.user32.mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, 0)
+            time.sleep(0.1)
+
+        # Execute start and end clicks
+        click(start_pt[0], start_pt[1])
+        time.sleep(0.2)
+        click(end_pt[0], end_pt[1])
+        
+        # Handle Pawn Promotion
+        # Usually UCI for promotion is 5 chars, e.g. "e7e8q"
+        # When a pawn reaches the 8th/1st rank, chess.com (and most sites) shows a popup.
+        # The popup usually appears right at the destination square, extending downwards or upwards.
+        # Typically the Queen is the first option (exactly on the destination square or slightly offset).
+        # We will add a small delay and then click slightly around the destination square
+        # depending on the piece requested.
+        if len(move_uci) == 5 and move_uci[-1] in ['q', 'r', 'b', 'n']:
+            promo_piece = move_uci[-1]
+            print(f"[INFO] 偵測到升變: {promo_piece}，準備點擊選擇選單...")
+            # Wait for the promotion menu to appear
+            time.sleep(0.4) 
+            
+            # Estimate screen coordinates for the popup menu.
+            # On chess.com, for white's promotion on e8 (top), the menu opens downwards [Q, N, R, B]
+            # For black's promotion on e1 (bottom), the menu opens upwards.
+            # It's highly site-specific. We'll implement a basic standard offset.
+            # Assuming Q is always exactly at the target square (which covers 95% of cases as we usually promote to Q).
+            sq_size = self.recognizer.board_side_length // 8
+            
+            target_file = ord(move_uci[2]) - ord('a')
+            target_rank = int(move_uci[3]) - 1 # 0 for rank 1, 7 for rank 8
+            
+            # Is promotion UI going down or up?
+            is_white_promo = (target_rank == 7)
+            
+            # Simple offset logic (Assuming standard chess.com layout: Q, N, R, B)
+            # We add vertical offset based on the piece.
+            offset_multiplier = {'q': 0, 'n': 1, 'r': 2, 'b': 3}
+            # Many sites auto-promote to Queen if you just click the square again, 
+            # or the Queen button replaces the square.
+            
+            # To be safe, try to click the exact spot if it's 'q'
+            if promo_piece == 'q':
+                # Just click the destination square again
+                click(end_pt[0], end_pt[1])
+            else:
+                 # If not Q, we try to guess the offset. This might need tweaking per website.
+                 # Let's assume the pieces are stacked vertically on top of each other.
+                 # For white, pieces go down. For black, pieces might go up or down depending on the site.
+                 # Let's assume downward for simplicity, each piece taking 1 square size.
+                 y_offset = offset_multiplier[promo_piece] * sq_size
+                 # If we are Black promoting at the bottom (rank 1), popup usually goes UP.
+                 if not is_white_promo:
+                     y_offset = -y_offset 
+                 click(end_pt[0], end_pt[1] + y_offset)
+
+    def _auto_detect_loop(self):
+        """Background thread to detect when the opponent has moved."""
+        print("[INFO] Started Auto-Detect Opponent loop...")
+        self.auto_detecting_opponent = True
+        
+        def update_status(text, color):
+            self.lbl_status.config(text=text, foreground=color)
+            
+        self.after(0, update_status, "狀態 (Status): 等待對手下棋... (Waiting for opponent)", "blue")
+
+        # Wait a moment before taking the baseline FEN so animations can finish
+        time.sleep(0.5)
+        
+        try:
+            # We assume recognizer exists because we just finished our own analysis
+            baseline_fen_raw = self.recognizer.get_fen_from_screen(
+                player_color=self.my_color_var.get(),
+                active_player=self.side_var.get(), # Now opponent's side
+                castling='-', en_passant='-'
+            )
+            self.last_detected_fen = baseline_fen_raw
+            if not baseline_fen_raw:
+                print("[WARN] Auto-detect failed to get baseline FEN.")
+                self.auto_detecting_opponent = False
+                self.after(0, update_status, "狀態 (Status): 自動偵測失敗 (Auto-detect failed)", "red")
+                return
+
+            print(f"[INFO] Baseline FEN for auto-detect: {self.last_detected_fen}")
+        except Exception as e:
+            print(f"Error getting baseline FEN: {e}")
+            self.auto_detecting_opponent = False
+            return
+
+        consecutive_stable_frames = 0
+        current_detected_fen = baseline_fen_raw
+
+        while self.auto_detecting_opponent:
+            time.sleep(0.5) # Check every 0.5 second
+            if not self.auto_detecting_opponent:
+                 break
+                 
+            try:
+                new_fen_raw = self.recognizer.get_fen_from_screen(
+                    player_color=self.my_color_var.get(),
+                    active_player=self.side_var.get(),
+                    castling='-', en_passant='-'
+                )
+                
+                if new_fen_raw and new_fen_raw != baseline_fen_raw:
+                    # FEN changed! Let's ensure it's stable for 2 frames to avoid animation mid-points
+                    if new_fen_raw == current_detected_fen:
+                        consecutive_stable_frames += 1
+                    else:
+                        consecutive_stable_frames = 1
+                        current_detected_fen = new_fen_raw
+                        
+                    if consecutive_stable_frames >= 2:
+                        print(f"[INFO] Opponent move detected! New FEN: {current_detected_fen}")
+                        self.auto_detecting_opponent = False
+                        
+                        def resume_turn():
+                            self.toggle_side_to_move()
+                            self.start_analysis_thread()
+                            
+                        # Trigger analysis automatically via UI thread
+                        self.after(0, resume_turn)
+                        break
+            except Exception as e:
+                 print(f"Error during auto-detect: {e}")
+                 pass
 
     def infer_castling_rights(self, board):
         """
@@ -579,13 +783,28 @@ class ChessVisionApp(tk.Tk):
                         self.lbl_status.config(text="狀態 (Status): 準備就緒 (Ready)", foreground="green")
                         print("[INFO] Warmup complete.")
                         continue
+                        
+                    # If user pressed stop, analyzing is False, so we should discard this bestmove
+                    if not self.analyzing:
+                         print("[INFO] Muted bestmove because analysis was stopped.")
+                         self.btn_analyze.config(state="normal")
+                         self.btn_stop.config(state="disabled")
+                         continue
 
                     move_uci = msg["move"]
-                    self.lbl_bestmove.config(text=f"最佳著法 (Best Move): {move_uci}")
+                    
+                    # Display proper castling move
+                    castling_map = {"e1h1": "e1g1", "e1a1": "e1c1", "e8h8": "e8g8", "e8a8": "e8c8"}
+                    if move_uci in castling_map and self.board.piece_at(chess.parse_square(move_uci[:2])) == chess.Piece(chess.KING, self.board.turn):
+                        display_move = castling_map[move_uci]
+                    else:
+                        display_move = move_uci
+                        
+                    self.lbl_bestmove.config(text=f"最佳著法 (Best Move): {display_move}")
                     
                     # Highlight move on board
                     try:
-                        move = chess.Move.from_uci(move_uci)
+                        move = chess.Move.from_uci(display_move)
                         if move in self.board.legal_moves:
                             self.board.push(move)
                             self.draw_board()
@@ -594,6 +813,31 @@ class ChessVisionApp(tk.Tk):
                     
                     # Signal that analysis is done
                     self.message_queue.put({"type": "analysis_finished"})
+                    
+                    # --- Automation Logic ---
+                    # Execute auto play if enabled
+                    if self.auto_play_var.get():
+                        # If in fixed mode, only auto-play if the current side to move matches "My Color"
+                        if self.autoplay_mode_var.get() == "self" or self.side_var.get() == self.my_color_var.get():
+                            self.execute_auto_play(display_move)
+                        else:
+                            print(f"[INFO] 略過自動下棋：目前為固定方對戰模式，且輪到對手 ({self.side_var.get()})。")
+                        
+                    # If auto detect is enabled, wait for opponent
+                    if self.auto_detect_opponent_var.get():
+                        if self.autoplay_mode_var.get() == "self":
+                           # In self-play mode, we don't wait for the opponent. We just flip the board side and trigger our own analysis again.
+                           self.toggle_side_to_move()
+                           print("[INFO] 自己對戰模式：正在自動觸發下一回合分析...")
+                           # Tiny delay to allow pieces to visually move
+                           time.sleep(1)
+                           self.after(0, self.start_analysis_thread)
+                        else:
+                           self.toggle_side_to_move()
+                           # Start background thread to detect move
+                           threading.Thread(target=self._auto_detect_loop, daemon=True).start()
+                    else:
+                        self.lbl_status.config(text="狀態 (Status): 準備就緒 (Ready)", foreground="green")
 
                 elif msg["type"] == "fen_update":
                     fen = msg["fen"]
@@ -605,11 +849,13 @@ class ChessVisionApp(tk.Tk):
 
                 elif msg["type"] == "error":
                     messagebox.showerror("Error", msg["message"])
+                    self.lbl_status.config(text="狀態 (Status): 發生錯誤 (Error)", foreground="red")
 
                 elif msg["type"] == "analysis_finished":
                     self.analyzing = False
                     self.btn_analyze.config(state="normal")
                     self.btn_stop.config(state="disabled")
+                    # Note: we update label inside bestmove now if auto-detecting
                 
                 elif msg["type"] == "log":
                     print(f"[LOG] {msg['message']}")
