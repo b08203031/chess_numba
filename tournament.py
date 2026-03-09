@@ -72,13 +72,13 @@ class Engine:
     def warm_up(self):
         # Trigger JIT compilation
         print(f"[{self.name}] Warming up...")
+        self.send_command("setoption name OwnBook value false")
         self.send_command("position startpos")
         self.send_command("go depth 2")
         while True:
             line = self.read_line()
             if line is None:
                 raise RuntimeError(f"Engine {self.name} terminated during warm-up")
-            # print(f"[{self.name} warm-up] {line}")
             if line.startswith("bestmove"):
                 break
 
@@ -114,8 +114,54 @@ class Engine:
 
         return best_move
 
-def play_game(white_engine, black_engine, time_limit_ms, game_number):
-    board = chess.Board()
+class SPRTTest:
+    def __init__(self, elo0=0.0, elo1=5.0, alpha=0.05, beta=0.05):
+        self.elo0 = elo0
+        self.elo1 = elo1
+        self.a = math.log((1 - beta) / alpha)
+        self.b = math.log(beta / (1 - alpha))
+        self.pair_scores = [] # stores scores of Engine 1 in each pair (0 to 2)
+        
+    def add_pair_result(self, score):
+        self.pair_scores.append(score)
+        
+    def check_status(self):
+        n = len(self.pair_scores)
+        if n < 5:
+            return "Continue", 0.0
+            
+        mean = sum(self.pair_scores) / n
+        mean_sq = sum(x**2 for x in self.pair_scores) / n
+        variance = mean_sq - mean**2
+        
+        if variance <= 1e-10:
+            return "Continue", 0.0
+            
+        # Expected scores for a single game based on Elo difference
+        mu0_game = 1.0 / (1.0 + 10.0 ** (-self.elo0 / 400.0))
+        mu1_game = 1.0 / (1.0 + 10.0 ** (-self.elo1 / 400.0))
+        
+        # Expected scores for a PAIR of games
+        mu0_pair = 2.0 * mu0_game
+        mu1_pair = 2.0 * mu1_game
+        
+        # Calculate Sequential Probability Ratio Test (SPRT) Log-Likelihood Ratio (LLR)
+        # using the normal approximation of the score sum
+        sum_scores = sum(self.pair_scores)
+        llr = (mu1_pair - mu0_pair) / variance * (sum_scores - n * (mu0_pair + mu1_pair) / 2.0)
+        
+        if llr >= self.a:
+            return "H1 Accepted (Engine improved)", llr
+        elif llr <= self.b:
+            return "H0 Accepted (No improvement)", llr
+        else:
+            return "Continue", llr
+
+def play_game(white_engine, black_engine, time_limit_ms, game_number, start_fen=None):
+    if start_fen:
+        board = chess.Board(start_fen)
+    else:
+        board = chess.Board()
 
     # Send new game command
     white_engine.send_command("ucinewgame")
@@ -124,6 +170,9 @@ def play_game(white_engine, black_engine, time_limit_ms, game_number):
     black_engine.wait_for_ready()
 
     pgn_game = chess.pgn.Game()
+    if start_fen:
+        pgn_game.setup(start_fen)
+        
     pgn_game.headers["Event"] = "Engine Tournament"
     pgn_game.headers["Site"] = "Local"
     pgn_game.headers["Date"] = datetime.now().strftime("%Y.%m.%d")
@@ -133,17 +182,18 @@ def play_game(white_engine, black_engine, time_limit_ms, game_number):
 
     node = pgn_game
 
-    print(f"Game {game_number}: {white_engine.name} (White) vs {black_engine.name} (Black)")
+    print(f"Game {game_number}: {white_engine.name} (White) vs {black_engine.name} (Black)", end="")
+    if start_fen:
+        print(" (from custom opening)")
+    else:
+        print()
 
     while not board.is_game_over(claim_draw=True):
-        if board.turn == chess.WHITE:
-            mover = white_engine
-        else:
-            mover = black_engine
+        mover = white_engine if board.turn == chess.WHITE else black_engine
 
         try:
             moves_history = [m.uci() for m in board.move_stack]
-            move = mover.get_move(moves_history, time_limit_ms)
+            move = mover.get_move(moves_history, time_limit_ms, start_fen)
         except Exception as e:
             print(f"Error getting move from {mover.name}: {e}")
             break
@@ -163,13 +213,9 @@ def play_game(white_engine, black_engine, time_limit_ms, game_number):
         board.push(move)
         node = node.add_variation(move)
 
-        # Simple progress indicator
-        # print(".", end="", flush=True)
-
-    # print() # Newline after dots
     result = board.result(claim_draw=True)
     pgn_game.headers["Result"] = result
-    print(f"Result: {result}")
+    print(f" Result: {result}")
 
     return result, pgn_game
 
@@ -199,7 +245,6 @@ def calculate_elo_statistics(wins, draws, losses):
     mean_sq = (wins * 1.0 + draws * 0.25) / total_games
     variance = mean_sq - (p ** 2)
     
-    # 確保變異數非負 (浮點誤差可能導致極小負值)
     if variance < 0: variance = 0
     
     sigma = math.sqrt(variance)
@@ -207,16 +252,30 @@ def calculate_elo_statistics(wins, draws, losses):
 
     # 4. 計算誤差範圍 (95% CI)
     z_score = 1.96
-    # Gradient approximation: d(Elo)/dp
     gradient = 400 / (math.log(10) * p * (1 - p))
     error_margin = z_score * se * gradient
 
     return elo_diff, error_margin
 
+def count_result(result_str, is_white):
+    if result_str == "1-0": return 1.0 if is_white else 0.0
+    if result_str == "0-1": return 0.0 if is_white else 1.0
+    return 0.5 
+
 def run_tournament(engine1_path, engine2_path, games_count, time_ms, engine1_name="Engine_A", engine2_name="Engine_B"):
 
     e1 = Engine(engine1_name, engine1_path)
     e2 = Engine(engine2_name, engine2_path)
+    
+    # Read openings if available
+    openings = [None]
+    if os.path.exists("openings.epd"):
+        with open("openings.epd", "r") as f:
+            lines = [l.strip() for l in f if l.strip()]
+            if lines: openings = lines
+
+    import random
+    random.shuffle(openings)
 
     try:
         print("Starting engines...")
@@ -227,63 +286,69 @@ def run_tournament(engine1_path, engine2_path, games_count, time_ms, engine1_nam
         e2.warm_up()
 
         scores = {engine1_name: 0.0, engine2_name: 0.0}
-        
-        # 追蹤 Engine 1 的詳細戰績以計算 Elo 誤差
         e1_stats = {"wins": 0, "draws": 0, "losses": 0}
 
         pgn_file = "tournament_analysis/tournament_results.pgn"
-        # Clear existing PGN file
+        os.makedirs(os.path.dirname(pgn_file), exist_ok=True)
         with open(pgn_file, "w") as f:
             pass
-
-        for i in range(1, games_count + 1):
-            # Alternate colors
-            if i % 2 != 0:
-                white, black = e1, e2
-            else:
-                white, black = e2, e1
-
-            result, pgn_game = play_game(white, black, time_ms, i)
+            
+        # Target Elo bounds: Test if we gained 10 Elo or 0 Elo
+        sprt = SPRTTest(elo0=0.0, elo1=10.0, alpha=0.05, beta=0.05)
+        
+        pairs_count = games_count // 2
+        game_num = 1
+        
+        status, llr = "Continue", 0.0
+        
+        for pair_i in range(1, pairs_count + 1):
+            opening_fen = openings[(pair_i - 1) % len(openings)]
+            
+            # Game A: Engine 1 plays White
+            res_a, pgn_a = play_game(e1, e2, time_ms, game_num, opening_fen)
+            score_a_for_e1 = count_result(res_a, is_white=True)
+            game_num += 1
+            
+            # Game B: Engine 1 plays Black
+            res_b, pgn_b = play_game(e2, e1, time_ms, game_num, opening_fen)
+            score_b_for_e1 = count_result(res_b, is_white=False)
+            game_num += 1
+            
+            pair_score = score_a_for_e1 + score_b_for_e1
+            sprt.add_pair_result(pair_score)
+            scores[e1.name] += pair_score
+            scores[e2.name] += (2.0 - pair_score)
+            
+            # Record individual stats for ELO calculation
+            for s in [score_a_for_e1, score_b_for_e1]:
+                if s == 1.0: e1_stats["wins"] += 1
+                elif s == 0.0: e1_stats["losses"] += 1
+                else: e1_stats["draws"] += 1
 
             with open(pgn_file, "a") as f:
-                print(pgn_game, file=f, end="\n\n")
+                print(pgn_a, file=f, end="\n\n")
+                print(pgn_b, file=f, end="\n\n")
 
-            if result == "1-0":
-                scores[white.name] += 1.0
-                # 更新 Engine 1 戰績
-                if white.name == engine1_name:
-                    e1_stats["wins"] += 1
-                else:
-                    e1_stats["losses"] += 1
-                    
-            elif result == "0-1":
-                scores[black.name] += 1.0
-                # 更新 Engine 1 戰績
-                if black.name == engine1_name:
-                    e1_stats["wins"] += 1
-                else:
-                    e1_stats["losses"] += 1
-            else:
-                scores[white.name] += 0.5
-                scores[black.name] += 0.5
-                # 更新 Engine 1 戰績
-                e1_stats["draws"] += 1
-
-            # Print intermediate stats
-            print(f"After {i} games:")
+            status, llr = sprt.check_status()
+            
+            print(f"\nAfter {pair_i} pairs ({(pair_i)*2} games):")
             print(f"{engine1_name}: {scores[engine1_name]}")
             print(f"{engine2_name}: {scores[engine2_name]}")
+            print(f"SPRT LLR: {llr:.2f} bounds: [{sprt.b:.2f}, {sprt.a:.2f}]")
+            print(f"SPRT Status: {status}")
             print("-" * 30)
+            
+            if status != "Continue":
+                print(f"SPRT bounds triggered. Stopping test early.")
+                break
 
-        # Final Stats
         print("\n=== Tournament Finished ===")
-        print(f"Total Games: {games_count}")
+        print(f"Total Matches Played: {game_num - 1}")
         print(f"Final Score {engine1_name}: {scores[engine1_name]} ({e1_stats['wins']}W - {e1_stats['draws']}D - {e1_stats['losses']}L)")
         print(f"Final Score {engine2_name}: {scores[engine2_name]}")
+        print(f"SPRT Status: {status} (LLR = {llr:.2f})")
 
-        # 計算 Elo 與誤差
         elo_diff, error_margin = calculate_elo_statistics(e1_stats["wins"], e1_stats["draws"], e1_stats["losses"])
-
         if math.isinf(elo_diff):
              print(f"ELO Difference: > +/- 800 (Perfect score or zero score)")
         else:

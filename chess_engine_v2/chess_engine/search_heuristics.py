@@ -99,17 +99,27 @@ def score_captures(piece_bbs, occupancy_bbs, game_state, moves, scores, start_id
         scores[i] = score
 
 @numba.njit(cache=True, boundscheck=False, fastmath=True)
-def score_quiets(piece_bbs, occupancy_bbs, game_state, moves, scores, start_idx, end_idx, search_context, ply):
+def score_quiets(piece_bbs, occupancy_bbs, game_state, moves, scores, start_idx, end_idx, search_context, ply, killer_1, killer_2, counter_move):
     side_to_move = game_state[0]
     
-    prev_move = NO_MOVE
-    prev_piece = -1
+    prev_move_1 = NO_MOVE
+    prev_piece_1 = -1
+    prev_move_2 = NO_MOVE
+    prev_piece_2 = -1
+    prev_move_4 = NO_MOVE
+    prev_piece_4 = -1
     
     if ply > 0:
-        prev_move = search_context.move_stack[ply-1]
-        if prev_move != NO_MOVE:
-            prev_to = get_to_square(prev_move)
-            prev_piece = find_piece_type_for_square(piece_bbs, prev_to, 1 - side_to_move)
+        prev_move_1 = search_context.move_stack[ply-1]
+        prev_piece_1 = search_context.piece_stack[ply-1]
+        
+    if ply > 1:
+        prev_move_2 = search_context.move_stack[ply-2]
+        prev_piece_2 = search_context.piece_stack[ply-2]
+        
+    if ply > 3:
+        prev_move_4 = search_context.move_stack[ply-4]
+        prev_piece_4 = search_context.piece_stack[ply-4]
 
     for i in range(start_idx, end_idx):
         move = moves[i]
@@ -123,9 +133,17 @@ def score_quiets(piece_bbs, occupancy_bbs, game_state, moves, scores, start_idx,
         score += search_context.butterfly_history[from_sq, to_square]
         
         # Continuation History
-        if prev_move != NO_MOVE and prev_piece != -1:
-            cont_score = search_context.continuation_history[prev_piece, get_to_square(prev_move), aggressor_type, to_square]
-            score += cont_score * CONTINUATION_HISTORY_FACTOR
+        if prev_move_1 != NO_MOVE and prev_piece_1 != -1:
+            cont_score = search_context.continuation_history[prev_piece_1, get_to_square(prev_move_1), aggressor_type, to_square]
+            score += cont_score * 2
+
+        if prev_move_2 != NO_MOVE and prev_piece_2 != -1:
+            cont_score = search_context.continuation_history[prev_piece_2, get_to_square(prev_move_2), aggressor_type, to_square]
+            score += cont_score
+
+        if prev_move_4 != NO_MOVE and prev_piece_4 != -1:
+            cont_score = search_context.continuation_history[prev_piece_4, get_to_square(prev_move_4), aggressor_type, to_square]
+            score += cont_score
 
         # Static Check Bonus
         opponent_king_bb = piece_bbs[11] if side_to_move == 0 else piece_bbs[5]
@@ -147,6 +165,13 @@ def score_quiets(piece_bbs, occupancy_bbs, game_state, moves, scores, start_idx,
             
             if is_check:
                 score += 15000
+
+        if move == killer_1:
+            score += 50000
+        elif move == killer_2:
+            score += 40000
+        elif move == counter_move:
+            score += 30000
 
         scores[i] = score
 
@@ -185,20 +210,24 @@ def score_moves(piece_bbs, occupancy_bbs, game_state, moves, scores, move_count,
     side_to_move = game_state[0]
     opponent_pieces_bb = occupancy_bbs[1] if side_to_move == 0 else occupancy_bbs[0]
     
-    prev_move = NO_MOVE
-    prev_piece = -1
+    prev_move_1 = NO_MOVE
+    prev_piece_1 = -1
+    prev_move_2 = NO_MOVE
+    prev_piece_2 = -1
+    prev_move_4 = NO_MOVE
+    prev_piece_4 = -1
     
     if ply > 0:
-        prev_move = search_context.move_stack[ply-1]
-        if prev_move != NO_MOVE:
-            # We need to find what piece was moved in the previous move.
-            # The piece is currently at prev_move.to_square (unless captured, but move_stack tracks moves made)
-            # wait, move_stack tracks moves made on the board.
-            # The previous move was made by the opponent (1-side_to_move).
-            # The piece should be at get_to_square(prev_move).
-            prev_to = get_to_square(prev_move)
-            # Find piece type on square for opponent
-            prev_piece = find_piece_type_for_square(piece_bbs, prev_to, 1 - side_to_move)
+        prev_move_1 = search_context.move_stack[ply-1]
+        prev_piece_1 = search_context.piece_stack[ply-1]
+        
+    if ply > 1:
+        prev_move_2 = search_context.move_stack[ply-2]
+        prev_piece_2 = search_context.piece_stack[ply-2]
+        
+    if ply > 3:
+        prev_move_4 = search_context.move_stack[ply-4]
+        prev_piece_4 = search_context.piece_stack[ply-4]
 
     for i in range(move_count):
         move = moves[i]
@@ -251,8 +280,49 @@ def score_moves(piece_bbs, occupancy_bbs, game_state, moves, scores, move_count,
                     score += search_context.butterfly_history[from_sq, to_square]
                     
                     # Continuation History
-                    if prev_move != NO_MOVE and prev_piece != -1:
-                        cont_score = search_context.continuation_history[prev_piece, get_to_square(prev_move), aggressor_type, to_square]
-                        score += cont_score * CONTINUATION_HISTORY_FACTOR
+                    if prev_move_1 != NO_MOVE and prev_piece_1 != -1:
+                        cont_score = search_context.continuation_history[prev_piece_1, get_to_square(prev_move_1), aggressor_type, to_square]
+                        if cont_score != 0:
+                            score += cont_score * 2
+
+                    if prev_move_2 != NO_MOVE and prev_piece_2 != -1:
+                        cont_score = search_context.continuation_history[prev_piece_2, get_to_square(prev_move_2), aggressor_type, to_square]
+                        if cont_score != 0:
+                            score += cont_score
+
+                    if prev_move_4 != NO_MOVE and prev_piece_4 != -1:
+                        cont_score = search_context.continuation_history[prev_piece_4, get_to_square(prev_move_4), aggressor_type, to_square]
+                        if cont_score != 0:
+                            score += cont_score
 
         scores[i] = score
+
+@numba.njit(cache=True, boundscheck=False, fastmath=True)
+def partial_insertion_sort_moves(moves, scores, start_idx, end_idx, limit):
+    """
+    Sorts moves in descending order up to and including a given score limit.
+    Returns the index of the first element that is < limit (i.e. number of sorted elements + start_idx).
+    Moves with score < limit are left unsorted at the end.
+    """
+    sorted_end = start_idx - 1
+    
+    for p in range(start_idx, end_idx):
+        if scores[p] >= limit:
+            tmp_score = scores[p]
+            tmp_move = moves[p]
+            
+            sorted_end += 1
+            if p != sorted_end:
+                scores[p] = scores[sorted_end]
+                moves[p] = moves[sorted_end]
+            
+            q = sorted_end
+            while q > start_idx and scores[q - 1] < tmp_score:
+                scores[q] = scores[q - 1]
+                moves[q] = moves[q - 1]
+                q -= 1
+                
+            scores[q] = tmp_score
+            moves[q] = tmp_move
+            
+    return sorted_end + 1

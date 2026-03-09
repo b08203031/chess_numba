@@ -1,0 +1,76 @@
+# 國際象棋引擎 (chess_engine_v2) 搜尋與 MovePicker 核心優化總結報告
+**目的：提供第三方開發者與架構師進行程式碼審查 (Code Review)**
+
+本報告詳述了近期針對 `chess_engine_v2` 中搜尋演算法與走法選擇器 (MovePicker) 所進行的三大階段深度重構與優化。這些改動旨在將引擎的節點展開邏輯現代化，並向 Stockfish 的架構靠攏。
+
+---
+
+## Phase 2: MovePicker 狀態機現代化重構 (Unified Quiets Flow)
+
+**📝 背景與目標**
+舊版的 MovePicker ([get_next_move](file:///c:/Users/ren%20cian/OneDrive/%E6%A1%8C%E9%9D%A2/chess/chess_numba/chess_numba/chess_engine_v2/chess_engine/search.py#544-664)) 擁有過多死板的獨立階段（例如將 Killer 1、Killer 2、Counter Move 拆分為不同階段）。這不僅讓 `while` 迴圈狀態機異常龐大，也阻礙了依賴分數進行整體排序的靈活性。本階段目標是將架構扁平化。
+
+**🛠 具體程式碼變動**
+1.  **拔除冗餘階段 ([constants.py](file:///c:/Users/ren%20cian/OneDrive/%E6%A1%8C%E9%9D%A2/chess/chess_numba/chess_numba/chess_engine/constants.py))**：
+    *   **移除**：`STAGE_KILLER_1`, `STAGE_KILLER_2`, `STAGE_COUNTER_MOVE`
+    *   **新增**：`STAGE_GOOD_QUIETS`, `STAGE_BAD_QUIETS`
+2.  **融合靜態評分 (`search_heuristics.py -> score_quiets`)**：
+    *   將 Killer Moves 與 Counter Move 作為參數傳入 [score_quiets](file:///c:/Users/ren%20cian/OneDrive/%E6%A1%8C%E9%9D%A2/chess/chess_numba/chess_numba/chess_engine/search_heuristics.py#101-159)。
+    *   在評分迴圈中，若該寧靜步符合 Killer/Counter，直接賦予極端的「特權分數」（如 `+50000` / `+40000`）。這使得它們在後續的排序中自然浮出水面，無需佔用獨立的狀態機階段。
+3.  **狀態機扁平化 (`search.py -> get_next_move`)**：
+    *   將 [get_next_move](file:///c:/Users/ren%20cian/OneDrive/%E6%A1%8C%E9%9D%A2/chess/chess_numba/chess_numba/chess_engine_v2/chess_engine/search.py#544-664) 重構為主流的五個階段：`TT -> Good Captures -> Good Quiets -> Bad Captures -> Bad Quiets`。
+    *   在 `Good Captures` 與 `Good Quiets` 階段導入高效的 [partial_insertion_sort_moves](file:///c:/Users/ren%20cian/OneDrive/%E6%A1%8C%E9%9D%A2/chess/chess_numba/chess_numba/chess_engine/search_heuristics.py#267-296)，只挑選並排序分數大於一定閾值的高質量步法，極大化節省低端節點的排序開銷。
+    *   確定虧分的 `Bad Captures` 被挪移到 `Good Quiets` 之後、`Bad Quiets` 之前搜尋。
+
+---
+
+## Phase 3: 多層次延續歷史 (Multi-level Continuation History)
+
+**📝 背景與目標**
+原先引擎的歷史啟發 (History Heuristic) 僅依賴 `ply-1` (對手上一著) 作為 Context。為了提升寧靜步的排序精準度與 LMR (後期移動縮減) 的安全性，我們實作了 Stockfish 標配的多維度歷史檢索，讓引擎能學習 `ply-2` (我方上一著/計畫) 與 `ply-4` (我方佈局) 的歷史因果關係。
+
+**🛠 具體程式碼變動**
+1.  **引入歷史追蹤堆疊 ([engine_types.py](file:///c:/Users/ren%20cian/OneDrive/%E6%A1%8C%E9%9D%A2/chess/chess_numba/chess_numba/chess_engine_v2/chess_engine/engine_types.py), `search.py -> _search`)**：
+    *   在 [SearchContext](file:///c:/Users/ren%20cian/OneDrive/%E6%A1%8C%E9%9D%A2/chess/chess_numba/chess_numba/chess_engine_v2/chess_engine/engine_types.py#65-141) 中新增 `piece_stack` (大小為 `MAX_PLY` 的 numpy array)。
+    *   在 [_search](file:///c:/Users/ren%20cian/OneDrive/%E6%A1%8C%E9%9D%A2/chess/chess_numba/chess_numba/chess_engine_v2/chess_engine/search.py#687-1541) 遞迴執行 [make_move](file:///c:/Users/ren%20cian/OneDrive/%E6%A1%8C%E9%9D%A2/chess/chess_numba/chess_numba/chess_engine_v2/chess_engine/board_operations.py#55-218) 前，除了記錄 `move_stack`，一併將當前的棋子類型記錄進 `piece_stack`。這解決了在發生吃子後，無法反查 `ply-2` 或 `ply-4` 移動的是什麼棋子的問題。
+2.  **升級歷史提取 (`search_heuristics.py -> score_quiets`, [score_moves](file:///c:/Users/ren%20cian/OneDrive/%E6%A1%8C%E9%9D%A2/chess/chess_numba/chess_numba/chess_engine_v2/chess_engine/search_heuristics.py#222-319))**：
+    *   在評估寧靜步時，除了主 `history_table`，同時計算三層延續歷史的分數總和：
+        *   `ply-1` 分數：權重 `x2`
+        *   `ply-2` 分數：權重 `x1`
+        *   `ply-4` 分數：權重 `x1`
+3.  ** Cutoff 與 Malus 更新邏輯 (`search.py -> _search`)**：
+    *   當優質寧靜步引發 Beta Cutoff 時，呼叫 [update_continuation_history](file:///c:/Users/ren%20cian/OneDrive/%E6%A1%8C%E9%9D%A2/chess/chess_numba/chess_numba/chess_engine_v2/chess_engine/search_heuristics.py#65-78) **三次**，分別給予 `ply-1`, `ply-2`, `ply-4` 正向 Bonus。
+    *   對於排序在前面但未能觸發 Cutoff 的 `quiet_moves_tried` 陣列，同樣呼叫三次給予負向 Malus。
+4.  **動態 LMR 縮減 (`search.py -> _search LMR Block`)**：
+    *   在決定 LMR 縮減深度時，將 `ply-1`, `ply-2`, `ply-4` 的歷史分數加總進 `history_score` 變數中。
+    *   若該步擁有一系列高分的歷史軌跡，使得 `history_score` 衝高，[get_lmr_reduction](file:///c:/Users/ren%20cian/OneDrive/%E6%A1%8C%E9%9D%A2/chess/chess_numba/chess_numba/chess_engine/search_heuristics.py#160-189) 將返回較小的縮減值 (Reduction)，藉此保護極具戰略潛力的連續步法不被過度修剪。
+
+---
+
+## Phase 4: 動態剪枝與威脅感知 (Dynamic Pruning & Threat Awareness)
+
+**📝 背景與目標**
+消除「寧靜步主動送死」與「錯失深層犧牲打」的盲點。我們加入了動態 SEE 閾值來保留特定虧分吃子，並加入輕量化位元棋盤掃描，將走向危險網的寧靜步踢出 `Good Quiets` 頂端。
+
+**🛠 具體程式碼變動**
+1.  **動態 SEE 容錯閾值 (`search_heuristics.py -> score_moves`)**：
+    *   原本區分好壞吃子的公式為死板的 [see_ge(..., 0)](file:///c:/Users/ren%20cian/OneDrive/%E6%A1%8C%E9%9D%A2/chess/chess_numba/chess_numba/chess_engine_v2/chess_engine/see.py#245-357)。
+    *   現在透過該步的吃子歷史 (`CaptureHistory`) 動態計算閾值：`see_threshold = - int(capture_hist / DYNAMIC_SEE_THRESHOLD_DIVISOR)`。
+    *   若一著吃子的歷史分數極高（例如經常被證明是有長遠回報的犧牲打），引擎允許其 SEE 微幅虧損（例如虧半子），呼叫 [see_ge(..., see_threshold)](file:///c:/Users/ren%20cian/OneDrive/%E6%A1%8C%E9%9D%A2/chess/chess_numba/chess_numba/chess_engine_v2/chess_engine/see.py#245-357)，讓它能留在 `Good Captures` 提前被搜尋。
+2.  **寧靜步輕量威脅懲罰 (`search_heuristics.py -> score_quiets`)**：
+    *   利用 Magic Bitboards (如 `PAWN_ATTACKS`, `KNIGHT_ATTACKS`, [get_bishop_attacks](file:///c:/Users/ren%20cian/OneDrive/%E6%A1%8C%E9%9D%A2/chess/chess_numba/chess_numba/chess_engine_v2/chess_engine/move_generator.py#157-167))。
+    *   計算目的地 `to_square` 是否處於敵方低價值棋子 (`PAWN` 及小於等於 `BISHOP` 的輕子) 的攻擊範圍內。
+    *   若是，則給予嚴厲的負分懲罰 (`-5000` 或 `-2000`)，以抵銷其可能的歷史高分。這能極其有效地過濾掉引擎在深層搜尋時因 Horizon Effect 而產生的「主動送大子給兵吃」的低級失誤。
+
+---
+
+## 🚨 重大 Bug 修復紀錄 (Review 重點)
+
+在開發 Phase 4 及 100ms 賽事初期，V2 引擎一度發生嚴重的 Elo 衰退，第三方 Code Reviewer 請務必留意以下兩處已被修復的邏輯，避免未來衍生類似問題：
+
+1.  **LMR 歷史膨脹導致盲目深搜 (已修復於 [search.py](file:///c:/Users/ren%20cian/OneDrive/%E6%A1%8C%E9%9D%A2/chess/chess_numba/chess_numba/chess_engine/search.py))**：
+    *   **肇因**：在 Phase 3 將 `ply-2` 與 `ply-4` 歷史計入 LMR 時，錯誤地將其乘上了 `CONTINUATION_HISTORY_FACTOR` 的倍率。這導致寧靜步的總分被無限制放大，使得 LMR [reduction](file:///c:/Users/ren%20cian/OneDrive/%E6%A1%8C%E9%9D%A2/chess/chess_numba/chess_numba/chess_engine/search_heuristics.py#160-189) 在多數情況下趨近於 0。引擎因此無法在晚期步法中有效剪枝，退化回暴力搜索，NPS 不變但深度暴跌。
+    *   **修復**：解除了 `ply-2` 與 `ply-4` 在 LMR 計算時的倍率放大，僅保留原始分數的疊加。
+2.  **PAWN_ATTACKS 敵我不分 (Friendly Fire Bug) (已修復於 [search_heuristics.py](file:///c:/Users/ren%20cian/OneDrive/%E6%A1%8C%E9%9D%A2/chess/chess_numba/chess_numba/chess_engine/search_heuristics.py))**：
+    *   **肇因**：在實作威脅懲罰時，針對兵的攻擊檢查 `PAWN_ATTACKS[side_to_move, to_square]`，不慎傳入了己方的顏色 (`side_to_move`)。這導致引擎檢查到的其實是「該格子是否被自己的兵保護」，反而演變成「走向被自己兵保護的安全格會被扣死分」的荒謬行為。
+    *   **修復**：新增 `opponent_side = 1 - side_to_move`，正確改為 `PAWN_ATTACKS[opponent_side, to_square]`。

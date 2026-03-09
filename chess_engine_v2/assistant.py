@@ -228,6 +228,7 @@ class ChessVisionApp(tk.Tk):
         super().__init__()
         self.title("西洋棋視覺助理 (Chess Vision App)")
         self.geometry("600x850") # Increased height for new controls
+        self.attributes('-topmost', True) # Keep window on top
         
         # State
         self.board = chess.Board()
@@ -300,6 +301,12 @@ class ChessVisionApp(tk.Tk):
         ToolTip(entry_time, "毫秒 (1000 = 1秒)\nMilliseconds (1000 = 1s)")
         row_idx += 1
 
+        # Always on top Checkbox
+        self.always_on_top_var = tk.BooleanVar(value=True)
+        chk_top = ttk.Checkbutton(control_frame, text="視窗置頂 (Always on Top)", variable=self.always_on_top_var, command=self.toggle_topmost)
+        chk_top.grid(row=row_idx, column=0, columnspan=2, sticky="w", pady=5)
+        row_idx += 1
+
         # Buttons Frame
         btn_frame = ttk.Frame(control_frame)
         btn_frame.grid(row=row_idx, column=0, columnspan=3, pady=10, sticky="ew")
@@ -349,10 +356,22 @@ class ChessVisionApp(tk.Tk):
         self.load_piece_images()
         
         self.canvas = tk.Canvas(self, width=self.canvas_size, height=self.canvas_size)
-        self.canvas.pack(padx=10, pady=10)
+        self.canvas.pack(padx=10, pady=10, expand=True, fill=tk.BOTH)
+        self.canvas.bind("<Configure>", self.on_canvas_resize)
         
         # Initial Draw
         self.draw_board()
+
+    def toggle_topmost(self):
+        self.attributes('-topmost', self.always_on_top_var.get())
+
+    def on_canvas_resize(self, event):
+        new_size = min(event.width, event.height)
+        if new_size > 50 and abs(self.canvas_size - new_size) > 2:
+            self.canvas_size = new_size
+            self.square_size = self.canvas_size // 8
+            self.load_piece_images()
+            self.draw_board()
 
     def load_piece_images(self):
         """Loads piece images from templates folder."""
@@ -362,21 +381,21 @@ class ChessVisionApp(tk.Tk):
             return
 
         try:
-            script_dir = os.path.dirname(os.path.abspath(__file__))
-            template_dir = os.path.join(script_dir, "templates")
-            pieces = ['wP', 'wN', 'wB', 'wR', 'wQ', 'wK', 'bP', 'bN', 'bB', 'bR', 'bQ', 'bK']
+            if not hasattr(self, 'original_pil_images'):
+                self.original_pil_images = {}
+                script_dir = os.path.dirname(os.path.abspath(__file__))
+                template_dir = os.path.join(script_dir, "templates")
+                pieces = ['wP', 'wN', 'wB', 'wR', 'wQ', 'wK', 'bP', 'bN', 'bB', 'bR', 'bQ', 'bK']
+                
+                for p in pieces:
+                    path = os.path.join(template_dir, f"{p}.png")
+                    if os.path.exists(path):
+                        self.original_pil_images[p] = Image.open(path)
             
-            for p in pieces:
-                path = os.path.join(template_dir, f"{p}.png")
-                if not os.path.exists(path):
-                    print(f"[WARN] Piece image not found: {path}")
-                    continue
+            for p, img in self.original_pil_images.items():
+                img_resized = img.resize((self.square_size, self.square_size), Image.Resampling.LANCZOS)
+                self.piece_images[p] = ImageTk.PhotoImage(img_resized)
                 
-                img = Image.open(path)
-                img = img.resize((self.square_size, self.square_size), Image.Resampling.LANCZOS)
-                self.piece_images[p] = ImageTk.PhotoImage(img)
-                
-            print(f"[INFO] Loaded {len(self.piece_images)} piece images.")
         except Exception as e:
             print(f"[WARN] Failed to load piece images: {e}")
             self.piece_images = {}
@@ -605,14 +624,23 @@ class ChessVisionApp(tk.Tk):
         
         is_flipped = (self.my_color_var.get() == 'b')
         
+        canvas_w = self.canvas.winfo_width()
+        canvas_h = self.canvas.winfo_height()
+        if canvas_w < 10 or canvas_h < 10:
+            canvas_w = self.canvas_size
+            canvas_h = self.canvas_size
+            
+        offset_x = max(0, (canvas_w - (self.square_size * 8)) // 2)
+        offset_y = max(0, (canvas_h - (self.square_size * 8)) // 2)
+        
         for rank in range(8):
             for file in range(8):
                 # Calculate coordinates
                 display_rank = rank if is_flipped else (7 - rank)
                 display_file = (7 - file) if is_flipped else file
                 
-                x1 = display_file * self.square_size
-                y1 = display_rank * self.square_size
+                x1 = offset_x + display_file * self.square_size
+                y1 = offset_y + display_rank * self.square_size
                 x2 = x1 + self.square_size
                 y2 = y1 + self.square_size
                 

@@ -31,8 +31,8 @@ from chess_engine.constants import (
     ENABLE_PROBCUT, PROBCUT_R, PROBCUT_R_PRIME, PROBCUT_MARGIN,
     ENABLE_NMP, ENABLE_RAZORING, ENABLE_FP, ENABLE_RFP, ENABLE_LMR, ENABLE_IID,
     STAGE_TT_MOVE, STAGE_GEN_CAPTURES, STAGE_GOOD_CAPTURES,
-    STAGE_KILLER_1, STAGE_KILLER_2, STAGE_COUNTER_MOVE, STAGE_GEN_QUIETS,
-    STAGE_QUIETS, STAGE_BAD_CAPTURES, STAGE_DONE,
+    STAGE_GEN_QUIETS, STAGE_GOOD_QUIETS, STAGE_BAD_CAPTURES,
+    STAGE_BAD_QUIETS, STAGE_DONE,
     ENABLE_SINGULAR_EXTENSIONS, MIN_SINGULAR_DEPTH, SINGULAR_EXTENSION_MARGIN,
     STOP_SEARCH_FLAG, MAX_HISTORY,
     SCORE_TT_MOVE, SCORE_GOOD_CAPTURE_BONUS, SCORE_KILLER_1,
@@ -60,7 +60,7 @@ from .move import move_to_uci
 from chess_engine.search_heuristics import (
     update_history, update_butterfly_history, update_capture_history,
     update_continuation_history, score_captures, score_quiets,
-    get_lmr_reduction, score_moves
+    get_lmr_reduction, score_moves, partial_insertion_sort_moves
 )
 
 quiescence_search_return_type = numba.types.Tuple([
@@ -295,70 +295,62 @@ def get_next_move(piece_bbs, occupancy_bbs, game_state, search_context, ply, tt_
                     search_context.mp_bad_captures_count[ply] += 1
                     continue
             else:
-                search_context.mp_stage[ply] = STAGE_KILLER_1
+                search_context.mp_stage[ply] = STAGE_GEN_QUIETS
                 continue
                 
-        elif mp_stage == STAGE_KILLER_1:
-            search_context.mp_stage[ply] = STAGE_KILLER_2
-            if killer_1 != NO_MOVE and killer_1 != tt_move and killer_1 != excluded_move:
-                if is_move_pseudo_legal(piece_bbs, occupancy_bbs, game_state, killer_1):
-                    to_sq = get_to_square(killer_1)
-                    opponent_pieces_bb = occupancy_bbs[1] if game_state[0] == 0 else occupancy_bbs[0]
-                    is_capture = (opponent_pieces_bb & BB_SQUARES[to_sq]) != 0
-                    if not is_capture:
-                        move = killer_1
-                        return move
-            
-        elif mp_stage == STAGE_KILLER_2:
-            search_context.mp_stage[ply] = STAGE_COUNTER_MOVE
-            if killer_2 != NO_MOVE and killer_2 != tt_move and killer_2 != excluded_move and killer_2 != killer_1:
-                if is_move_pseudo_legal(piece_bbs, occupancy_bbs, game_state, killer_2):
-                    to_sq = get_to_square(killer_2)
-                    opponent_pieces_bb = occupancy_bbs[1] if game_state[0] == 0 else occupancy_bbs[0]
-                    is_capture = (opponent_pieces_bb & BB_SQUARES[to_sq]) != 0
-                    if not is_capture:
-                        move = killer_2
-                        return move
-                    
-        elif mp_stage == STAGE_COUNTER_MOVE:
-            search_context.mp_stage[ply] = STAGE_GEN_QUIETS
-            if counter_move != NO_MOVE and counter_move != tt_move and counter_move != excluded_move and counter_move != killer_1 and counter_move != killer_2:
-                if is_move_pseudo_legal(piece_bbs, occupancy_bbs, game_state, counter_move):
-                    to_sq = get_to_square(counter_move)
-                    opponent_pieces_bb = occupancy_bbs[1] if game_state[0] == 0 else occupancy_bbs[0]
-                    is_capture = (opponent_pieces_bb & BB_SQUARES[to_sq]) != 0
-                    if not is_capture:
-                        move = counter_move
-                        return move
-                    
         elif mp_stage == STAGE_GEN_QUIETS:
             captures_end = search_context.mp_captures_end[ply]
             search_context.mp_quiets_end[ply] = generate_pseudo_legal_quiets_buffer(piece_bbs, occupancy_bbs, game_state, search_context.moves_buffer, ply, captures_end)
-            score_quiets(piece_bbs, occupancy_bbs, game_state, moves, scores, captures_end, search_context.mp_quiets_end[ply], search_context, ply)
+            score_quiets(piece_bbs, occupancy_bbs, game_state, moves, scores, captures_end, search_context.mp_quiets_end[ply], search_context, ply, killer_1, killer_2, counter_move)
+            
+            # Sort good quiets (score >= 0) to the front. Bad quiets (score < 0) remain at the back.
+            num_sorted = partial_insertion_sort_moves(moves, scores, captures_end, search_context.mp_quiets_end[ply], 0)
+            
             search_context.mp_current_idx[ply] = captures_end
-            search_context.mp_stage[ply] = STAGE_QUIETS
+            search_context.mp_stage[ply] = STAGE_GOOD_QUIETS
             continue
             
-        elif mp_stage == STAGE_QUIETS:
+        elif mp_stage == STAGE_GOOD_QUIETS:
             quiets_end = search_context.mp_quiets_end[ply]
             current_idx = search_context.mp_current_idx[ply]
-            if current_idx < quiets_end:
-                best_idx = current_idx
-                for j in range(current_idx + 1, quiets_end):
-                    if scores[j] > scores[best_idx]:
-                        best_idx = j
-                moves[current_idx], moves[best_idx] = moves[best_idx], moves[current_idx]
-                scores[current_idx], scores[best_idx] = scores[best_idx], scores[current_idx]
-                
+            
+            # Since Good Quiets are strictly sorted and have score >= 0 at the front, we just yield them until score < 0
+            if current_idx < quiets_end and scores[current_idx] >= 0:
                 candidate_move = moves[current_idx]
                 search_context.mp_current_idx[ply] += 1
                 
-                if candidate_move == tt_move or candidate_move == excluded_move or candidate_move == killer_1 or candidate_move == killer_2 or candidate_move == counter_move:
+                if candidate_move == tt_move or candidate_move == excluded_move:
                     continue
                 move = candidate_move
                 return move
             else:
                 search_context.mp_stage[ply] = STAGE_BAD_CAPTURES
+                continue
+                
+        elif mp_stage == STAGE_BAD_CAPTURES:
+            if search_context.mp_bad_captures_idx[ply] < search_context.mp_bad_captures_count[ply]:
+                move = bad_captures[search_context.mp_bad_captures_idx[ply]]
+                search_context.mp_bad_captures_idx[ply] += 1
+                return move
+            else:
+                search_context.mp_stage[ply] = STAGE_BAD_QUIETS
+                continue
+                
+        elif mp_stage == STAGE_BAD_QUIETS:
+            quiets_end = search_context.mp_quiets_end[ply]
+            current_idx = search_context.mp_current_idx[ply]
+            
+            # These are the quiets with score < 0 that were left at the end of the array.
+            if current_idx < quiets_end:
+                candidate_move = moves[current_idx]
+                search_context.mp_current_idx[ply] += 1
+                
+                if candidate_move == tt_move or candidate_move == excluded_move:
+                    continue
+                move = candidate_move
+                return move
+            else:
+                search_context.mp_stage[ply] = STAGE_DONE
                 continue
                 
         elif mp_stage == STAGE_BAD_CAPTURES:
@@ -570,6 +562,7 @@ def get_next_move(piece_bbs, occupancy_bbs, game_state, search_context, ply, tt_
         elif mp_stage == STAGE_GEN_CAPTURES:
             search_context.mp_captures_end[ply] = generate_pseudo_legal_captures_buffer(piece_bbs, occupancy_bbs, game_state, search_context.moves_buffer, ply)
             score_captures(piece_bbs, occupancy_bbs, game_state, moves, scores, 0, search_context.mp_captures_end[ply], search_context)
+            partial_insertion_sort_moves(moves, scores, 0, search_context.mp_captures_end[ply], -1000000)
             search_context.mp_current_idx[ply] = 0
             search_context.mp_stage[ply] = STAGE_GOOD_CAPTURES
             continue
@@ -578,13 +571,6 @@ def get_next_move(piece_bbs, occupancy_bbs, game_state, search_context, ply, tt_
             captures_end = search_context.mp_captures_end[ply]
             current_idx = search_context.mp_current_idx[ply]
             if current_idx < captures_end:
-                best_idx = current_idx
-                for j in range(current_idx + 1, captures_end):
-                    if scores[j] > scores[best_idx]:
-                        best_idx = j
-                moves[current_idx], moves[best_idx] = moves[best_idx], moves[current_idx]
-                scores[current_idx], scores[best_idx] = scores[best_idx], scores[current_idx]
-                
                 candidate_move = moves[current_idx]
                 search_context.mp_current_idx[ply] += 1
                 
@@ -595,7 +581,11 @@ def get_next_move(piece_bbs, occupancy_bbs, game_state, search_context, ply, tt_
                 to_sq = get_to_square(candidate_move)
                 side_to_move = game_state[0]
                 
-                if see_ge(piece_bbs, occupancy_bbs, side_to_move, from_sq, to_sq, 0, pinned_white, pinned_black):
+                # Dynamic SEE threshold: allow slightly negative captures if they have a very high history score
+                # scores[current_idx] can be up to ~20000. DIV 32 means we can forgive up to ~-600.
+                threshold = -(scores[current_idx] // 32)
+                
+                if see_ge(piece_bbs, occupancy_bbs, side_to_move, from_sq, to_sq, threshold, pinned_white, pinned_black):
                     move = candidate_move
                     return move
                 else:
@@ -603,70 +593,62 @@ def get_next_move(piece_bbs, occupancy_bbs, game_state, search_context, ply, tt_
                     search_context.mp_bad_captures_count[ply] += 1
                     continue
             else:
-                search_context.mp_stage[ply] = STAGE_KILLER_1
+                search_context.mp_stage[ply] = STAGE_GEN_QUIETS
                 continue
                 
-        elif mp_stage == STAGE_KILLER_1:
-            search_context.mp_stage[ply] = STAGE_KILLER_2
-            if killer_1 != NO_MOVE and killer_1 != tt_move and killer_1 != excluded_move:
-                if is_move_pseudo_legal(piece_bbs, occupancy_bbs, game_state, killer_1):
-                    to_sq = get_to_square(killer_1)
-                    opponent_pieces_bb = occupancy_bbs[1] if game_state[0] == 0 else occupancy_bbs[0]
-                    is_capture = (opponent_pieces_bb & BB_SQUARES[to_sq]) != 0
-                    if not is_capture:
-                        move = killer_1
-                        return move
-            
-        elif mp_stage == STAGE_KILLER_2:
-            search_context.mp_stage[ply] = STAGE_COUNTER_MOVE
-            if killer_2 != NO_MOVE and killer_2 != tt_move and killer_2 != excluded_move and killer_2 != killer_1:
-                if is_move_pseudo_legal(piece_bbs, occupancy_bbs, game_state, killer_2):
-                    to_sq = get_to_square(killer_2)
-                    opponent_pieces_bb = occupancy_bbs[1] if game_state[0] == 0 else occupancy_bbs[0]
-                    is_capture = (opponent_pieces_bb & BB_SQUARES[to_sq]) != 0
-                    if not is_capture:
-                        move = killer_2
-                        return move
-                    
-        elif mp_stage == STAGE_COUNTER_MOVE:
-            search_context.mp_stage[ply] = STAGE_GEN_QUIETS
-            if counter_move != NO_MOVE and counter_move != tt_move and counter_move != excluded_move and counter_move != killer_1 and counter_move != killer_2:
-                if is_move_pseudo_legal(piece_bbs, occupancy_bbs, game_state, counter_move):
-                    to_sq = get_to_square(counter_move)
-                    opponent_pieces_bb = occupancy_bbs[1] if game_state[0] == 0 else occupancy_bbs[0]
-                    is_capture = (opponent_pieces_bb & BB_SQUARES[to_sq]) != 0
-                    if not is_capture:
-                        move = counter_move
-                        return move
-                    
         elif mp_stage == STAGE_GEN_QUIETS:
             captures_end = search_context.mp_captures_end[ply]
             search_context.mp_quiets_end[ply] = generate_pseudo_legal_quiets_buffer(piece_bbs, occupancy_bbs, game_state, search_context.moves_buffer, ply, captures_end)
-            score_quiets(piece_bbs, occupancy_bbs, game_state, moves, scores, captures_end, search_context.mp_quiets_end[ply], search_context, ply)
+            score_quiets(piece_bbs, occupancy_bbs, game_state, moves, scores, captures_end, search_context.mp_quiets_end[ply], search_context, ply, killer_1, killer_2, counter_move)
+            
+            # Sort good quiets (score >= 0) to the front. Bad quiets (score < 0) remain at the back.
+            num_sorted = partial_insertion_sort_moves(moves, scores, captures_end, search_context.mp_quiets_end[ply], 0)
+            
             search_context.mp_current_idx[ply] = captures_end
-            search_context.mp_stage[ply] = STAGE_QUIETS
+            search_context.mp_stage[ply] = STAGE_GOOD_QUIETS
             continue
             
-        elif mp_stage == STAGE_QUIETS:
+        elif mp_stage == STAGE_GOOD_QUIETS:
             quiets_end = search_context.mp_quiets_end[ply]
             current_idx = search_context.mp_current_idx[ply]
-            if current_idx < quiets_end:
-                best_idx = current_idx
-                for j in range(current_idx + 1, quiets_end):
-                    if scores[j] > scores[best_idx]:
-                        best_idx = j
-                moves[current_idx], moves[best_idx] = moves[best_idx], moves[current_idx]
-                scores[current_idx], scores[best_idx] = scores[best_idx], scores[current_idx]
-                
+            
+            # Since Good Quiets are strictly sorted and have score >= 0 at the front, we just yield them until score < 0
+            if current_idx < quiets_end and scores[current_idx] >= 0:
                 candidate_move = moves[current_idx]
                 search_context.mp_current_idx[ply] += 1
                 
-                if candidate_move == tt_move or candidate_move == excluded_move or candidate_move == killer_1 or candidate_move == killer_2 or candidate_move == counter_move:
+                if candidate_move == tt_move or candidate_move == excluded_move:
                     continue
                 move = candidate_move
                 return move
             else:
                 search_context.mp_stage[ply] = STAGE_BAD_CAPTURES
+                continue
+                
+        elif mp_stage == STAGE_BAD_CAPTURES:
+            if search_context.mp_bad_captures_idx[ply] < search_context.mp_bad_captures_count[ply]:
+                move = bad_captures[search_context.mp_bad_captures_idx[ply]]
+                search_context.mp_bad_captures_idx[ply] += 1
+                return move
+            else:
+                search_context.mp_stage[ply] = STAGE_BAD_QUIETS
+                continue
+                
+        elif mp_stage == STAGE_BAD_QUIETS:
+            quiets_end = search_context.mp_quiets_end[ply]
+            current_idx = search_context.mp_current_idx[ply]
+            
+            # These are the quiets with score < 0 that were left at the end of the array.
+            if current_idx < quiets_end:
+                candidate_move = moves[current_idx]
+                search_context.mp_current_idx[ply] += 1
+                
+                if candidate_move == tt_move or candidate_move == excluded_move:
+                    continue
+                move = candidate_move
+                return move
+            else:
+                search_context.mp_stage[ply] = STAGE_DONE
                 continue
                 
         elif mp_stage == STAGE_BAD_CAPTURES:
