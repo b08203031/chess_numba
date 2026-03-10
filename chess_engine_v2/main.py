@@ -62,6 +62,9 @@ def uci_loop():
     continuation_history = np.zeros((3, 12, 64, 12, 64), dtype=np.int16)
     capture_history = np.zeros((12, 64, 12), dtype=np.int32)
     pawn_correction_history = np.zeros(16384, dtype=np.int16) # CORRECTION_HISTORY_SIZE
+    minor_correction_history = np.zeros(16384, dtype=np.int16)
+    non_pawn_correction_history_white = np.zeros(16384, dtype=np.int16)
+    non_pawn_correction_history_black = np.zeros(16384, dtype=np.int16)
     pv_table = np.zeros((MAX_PLY, MAX_PLY), dtype=np.uint16)
 
     # --- Initialize Opening Book / 初始化開局書 ---
@@ -101,15 +104,19 @@ def uci_loop():
             if command == "uci":
                 print("id name MyChessEngine")
                 print("id author YourName")
-                print("uciok")
+                print("uciok", flush=True)
             elif command == "isready":
-                print("readyok")
+                print("readyok", flush=True)
             elif command == "ucinewgame":
                 clear_transposition_table(transposition_table)
                 killer_moves.fill(0)
                 history_table.fill(0)
                 butterfly_history.fill(0)
                 continuation_history.fill(0)
+                pawn_correction_history.fill(0)
+                minor_correction_history.fill(0)
+                non_pawn_correction_history_white.fill(0)
+                non_pawn_correction_history_black.fill(0)
                 pv_table.fill(0)
                 game_history = []
                 global_tt_generation = 0 # Reset generation on new game
@@ -222,7 +229,9 @@ def uci_loop():
                 # Create a new context for this search / 為此搜尋創建新的上下文
                 global_search_context = SearchContext(
                     transposition_table, killer_moves, pv_table, history_table,
-                    butterfly_history, continuation_history, capture_history, pawn_correction_history
+                    butterfly_history, continuation_history, capture_history,
+                    pawn_correction_history, minor_correction_history,
+                    non_pawn_correction_history_white, non_pawn_correction_history_black
                 )
                 
                 # Update TT Generation

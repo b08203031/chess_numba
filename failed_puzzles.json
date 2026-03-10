@@ -1,11 +1,11 @@
 [
     {
-        "name": "Lichess Puzzle 006of",
-        "fen": "r2qr2k/1pp2Qp1/1b4np/pP2P3/P4n2/B1N2N1P/5PP1/R3R1K1 b - - 0 20",
-        "solution": "d8d3",
-        "engine_move": "f4d3",
-        "rating": "2500",
-        "theme": "advantage kingsideAttack long middlegame"
+        "name": "Lichess Puzzle 006eO",
+        "fen": "8/8/2p5/1p1p1k2/3P4/1PP1pK2/8/8 w - - 4 65",
+        "solution": "b3b4",
+        "engine_move": "f3e3",
+        "rating": "2186",
+        "theme": "defensiveMove endgame equality oneMove pawnEndgame"
     },
     {
         "name": "Lichess Puzzle 0078T",
@@ -22,5 +22,29 @@
         "engine_move": "d4c5",
         "rating": "1776",
         "theme": "crushing kingsideAttack long middlegame pin"
+    },
+    {
+        "name": "Lichess Puzzle 004d8",
+        "fen": "8/4kr2/R2p4/1p1Pp3/5pp1/3K1P2/PPP5/8 w - - 0 40",
+        "solution": "a6a7",
+        "engine_move": "f3g4",
+        "rating": "1730",
+        "theme": "crushing endgame long rookEndgame"
+    },
+    {
+        "name": "Lichess Puzzle 004Op",
+        "fen": "2kr2r1/1bp4n/1pq1p2p/p1P5/1P3B2/P6P/5RP1/RB3QK1 b - - 4 26",
+        "solution": "d8d1",
+        "engine_move": "h7g5",
+        "rating": "2164",
+        "theme": "crushing deflection kingsideAttack middlegame pin sacrifice skewer veryLong"
+    },
+    {
+        "name": "Lichess Puzzle 0055Y",
+        "fen": "r1b2rk1/p3pp2/2B5/2Qpq3/3N2pp/4b3/2P2PPP/1R2K2R w K - 0 24",
+        "solution": "f2e3",
+        "engine_move": "c5d5",
+        "rating": "2089",
+        "theme": "advantage defensiveMove middlegame short"
     }
 ]

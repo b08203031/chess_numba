@@ -12,6 +12,9 @@ from chess_engine.zobrist import (
 from chess_engine.engine_types import (
     piece_bbs_signature, occupancy_bbs_signature, game_state_signature, unmake_info_signature
 )
+from chess_engine.constants import (
+    PAWN_KEY_INDEX, MINOR_KEY_INDEX, NON_PAWN_KEY_WHITE_INDEX, NON_PAWN_KEY_BLACK_INDEX
+)
 
 # --- Piece Type Constants / 棋子類型常量 ---
 PAWN, ROOK, KING = 0, 3, 5
@@ -71,7 +74,7 @@ def make_move(piece_bbs: np.ndarray, occupancy_bbs: np.ndarray, game_state: np.n
 
     Returns:
         tuple: unmake_info，包含撤銷這步棋所需的信息。
-               (captured_piece_type, old_castling_rights, old_ep_square, old_halfmove_clock, old_zobrist_key)
+               (captured_piece_type, old_castling_rights, old_ep_square, old_halfmove_clock, old_zobrist_key, old_pawn_key, old_minor_key, old_non_pawn_key_white, old_non_pawn_key_black)
     """
     side = game_state[0]
     current_castling_rights = game_state[1]
@@ -99,12 +102,32 @@ def make_move(piece_bbs: np.ndarray, occupancy_bbs: np.ndarray, game_state: np.n
     piece_bbs[moving_piece_bb_idx] ^= move_mask
     occupancy_bbs[side] ^= move_mask
 
-    # --- Pawn Key Update (Movement) ---
-    pawn_key = game_state[5]
+    # --- Pawn/Minor/Non-Pawn Key Update (Movement) ---
+    pawn_key = game_state[PAWN_KEY_INDEX]
+    minor_key = game_state[MINOR_KEY_INDEX]
+    np_white_key = game_state[NON_PAWN_KEY_WHITE_INDEX]
+    np_black_key = game_state[NON_PAWN_KEY_BLACK_INDEX]
+    
     old_pawn_key = pawn_key
+    old_minor_key = minor_key
+    old_np_white_key = np_white_key
+    old_np_black_key = np_black_key
+
     if moving_piece_type == PAWN:
         pawn_key ^= PIECE_SQUARE_KEYS[moving_piece_bb_idx, from_sq]
         pawn_key ^= PIECE_SQUARE_KEYS[moving_piece_bb_idx, to_sq]
+    else:
+        # It's a non-pawn piece
+        if moving_piece_type in (1, 2): # Knight or Bishop
+            minor_key ^= PIECE_SQUARE_KEYS[moving_piece_bb_idx, from_sq]
+            minor_key ^= PIECE_SQUARE_KEYS[moving_piece_bb_idx, to_sq]
+        
+        if side == WHITE:
+            np_white_key ^= PIECE_SQUARE_KEYS[moving_piece_bb_idx, from_sq]
+            np_white_key ^= PIECE_SQUARE_KEYS[moving_piece_bb_idx, to_sq]
+        else:
+            np_black_key ^= PIECE_SQUARE_KEYS[moving_piece_bb_idx, from_sq]
+            np_black_key ^= PIECE_SQUARE_KEYS[moving_piece_bb_idx, to_sq]
 
     is_capture = False
     # --- Standard Capture / 標準吃子 ---
@@ -120,9 +143,17 @@ def make_move(piece_bbs: np.ndarray, occupancy_bbs: np.ndarray, game_state: np.n
         # Update Zobrist key for captured piece (remove) / 更新被吃棋子的 Zobrist 鍵（移除）
         key ^= PIECE_SQUARE_KEYS[captured_piece_bb_idx, to_sq]
         
-        # --- Pawn Key Update (Capture) ---
+        # --- Pawn/Minor/Non-Pawn Key Update (Capture) ---
         if captured_piece_type == PAWN:
             pawn_key ^= PIECE_SQUARE_KEYS[captured_piece_bb_idx, to_sq]
+        else:
+            if captured_piece_type in (1, 2): # Knight or Bishop
+                minor_key ^= PIECE_SQUARE_KEYS[captured_piece_bb_idx, to_sq]
+            
+            if opponent_color == WHITE:
+                np_white_key ^= PIECE_SQUARE_KEYS[captured_piece_bb_idx, to_sq]
+            else:
+                np_black_key ^= PIECE_SQUARE_KEYS[captured_piece_bb_idx, to_sq]
 
     # --- Handle Special Moves / 處理特殊移動 ---
     if flag == SPECIAL_MOVE_FLAG_PROMOTION:
@@ -141,10 +172,18 @@ def make_move(piece_bbs: np.ndarray, occupancy_bbs: np.ndarray, game_state: np.n
         key ^= PIECE_SQUARE_KEYS[moving_piece_bb_idx, to_sq]
         key ^= PIECE_SQUARE_KEYS[promo_piece_bb_idx, to_sq]
         
-        # --- Pawn Key Update (Promotion) ---
+        # --- Pawn/Minor/Non-Pawn Key Update (Promotion) ---
         # The pawn moved to 'to_sq' (XORed in by standard move logic), but then it was promoted.
         # So we must remove the pawn from 'to_sq' in the pawn key.
         pawn_key ^= PIECE_SQUARE_KEYS[moving_piece_bb_idx, to_sq]
+        
+        # We must add the new promoted piece to the minor/non-pawn keys
+        if promo_piece_type in (1, 2):
+            minor_key ^= PIECE_SQUARE_KEYS[promo_piece_bb_idx, to_sq]
+        if side == WHITE:
+            np_white_key ^= PIECE_SQUARE_KEYS[promo_piece_bb_idx, to_sq]
+        else:
+            np_black_key ^= PIECE_SQUARE_KEYS[promo_piece_bb_idx, to_sq]
 
     elif flag == SPECIAL_MOVE_FLAG_EN_PASSANT:
         is_capture = True
@@ -174,6 +213,15 @@ def make_move(piece_bbs: np.ndarray, occupancy_bbs: np.ndarray, game_state: np.n
         # Update Zobrist key for moving rook / 更新移動車的 Zobrist 鍵
         key ^= PIECE_SQUARE_KEYS[rook_bb_idx, rook_from_sq]
         key ^= PIECE_SQUARE_KEYS[rook_bb_idx, rook_to_sq]
+        
+        # Castling only involves King and Rook (both non-pawns). King is already updated in main movement block.
+        # We need to update the Rook in the non_pawn_key.
+        if side == WHITE:
+            np_white_key ^= PIECE_SQUARE_KEYS[rook_bb_idx, rook_from_sq]
+            np_white_key ^= PIECE_SQUARE_KEYS[rook_bb_idx, rook_to_sq]
+        else:
+            np_black_key ^= PIECE_SQUARE_KEYS[rook_bb_idx, rook_from_sq]
+            np_black_key ^= PIECE_SQUARE_KEYS[rook_bb_idx, rook_to_sq]
 
     # --- Recalculate Combined Occupancy (Robust Fix) / 重新計算組合佔用位元棋盤（穩健修復） ---
     occupancy_bbs[2] = occupancy_bbs[0] | occupancy_bbs[1]
@@ -205,7 +253,10 @@ def make_move(piece_bbs: np.ndarray, occupancy_bbs: np.ndarray, game_state: np.n
     game_state[2] = new_ep_square
     game_state[3] = new_halfmove_clock
     game_state[4] = key
-    game_state[5] = pawn_key
+    game_state[PAWN_KEY_INDEX] = pawn_key
+    game_state[MINOR_KEY_INDEX] = minor_key
+    game_state[NON_PAWN_KEY_WHITE_INDEX] = np_white_key
+    game_state[NON_PAWN_KEY_BLACK_INDEX] = np_black_key
 
     return (
         captured_piece_type,
@@ -213,7 +264,10 @@ def make_move(piece_bbs: np.ndarray, occupancy_bbs: np.ndarray, game_state: np.n
         np.uint8(current_ep_square),
         np.uint8(current_halfmove_clock),
         original_zobrist_key,
-        old_pawn_key
+        old_pawn_key,
+        old_minor_key,
+        old_np_white_key,
+        old_np_black_key
     )
 
 @numba.jit(numba.void(
@@ -231,7 +285,7 @@ def unmake_move(piece_bbs: np.ndarray, occupancy_bbs: np.ndarray, game_state: np
         move (np.uint16): 要撤銷的移動。
         unmake_info (tuple): `make_move` 返回的撤銷信息。
     """
-    captured_piece_type, old_castling_rights, old_ep_square, old_halfmove_clock, old_zobrist_key, old_pawn_key = unmake_info
+    captured_piece_type, old_castling_rights, old_ep_square, old_halfmove_clock, old_zobrist_key, old_pawn_key, old_minor_key, old_np_white_key, old_np_black_key = unmake_info
 
     side = 1 - game_state[0]
 
@@ -312,7 +366,10 @@ def unmake_move(piece_bbs: np.ndarray, occupancy_bbs: np.ndarray, game_state: np
     game_state[2] = old_ep_square
     game_state[3] = old_halfmove_clock
     game_state[4] = old_zobrist_key
-    game_state[5] = old_pawn_key
+    game_state[PAWN_KEY_INDEX] = old_pawn_key
+    game_state[MINOR_KEY_INDEX] = old_minor_key
+    game_state[NON_PAWN_KEY_WHITE_INDEX] = old_np_white_key
+    game_state[NON_PAWN_KEY_BLACK_INDEX] = old_np_black_key
 
 @numba.jit(numba.void(game_state_signature), nopython=True, cache=True, boundscheck=False, fastmath=True)
 def make_null_move(game_state: np.ndarray):

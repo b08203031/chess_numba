@@ -94,23 +94,47 @@ def parse_fen(fen_string: str):
     # Pass NumPy arrays directly to the JIT'd function / 直接將 NumPy 陣列傳遞給 JIT 函數
     zobrist_key = compute_initial_hash(piece_bbs, temp_game_state_arr)
 
-    # Compute initial pawn key (Zobrist hash of only pawns)
+    # Compute initial key sets
     pawn_key = np.uint64(0)
+    minor_key = np.uint64(0)
+    non_pawn_white_key = np.uint64(0)
+    non_pawn_black_key = np.uint64(0)
+    
     from chess_engine.zobrist import PIECE_SQUARE_KEYS, get_lsb_index
     
+    # helper for keys
+    def _add_pieces(pieces_bb, p_idx, is_pawn=False, is_minor=False, is_white=False):
+        nonlocal pawn_key, minor_key, non_pawn_white_key, non_pawn_black_key
+        temp_bb = pieces_bb
+        while temp_bb:
+            sq = get_lsb_index(temp_bb)
+            key = PIECE_SQUARE_KEYS[p_idx, sq]
+            if is_pawn:
+                pawn_key ^= key
+            elif is_minor:
+                minor_key ^= key
+            if not is_pawn:
+                if is_white:
+                    non_pawn_white_key ^= key
+                else:
+                    non_pawn_black_key ^= key
+            temp_bb &= temp_bb - np.uint64(1)
+    
     # White Pawns (Index 0)
-    wp = piece_bbs[0]
-    while wp:
-        sq = get_lsb_index(wp)
-        pawn_key ^= PIECE_SQUARE_KEYS[0, sq]
-        wp &= wp - np.uint64(1)
-        
-    # Black Pawns (Index 6)
-    bp = piece_bbs[6]
-    while bp:
-        sq = get_lsb_index(bp)
-        pawn_key ^= PIECE_SQUARE_KEYS[6, sq]
-        bp &= bp - np.uint64(1)
+    # Add all pieces systematically
+    _add_pieces(piece_bbs[0], 0, is_pawn=True, is_white=True)          # P
+    _add_pieces(piece_bbs[1], 1, is_minor=True, is_white=True)         # N
+    _add_pieces(piece_bbs[2], 2, is_minor=True, is_white=True)         # B
+    _add_pieces(piece_bbs[3], 3, is_white=True)                        # R
+    _add_pieces(piece_bbs[4], 4, is_white=True)                        # Q
+    _add_pieces(piece_bbs[5], 5, is_white=True)                        # K
+    
+    _add_pieces(piece_bbs[6], 6, is_pawn=True, is_white=False)         # p
+    _add_pieces(piece_bbs[7], 7, is_minor=True, is_white=False)        # n
+    _add_pieces(piece_bbs[8], 8, is_minor=True, is_white=False)        # b
+    _add_pieces(piece_bbs[9], 9, is_white=False)                       # r
+    _add_pieces(piece_bbs[10], 10, is_white=False)                     # q
+    _add_pieces(piece_bbs[11], 11, is_white=False)                     # k
 
     game_state = np.array([
         side_to_move,
@@ -118,7 +142,10 @@ def parse_fen(fen_string: str):
         en_passant_square,
         halfmove_clock,
         zobrist_key,
-        pawn_key
+        pawn_key,
+        minor_key,
+        non_pawn_white_key,
+        non_pawn_black_key
     ], dtype=np.uint64)
 
     # --- Sanity Checks / 健全性檢查 ---

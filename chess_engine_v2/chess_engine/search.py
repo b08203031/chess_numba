@@ -39,7 +39,8 @@ from chess_engine.constants import (
     SCORE_KILLER_2, SCORE_COUNTER_MOVE, SCORE_BAD_CAPTURE_PENALTY, NMP_STATIC_MARGIN,
     ENABLE_SHALLOW_SEE_PRUNING, ENABLE_HISTORY_PRUNING, PRUNING_SHALLOW_DEPTH,
     PRUNING_CAPTURE_SEE_MARGIN, PRUNING_QUIET_SEE_MARGIN, PRUNING_HISTORY_THRESHOLD,
-    WHITE, BLACK, PAWN_KEY_INDEX, CORRECTION_HISTORY_SIZE, CORRECTION_HISTORY_LIMIT,
+    WHITE, BLACK, PAWN_KEY_INDEX, MINOR_KEY_INDEX, NON_PAWN_KEY_WHITE_INDEX, NON_PAWN_KEY_BLACK_INDEX, CORRECTION_HISTORY_SIZE, CORRECTION_HISTORY_MASK, CORRECTION_HISTORY_LIMIT, CORRECTION_HISTORY_DIVISOR, 
+    CORRECTION_HISTORY_PAWN_WEIGHT, CORRECTION_HISTORY_MINOR_WEIGHT, CORRECTION_HISTORY_NON_PAWN_WEIGHT, CORRECTION_HISTORY_UPDATE_DEPTH, SCORE_MIN, SCORE_MAX,
     CONTINUATION_HISTORY_FACTOR, HISTORY_MAX_CONTINUATION,
     FIFTY_MOVE_RULE_LIMIT, FIFTY_MOVE_SCALE_THRESHOLD, FIFTY_MOVE_MAX_SCALE,
     SEE_HISTORY_DIVISOR, LMR_CONT_HISTORY_MULT,
@@ -65,308 +66,8 @@ from chess_engine.search_heuristics import (
     get_lmr_reduction, score_moves, partial_insertion_sort_moves
 )
 
+
 quiescence_search_return_type = numba.types.Tuple([
-    numba.int32, numba.uint64
-])
-
-# @numba.njit(quiescence_search_return_type(
-#     piece_bbs_signature, occupancy_bbs_signature, game_state_signature,
-#     numba.int32, numba.int32, numba.int32, search_context_type
-# ), cache=True)
-@numba.njit(quiescence_search_return_type(piece_bbs_signature, occupancy_bbs_signature, game_state_signature, numba.int32, numba.int32, numba.int32, search_context_type, numba.int32), cache=True)
-def quiescence_search(piece_bbs, occupancy_bbs, game_state, alpha, beta, ply, search_context, q_ply):
-    q_nodes = np.uint64(1)
-    search_context.nodes_searched += 1
-
-    # Check for stop flag every 2048 nodes
-    if (search_context.nodes_searched & 2047) == 0:
-        if search_context.stop_flag[0]:
-            return np.int32(0), q_nodes
-
-        if search_context.end_time > 0.0:
-            current_time = 0.0
-            with numba.objmode(current_time='float64'):
-                current_time = time.time()
-            if current_time >= search_context.end_time:
-                search_context.stop_flag[0] = True
-                return np.int32(0), q_nodes
-
-    if ply >= MAX_PLY:
-        return evaluate_position(piece_bbs, occupancy_bbs, game_state, lazy=False), q_nodes
-
-    # M4: TT Probe in QSearch — avoids re-evaluating positions already in TT
-    zobrist_key = game_state[4]
-    tt_entry = probe_tt(search_context.transposition_table, zobrist_key)
-    if tt_entry['flag'] != TT_FLAG_NONE and tt_entry['depth'] >= 0:
-        qs_tt_score = np.int32(tt_entry['score'])
-        if qs_tt_score > MATE_IN_MAX_PLY: qs_tt_score -= ply
-        elif qs_tt_score < -MATE_IN_MAX_PLY: qs_tt_score += ply
-        
-        should_cutoff = False
-        if tt_entry['flag'] == TT_FLAG_EXACT:
-            should_cutoff = True
-        elif tt_entry['flag'] == TT_FLAG_ALPHA and qs_tt_score <= alpha:
-            should_cutoff = True
-        elif tt_entry['flag'] == TT_FLAG_BETA and qs_tt_score >= beta:
-            should_cutoff = True
-        if should_cutoff:
-            return qs_tt_score, q_nodes
-
-    is_currently_in_check = is_in_check(piece_bbs, occupancy_bbs, game_state)
-
-    move_count = 0
-    if is_currently_in_check:
-        # If in check, we must evade. No stand_pat (can't stand pat in check).
-        # H9 Fix: Add depth limit for check evasion in QSearch to prevent infinite loops.
-        # Check evasions are very forcing, so we allow them to go deeper than normal QSearch.
-        # (e.g., 2x MAX_QUIESCENCE_DEPTH)
-        if q_ply >= MAX_QUIESCENCE_DEPTH * 2:
-            return evaluate_position(piece_bbs, occupancy_bbs, game_state, lazy=False), q_nodes
-
-        # We must generate ALL legal moves (evasions).
-        move_count = generate_pseudo_legal_moves_buffer(piece_bbs, occupancy_bbs, game_state, search_context.moves_buffer, ply)
-        if move_count == 0:
-            # Checkmate
-            return np.int32(-MATE_SCORE + ply), q_nodes
-    else:
-        # If not in check, we can stand pat (static evaluation)
-        if q_ply >= MAX_QUIESCENCE_DEPTH:
-            return evaluate_position(piece_bbs, occupancy_bbs, game_state, lazy=False), q_nodes
-
-        stand_pat = evaluate_position(piece_bbs, occupancy_bbs, game_state, lazy=False)
-        if stand_pat >= beta:
-            return beta, q_nodes
-        alpha = max(alpha, stand_pat)
-
-        move_count = generate_pseudo_legal_captures_buffer(piece_bbs, occupancy_bbs, game_state, search_context.moves_buffer, ply)
-        if move_count == 0:
-            return stand_pat, q_nodes
-
-    # --- Sort moves in QSearch ---
-    moves = search_context.moves_buffer[ply]
-    scores = search_context.move_scores[ply]
-
-    # Safe access to killers:
-    safe_ply = min(ply, MAX_PLY - 1)
-
-    # Optimization: Calculate pinned pieces once for QS pruning logic and score_moves
-    pinned_white = get_pinned_pieces(piece_bbs, occupancy_bbs, WHITE)
-    pinned_black = get_pinned_pieces(piece_bbs, occupancy_bbs, BLACK)
-
-    # B1: Use TT best move for QSearch ordering (since we already probe TT above)
-    qs_tt_move = tt_entry['best_move'] if tt_entry['flag'] != TT_FLAG_NONE else NO_MOVE
-
-    # Use score_moves to sort captures (SEE >= 0 first).
-    score_moves(
-        piece_bbs, occupancy_bbs, game_state, 
-        moves, 
-        scores, 
-        move_count,
-        qs_tt_move,  # B1: was NO_MOVE, now uses TT best move for better ordering
-        search_context.killer_moves[safe_ply*2:safe_ply*2+2], 
-        search_context.history_table, 
-        NO_MOVE, # No counter move
-        pinned_white,
-        pinned_black,
-        search_context,
-        ply
-    )
-
-    legal_moves_tried = 0
-    for i in range(move_count):
-        # Lazy Selection Sort: find the best remaining move
-        best_idx = i
-        for j in range(i + 1, move_count):
-            if scores[j] > scores[best_idx]:
-                best_idx = j
-        
-        # Swap moves and scores in the pre-allocated buffers
-        moves[i], moves[best_idx] = moves[best_idx], moves[i]
-        scores[i], scores[best_idx] = scores[best_idx], scores[i]
-
-        move = moves[i]
-        score_val = scores[i]
-        
-        if not is_currently_in_check:
-            if ENABLE_DELTA_PRUNING:
-                is_promotion = get_special_move_flag(move) == SPECIAL_MOVE_FLAG_PROMOTION
-                promotion_gain = MG_MATERIAL_VALUES[4] - MG_MATERIAL_VALUES[0] if is_promotion else 0
-                side_to_move = game_state[0]
-                victim_type = find_piece_type_on_square_side(piece_bbs, get_to_square(move), 1 - side_to_move)
-                victim_value = MG_MATERIAL_VALUES[victim_type % 6] if victim_type != -1 else 0
-                potential_gain = victim_value + promotion_gain
-                
-                if stand_pat + potential_gain + DELTA_PRUNING_MARGIN < alpha:
-                    continue
-
-        if not is_currently_in_check:
-            if ENABLE_SEE_IN_QUIESCENCE:
-                # Stockfish Alignment: Since SEE_THRESHOLD is 0, any move with score < SCORE_GOOD_CAPTURE_BONUS
-                # has already failed see_ge(..., 0) inside score_moves. We can just prune it directly!
-                if score_val < SCORE_GOOD_CAPTURE_BONUS:
-                    continue
-
-        unmake_info = make_move(piece_bbs, occupancy_bbs, game_state, move)
-        
-        # --- Lazy Legality Check ---
-        king_bb_after_move = piece_bbs[5] if (1 - game_state[0]) == 0 else piece_bbs[11]
-        king_sq = get_lsb_index(king_bb_after_move) if king_bb_after_move else 0
-        if is_square_attacked(piece_bbs, occupancy_bbs, king_sq, game_state[0]):
-            unmake_move(piece_bbs, occupancy_bbs, game_state, move, unmake_info)
-            continue
-            
-        legal_moves_tried += 1
-
-        score, child_q_nodes = quiescence_search(
-            piece_bbs, occupancy_bbs, game_state, -beta, -alpha, ply + 1, search_context, q_ply + 1
-        )
-        unmake_move(piece_bbs, occupancy_bbs, game_state, move, unmake_info)
-
-        if search_context.stop_flag[0]:
-            return np.int32(0), q_nodes
-
-        q_nodes += child_q_nodes
-        score = -score
-
-        if score >= beta:
-            return beta, q_nodes
-        alpha = max(alpha, score)
-
-    if is_currently_in_check and legal_moves_tried == 0:
-        return np.int32(-MATE_SCORE + ply), q_nodes
-
-    return alpha, q_nodes
-
-search_return_type = numba.types.Tuple([
-    numba.int32, numba.uint16, numba.uint64, numba.uint64, numba.uint64
-])
-
-get_next_move_return_type = numba.uint16
-
-@numba.njit(get_next_move_return_type(piece_bbs_signature, occupancy_bbs_signature, game_state_signature, search_context_type, numba.int32, numba.uint16, numba.uint16, numba.uint16, numba.uint16, numba.uint16, numba.uint64, numba.uint64), cache=True)
-def get_next_move(piece_bbs, occupancy_bbs, game_state, search_context, ply, tt_move, excluded_move, killer_1, killer_2, counter_move, pinned_white, pinned_black):
-    moves = search_context.moves_buffer[ply]
-    scores = search_context.move_scores[ply]
-    bad_captures = search_context.bad_captures[ply]
-
-    while search_context.mp_stage[ply] < STAGE_DONE:
-        move = NO_MOVE
-        mp_stage = search_context.mp_stage[ply]
-        
-        if mp_stage == STAGE_TT_MOVE:
-            if tt_move != NO_MOVE and tt_move != excluded_move:
-                if is_move_pseudo_legal(piece_bbs, occupancy_bbs, game_state, tt_move):
-                    move = tt_move
-            search_context.mp_stage[ply] = STAGE_GEN_CAPTURES
-            if move != NO_MOVE:
-                return move
-            
-        elif mp_stage == STAGE_GEN_CAPTURES:
-            search_context.mp_captures_end[ply] = generate_pseudo_legal_captures_buffer(piece_bbs, occupancy_bbs, game_state, search_context.moves_buffer, ply)
-            score_captures(piece_bbs, occupancy_bbs, game_state, moves, scores, 0, search_context.mp_captures_end[ply], search_context)
-            search_context.mp_current_idx[ply] = 0
-            search_context.mp_stage[ply] = STAGE_GOOD_CAPTURES
-            continue
-            
-        elif mp_stage == STAGE_GOOD_CAPTURES:
-            captures_end = search_context.mp_captures_end[ply]
-            current_idx = search_context.mp_current_idx[ply]
-            if current_idx < captures_end:
-                best_idx = current_idx
-                for j in range(current_idx + 1, captures_end):
-                    if scores[j] > scores[best_idx]:
-                        best_idx = j
-                moves[current_idx], moves[best_idx] = moves[best_idx], moves[current_idx]
-                scores[current_idx], scores[best_idx] = scores[best_idx], scores[current_idx]
-                
-                candidate_move = moves[current_idx]
-                search_context.mp_current_idx[ply] += 1
-                
-                if candidate_move == tt_move or candidate_move == excluded_move:
-                    continue
-                    
-                from_sq = get_from_square(candidate_move)
-                to_sq = get_to_square(candidate_move)
-                side_to_move = game_state[0]
-                
-                if see_ge(piece_bbs, occupancy_bbs, side_to_move, from_sq, to_sq, 0, pinned_white, pinned_black):
-                    move = candidate_move
-                    return move
-                else:
-                    bad_captures[search_context.mp_bad_captures_count[ply]] = candidate_move
-                    search_context.mp_bad_captures_count[ply] += 1
-                    continue
-            else:
-                search_context.mp_stage[ply] = STAGE_GEN_QUIETS
-                continue
-                
-        elif mp_stage == STAGE_GEN_QUIETS:
-            captures_end = search_context.mp_captures_end[ply]
-            search_context.mp_quiets_end[ply] = generate_pseudo_legal_quiets_buffer(piece_bbs, occupancy_bbs, game_state, search_context.moves_buffer, ply, captures_end)
-            score_quiets(piece_bbs, occupancy_bbs, game_state, moves, scores, captures_end, search_context.mp_quiets_end[ply], search_context, ply, killer_1, killer_2, counter_move)
-            
-            # Sort good quiets (score >= 0) to the front. Bad quiets (score < 0) remain at the back.
-            num_sorted = partial_insertion_sort_moves(moves, scores, captures_end, search_context.mp_quiets_end[ply], 0)
-            
-            search_context.mp_current_idx[ply] = captures_end
-            search_context.mp_stage[ply] = STAGE_GOOD_QUIETS
-            continue
-            
-        elif mp_stage == STAGE_GOOD_QUIETS:
-            quiets_end = search_context.mp_quiets_end[ply]
-            current_idx = search_context.mp_current_idx[ply]
-            
-            # Since Good Quiets are strictly sorted and have score >= 0 at the front, we just yield them until score < 0
-            if current_idx < quiets_end and scores[current_idx] >= 0:
-                candidate_move = moves[current_idx]
-                search_context.mp_current_idx[ply] += 1
-                
-                if candidate_move == tt_move or candidate_move == excluded_move:
-                    continue
-                move = candidate_move
-                return move
-            else:
-                search_context.mp_stage[ply] = STAGE_BAD_CAPTURES
-                continue
-                
-        elif mp_stage == STAGE_BAD_CAPTURES:
-            if search_context.mp_bad_captures_idx[ply] < search_context.mp_bad_captures_count[ply]:
-                move = bad_captures[search_context.mp_bad_captures_idx[ply]]
-                search_context.mp_bad_captures_idx[ply] += 1
-                return move
-            else:
-                search_context.mp_stage[ply] = STAGE_BAD_QUIETS
-                continue
-                
-        elif mp_stage == STAGE_BAD_QUIETS:
-            quiets_end = search_context.mp_quiets_end[ply]
-            current_idx = search_context.mp_current_idx[ply]
-            
-            # These are the quiets with score < 0 that were left at the end of the array.
-            if current_idx < quiets_end:
-                candidate_move = moves[current_idx]
-                search_context.mp_current_idx[ply] += 1
-                
-                if candidate_move == tt_move or candidate_move == excluded_move:
-                    continue
-                move = candidate_move
-                return move
-            else:
-                search_context.mp_stage[ply] = STAGE_DONE
-                continue
-                
-        elif mp_stage == STAGE_BAD_CAPTURES:
-            if search_context.mp_bad_captures_idx[ply] < search_context.mp_bad_captures_count[ply]:
-                move = bad_captures[search_context.mp_bad_captures_idx[ply]]
-                search_context.mp_bad_captures_idx[ply] += 1
-                return move
-            else:
-                search_context.mp_stage[ply] = STAGE_DONE
-                continue
-
-    return NO_MOVE
-
-search_return_type = numba.types.Tuple([
     numba.int32, numba.uint64
 ])
 
@@ -658,15 +359,7 @@ def get_next_move(piece_bbs, occupancy_bbs, game_state, search_context, ply, tt_
             else:
                 search_context.mp_stage[ply] = STAGE_DONE
                 continue
-                
-        elif mp_stage == STAGE_BAD_CAPTURES:
-            if search_context.mp_bad_captures_idx[ply] < search_context.mp_bad_captures_count[ply]:
-                move = bad_captures[search_context.mp_bad_captures_idx[ply]]
-                search_context.mp_bad_captures_idx[ply] += 1
-                return move
-            else:
-                search_context.mp_stage[ply] = STAGE_DONE
-                continue
+
 
     return NO_MOVE
 
@@ -883,12 +576,34 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
         
         # Apply Correction History
         pawn_key = game_state[PAWN_KEY_INDEX]
-        correction = search_context.pawn_correction_history[pawn_key % CORRECTION_HISTORY_SIZE]
+        minor_key = game_state[MINOR_KEY_INDEX]
+        np_white_key = game_state[NON_PAWN_KEY_WHITE_INDEX]
+        np_black_key = game_state[NON_PAWN_KEY_BLACK_INDEX]
         
-        # Clamp correction to limit its effect
-        correction = min(max(correction, -CORRECTION_HISTORY_LIMIT), CORRECTION_HISTORY_LIMIT)
+        # Calculate sum of correction histories (Stockfish weights)
+        # Using native Python integers for intermediate sum to avoid repeated np.int64 calls
+        # Numba will optimize this to 64-bit registers anyway
         
-        static_score = raw_static_eval + correction
+        # pawn and minor keys are global (both colors), so we store them relative to WHITE.
+        global_pawn = search_context.pawn_correction_history[pawn_key & CORRECTION_HISTORY_MASK]
+        global_minor = search_context.minor_correction_history[minor_key & CORRECTION_HISTORY_MASK]
+        
+        # Determine side to move
+        side = game_state[0]
+        
+        if side == WHITE:
+            correction_sum = (global_pawn * CORRECTION_HISTORY_PAWN_WEIGHT +
+                             global_minor * CORRECTION_HISTORY_MINOR_WEIGHT +
+                             search_context.non_pawn_correction_history_white[np_white_key & CORRECTION_HISTORY_MASK] * CORRECTION_HISTORY_NON_PAWN_WEIGHT)
+        else:
+            # Invert global correction for Black (Absolute White Perspective)
+            correction_sum = (-global_pawn * CORRECTION_HISTORY_PAWN_WEIGHT -
+                             global_minor * CORRECTION_HISTORY_MINOR_WEIGHT +
+                             search_context.non_pawn_correction_history_black[np_black_key & CORRECTION_HISTORY_MASK] * CORRECTION_HISTORY_NON_PAWN_WEIGHT)
+        
+        # Apply scaling (Stockfish total sum / 2^17)
+        static_score = raw_static_eval + np.int16(correction_sum // CORRECTION_HISTORY_DIVISOR)
+        static_score = min(max(static_score, SCORE_MIN), SCORE_MAX)
         
         # --- H2 Enhancement: Refine static_score using TT Score Bound ---
         if tt_entry['flag'] != TT_FLAG_NONE:
@@ -1540,30 +1255,51 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                 break
     
     # --- Update Correction History ---
-    if not is_currently_in_check and best_move != NO_MOVE and abs(max_eval) < MATE_SCORE - MAX_PLY:
+    if depth >= CORRECTION_HISTORY_UPDATE_DEPTH and not is_currently_in_check and best_move != NO_MOVE and abs(max_eval) < MATE_SCORE - MAX_PLY:
         # Only update if we have a valid static eval (raw_static_eval != -INFINITY)
         # And we are not in check
         if raw_static_eval != -INFINITY:
             diff = max_eval - raw_static_eval
+            
             pawn_key = game_state[PAWN_KEY_INDEX]
-            idx = pawn_key % CORRECTION_HISTORY_SIZE
-            current_corr = search_context.pawn_correction_history[idx]
+            minor_key = game_state[MINOR_KEY_INDEX]
+            np_white_key = game_state[NON_PAWN_KEY_WHITE_INDEX]
+            np_black_key = game_state[NON_PAWN_KEY_BLACK_INDEX]
+            side = game_state[0]
             
-            # Simple gravity update towards the difference
-            # new_corr = current_corr + (diff - current_corr) / GRAVITY
-            # We use a shift or division for gravity. Using constant 16.
-            # Avoid using floating point if possible, or cast.
-            # Correction history is int16.
+            # Stockfish-style bonus calculation with depth scaling
+            bonus = (max_eval - raw_static_eval) * depth // (10 if best_move != NO_MOVE else 8)
+            # Limit single bonus to 1/4 of the total limit
+            bonus = min(max(bonus, -CORRECTION_HISTORY_LIMIT // 4), CORRECTION_HISTORY_LIMIT // 4)
             
-            # Limit diff to avoid extreme swings
-            clamped_diff = min(max(diff, -CORRECTION_HISTORY_LIMIT), CORRECTION_HISTORY_LIMIT)
+            # Absolute White perspective for Pawn and Minor
+            white_bonus = bonus if side == WHITE else -bonus
             
-            new_corr = current_corr + (clamped_diff - current_corr) // 16
+            # Stockfish Update Formula: val + bonus - val * abs(bonus) / LIMIT
             
-            # Clamp final result
-            new_corr = min(max(new_corr, -CORRECTION_HISTORY_LIMIT), CORRECTION_HISTORY_LIMIT)
+            # Update Pawn Correction (relative to White)
+            idx_pawn = pawn_key & CORRECTION_HISTORY_MASK
+            curr_pawn = search_context.pawn_correction_history[idx_pawn]
+            search_context.pawn_correction_history[idx_pawn] = curr_pawn + white_bonus - (curr_pawn * abs(white_bonus)) // CORRECTION_HISTORY_LIMIT
             
-            search_context.pawn_correction_history[idx] = new_corr
+            # Update Minor Correction (relative to White)
+            idx_minor = minor_key & CORRECTION_HISTORY_MASK
+            curr_minor = search_context.minor_correction_history[idx_minor]
+            # Minor update in SF is further scaled: bonus * 155 / 128
+            scaled_minor_bonus = (white_bonus * 155) // 128
+            search_context.minor_correction_history[idx_minor] = curr_minor + scaled_minor_bonus - (curr_minor * abs(scaled_minor_bonus)) // CORRECTION_HISTORY_LIMIT
+            
+            # Update Non-Pawn Correction based on Side (relative to Side to Move)
+            # Non-Pawn update in SF is further scaled: bonus * 181 / 128
+            scaled_np_bonus = (bonus * 181) // 128
+            if side == WHITE:
+                idx_np = np_white_key & CORRECTION_HISTORY_MASK
+                curr_np = search_context.non_pawn_correction_history_white[idx_np]
+                search_context.non_pawn_correction_history_white[idx_np] = curr_np + scaled_np_bonus - (curr_np * abs(scaled_np_bonus)) // CORRECTION_HISTORY_LIMIT
+            else:
+                idx_np = np_black_key & CORRECTION_HISTORY_MASK
+                curr_np = search_context.non_pawn_correction_history_black[idx_np]
+                search_context.non_pawn_correction_history_black[idx_np] = curr_np + scaled_np_bonus - (curr_np * abs(scaled_np_bonus)) // CORRECTION_HISTORY_LIMIT
 
     tt_score = max_eval
     if tt_score > MATE_IN_MAX_PLY: tt_score += ply

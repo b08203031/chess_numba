@@ -20,9 +20,12 @@ butterfly_history = np.zeros((64, 64), dtype=np.int32)
 continuation_history = np.zeros((3, 12, 64, 12, 64), dtype=np.int16)
 capture_history = np.zeros((12, 64, 12), dtype=np.int32)
 pawn_correction_history = np.zeros(16384, dtype=np.int16)
+minor_correction_history = np.zeros(16384, dtype=np.int16)
+non_pawn_correction_history_white = np.zeros(16384, dtype=np.int16)
+non_pawn_correction_history_black = np.zeros(16384, dtype=np.int16)
 pv_table = np.zeros((MAX_PLY, MAX_PLY), dtype=np.uint16)
 
-search_context = SearchContext(transposition_table, killer_moves, pv_table, history_table, butterfly_history, continuation_history, capture_history, pawn_correction_history)
+search_context = SearchContext(transposition_table, killer_moves, pv_table, history_table, butterfly_history, continuation_history, capture_history, pawn_correction_history, minor_correction_history, non_pawn_correction_history_white, non_pawn_correction_history_black)
 
 from chess_engine.debug_utils import log_info
 

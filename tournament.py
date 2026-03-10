@@ -60,6 +60,9 @@ class Engine:
                 raise RuntimeError(f"Engine {self.name} terminated unexpectedly during initialization")
             if line == "readyok":
                 break
+            else:
+                # 打印啟動期間所有的消息，包括 Numba 編譯警告，避免看起來像當機
+                print(f"[{self.name} init] {line}")
 
     def read_line(self):
         if not self.process:
@@ -79,6 +82,8 @@ class Engine:
             line = self.read_line()
             if line is None:
                 raise RuntimeError(f"Engine {self.name} terminated during warm-up")
+            # 打印 warmup 期間所有的消息
+            print(f"[{self.name} warmup] {line}")
             if line.startswith("bestmove"):
                 break
 

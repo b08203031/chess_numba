@@ -587,7 +587,8 @@ class ChessVisionApp(tk.Tk):
         self.after(0, update_status, "狀態 (Status): 等待對手下棋... (Waiting for opponent)", "blue")
 
         # Wait a moment before taking the baseline FEN so animations can finish
-        time.sleep(0.5)
+        # Reduced from 0.5 to 0.1 to catch fast responses
+        time.sleep(0.1)
         
         try:
             # We assume recognizer exists because we just finished our own analysis
@@ -833,7 +834,16 @@ class ChessVisionApp(tk.Tk):
                     # Signal that analysis is done
                     self.message_queue.put({"type": "analysis_finished"})
                     
-                    # Detect Game Over
+                    # --- Automation Logic ---
+                    # Execute auto play if enabled
+                    if self.auto_play_var.get():
+                        # If in fixed mode, only auto-play if the current side to move matches "My Color"
+                        if self.autoplay_mode_var.get() == "self" or self.side_var.get() == self.my_color_var.get():
+                            self.execute_auto_play(display_move)
+                        else:
+                            print(f"[INFO] 略過自動下棋：目前為固定方對戰模式，且輪到對手 ({self.side_var.get()})。")
+                        
+                    # Detect Game Over AFTER executing the move (ensures checkmate move is played)
                     if self.board.is_game_over():
                         outcome = self.board.outcome()
                         print(f"[INFO] 遊戲結束: {outcome.result()} - {outcome.termination.name}")
@@ -848,19 +858,9 @@ class ChessVisionApp(tk.Tk):
                         self.lbl_status.config(text=f"狀態 (Status): 遊戲結束 ({reason}) - {outcome.result()}", foreground="purple")
                         self.auto_play_var.set(False)
                         self.auto_detect_opponent_var.set(False)
-                        
-                        # Stop here, don't execute normal auto-play/detect logic after game over
+                        self.analyzing = False # Stop further analysis
                         continue
-                    
-                    # --- Automation Logic ---
-                    # Execute auto play if enabled
-                    if self.auto_play_var.get():
-                        # If in fixed mode, only auto-play if the current side to move matches "My Color"
-                        if self.autoplay_mode_var.get() == "self" or self.side_var.get() == self.my_color_var.get():
-                            self.execute_auto_play(display_move)
-                        else:
-                            print(f"[INFO] 略過自動下棋：目前為固定方對戰模式，且輪到對手 ({self.side_var.get()})。")
-                        
+
                     # If auto detect is enabled, wait for opponent
                     if self.auto_detect_opponent_var.get():
                         if self.autoplay_mode_var.get() == "self":
@@ -868,7 +868,7 @@ class ChessVisionApp(tk.Tk):
                            self.toggle_side_to_move()
                            print("[INFO] 自己對戰模式：正在自動觸發下一回合分析...")
                            # Tiny delay to allow pieces to visually move
-                           time.sleep(1)
+                           time.sleep(0.8)
                            self.after(0, self.start_analysis_thread)
                         else:
                            self.toggle_side_to_move()

@@ -101,9 +101,9 @@ def uci_loop():
             if command == "uci":
                 print("id name MyChessEngine")
                 print("id author YourName")
-                print("uciok")
+                print("uciok", flush=True)
             elif command == "isready":
-                print("readyok")
+                print("readyok", flush=True)
             elif command == "ucinewgame":
                 clear_transposition_table(transposition_table)
                 killer_moves.fill(0)
