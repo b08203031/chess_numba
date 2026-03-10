@@ -40,7 +40,9 @@ from chess_engine.constants import (
     ENABLE_SHALLOW_SEE_PRUNING, ENABLE_HISTORY_PRUNING, PRUNING_SHALLOW_DEPTH,
     PRUNING_CAPTURE_SEE_MARGIN, PRUNING_QUIET_SEE_MARGIN, PRUNING_HISTORY_THRESHOLD,
     WHITE, BLACK, PAWN_KEY_INDEX, CORRECTION_HISTORY_SIZE, CORRECTION_HISTORY_LIMIT,
-    CONTINUATION_HISTORY_FACTOR, MAX_HISTORY,
+    CONTINUATION_HISTORY_FACTOR, HISTORY_MAX_CONTINUATION,
+    FIFTY_MOVE_RULE_LIMIT, FIFTY_MOVE_SCALE_THRESHOLD, FIFTY_MOVE_MAX_SCALE,
+    SEE_HISTORY_DIVISOR, LMR_CONT_HISTORY_MULT,
     LMR_TABLE, ENABLE_MATE_DISTANCE_PRUNING
 )
 from chess_engine.bitboard_utils import find_piece_type_on_square, find_piece_type_on_square_side
@@ -589,7 +591,7 @@ def get_next_move(piece_bbs, occupancy_bbs, game_state, search_context, ply, tt_
                     hist_score = search_context.capture_history[aggressor_type_see, to_sq, victim_type_see]
                 
                 # Dynamic SEE threshold: clamp to avoid allowing massive blunders
-                threshold = min(0, -(hist_score // 512)) # Max relaxation of ~-32cp
+                threshold = min(0, -(hist_score // SEE_HISTORY_DIVISOR)) # Max relaxation of ~-32cp
                 
                 if see_ge(piece_bbs, occupancy_bbs, side_to_move, from_sq, to_sq, threshold, pinned_white, pinned_black):
                     move = candidate_move
@@ -761,16 +763,16 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
 
     # Avoid 1st repetition (2nd occurrence total) or 50-move rule
     # Crucial fix: Do not prune at the root (ply 0).
-    if ply > 0 and (repetition_count >= 1 or halfmove_clock >= 100):
+    if ply > 0 and (repetition_count >= 1 or halfmove_clock >= FIFTY_MOVE_RULE_LIMIT):
         search_context.pv_table[ply, ply] = NO_MOVE
         return (np.int32(0), NO_MOVE, nodes_searched, quiescence_nodes, tt_hits)
     
-    # M3: 50-move rule scale-down — gradually reduce eval towards draw as halfmove_clock approaches 100
-    # This prevents the "cliff effect" where depth-10 search sees halfmove_clock=100 at leaf nodes
-    fifty_move_scale = 256  # Full scale (no reduction)
-    if halfmove_clock >= 80 and ply > 0:
-        # Linear scale-down: at hmc=80 → scale=256, at hmc=100 → scale=0
-        fifty_move_scale = max(0, (100 - halfmove_clock) * 256 // 20)
+    # M3: 50-move rule scale-down — gradually reduce eval towards draw as halfmove_clock approaches limit
+    # This prevents the "cliff effect" where deep search sees halfmove_clock=limit at leaf nodes
+    fifty_move_scale = FIFTY_MOVE_MAX_SCALE  # Full scale (no reduction)
+    if halfmove_clock >= FIFTY_MOVE_SCALE_THRESHOLD and ply > 0:
+        # Linear scale-down
+        fifty_move_scale = max(0, (FIFTY_MOVE_RULE_LIMIT - halfmove_clock) * FIFTY_MOVE_MAX_SCALE // (FIFTY_MOVE_RULE_LIMIT - FIFTY_MOVE_SCALE_THRESHOLD))
     
     # Initialize PV for this ply to avoid ghost moves from previous searches
     search_context.pv_table[ply, ply] = NO_MOVE
@@ -838,8 +840,8 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
             elif tt_score < -MATE_IN_MAX_PLY: tt_score += ply
 
             # NEW: Apply 50-move scale down immediately to TT scores to avoid overlooking impending draws
-            if fifty_move_scale < 256 and abs(tt_score) < MATE_IN_MAX_PLY:
-                tt_score = tt_score * fifty_move_scale // 256
+            if fifty_move_scale < FIFTY_MOVE_MAX_SCALE and abs(tt_score) < MATE_IN_MAX_PLY:
+                tt_score = tt_score * fifty_move_scale // FIFTY_MOVE_MAX_SCALE
 
             should_cutoff = False
             if tt_entry['flag'] == TT_FLAG_EXACT:
@@ -1374,7 +1376,7 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                         if p_piece != -1:
                             cont_score = search_context.continuation_history[0, p_piece, p_to, aggressor_type, to_sq]
                             # Scale: ±1 reduction for max history
-                            lmr -= int(float(cont_score) / float(MAX_HISTORY) * 1.0)
+                            lmr -= int(float(cont_score) / float(HISTORY_MAX_CONTINUATION) * LMR_CONT_HISTORY_MULT)
 
                 # Clamp LMR to avoid reducing below depth 1
                 lmr = max(0, min(lmr, search_depth - 1))
@@ -1528,8 +1530,8 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
         max_eval = original_alpha
 
     # M3: Apply 50-move scale-down to non-mate evaluations
-    if fifty_move_scale < 256 and abs(max_eval) < MATE_IN_MAX_PLY:
-        max_eval = max_eval * fifty_move_scale // 256
+    if fifty_move_scale < FIFTY_MOVE_MAX_SCALE and abs(max_eval) < MATE_IN_MAX_PLY:
+        max_eval = max_eval * fifty_move_scale // FIFTY_MOVE_MAX_SCALE
     if best_move == NO_MOVE and search_context.mp_captures_end[ply] + search_context.mp_quiets_end[ply] > 0:
         # Fallback to first move that is not excluded
         for i in range(search_context.mp_captures_end[ply] + search_context.mp_quiets_end[ply]):

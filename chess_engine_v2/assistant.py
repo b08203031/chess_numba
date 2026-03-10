@@ -738,6 +738,25 @@ class ChessVisionApp(tk.Tk):
                 fen_final = " ".join(parts)
 
             self.message_queue.put({"type": "fen_update", "fen": fen_final})
+            
+            # Check for Game Over before sending to engine
+            temp_board = chess.Board(fen_final)
+            if temp_board.is_game_over():
+                outcome = temp_board.outcome()
+                reason = "將殺 (Checkmate)" if temp_board.is_checkmate() else "平局/逼和 (Draw/Stalemate)"
+                msg = f"偵測到遊戲已結束 ({reason}): {outcome.result()}"
+                self.message_queue.put({"type": "log", "message": msg})
+                
+                def stop_on_over():
+                    self.lbl_status.config(text=f"狀態 (Status): 遊戲結束 - {outcome.result()}", foreground="purple")
+                    self.auto_play_var.set(False)
+                    self.auto_detect_opponent_var.set(False)
+                    self.analyzing = False
+                    self.btn_analyze.config(state="normal")
+                    self.btn_stop.config(state="disabled")
+                
+                self.after(0, stop_on_over)
+                return
 
             # Send to Engine
             try:
@@ -813,6 +832,25 @@ class ChessVisionApp(tk.Tk):
                     
                     # Signal that analysis is done
                     self.message_queue.put({"type": "analysis_finished"})
+                    
+                    # Detect Game Over
+                    if self.board.is_game_over():
+                        outcome = self.board.outcome()
+                        print(f"[INFO] 遊戲結束: {outcome.result()} - {outcome.termination.name}")
+                        reason = ""
+                        if self.board.is_checkmate():
+                            reason = "將殺 (Checkmate)"
+                        elif self.board.is_stalemate():
+                            reason = "逼和 (Stalemate)"
+                        else:
+                            reason = "平局 (Draw)"
+                            
+                        self.lbl_status.config(text=f"狀態 (Status): 遊戲結束 ({reason}) - {outcome.result()}", foreground="purple")
+                        self.auto_play_var.set(False)
+                        self.auto_detect_opponent_var.set(False)
+                        
+                        # Stop here, don't execute normal auto-play/detect logic after game over
+                        continue
                     
                     # --- Automation Logic ---
                     # Execute auto play if enabled

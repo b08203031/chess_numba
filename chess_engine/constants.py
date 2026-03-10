@@ -448,8 +448,22 @@ KING_TROPISM_BONUS = 2500 # Bonus for improving king tropism
 KING_ATTACK_BONUS = 2000 # Bonus for quiet moves attacking the opponent's King zone
 ROOK_QUEEN_BATTERY_BONUS = 5000 # Bonus for Rook moving to same file/rank as Queen
 
-# History Heuristic Constants
+# History Heuristics Constants
 MAX_HISTORY = 16384 # Max value for history table to prevent overflow and saturation
+HISTORY_MAX_MAIN = 7183
+HISTORY_MAX_BUTTERFLY = 7183
+HISTORY_MAX_CAPTURE = 10692
+HISTORY_MAX_CONTINUATION = 30000
+
+# 50-move rule constants
+FIFTY_MOVE_RULE_LIMIT = 100
+FIFTY_MOVE_SCALE_THRESHOLD = 80
+FIFTY_MOVE_MAX_SCALE = 256
+
+# History tuning in Search
+SEE_HISTORY_DIVISOR = 512
+LMR_CONT_HISTORY_MULT = 1.0
+
 CORRECTION_HISTORY_SIZE = 16384
 CORRECTION_HISTORY_LIMIT = 400
 CORRECTION_HISTORY_GRAVITY = 16

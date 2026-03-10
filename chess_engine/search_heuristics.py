@@ -6,7 +6,8 @@ from chess_engine.move import (
     SPECIAL_MOVE_FLAG_PROMOTION, SPECIAL_MOVE_FLAG_EN_PASSANT
 )
 from chess_engine.constants import (
-    MAX_HISTORY, CONTINUATION_HISTORY_FACTOR, LMR_TABLE,
+    MAX_HISTORY, HISTORY_MAX_MAIN, HISTORY_MAX_BUTTERFLY, HISTORY_MAX_CAPTURE, HISTORY_MAX_CONTINUATION,
+    CONTINUATION_HISTORY_FACTOR, LMR_TABLE,
     MG_MATERIAL_VALUES, NO_MOVE, MAX_PLY, BB_SQUARES,
     SCORE_TT_MOVE, SCORE_GOOD_CAPTURE_BONUS, SCORE_BAD_CAPTURE_PENALTY,
     SCORE_KILLER_1, SCORE_KILLER_2, SCORE_COUNTER_MOVE
@@ -26,14 +27,14 @@ from chess_engine.engine_types import (
 def update_history(history_table, piece_type, to_square, bonus):
     """
     Updates the history table using the gravity formula:
-    history += bonus - history * abs(bonus) / MAX_HISTORY
+    history += bonus - history * abs(bonus) / HISTORY_MAX_MAIN
     This automatically prevents overflow and scales updates.
     """
     current_value = history_table[piece_type, to_square]
-    clamped_bonus = min(max(bonus, -MAX_HISTORY), MAX_HISTORY)
+    clamped_bonus = min(max(bonus, -HISTORY_MAX_MAIN), HISTORY_MAX_MAIN)
     
     # Gravity formula
-    new_value = current_value + clamped_bonus - (current_value * abs(clamped_bonus)) // MAX_HISTORY
+    new_value = current_value + clamped_bonus - (current_value * abs(clamped_bonus)) // HISTORY_MAX_MAIN
     history_table[piece_type, to_square] = new_value
 
 @numba.njit(cache=True, boundscheck=False, fastmath=True)
@@ -42,10 +43,10 @@ def update_butterfly_history(butterfly_table, from_sq, to_sq, bonus):
     Updates the butterfly history table using the gravity formula.
     """
     current_value = butterfly_table[from_sq, to_sq]
-    clamped_bonus = min(max(bonus, -MAX_HISTORY), MAX_HISTORY)
+    clamped_bonus = min(max(bonus, -HISTORY_MAX_BUTTERFLY), HISTORY_MAX_BUTTERFLY)
     
     # Gravity formula
-    new_value = current_value + clamped_bonus - (current_value * abs(clamped_bonus)) // MAX_HISTORY
+    new_value = current_value + clamped_bonus - (current_value * abs(clamped_bonus)) // HISTORY_MAX_BUTTERFLY
     butterfly_table[from_sq, to_sq] = new_value
 
 @numba.njit(cache=True, boundscheck=False, fastmath=True)
@@ -55,10 +56,10 @@ def update_capture_history(capture_history, piece_type, to_square, victim_type, 
     capture_history: [12, 64, 12] (aggressor_piece, to_square, victim_piece)
     """
     current_value = capture_history[piece_type, to_square, victim_type]
-    clamped_bonus = min(max(bonus, -MAX_HISTORY), MAX_HISTORY)
+    clamped_bonus = min(max(bonus, -HISTORY_MAX_CAPTURE), HISTORY_MAX_CAPTURE)
     
     # Gravity formula
-    new_value = current_value + clamped_bonus - (current_value * abs(clamped_bonus)) // MAX_HISTORY
+    new_value = current_value + clamped_bonus - (current_value * abs(clamped_bonus)) // HISTORY_MAX_CAPTURE
     capture_history[piece_type, to_square, victim_type] = new_value
 
 @numba.njit(cache=True, boundscheck=False, fastmath=True)
@@ -70,9 +71,9 @@ def update_continuation_history(context, ply_offset, prev_move, prev_piece, curr
     curr_to = get_to_square(curr_move)
     
     current_val = context.continuation_history[ply_offset, prev_piece, prev_to, curr_piece, curr_to]
-    clamped_bonus = min(max(bonus, -MAX_HISTORY), MAX_HISTORY)
+    clamped_bonus = min(max(bonus, -HISTORY_MAX_CONTINUATION), HISTORY_MAX_CONTINUATION)
     
-    new_val = current_val + clamped_bonus - (current_val * abs(clamped_bonus)) // MAX_HISTORY
+    new_val = current_val + clamped_bonus - (current_val * abs(clamped_bonus)) // HISTORY_MAX_CONTINUATION
     context.continuation_history[ply_offset, prev_piece, prev_to, curr_piece, curr_to] = new_val
 
 @numba.njit(cache=True, boundscheck=False, fastmath=True)
