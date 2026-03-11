@@ -816,9 +816,12 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                 return (np.int32(alpha), NO_MOVE, nodes_searched, quiescence_nodes, tt_hits)
 
     # --- M1: IIR (Internal Iterative Reduction) replaces IID ---
-    # Instead of doing a costly sub-search, just reduce depth by 1 when we have no TT move
-    if depth >= 4 and tt_move == NO_MOVE and not is_currently_in_check:
-        depth -= 1
+    # Instead of doing a costly sub-search, just reduce depth for nodes without a TT move.
+    if tt_move == NO_MOVE and not is_currently_in_check:
+        if depth >= 8:
+            depth -= 2
+        elif depth >= 4:
+            depth -= 1
 
     # --- Move Ordering ---
     # Retrieve Counter Move if available
@@ -1039,9 +1042,10 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                     # If the singular search fails high (exclusion_score >= exclusion_beta)
                     # AND the bounds at which it was searched are >= beta,
                     # it means multiple moves (TT move + another move) fail high.
-                    # This is a solid Cut-Node, prune immediately!
-                    unmake_move(piece_bbs, occupancy_bbs, game_state, move, unmake_info)
-                    return (np.int32(exclusion_beta), NO_MOVE, nodes_searched, quiescence_nodes, tt_hits)
+                    # Conservative check: Never prune if we see a mate score!
+                    if abs(exclusion_score) < MATE_IN_MAX_PLY:
+                        unmake_move(piece_bbs, occupancy_bbs, game_state, move, unmake_info)
+                        return (np.int32(exclusion_beta), NO_MOVE, nodes_searched, quiescence_nodes, tt_hits)
                     
         search_depth = depth - 1 + current_extension
 

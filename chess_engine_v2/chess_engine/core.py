@@ -54,7 +54,7 @@ SQUARE_TO_ALGEBRAIC = {i: f"{chr(ord('a') + i % 8)}{i // 8 + 1}" for i in range(
 將方格索引映射到代數記號的字典。
 """
 
-@numba.jit(nbt.uint64(piece_bbs_signature, occupancy_bbs_signature, game_state_signature, nbt.intc), nopython=True)
+@numba.jit(nbt.uint64(piece_bbs_signature, occupancy_bbs_signature, game_state_signature, nbt.intc), nopython=True, cache=True)
 def perft(piece_bbs, occupancy_bbs, game_state, depth: int):
     """
     核心遞歸 Perft 函數，重構為 Make-Unmake 模式。
@@ -85,7 +85,7 @@ def perft(piece_bbs, occupancy_bbs, game_state, depth: int):
         unmake_move(piece_bbs, occupancy_bbs, game_state, move, unmake_info)
     return nodes
 
-@numba.jit(nbt.types.Array(nbt.uint64, 2, "C")(piece_bbs_signature, occupancy_bbs_signature, game_state_signature, nbt.intc), nopython=True)
+@numba.jit(nbt.types.Array(nbt.uint64, 2, "C")(piece_bbs_signature, occupancy_bbs_signature, game_state_signature, nbt.intc), nopython=True, cache=True)
 def _jit_perft_divide(piece_bbs, occupancy_bbs, game_state, depth: int):
     """
     JIT 編譯的核心 Perft Divide 邏輯，重構為 Make-Unmake 模式。

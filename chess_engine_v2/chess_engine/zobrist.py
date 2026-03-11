@@ -67,7 +67,7 @@ def count_trailing_zeros(typingctx, val):
     sig = types.int64(types.uint64)
     return sig, codegen
 
-@numba.jit(numba.int8(numba.uint64), nopython=True, inline='always')
+@numba.jit(numba.int8(numba.uint64), nopython=True, cache=True, inline='always')
 def get_lsb_index(bitboard: np.uint64) -> int:
     """
     Uses hardware CTZ (Count Trailing Zeros) intrinsic via LLVM to find LSB index.
@@ -77,7 +77,7 @@ def get_lsb_index(bitboard: np.uint64) -> int:
         return -1
     return numba.int8(count_trailing_zeros(bitboard))
 
-@numba.jit(numba.uint64(piece_bbs_signature, game_state_signature), nopython=True)
+@numba.jit(numba.uint64(piece_bbs_signature, game_state_signature), nopython=True, cache=True)
 def compute_initial_hash(piece_bbs: np.ndarray, game_state: np.ndarray) -> np.uint64:
     """
     從頭計算當前局面的 Zobrist 哈希值。
@@ -117,7 +117,7 @@ def compute_initial_hash(piece_bbs: np.ndarray, game_state: np.ndarray) -> np.ui
 
     return zobrist_key
 
-@numba.jit(numba.uint64(piece_bbs_signature, game_state_signature), nopython=True)
+@numba.jit(numba.uint64(piece_bbs_signature, game_state_signature), nopython=True, cache=True)
 def compute_initial_pawn_hash(piece_bbs: np.ndarray, game_state: np.ndarray) -> np.uint64:
     """計算僅包含兵的 Zobrist 哈希值"""
     zobrist_key = np.uint64(0)
@@ -129,7 +129,7 @@ def compute_initial_pawn_hash(piece_bbs: np.ndarray, game_state: np.ndarray) -> 
             bb &= np.uint64(bb - 1)
     return zobrist_key
 
-@numba.jit(numba.uint64(piece_bbs_signature, game_state_signature), nopython=True)
+@numba.jit(numba.uint64(piece_bbs_signature, game_state_signature), nopython=True, cache=True)
 def compute_initial_minor_hash(piece_bbs: np.ndarray, game_state: np.ndarray) -> np.uint64:
     """計算包含馬與象 (輕子) 的 Zobrist 哈希值"""
     zobrist_key = np.uint64(0)
@@ -141,7 +141,7 @@ def compute_initial_minor_hash(piece_bbs: np.ndarray, game_state: np.ndarray) ->
             bb &= np.uint64(bb - 1)
     return zobrist_key
 
-@numba.jit(numba.uint64(piece_bbs_signature, game_state_signature, numba.boolean), nopython=True)
+@numba.jit(numba.uint64(piece_bbs_signature, game_state_signature, numba.boolean), nopython=True, cache=True)
 def compute_initial_non_pawn_hash(piece_bbs: np.ndarray, game_state: np.ndarray, is_white: bool) -> np.uint64:
     """計算非兵棋子的 Zobrist 哈希值 (分黑白)"""
     zobrist_key = np.uint64(0)
