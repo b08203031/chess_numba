@@ -288,10 +288,24 @@ PASSED_PAWN_BONUS = np.array([
     [  0,   0], # Rank 1
     [ 0,  0], # Rank 2
     [ 10,  20], # Rank 3
-    [ 30, 50], # Rank 4
-    [ 50, 80], # Rank 5
+    [ 30, 50],  # Rank 4
+    [ 50, 80],  # Rank 5
     [ 80, 150], # Rank 6
     [150, 250], # Rank 7
+    [  0,   0]  # Rank 8
+], dtype=np.int32)
+
+# Candidate Passed Pawns Bonus by Rank (0-7).
+# Pawns that are not passed yet, but can become passed easily (e.g. facing only one enemy pawn that is at the same rank or ahead on adjacent file).
+# Bonus is roughly half that of a true passed pawn.
+CANDIDATE_PASSED_PAWN_BONUS = np.array([
+    [  0,   0], # Rank 1
+    [  0,   0], # Rank 2
+    [  5,  10], # Rank 3
+    [ 15,  25], # Rank 4
+    [ 25,  40], # Rank 5
+    [ 40,  75], # Rank 6
+    [ 75, 125], # Rank 7
     [  0,   0]  # Rank 8
 ], dtype=np.int32)
 
@@ -496,6 +510,12 @@ ENABLE_DELTA_PRUNING = True # Delta Pruning in Quiescence Search
 ENABLE_IID = True           # Internal Iterative Deepening
 ENABLE_SINGULAR_EXTENSIONS = True # Singular Extensions
 ENABLE_MATE_DISTANCE_PRUNING = True # Mate Distance Pruning
+ENABLE_MULTICUT = False  # Multi-Cut Pruning (disabled — causes regression, needs redesign)
+
+# Multi-Cut Parameters
+MULTICUT_MIN_DEPTH = 5  # Only apply Multi-Cut at this depth or higher
+MULTICUT_M = 3          # Number of fail-highs required to trigger prune
+MULTICUT_C = 6          # Number of moves to probe
 
 
 # IID and Singular Extension Parameters

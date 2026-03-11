@@ -143,6 +143,10 @@ def evaluate_pawn_structure(piece_bbs):
     
     white_pawns = piece_bbs[0]
     black_pawns = piece_bbs[6]
+    
+    white_pieces = piece_bbs[0] | piece_bbs[1] | piece_bbs[2] | piece_bbs[3] | piece_bbs[4] | piece_bbs[5]
+    black_pieces = piece_bbs[6] | piece_bbs[7] | piece_bbs[8] | piece_bbs[9] | piece_bbs[10] | piece_bbs[11]
+
     white_king_sq = get_lsb_index(piece_bbs[5])
     black_king_sq = get_lsb_index(piece_bbs[11])
     
@@ -179,8 +183,18 @@ def evaluate_pawn_structure(piece_bbs):
 
         # A. Passed Pawn Logic
         if not (WHITE_PASSED_PAWN_MASKS[sq] & black_pawns):
-            mg_score += PASSED_PAWN_BONUS[rank, 0]
-            eg_score += PASSED_PAWN_BONUS[rank, 1]
+            # Check if blocked by any piece directly in front (Non-Pawn Blockader)
+            # This prevents giving full passed pawn bonus when blocked by knights/rooks, etc.
+            is_blocked = ((white_pieces | black_pieces) & (np.uint64(1) << np.uint64(sq + 8))) != 0
+            
+            p_bonus_mg = PASSED_PAWN_BONUS[rank, 0]
+            p_bonus_eg = PASSED_PAWN_BONUS[rank, 1]
+            if is_blocked:
+                p_bonus_mg //= 2
+                p_bonus_eg //= 2
+                
+            mg_score += p_bonus_mg
+            eg_score += p_bonus_eg
 
             # Connected Passed Pawn Bonus
             if adjacent_pawns:
@@ -206,7 +220,34 @@ def evaluate_pawn_structure(piece_bbs):
                     proximity_bonus = max(-150, min(150, proximity_bonus))
                     eg_score += proximity_bonus
 
-         # B. Backward Pawn Logic
+        # B. Candidate Passed Pawn Logic
+        # A pawn is a candidate if it's not passed, but only has 1 enemy pawn blocking its path
+        # (on an adjacent file) and NO enemy pawns on the same file ahead of it.
+        elif not (WHITE_FORWARD_RANKS[sq] & FILE_MASKS[file_idx] & black_pawns):
+            # No enemy pawns on the same file. Check adjacent files.
+            enemy_blockers = (WHITE_PASSED_PAWN_MASKS[sq] & black_pawns) | (RANK_MASKS[rank] & ADJACENT_FILES_MASKS[file_idx] & black_pawns)
+            # Count set bits (number of enemy blockers)
+            num_blockers = 0
+            temp_blockers = enemy_blockers
+            while temp_blockers:
+                num_blockers += 1
+                temp_blockers &= temp_blockers - np.uint64(1)
+            
+            if num_blockers == 1:
+                # Candidate passer!
+                c_bonus_mg = CANDIDATE_PASSED_PAWN_BONUS[rank, 0]
+                c_bonus_eg = CANDIDATE_PASSED_PAWN_BONUS[rank, 1]
+                
+                # If blocked by any piece directly in front, halve it too
+                is_blocked = ((white_pieces | black_pieces) & (np.uint64(1) << np.uint64(sq + 8))) != 0
+                if is_blocked:
+                    c_bonus_mg //= 2
+                    c_bonus_eg //= 2
+                    
+                mg_score += c_bonus_mg
+                eg_score += c_bonus_eg
+
+         # C. Backward Pawn Logic
         # Definition: No friendly pawn on adjacent files is at the same rank or behind (supporting).
         # A backward pawn is one that has fallen behind its neighbors.
         # And the stop square (sq + 8) is controlled by an enemy pawn.
@@ -264,8 +305,17 @@ def evaluate_pawn_structure(piece_bbs):
 
         # A. Passed Pawn Logic
         if not (BLACK_PASSED_PAWN_MASKS[sq] & white_pawns):
-            mg_score -= PASSED_PAWN_BONUS[relative_rank, 0]
-            eg_score -= PASSED_PAWN_BONUS[relative_rank, 1]
+            # Check if blocked by any piece directly in front (Non-Pawn Blockader)
+            is_blocked = ((white_pieces | black_pieces) & (np.uint64(1) << np.uint64(sq - 8))) != 0
+            
+            p_bonus_mg = PASSED_PAWN_BONUS[relative_rank, 0]
+            p_bonus_eg = PASSED_PAWN_BONUS[relative_rank, 1]
+            if is_blocked:
+                p_bonus_mg //= 2
+                p_bonus_eg //= 2
+                
+            mg_score -= p_bonus_mg
+            eg_score -= p_bonus_eg
 
             # Connected Passed Pawn Bonus
             if adjacent_pawns:
@@ -284,7 +334,28 @@ def evaluate_pawn_structure(piece_bbs):
                     proximity_bonus = max(-150, min(150, proximity_bonus))
                     eg_score -= proximity_bonus
 
-        # B. Backward Pawn Logic
+        # B. Candidate Passed Pawn Logic (Black)
+        elif not (BLACK_FORWARD_RANKS[sq] & FILE_MASKS[file_idx] & white_pawns):
+            enemy_blockers = (BLACK_PASSED_PAWN_MASKS[sq] & white_pawns) | (RANK_MASKS[rank] & ADJACENT_FILES_MASKS[file_idx] & white_pawns)
+            num_blockers = 0
+            temp_blockers = enemy_blockers
+            while temp_blockers:
+                num_blockers += 1
+                temp_blockers &= temp_blockers - np.uint64(1)
+            
+            if num_blockers == 1:
+                c_bonus_mg = CANDIDATE_PASSED_PAWN_BONUS[relative_rank, 0]
+                c_bonus_eg = CANDIDATE_PASSED_PAWN_BONUS[relative_rank, 1]
+                
+                is_blocked = ((white_pieces | black_pieces) & (np.uint64(1) << np.uint64(sq - 8))) != 0
+                if is_blocked:
+                    c_bonus_mg //= 2
+                    c_bonus_eg //= 2
+                    
+                mg_score -= c_bonus_mg
+                eg_score -= c_bonus_eg
+
+        # C. Backward Pawn Logic
         else:
              # Support: Friendly pawns on adjacent files and rank <= current rank (since black moves down)
              # BLACK_FORWARD_RANKS[sq] gives ranks < rank.

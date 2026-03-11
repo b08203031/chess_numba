@@ -34,6 +34,7 @@ from chess_engine.constants import (
     STAGE_GEN_QUIETS, STAGE_GOOD_QUIETS, STAGE_BAD_CAPTURES,
     STAGE_BAD_QUIETS, STAGE_DONE,
     ENABLE_SINGULAR_EXTENSIONS, MIN_SINGULAR_DEPTH, SINGULAR_EXTENSION_MARGIN,
+    ENABLE_MULTICUT, MULTICUT_MIN_DEPTH, MULTICUT_M, MULTICUT_C,
     STOP_SEARCH_FLAG, MAX_HISTORY,
     SCORE_TT_MOVE, SCORE_GOOD_CAPTURE_BONUS, SCORE_KILLER_1,
     SCORE_KILLER_2, SCORE_COUNTER_MOVE, SCORE_BAD_CAPTURE_PENALTY, NMP_STATIC_MARGIN,
@@ -672,6 +673,8 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
         
         # Dynamic NMP Reduction: R = 3 + depth / 6 + min(3, (static_score - beta) / 200)
         nmp_reduction = 3 + depth // 6 + min(3, (static_score - beta) // 200)
+        # nmp_reduction = 3 + depth // 4 + min(3, (static_score - beta) // 150)
+        
         # C1: Extra reduction when not improving
         if not improving:
             nmp_reduction += 1
@@ -1031,7 +1034,15 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                     # Double extension for big margin
                     if depth >= 8 and exclusion_score < exclusion_beta - SINGULAR_EXTENSION_MARGIN:
                         current_extension = max(current_extension, 2)
-
+                elif exclusion_beta >= beta:
+                    # --- MODERN MULTI-CUT PRUNING ---
+                    # If the singular search fails high (exclusion_score >= exclusion_beta)
+                    # AND the bounds at which it was searched are >= beta,
+                    # it means multiple moves (TT move + another move) fail high.
+                    # This is a solid Cut-Node, prune immediately!
+                    unmake_move(piece_bbs, occupancy_bbs, game_state, move, unmake_info)
+                    return (np.int32(exclusion_beta), NO_MOVE, nodes_searched, quiescence_nodes, tt_hits)
+                    
         search_depth = depth - 1 + current_extension
 
         evaluation = 0
