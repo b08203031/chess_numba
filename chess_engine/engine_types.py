@@ -23,7 +23,8 @@ game_state_signature = numba.uint64[::1]
 piece_counts_signature = numba.types.UniTuple(numba.int32, 12)
 
 unmake_info_signature = numba.types.Tuple([
-    numba.int8, numba.uint8, numba.uint8, numba.uint8, numba.uint64, numba.uint64
+    numba.int8, numba.uint8, numba.uint8, numba.uint8, numba.uint64, numba.uint64,
+    numba.uint64, numba.uint64, numba.uint64
 ])
 
 # --- Search Context / 搜尋上下文 ---
@@ -58,6 +59,9 @@ search_context_spec = [
     ('mp_bad_captures_idx', numba.int32[::1]),
     ('continuation_history', numba.int16[:, :, :, :, :]),
     ('pawn_correction_history', numba.int16[:]),
+    ('minor_correction_history', numba.int16[:]),
+    ('non_pawn_correction_history_white', numba.int16[:]),
+    ('non_pawn_correction_history_black', numba.int16[:]),
     ('butterfly_history', numba.int32[:, :]),
     ('capture_history', numba.int32[:, :, :]),
 ]
@@ -86,8 +90,11 @@ class SearchContext:
 
         continuation_history (numba.int16[:, :, :, :, :]): 連續歷史表。
         pawn_correction_history (numba.int16[:]): 兵型修正歷史表。
+        minor_correction_history (numba.int16[:]): 輕子修正歷史表。
+        non_pawn_correction_history_white (numba.int16[:]): 白方非兵修正歷史表。
+        non_pawn_correction_history_black (numba.int16[:]): 黑方非兵修正歷史表。
     """
-    def __init__(self, transposition_table, killer_moves, pv_table, history_table, butterfly_history, continuation_history, capture_history, pawn_correction_history):
+    def __init__(self, transposition_table, killer_moves, pv_table, history_table, butterfly_history, continuation_history, capture_history, pawn_correction_history, minor_correction_history, non_pawn_correction_history_white, non_pawn_correction_history_black):
         """
         初始化搜尋上下文。
 
@@ -100,6 +107,9 @@ class SearchContext:
             continuation_history: 預先分配的連續歷史表。
             capture_history: 預先分配的吃子歷史表。
             pawn_correction_history: 預先分配的兵型修正歷史表。
+            minor_correction_history: 預先分配的輕子修正歷史表。
+            non_pawn_correction_history_white: 預先分配的白方非兵修正歷史表。
+            non_pawn_correction_history_black: 預先分配的黑方非兵修正歷史表。
         """
         self.transposition_table = transposition_table
         self.killer_moves = killer_moves
@@ -109,6 +119,9 @@ class SearchContext:
         self.continuation_history = continuation_history
         self.capture_history = capture_history
         self.pawn_correction_history = pawn_correction_history
+        self.minor_correction_history = minor_correction_history
+        self.non_pawn_correction_history_white = non_pawn_correction_history_white
+        self.non_pawn_correction_history_black = non_pawn_correction_history_black
         self.nodes_searched = np.uint64(0)
         self.end_time = 0.0
         # 使用陣列來包裝布林值，以便可以作為引用傳遞並在外部修改

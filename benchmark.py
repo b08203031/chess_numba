@@ -17,12 +17,15 @@ from chess_engine.constants import MAX_PLY
 killer_moves = np.zeros(MAX_PLY * 2, dtype=np.uint16) # MAX_PLY is 128
 history_table = np.zeros((12, 64), dtype=np.int32)
 butterfly_history = np.zeros((64, 64), dtype=np.int32)
-continuation_history = np.zeros((12, 64, 12, 64), dtype=np.int16)
+continuation_history = np.zeros((3, 12, 64, 12, 64), dtype=np.int16)
 capture_history = np.zeros((12, 64, 12), dtype=np.int32)
 pawn_correction_history = np.zeros(16384, dtype=np.int16)
+minor_correction_history = np.zeros(16384, dtype=np.int16)
+non_pawn_correction_history_white = np.zeros(16384, dtype=np.int16)
+non_pawn_correction_history_black = np.zeros(16384, dtype=np.int16)
 pv_table = np.zeros((MAX_PLY, MAX_PLY), dtype=np.uint16)
 
-search_context = SearchContext(transposition_table, killer_moves, pv_table, history_table, butterfly_history, continuation_history, capture_history, pawn_correction_history)
+search_context = SearchContext(transposition_table, killer_moves, pv_table, history_table, butterfly_history, continuation_history, capture_history, pawn_correction_history, minor_correction_history, non_pawn_correction_history_white, non_pawn_correction_history_black)
 
 from chess_engine.debug_utils import log_info
 
@@ -38,8 +41,7 @@ def clear_numba_cache():
         if cache_dir.is_dir():
             shutil.rmtree(cache_dir)
 
-# Clear cache before importing the engine to avoid stale cache issues / 在導入引擎之前清除緩存以避免過時的緩存問題
-clear_numba_cache()
+# clear_numba_cache()
 
 from chess_engine.fen_parser import parse_fen
 from chess_engine.search import iterative_deepening_search
@@ -85,6 +87,7 @@ def run_benchmark_for_fen(fen, depth, name):
     log_info(f"Search finished in {elapsed_time:.4f} seconds.")
     log_info(f"Total Nodes Searched: {total_nodes}")
     log_info(f"Nodes Per Second (NPS): {nps}")
+    log_info(f"Quiescence Nodes: {quiescence_nodes}")
     log_info(f"Best move: {move_to_uci(best_move)}")
     log_info(f"Evaluation: {best_eval}")
     log_info("----------------------------------------\n")
@@ -98,11 +101,11 @@ def run_all_benchmarks():
 
     # Benchmark 1: Standard starting position
     startpos_fen = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
-    run_benchmark_for_fen(startpos_fen, depth=10, name="Start Position")
+    run_benchmark_for_fen(startpos_fen, depth=15, name="Start Position")
 
     # Benchmark 2: Kiwipete position
     kiwipete_fen = "r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1"
-    run_benchmark_for_fen(kiwipete_fen, depth=10, name="Kiwipete")
+    run_benchmark_for_fen(kiwipete_fen, depth=15, name="Kiwipete")
 
 
 if __name__ == "__main__":

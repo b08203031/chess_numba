@@ -288,10 +288,24 @@ PASSED_PAWN_BONUS = np.array([
     [  0,   0], # Rank 1
     [ 0,  0], # Rank 2
     [ 10,  20], # Rank 3
-    [ 30, 50], # Rank 4
-    [ 50, 80], # Rank 5
+    [ 30, 50],  # Rank 4
+    [ 50, 80],  # Rank 5
     [ 80, 150], # Rank 6
     [150, 250], # Rank 7
+    [  0,   0]  # Rank 8
+], dtype=np.int32)
+
+# Candidate Passed Pawns Bonus by Rank (0-7).
+# Pawns that are not passed yet, but can become passed easily (e.g. facing only one enemy pawn that is at the same rank or ahead on adjacent file).
+# Bonus is roughly half that of a true passed pawn.
+CANDIDATE_PASSED_PAWN_BONUS = np.array([
+    [  0,   0], # Rank 1
+    [  0,   0], # Rank 2
+    [  5,  10], # Rank 3
+    [ 15,  25], # Rank 4
+    [ 25,  40], # Rank 5
+    [ 40,  75], # Rank 6
+    [ 75, 125], # Rank 7
     [  0,   0]  # Rank 8
 ], dtype=np.int32)
 
@@ -465,8 +479,15 @@ SEE_HISTORY_DIVISOR = 512
 LMR_CONT_HISTORY_MULT = 1.0
 
 CORRECTION_HISTORY_SIZE = 16384
-CORRECTION_HISTORY_LIMIT = 400
-CORRECTION_HISTORY_GRAVITY = 16
+CORRECTION_HISTORY_MASK = 16383
+CORRECTION_HISTORY_LIMIT = 1024
+CORRECTION_HISTORY_DIVISOR = 131072
+CORRECTION_HISTORY_PAWN_WEIGHT = 11433
+CORRECTION_HISTORY_MINOR_WEIGHT = 8823
+CORRECTION_HISTORY_NON_PAWN_WEIGHT = 12749
+CORRECTION_HISTORY_UPDATE_DEPTH = 4
+SCORE_MIN = -30000
+SCORE_MAX = 30000
 CONTINUATION_HISTORY_FACTOR = 4
 
 # Special value to indicate that the search was stopped due to timeout
@@ -474,6 +495,9 @@ CONTINUATION_HISTORY_FACTOR = 4
 STOP_SEARCH_FLAG = 66666
 
 PAWN_KEY_INDEX = 5
+MINOR_KEY_INDEX = 6
+NON_PAWN_KEY_WHITE_INDEX = 7
+NON_PAWN_KEY_BLACK_INDEX = 8
 
 # --- Aspiration Windows / 期望窗口 ---
 ASPIRATION_WINDOW_SIZE = 25 # centipawns (H8: tightened from 100 to detect score instability)
@@ -486,6 +510,12 @@ ENABLE_DELTA_PRUNING = True # Delta Pruning in Quiescence Search
 ENABLE_IID = True           # Internal Iterative Deepening
 ENABLE_SINGULAR_EXTENSIONS = True # Singular Extensions
 ENABLE_MATE_DISTANCE_PRUNING = True # Mate Distance Pruning
+ENABLE_MULTICUT = False  # Multi-Cut Pruning (disabled — causes regression, needs redesign)
+
+# Multi-Cut Parameters
+MULTICUT_MIN_DEPTH = 5  # Only apply Multi-Cut at this depth or higher
+MULTICUT_M = 3          # Number of fail-highs required to trigger prune
+MULTICUT_C = 6          # Number of moves to probe
 
 
 # IID and Singular Extension Parameters
