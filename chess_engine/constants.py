@@ -433,6 +433,12 @@ THREAT_ROOK_ON_QUEEN = np.array([20, 10], dtype=np.int32) # MG, EG
 # 這是給攻擊者的獎勵。
 THREAT_HANGING = np.array([25, 15], dtype=np.int32) # MG, EG
 
+# --- Endgame Scale Factors ---
+SCALE_FACTOR_NORMAL = 64
+SCALE_FACTOR_DRAW = 0
+SCALE_FACTOR_OCB_ONE_PAWN = 16
+SCALE_FACTOR_OCB_TWO_PAWNS = 32
+SCALE_FACTOR_OCB_MULTIPLE_PAWNS = 48
 
 # =============================================================================
 # --- Search Constants / 搜尋常量 ---
@@ -507,7 +513,7 @@ ASPIRATION_WINDOW_SIZE = 25 # centipawns (H8: tightened from 100 to detect score
 ENABLE_LMP = True           # Late Move Pruning
 ENABLE_PROBCUT = True       # ProbCut
 ENABLE_DELTA_PRUNING = True # Delta Pruning in Quiescence Search
-ENABLE_IID = True           # Internal Iterative Deepening
+ENABLE_IIR = True           # Internal Iterative Reduction (Replaces old IID)
 ENABLE_SINGULAR_EXTENSIONS = True # Singular Extensions
 ENABLE_MATE_DISTANCE_PRUNING = True # Mate Distance Pruning
 ENABLE_MULTICUT = False  # Multi-Cut Pruning (disabled — causes regression, needs redesign)

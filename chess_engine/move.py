@@ -60,7 +60,7 @@ PROMO_KNIGHT, PROMO_BISHOP, PROMO_ROOK, PROMO_QUEEN = 0, 1, 2, 3
 升變棋子的常量定義。
 """
 
-@numba.jit(nopython=True, inline='always')
+@numba.jit(nopython=True, cache=True, inline='always')
 def encode_move(from_square: int, to_square: int, promotion_piece: int, special_flag: int) -> np.uint16:
     """
     將移動信息編碼為一個 16 位無符號整數。
@@ -80,7 +80,7 @@ def encode_move(from_square: int, to_square: int, promotion_piece: int, special_
     move |= np.uint16(special_flag << SPECIAL_MOVE_SHIFT)
     return move
 
-@numba.jit(nopython=True, inline='always')
+@numba.jit(nopython=True, cache=True, inline='always')
 def get_from_square(move: np.uint16) -> int:
     """
     從編碼的移動中提取起始方格。
@@ -93,7 +93,7 @@ def get_from_square(move: np.uint16) -> int:
     """
     return int(move & FROM_SQUARE_MASK)
 
-@numba.jit(nopython=True, inline='always')
+@numba.jit(nopython=True, cache=True, inline='always')
 def get_to_square(move: np.uint16) -> int:
     """
     從編碼的移動中提取目標方格。
@@ -106,7 +106,7 @@ def get_to_square(move: np.uint16) -> int:
     """
     return int((move & TO_SQUARE_MASK) >> TO_SQUARE_SHIFT)
 
-@numba.jit(nopython=True, inline='always')
+@numba.jit(nopython=True, cache=True, inline='always')
 def get_promotion_piece(move: np.uint16) -> int:
     """
     從編碼的移動中提取升變棋子類型。
@@ -119,7 +119,7 @@ def get_promotion_piece(move: np.uint16) -> int:
     """
     return int((move & PROMOTION_PIECE_MASK) >> PROMOTION_PIECE_SHIFT)
 
-@numba.jit(nopython=True, inline='always')
+@numba.jit(nopython=True, cache=True, inline='always')
 def get_special_move_flag(move: np.uint16) -> int:
     """
     從編碼的移動中提取特殊移動標誌。

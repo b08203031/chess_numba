@@ -29,7 +29,7 @@ from chess_engine.constants import (
     RAZORING_MARGIN, FP_MARGIN_D1, FP_MARGIN_D2, FP_BASE, FP_MULTIPLIER, RFP_MARGIN_D1,
     ENABLE_DELTA_PRUNING, DELTA_PRUNING_MARGIN, LMP_MOVE_COUNT, ENABLE_LMP,
     ENABLE_PROBCUT, PROBCUT_R, PROBCUT_R_PRIME, PROBCUT_MARGIN,
-    ENABLE_NMP, ENABLE_RAZORING, ENABLE_FP, ENABLE_RFP, ENABLE_LMR, ENABLE_IID,
+    ENABLE_NMP, ENABLE_RAZORING, ENABLE_FP, ENABLE_RFP, ENABLE_LMR, ENABLE_IIR,
     STAGE_TT_MOVE, STAGE_GEN_CAPTURES, STAGE_GOOD_CAPTURES,
     STAGE_GEN_QUIETS, STAGE_GOOD_QUIETS, STAGE_BAD_CAPTURES,
     STAGE_BAD_QUIETS, STAGE_DONE,
@@ -817,7 +817,7 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
 
     # --- M1: IIR (Internal Iterative Reduction) replaces IID ---
     # Instead of doing a costly sub-search, just reduce depth for nodes without a TT move.
-    if tt_move == NO_MOVE and not is_currently_in_check:
+    if tt_move == NO_MOVE and ENABLE_IIR and not is_currently_in_check:
         if depth >= 8:
             depth -= 2
         elif depth >= 4:

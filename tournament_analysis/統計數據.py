@@ -23,6 +23,15 @@ class ChessEngineAnalyzer:
         
         # 賽果序列 (1.0=勝, 0.5=和, 0.0=負)
         self.score_sequence = []
+        
+        # 對局對分析 (v2 視角: 白勝-黑勝, 白勝-黑和, ...)
+        # 1.WW, 2.WD, 3.WL, 4.DW, 5.DD, 6.DL, 7.LW, 8.LD, 9.LL
+        self.pair_outcomes = {
+            "WW": 0, "WD": 0, "WL": 0,
+            "DW": 0, "DD": 0, "DL": 0,
+            "LW": 0, "LD": 0, "LL": 0
+        }
+        self.total_pairs = 0
 
     def parse_pgn(self, file_path):
         """讀取並解析 PGN 檔案"""
@@ -94,6 +103,35 @@ class ChessEngineAnalyzer:
                     self.openings_black[first_move] = {"W": 0, "D": 0, "L": 0, "Total": 0}
                 self.openings_black[first_move][res_type] += 1
                 self.openings_black[first_move]["Total"] += 1
+
+        # 對局對分類分析 (假設 PGN 中每兩局為一組，且同一開局交換顏色)
+        self._calculate_pair_stats()
+
+    def _calculate_pair_stats(self):
+        """分析九種組合比例 (假設偶數局為執白，奇數局為執黑)"""
+        self.pair_outcomes = {
+            "WW": 0, "WD": 0, "WL": 0,
+            "DW": 0, "DD": 0, "DL": 0,
+            "LW": 0, "LD": 0, "LL": 0
+        }
+        self.total_pairs = len(self.score_sequence) // 2
+        
+        for i in range(0, self.total_pairs * 2, 2):
+            s_white = self.score_sequence[i]  # 偶數盤 (v2執白)
+            s_black = self.score_sequence[i+1] # 奇數盤 (v2執黑)
+            
+            if s_white == 1.0:
+                if s_black == 1.0: self.pair_outcomes["WW"] += 1
+                elif s_black == 0.5: self.pair_outcomes["WD"] += 1
+                else: self.pair_outcomes["WL"] += 1
+            elif s_white == 0.5:
+                if s_black == 1.0: self.pair_outcomes["DW"] += 1
+                elif s_black == 0.5: self.pair_outcomes["DD"] += 1
+                else: self.pair_outcomes["DL"] += 1
+            else: # s_white == 0.0
+                if s_black == 1.0: self.pair_outcomes["LW"] += 1
+                elif s_black == 0.5: self.pair_outcomes["LD"] += 1
+                else: self.pair_outcomes["LL"] += 1
 
     def calculate_elo_and_ci(self):
         """計算 Elo 差距與 95% 信賴區間"""
@@ -334,12 +372,33 @@ class ChessEngineAnalyzer:
             print("💡【數據意義】")
             if seq_data['Runs_P'] < 0.05:
                 if seq_data['Autocorrelation'] > 0:
-                    print("  ⚠️ 【動量效應】：引擎的狀態容易受到上一局影響，出現明顯的一波連勝或連敗。")
-                    print("      可能原因為快取殘留、固定種子、或是某個特定變量導致引擎狀態不易重置。")
+                    print("  ⚠️ 【動量效應】：引擎的狀態容易受到上一局影響，出現明顯的一波連勝 or 連敗。")
                 else:
                     print("  ⚠️ 【劇烈震盪】：引擎的輸贏容易出現交替震盪的情況。")
             else:
                 print("  ✅ 【獨立性良好】：每局對弈的結果近似於相互獨立，沒有明顯的連續波動干擾。")
+            print("\n" + "="*50 + "\n")
+
+        if self.total_pairs > 0:
+            print("[6. 對局對 (Pairs) 結果分析 - 9宮格]")
+            print(f"總對局對數 : {self.total_pairs}")
+            
+            outcomes = [
+                ("白勝-黑勝 (WW)", "WW"), ("白勝-黑和 (WD)", "WD"), ("白勝-黑負 (WL)", "WL"),
+                ("白和-黑勝 (DW)", "DW"), ("白和-黑和 (DD)", "DD"), ("白和-黑負 (DL)", "DL"),
+                ("白負-黑勝 (LW)", "LW"), ("白負-黑和 (LD)", "LD"), ("白負-黑負 (LL)", "LL")
+            ]
+            
+            for label, key in outcomes:
+                count = self.pair_outcomes[key]
+                percent = count / self.total_pairs
+                print(f"  - {label:<16} : {count:>3} 盤 | {percent:.2%}")
+            
+            print("\n💡【數據意義】")
+            print("  - WW / LL: 實力代差，完全不受執色影響。")
+            print("  - WD / DW: 具備優勢，但存在某一執色下的技術瓶頸。")
+            print("  - WL: 極端的白方開局優勢 (White Bias)；LW: 極端的黑方反擊優勢 (Black Bias)。")
+            print("  - DD: 完美的勢均力敵，防禦體系極其成熟。")
             print("\n" + "="*50 + "\n")
         
         self.plot_cumulative_wins()

@@ -35,7 +35,7 @@ CASTLING_UPDATE_MASK[56] -= BQ_CASTLE
 CASTLING_UPDATE_MASK[60] -= (BK_CASTLE | BQ_CASTLE)
 CASTLING_UPDATE_MASK[63] -= BK_CASTLE
 
-@numba.jit(numba.int8(piece_bbs_signature, numba.uint8, numba.uint8), nopython=True, inline='always')
+@numba.jit(numba.int8(piece_bbs_signature, numba.uint8, numba.uint8), nopython=True, cache=True, inline='always')
 def find_piece_type_for_square(piece_bbs: np.ndarray, square: int, color: int) -> int:
     """
     尋找給定方格上是哪種棋子。

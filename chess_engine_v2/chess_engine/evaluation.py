@@ -59,9 +59,13 @@ ADJACENT_FILES_MASKS = np.array([
     FILE_MASKS[2] | FILE_MASKS[4],  # File D
     FILE_MASKS[3] | FILE_MASKS[5],  # File E
     FILE_MASKS[4] | FILE_MASKS[6],  # File F
+    FILE_MASKS[4] | FILE_MASKS[6],  # File F
     FILE_MASKS[5] | FILE_MASKS[7],  # File G
     FILE_MASKS[6],  # File H
 ], dtype=np.uint64)
+
+FILE_A = FILE_MASKS[0]
+FILE_H = FILE_MASKS[7]
 
 # Precomputed masks for forward ranks (relative to white)
 # White pawn at rank r: forward mask includes ranks > r
@@ -378,14 +382,15 @@ def evaluate_pawn_structure(piece_bbs):
     return mg_score, eg_score, white_pawn_tropism, black_pawn_tropism, white_pawn_storm, black_pawn_storm
 
 
-@numba.njit(numba.types.UniTuple(numba.int32, 2)(piece_bbs_signature, piece_counts_signature), cache=True, boundscheck=False, fastmath=True)
-def evaluate_piece_coordination(piece_bbs, piece_counts):
+@numba.njit(numba.types.UniTuple(numba.int32, 2)(piece_bbs_signature, piece_counts_signature, occupancy_bbs_signature), cache=True, fastmath=True)
+def evaluate_piece_coordination(piece_bbs, piece_counts, occupancy_bbs):
     """
     評估棋子協同性特徵（雙象、車在開放線）。
     
     Args:
         piece_bbs (np.ndarray): 12 個棋子的位元棋盤。
         piece_counts (np.ndarray): 12 個棋子的數量。
+        occupancy_bbs (np.ndarray): 佔用位元棋盤。
         
     Returns:
         tuple: (mg_score, eg_score) 從白方視角。
@@ -400,15 +405,28 @@ def evaluate_piece_coordination(piece_bbs, piece_counts):
     # black_bishops = piece_bbs[8] # Not needed for iteration
     black_rooks = piece_bbs[9]
 
+    all_occupancy = occupancy_bbs[2]
+
     # --- 1. Bishop Pair / 雙象 ---
-    # A bonus is awarded if a side has two or more bishops.
-    # 擁有雙象給予獎勵。
+    # Calculate Blocked Pawns for dynamic Bishop Pair scaling
+    # 白兵向前一步 (<< 8) 如果遇到任何棋子就是 blocked
+    # 黑兵向前一步 (>> 8) 如果遇到任何棋子就是 blocked
+    white_blocked = count_bits((white_pawns << np.uint64(8)) & all_occupancy)
+    black_blocked = count_bits((black_pawns >> np.uint64(8)) & all_occupancy)
+    total_blocked = white_blocked + black_blocked
+    
+    # Scale down Bishop Pair bonus based on position closedness (blocked pawns)
+    # A fully open position (blocked=0) gives 64/64 (100%).
+    # We deduct ~4 scale points per blocked pawn, so a heavily closed position (10+ blocked pawns)
+    # reduces the bonus to nearly zero.
+    scale = max(0, 64 - total_blocked * 4)
+
     if piece_counts[2] >= 2:
-        mg_score += BISHOP_PAIR_BONUS[0]
-        eg_score += BISHOP_PAIR_BONUS[1]
+        mg_score += (BISHOP_PAIR_BONUS[0] * scale) // 64
+        eg_score += (BISHOP_PAIR_BONUS[1] * scale) // 64
     if piece_counts[8] >= 2:
-        mg_score -= BISHOP_PAIR_BONUS[0]
-        eg_score -= BISHOP_PAIR_BONUS[1]
+        mg_score -= (BISHOP_PAIR_BONUS[0] * scale) // 64
+        eg_score -= (BISHOP_PAIR_BONUS[1] * scale) // 64
 
     # --- 2. Rooks on Open and Semi-Open Files / 車在開放線和半開放線 ---
     for f in range(8):
@@ -1050,6 +1068,116 @@ def _evaluate_king_pawn_endgame(piece_bbs, side_to_move):
     return score
 
 
+@numba.njit(numba.boolean(numba.uint64, numba.uint64), cache=True, fastmath=True, inline='always')
+def _is_opposite_bishops(wb_bb, bb_bb):
+    """
+    Checks if there are opposite colored bishops.
+    Requires exactly one bishop per side.
+    """
+    if count_bits(wb_bb) == 1 and count_bits(bb_bb) == 1:
+        w_sq = get_lsb_index(wb_bb)
+        b_sq = get_lsb_index(bb_bb)
+        w_color = (w_sq // 8 + w_sq % 8) % 2
+        b_color = (b_sq // 8 + b_sq % 8) % 2
+        return w_color != b_color
+    return False
+
+@numba.njit(numba.int32(numba.int32, piece_bbs_signature, numba.types.Tuple((numba.int32,)*12)), cache=True, boundscheck=False, fastmath=True)
+def evaluate_endgame_scale_factor(eg_score, piece_bbs, piece_counts):
+    """
+    Calculates the endgame scale factor to significantly reduce evaluation in theoretically drawn or highly drawish endgames.
+    """
+    if eg_score == 0:
+        return np.int32(64)
+        
+    strong_side = 0 if eg_score > 0 else 1
+    
+    # Unpack
+    (wp_bb, wn_bb, wb_bb, wr_bb, wq_bb, wk_bb,
+     bp_bb, bn_bb, bb_bb, br_bb, bq_bb, bk_bb) = piece_bbs
+     
+    # Counts
+    (wp_c, wn_c, wb_c, wr_c, wq_c, wk_c,
+     bp_c, bn_c, bb_c, br_c, bq_c, bk_c) = piece_counts
+     
+    strong_p = wp_c if strong_side == 0 else bp_c
+    weak_p = bp_c if strong_side == 0 else wp_c
+    
+    strong_n = wn_c if strong_side == 0 else bn_c
+    strong_b = wb_c if strong_side == 0 else bb_c
+    strong_r = wr_c if strong_side == 0 else br_c
+    strong_q = wq_c if strong_side == 0 else bq_c
+    
+    strong_non_pawn = strong_n + strong_b + strong_r + strong_q
+    
+    weak_n = bn_c if strong_side == 0 else wn_c
+    weak_b = bb_c if strong_side == 0 else wb_c
+    weak_r = br_c if strong_side == 0 else wr_c
+    weak_q = bq_c if strong_side == 0 else wq_c
+    
+    weak_non_pawn = weak_n + weak_b + weak_r + weak_q
+    
+    sf = np.int32(64)
+    
+    # 1. Pawnless Endgames (兵力枯竭檢查)
+    if strong_p == 0:
+        if strong_non_pawn == 0:
+            sf = np.int32(0) # K vs K
+        elif strong_non_pawn == 1 and (strong_n == 1 or strong_b == 1):
+            sf = np.int32(0) # K+N/B vs K(+ pieces) - can't win if minor is the only piece
+        elif strong_non_pawn == 2 and strong_n == 2 and weak_p == 0:
+            sf = np.int32(0) # K+N+N vs K is draw
+        elif strong_non_pawn == 1 and strong_r == 1 and weak_non_pawn == 1 and (weak_n == 1 or weak_b == 1):
+            sf = np.int32(16) # R vs B/N without pawns is generally a draw, highly scaled down
+            
+    # 2. Opposite Colored Bishops (異色格象殘局)
+    if wb_c == 1 and bb_c == 1 and _is_opposite_bishops(wb_bb, bb_bb):
+        if strong_non_pawn == 1 and weak_non_pawn == 1: # Pure OCB
+            if strong_p == 1:
+                sf = min(sf, np.int32(16))
+            elif strong_p == 2:
+                sf = min(sf, np.int32(32))
+            else:
+                sf = min(sf, np.int32(48))
+        else: # OCB with other pieces
+            sf = min(sf, np.int32(48 + 4 * strong_p)) # Scale down slightly
+            
+    # 3. Wrong Colored Bishop + Rook Pawn (邊兵錯角象)
+    if strong_p == 1 and strong_b == 1 and strong_non_pawn == 1:
+        # Check if it's a rook pawn (A or H file)
+        pawn_bb = wp_bb if strong_side == 0 else bp_bb
+        if (pawn_bb & (FILE_A | FILE_H)):
+            bishop_bb = wb_bb if strong_side == 0 else bb_bb
+            if bishop_bb:
+                bishop_sq = get_lsb_index(bishop_bb)
+                bishop_color = (bishop_sq // 8 + bishop_sq % 8) % 2
+                
+                pawn_sq = get_lsb_index(pawn_bb)
+                pawn_file = pawn_sq % 8
+                
+                progression_rank = 7 if strong_side == 0 else 0
+                promotion_sq = progression_rank * 8 + pawn_file
+                promotion_color = (promotion_sq // 8 + promotion_sq % 8) % 2
+                
+                if bishop_color != promotion_color:
+                    # Wrong colored bishop! Check if weak king is close
+                    weak_king_bb = bk_bb if strong_side == 0 else wk_bb
+                    if weak_king_bb:
+                        weak_king_sq = get_lsb_index(weak_king_bb)
+                        king_dist = max(abs(weak_king_sq // 8 - promotion_sq // 8), abs(weak_king_sq % 8 - promotion_sq % 8))
+                        
+                        # Also check distance to pawn's front square
+                        block_sq = pawn_sq + 8 if strong_side == 0 else pawn_sq - 8
+                        if 0 <= block_sq < 64:
+                            block_dist = max(abs(weak_king_sq // 8 - block_sq // 8), abs(weak_king_sq % 8 - block_sq % 8))
+                        else:
+                            block_dist = 99
+
+                        if king_dist <= 2 or block_dist <= 1:
+                            sf = np.int32(0) # Cannot win
+
+    return min(np.int32(64), max(np.int32(0), sf))
+
 @numba.njit(numba.types.Tuple((numba.int32, numba.int32, numba.int32))(numba.int32, numba.uint64, numba.boolean), cache=True, boundscheck=False, fastmath=True, inline='always')
 def _process_piece_score_and_count(piece_type, bb, is_white):
     mg = 0
@@ -1075,7 +1203,7 @@ def _process_piece_score_and_count(piece_type, bb, is_white):
         
     return mg, eg, count
 
-@numba.njit(numba.int32(piece_bbs_signature, occupancy_bbs_signature, game_state_signature, numba.boolean), cache=True, boundscheck=False, fastmath=True)
+@numba.njit(numba.int32(piece_bbs_signature, occupancy_bbs_signature, game_state_signature, numba.boolean), cache=True, fastmath=True)
 def evaluate_position(piece_bbs, occupancy_bbs, game_state, lazy: bool = False):
     """
     使用 Tapered Evaluation (加權評估) 模型評估目前局面，並從當前執棋方的角度返回分數。
@@ -1156,7 +1284,7 @@ def evaluate_position(piece_bbs, occupancy_bbs, game_state, lazy: bool = False):
     eg_score += eg_king_safety
 
     # --- 5. 加入棋子協同性分數 ---
-    mg_coord, eg_coord = evaluate_piece_coordination(piece_bbs, piece_counts)
+    mg_coord, eg_coord = evaluate_piece_coordination(piece_bbs, piece_counts, occupancy_bbs)
     mg_score += mg_coord
     eg_score += eg_coord
 
@@ -1172,6 +1300,10 @@ def evaluate_position(piece_bbs, occupancy_bbs, game_state, lazy: bool = False):
     # --- 8. Join Threat Evaluation / 加入威脅評估 ---
     mg_score += mg_threats
     eg_score += eg_threats
+
+    # --- Endgame Scale Factor (殘局動態縮放) ---
+    sf = evaluate_endgame_scale_factor(eg_score, piece_bbs, piece_counts)
+    eg_score = (eg_score * sf) // 64
 
     # --- 9. 根據遊戲階段進行插值計算 ---
     final_score = (mg_score * phase + eg_score * (MAX_PHASE - phase)) // MAX_PHASE
