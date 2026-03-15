@@ -467,8 +467,8 @@ def evaluate_piece_coordination(piece_bbs, piece_counts):
 @numba.njit(numba.int32(numba.int32, numba.uint64, numba.uint64, numba.int32), cache=True, boundscheck=False, fastmath=True)
 def _evaluate_pawn_shield_for_color(king_sq, friendly_pawns, enemy_pawns, color):
     """
-    (Phase 1) Evaluates the pawn shield in front of the king for a single color.
-    (階段 1) 評估單一方國王前方的兵盾。
+    Evaluates the pawn shield in front of the king for a single color.
+    評估單一方國王前方的兵盾。
     """
     score = np.int32(0)
     king_file = king_sq % 8
@@ -478,11 +478,15 @@ def _evaluate_pawn_shield_for_color(king_sq, friendly_pawns, enemy_pawns, color)
 
     for f in range(max(0, king_file - 1), min(7, king_file + 1) + 1):
         file_mask = FILE_MASKS[f]
-
         pawns_on_file = friendly_pawns & file_mask
 
         if not pawns_on_file:
-            score -= PAWN_SHIELD_MISSING_PENALTY # Pawn shield missing
+            score -= PAWN_SHIELD_MISSING_PENALTY
+            # Open/semi-open file penalty (only when no friendly pawn)
+            if not (enemy_pawns & file_mask):
+                score -= KING_OPEN_FILE_PENALTY
+            else:
+                score -= KING_SEMI_OPEN_FILE_PENALTY
         else:
             if color == 0:
                 pawn_sq = get_lsb_index(pawns_on_file)
@@ -491,59 +495,65 @@ def _evaluate_pawn_shield_for_color(king_sq, friendly_pawns, enemy_pawns, color)
             pawn_rank = pawn_sq // 8
             
             if pawn_rank == original_rank:
-                score += PAWN_SHIELD_INTACT_BONUS # Intact shield bonus increased
+                score += PAWN_SHIELD_INTACT_BONUS
             elif pawn_rank == one_step_rank:
-                score += PAWN_SHIELD_ADVANCED_BONUS # Advanced shield bonus increased
+                score += PAWN_SHIELD_ADVANCED_BONUS
             else:
-                score -= PAWN_SHIELD_PUSHED_PENALTY # Pushed shield penalty increased
-
-        if not (friendly_pawns & file_mask):
-            if not (enemy_pawns & file_mask):
-                score -= KING_OPEN_FILE_PENALTY # Open file penalty increased from 20
-            else:
-                score -= KING_SEMI_OPEN_FILE_PENALTY # Semi-open file penalty increased from 10
+                score -= PAWN_SHIELD_PUSHED_PENALTY
 
     return score
 
 @numba.njit(numba.int32(numba.int32, numba.int32, piece_bbs_signature, occupancy_bbs_signature, numba.uint64, numba.uint64, numba.uint64), cache=True, boundscheck=False, fastmath=True)
 def _evaluate_king_attackers(king_sq, color, piece_bbs, occupancy_bbs, enemy_attacks_bb, friendly_attacks_bb, king_zone):
     """
-    (Phase 2) Calculates the threat score based on pieces attacking the king zone using a non-linear model.
-    (階段 2) 根據攻擊國王區域的棋子，使用非線性模型計算威脅分數。
-    """
-    # king_zone is now passed as an argument
+    Calculates king danger using a multi-indicator linear formula inspired by SF11,
+    then converts via quadratic transformation.
+    使用受 SF11 啟發的多指標線性公式計算王的危險度，再透過二次轉換得到分數。
 
-    # Optimization: If no enemy piece attacks the king zone, we can skip individual piece checks.
+    Indicators:
+      1. zone_attack_units  — piece attacks in king zone (weighted)
+      2. safe_check_units   — safe check squares
+      3. weak_sq_count      — weak squares in king zone
+      4. unsafe_check_count — unsafe check squares
+      5. king_attacks_count — attacks on squares adjacent to king
+      6. queen absence      — flat deduction when no enemy queen
+    """
+    # Optimization: If no enemy piece attacks the king zone, we can skip.
     if not (enemy_attacks_bb & king_zone):
         return np.int32(0)
 
-    total_attack_units = np.int32(0)
+    zone_attack_units = np.int32(0)
     attacker_count = np.int32(0)
+    king_attacks_count = np.int32(0)
 
     enemy_start_idx = 6 if color == 0 else 0
     (en_p, en_n, en_b, en_r, en_q, _) = piece_bbs[enemy_start_idx : enemy_start_idx + 6]
 
     all_pieces_occupancy = occupancy_bbs[2]
 
-    # 構造「除了國王以外的己方防守掩碼」
-    # 這是為了避免國王在面臨貼臉攻擊時，誤認自己防守了該弱點格
+    # Friendly defense mask excluding king (king can't defend against contact attacks)
     friendly_attacks_without_king = friendly_attacks_bb & ~KING_ATTACKS[king_sq]
+
+    # King adjacent squares (the 8 squares around the king)
+    king_adjacent = KING_ATTACKS[king_sq]
+
+    # Collect combined attacks per piece type for check detection
+    en_n_attacks_all = np.uint64(0)
+    en_b_attacks_all = np.uint64(0)
+    en_r_attacks_all = np.uint64(0)
+    en_q_attacks_all = np.uint64(0)
 
     # Knights
     temp_bb = en_n
     while temp_bb:
         sq = get_lsb_index(temp_bb)
-        # KNIGHT_ATTACKS[sq] gives squares from which enemy knights would attack sq
-        knight_attacks_in_zone = KNIGHT_ATTACKS[sq] & king_zone
-        if knight_attacks_in_zone:
-            total_attack_units += KING_SAFETY_ATTACK_UNITS[1]
+        attacks = KNIGHT_ATTACKS[sq]
+        en_n_attacks_all |= attacks
+        attacks_in_zone = attacks & king_zone
+        if attacks_in_zone:
+            zone_attack_units += KING_SAFETY_ATTACK_UNITS[1]
             attacker_count += 1
-
-            # Check for weak squares attacked by this knight
-            undefended_in_zone = knight_attacks_in_zone & ~friendly_attacks_without_king
-            weak_count = count_bits(undefended_in_zone)
-            total_attack_units += weak_count * KING_SAFETY_WEAK_UNITS[1] # Each weak square adds more units
-
+        king_attacks_count += count_bits(attacks & king_adjacent)
         temp_bb &= temp_bb - np.uint64(1)
 
     # Bishops
@@ -551,15 +561,12 @@ def _evaluate_king_attackers(king_sq, color, piece_bbs, occupancy_bbs, enemy_att
     while temp_bb:
         sq = get_lsb_index(temp_bb)
         attacks = get_bishop_attacks(sq, all_pieces_occupancy)
+        en_b_attacks_all |= attacks
         attacks_in_zone = attacks & king_zone
         if attacks_in_zone:
-            total_attack_units += KING_SAFETY_ATTACK_UNITS[2]
+            zone_attack_units += KING_SAFETY_ATTACK_UNITS[2]
             attacker_count += 1
-
-            # Check for weak squares attacked by this bishop
-            undefended_in_zone = attacks_in_zone & ~friendly_attacks_without_king
-            weak_count = count_bits(undefended_in_zone)
-            total_attack_units += weak_count * KING_SAFETY_WEAK_UNITS[2] # Each weak square adds more units
+        king_attacks_count += count_bits(attacks & king_adjacent)
         temp_bb &= temp_bb - np.uint64(1)
 
     # Rooks
@@ -567,16 +574,12 @@ def _evaluate_king_attackers(king_sq, color, piece_bbs, occupancy_bbs, enemy_att
     while temp_bb:
         sq = get_lsb_index(temp_bb)
         attacks = get_rook_attacks(sq, all_pieces_occupancy)
-        attack_in_zone = attacks & king_zone
-        if attack_in_zone:
-            total_attack_units += KING_SAFETY_ATTACK_UNITS[3]
+        en_r_attacks_all |= attacks
+        attacks_in_zone = attacks & king_zone
+        if attacks_in_zone:
+            zone_attack_units += KING_SAFETY_ATTACK_UNITS[3]
             attacker_count += 1
-
-            # Check for weak squares attacked by this rook
-            undefended_in_zone = attack_in_zone & ~friendly_attacks_without_king
-            weak_count = count_bits(undefended_in_zone)
-            total_attack_units += weak_count * KING_SAFETY_WEAK_UNITS[3] # Each weak square adds more units
-
+        king_attacks_count += count_bits(attacks & king_adjacent)
         temp_bb &= temp_bb - np.uint64(1)
 
     # Queens
@@ -584,49 +587,97 @@ def _evaluate_king_attackers(king_sq, color, piece_bbs, occupancy_bbs, enemy_att
     while temp_bb:
         sq = get_lsb_index(temp_bb)
         attacks = get_queen_attacks(sq, all_pieces_occupancy)
-        attack_in_zone = attacks & king_zone
-        if attack_in_zone:
-            total_attack_units += KING_SAFETY_ATTACK_UNITS[4]
+        en_q_attacks_all |= attacks
+        attacks_in_zone = attacks & king_zone
+        if attacks_in_zone:
+            zone_attack_units += KING_SAFETY_ATTACK_UNITS[4]
             attacker_count += 1
-
-            # Check for weak squares attacked by this queen
-            undefended_in_zone = attack_in_zone & ~friendly_attacks_without_king
-            weak_count = count_bits(undefended_in_zone)
-            total_attack_units += weak_count * KING_SAFETY_WEAK_UNITS[4] # Each weak square adds more units
-
+        king_attacks_count += count_bits(attacks & king_adjacent)
         temp_bb &= temp_bb - np.uint64(1)
 
-    if attacker_count < 2:
-       return np.int32(0)
-    
-    # --- Weak Squares Logic (Stockfish 11) ---
-    # Weak Square: A square in King Zone attacked by enemy but not defended by friendly pieces.
-    # Note: Stockfish uses `~attackedBy2[Us]` which implies defended by at least 2 pieces? No, `~attackedBy2` means "not defended twice".
-    # And `(~attackedBy[Us] | king | queen)`.
-    # Let's simplify: Weak = Attacked by Enemy AND Not Defended by Friendly (or only King).
-    # `friendly_attacks_bb` includes King attacks.
-    # So `weak_squares` = (king_zone & enemy_attacks_bb) & ~friendly_attacks_bb.
-    # But wait, `friendly_attacks_bb` includes King's own defense. The King defends its own zone.
-    # If we want "Weak", it means King is the ONLY defender, or no defender.
-    # If King defends it, it's technically defended.
-    # But if King is the only defender and it's attacked by e.g. Rook, it's unsafe.
-    # Let's define Weak Square as: Attacked by Enemy AND Not Defended by Friendly *except King*.
-    # So we need `friendly_attacks_without_king`.
-    # For now, let's use the provided `friendly_attacks_bb` which includes King.
-    # If a square is attacked by enemy and NOT defended by anyone (undefended hole), it's very weak.
+    # --- Safe Check Detection (Inspired by Stockfish 11) ---
+    friendly_start_idx = 0 if color == 0 else 6
+    friendly_queen = piece_bbs[friendly_start_idx + 4]
+    occ_xray = all_pieces_occupancy ^ friendly_queen
 
-    # SF11 adds to `kingDanger`.
-    # My `KING_SAFETY_TABLE` maps units to score.
-    # Adding to units makes sense because multiple weak squares amplify the danger.
+    rook_check_rays = get_rook_attacks(king_sq, occ_xray)
+    bishop_check_rays = get_bishop_attacks(king_sq, occ_xray)
 
-    # The score from the table is a penalty, so it should be negative.
-    return -KING_SAFETY_TABLE[min(total_attack_units, len(KING_SAFETY_TABLE) - 1)]
+    attacker_occ = occupancy_bbs[1] if color == 0 else occupancy_bbs[0]
+    safe = ~attacker_occ & ~friendly_attacks_bb
+
+    safe_check_units = np.int32(0)
+    unsafe_checks = np.uint64(0)
+
+    # Rook safe checks
+    rook_safe_checks = rook_check_rays & safe & en_r_attacks_all
+    if rook_safe_checks:
+        safe_check_units += SAFE_CHECK_ROOK
+    else:
+        unsafe_checks |= rook_check_rays & en_r_attacks_all
+
+    # Queen safe checks
+    queen_safe_checks = (rook_check_rays | bishop_check_rays) & safe & en_q_attacks_all & ~rook_safe_checks
+    if queen_safe_checks:
+        safe_check_units += SAFE_CHECK_QUEEN
+
+    # Bishop safe checks
+    bishop_safe_checks = bishop_check_rays & safe & en_b_attacks_all & ~queen_safe_checks
+    if bishop_safe_checks:
+        safe_check_units += SAFE_CHECK_BISHOP
+    else:
+        unsafe_checks |= bishop_check_rays & en_b_attacks_all
+
+    # Knight safe checks
+    knight_check_squares = KNIGHT_ATTACKS[king_sq] & en_n_attacks_all
+    if knight_check_squares & safe:
+        safe_check_units += SAFE_CHECK_KNIGHT
+    else:
+        unsafe_checks |= knight_check_squares
+
+    # Weak squares: in king zone, attacked by enemy, not defended by us (except king)
+    weak_in_zone = king_zone & enemy_attacks_bb & ~friendly_attacks_without_king
+    weak_sq_count = count_bits(weak_in_zone)
+
+    # Unsafe check count
+    unsafe_check_count = count_bits(unsafe_checks)
+
+    # --- Attacker count gating (softened from hard cutoff) ---
+    if attacker_count == 0:
+        return np.int32(0)
+
+    # --- Combine all indicators into kingDanger ---
+    kingDanger = (
+          zone_attack_units
+        + safe_check_units
+        + KING_DANGER_WEAK_SQ * weak_sq_count
+        + KING_DANGER_UNSAFE_CHECK * unsafe_check_count
+        + KING_DANGER_ATTACK_ON_KING_SQ * king_attacks_count
+    )
+
+    # Queen absence: flat deduction
+    if not en_q:
+        kingDanger = max(np.int32(0), kingDanger - KING_DANGER_NO_QUEEN)
+
+    # Single attacker: halve the final danger score (softened threat)
+    if attacker_count == 1:
+        kingDanger = kingDanger // 2
+
+    # Quadratic transformation (equivalent to old KING_SAFETY_TABLE[i] = i²/2)
+    if kingDanger > 0:
+        penalty = kingDanger * kingDanger // KING_DANGER_DIVISOR
+        # Cap at 1000 to avoid extreme values
+        penalty = min(penalty, np.int32(1000))
+        return -penalty
+    else:
+        return np.int32(0)
 
 @numba.njit(numba.types.UniTuple(numba.int32, 2)(piece_bbs_signature, occupancy_bbs_signature, numba.uint64, numba.uint64, numba.int32, numba.int32, numba.int32, numba.int32, piece_counts_signature), cache=True, boundscheck=False, fastmath=True)
 def evaluate_king_safety(piece_bbs, occupancy_bbs, white_attacks, black_attacks, white_tropism, black_tropism, white_pawn_storm_score, black_pawn_storm_score, piece_counts):
     """
-    Refactored King Safety evaluation based on Chess Programming Wiki.
-    重構的國王安全評估，基於 Chess Programming Wiki。
+    King Safety evaluation. Combines pawn shield, king attackers, tropism, and pawn storm.
+    Material-based scaling is handled by tapered eval phase interpolation.
+    國王安全評估。結合兵盾、攻擊者、向心性和兵風暴。材質縮放由 根據對手材質（馬、象、車、后）進行縮放處理。
     """
     (wp_bb, wn_bb, wb_bb, wr_bb, wq_bb, wk_bb,
     bp_bb, bn_bb, bb_bb, br_bb, bq_bb, bk_bb) = piece_bbs
@@ -634,41 +685,38 @@ def evaluate_king_safety(piece_bbs, occupancy_bbs, white_attacks, black_attacks,
     white_king_sq = get_lsb_index(wk_bb)
     black_king_sq = get_lsb_index(bk_bb)
 
-    # --- Calculate raw scores for each component / 計算每個組件的原始分數 ---
+    # --- Calculate raw scores for each component ---
     white_shield = _evaluate_pawn_shield_for_color(white_king_sq, wp_bb, bp_bb, 0)
     white_attackers = _evaluate_king_attackers(white_king_sq, 0, piece_bbs, occupancy_bbs, black_attacks, white_attacks, WHITE_KING_ZONES[white_king_sq])
 
     black_shield = _evaluate_pawn_shield_for_color(black_king_sq, bp_bb, wp_bb, 1)
     black_attackers = _evaluate_king_attackers(black_king_sq, 1, piece_bbs, occupancy_bbs, white_attacks, black_attacks, BLACK_KING_ZONES[black_king_sq])
 
-    # --- Sum raw scores / 加總原始分數 ---
+    # --- Phase 4: Scaling based on enemy material (Crucial for Endgame/Strength) ---
+    # Sum raw scores first
     white_raw_safety = white_shield + white_attackers + white_tropism + white_pawn_storm_score
     black_raw_safety = black_shield + black_attackers + black_tropism + black_pawn_storm_score
 
-    # --- Phase 4: Scaling based on enemy material / 階段 4：基於敵方材質進行縮放 ---
+    # Penalty for white king is scaled by black's potential attacking material.
     black_material_for_scaling = (piece_counts[7] * SCALING_WEIGHTS[1] +
                                  piece_counts[8] * SCALING_WEIGHTS[2] +
                                  piece_counts[9] * SCALING_WEIGHTS[3] +
                                  piece_counts[10] * SCALING_WEIGHTS[4])
     white_scaling_factor = black_material_for_scaling / MAX_SCALING_MATERIAL
+    white_safety_scaled = np.int32(white_raw_safety * white_scaling_factor)
 
-    white_final_safety = np.int32(white_raw_safety * white_scaling_factor)
-
+    # Penalty for black king is scaled by white's potential attacking material.
     white_material_for_scaling = (piece_counts[1] * SCALING_WEIGHTS[1] +
                                  piece_counts[2] * SCALING_WEIGHTS[2] +
                                  piece_counts[3] * SCALING_WEIGHTS[3] +
                                  piece_counts[4] * SCALING_WEIGHTS[4])
     black_scaling_factor = white_material_for_scaling / MAX_SCALING_MATERIAL
+    black_safety_scaled = np.int32(black_raw_safety * black_scaling_factor)
 
-    black_final_safety = np.int32(black_raw_safety * black_scaling_factor)
+    mg_safety_score = white_safety_scaled - black_safety_scaled
 
-    mg_safety_score = white_final_safety - black_final_safety
-
-    # In the endgame, king safety is much less of a concern, and an active king is
-    # often an advantage. The King's PST already encourages centralization.
-    # Therefore, we set the endgame king safety score to 0.
-    # 在殘局中，國王安全通常不那麼重要，活躍的國王往往是優勢。
-    # 國王的 PST 已經鼓勵中心化。因此，我們將殘局國王安全分數設為 0（或按比例縮減）。
+    # Endgame: king safety is less important. Tapered eval handles the main reduction;
+    # we apply a further scale for the eg component.
     eg_safety_score = mg_safety_score * EG_SAFETY_SCALE
 
     return mg_safety_score, eg_safety_score

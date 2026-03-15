@@ -59,38 +59,33 @@ def get_msb_index(bitboard: np.uint64) -> int:
 
 def _init_king_attack_zones(color):
     """
-    預計算棋盤上每個方格的 3x3 王的攻擊區域再加上前面一排 1x3 的區域。
-    3x3 區域以王為中心。
+    Precomputes the king attack zone for each square on the board, following SF11 logic.
+    The king's position is clamped to B2-G7 to ensure a consistent 3x3 neighborhood.
+    預計算棋盤上每個方格的王攻擊區域，遵循 SF11 邏輯。
+    將王位限制在 B2-G7 以確保穩定的 3x3 鄰域格。
 
     Args:
-        color (int): 0 為白方，1 為黑方。
+        color (int): Ignored for geometry (kept for signature compatibility).
 
     Returns:
-        np.array: 大小為 64 的 uint64 陣列，每個元素代表對應方格的王周圍的攻擊區域位元棋盤。
+        np.array: Array of 64 uint64 bitboards.
     """
     zones = np.zeros(64, dtype=np.uint64)
     for sq in range(64):
-        zone_bb = np.uint64(0)
         rank, file = sq // 8, sq % 8
-
-        # Start with 3x3 centered at King
-        r_start = rank - 1
-        r_end = rank + 2
         
-        # Add one more rank in front
-        if color == 0: # White (moving up)
-            r_end = rank + 3
-        else: # Black (moving down)
-            r_start = rank - 2
-
-        for r in range(r_start, r_end):
-            for f in range(file - 1, file + 2):
-                if 0 <= r < 8 and 0 <= f < 8:
-                    target_sq = r * 8 + f
-                    zone_bb |= BB_SQUARES[target_sq]
+        # SF11 Logic: clamp rank and file to [1, 6] (B2 to G7)
+        clamped_rank = max(1, min(6, rank))
+        clamped_file = max(1, min(6, file))
         
-        # Exclude the king's own square / 排除王所在的方格
-        zone_bb &= ~BB_SQUARES[sq]
+        zone_bb = np.uint64(0)
+        # Generate 3x3 neighborhood around the clamped coordinate
+        for r in range(clamped_rank - 1, clamped_rank + 2):
+            for f in range(clamped_file - 1, clamped_file + 2):
+                zone_bb |= BB_SQUARES[r * 8 + f]
+        
+        # SF11's kingRing includes the king's square itself. 
+        # No excluding BB_SQUARES[sq] here.
         zones[sq] = zone_bb
     return zones
 

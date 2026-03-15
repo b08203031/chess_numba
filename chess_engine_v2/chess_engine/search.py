@@ -26,9 +26,9 @@ from chess_engine.constants import (
     BB_SQUARES, MG_MATERIAL_VALUES, INFINITY, MAX_QUIESCENCE_DEPTH, ASPIRATION_WINDOW_SIZE,
     NULL_MOVE_REDUCTION, MAX_PLY, LMR_MIN_DEPTH, LMR_MIN_QUIET_MOVE_INDEX, LMR_REDUCTION, SEE_THRESHOLD,
     ENABLE_SEE_IN_QUIESCENCE, MATE_SCORE, MATE_IN_MAX_PLY, NO_MOVE,
-    RAZORING_MARGIN, FP_MARGIN_D1, FP_MARGIN_D2, FP_BASE, FP_MULTIPLIER, RFP_MARGIN_D1,
+    RAZORING_MARGIN, FP_BASE, FP_MULTIPLIER, RFP_MARGIN_D1,
     ENABLE_DELTA_PRUNING, DELTA_PRUNING_MARGIN, LMP_MOVE_COUNT, ENABLE_LMP,
-    ENABLE_PROBCUT, PROBCUT_R, PROBCUT_R_PRIME, PROBCUT_MARGIN,
+    ENABLE_PROBCUT, PROBCUT_R, PROBCUT_MARGIN,
     ENABLE_NMP, ENABLE_RAZORING, ENABLE_FP, ENABLE_RFP, ENABLE_LMR, ENABLE_IIR,
     STAGE_TT_MOVE, STAGE_GEN_CAPTURES, STAGE_GOOD_CAPTURES,
     STAGE_GEN_QUIETS, STAGE_GOOD_QUIETS, STAGE_BAD_CAPTURES,
@@ -672,8 +672,8 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
         make_null_move(game_state)
         
         # Dynamic NMP Reduction: R = 3 + depth / 6 + min(3, (static_score - beta) / 200)
-        nmp_reduction = 3 + depth // 6 + min(3, (static_score - beta) // 200)
-        # nmp_reduction = 3 + depth // 4 + min(3, (static_score - beta) // 150)
+        # nmp_reduction = 3 + depth // 6 + min(3, (static_score - beta) // 200)
+        nmp_reduction = 4 + depth // 3 + min(3, (static_score - beta) // 150)
         
         # C1: Extra reduction when not improving
         if not improving:
@@ -782,7 +782,7 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                 search_context.move_stack[ply] = NO_MOVE
                 search_context.piece_stack[ply] = -1
                 res_pc = _search(
-                    piece_bbs, occupancy_bbs, game_state, depth - PROBCUT_R_PRIME,
+                    piece_bbs, occupancy_bbs, game_state, depth - PROBCUT_R,
                     -probcut_beta, -probcut_beta + 1, search_context, ply + 1, NO_MOVE, False, not cut_node
                 )
                 pc_score = -res_pc[0]

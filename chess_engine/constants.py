@@ -368,17 +368,39 @@ OUTPOST_HOLE_BONUS = np.array([25, 15], dtype=np.int32) # MG, EG
 # --- Phase 2: Attacking the King Zone (Non-Linear Model) / 攻擊王翼區域（非線性模型） ---
 # Attack units for each piece type. Order: P, N, B, R, Q
 # 每個棋子類型的攻擊單位。順序：兵、馬、象、車、后
-# Updated: Aggressive weights for R and Q
-KING_SAFETY_WEAK_UNITS = np.array([0, 1, 1, 2, 3], dtype=np.int32) # P, N, B, R, Q
-KING_SAFETY_ATTACK_UNITS = np.array([1, 2, 2, 5, 8], dtype=np.int32) # P, N, B, R, Q
+KING_SAFETY_ATTACK_UNITS = np.array([1, 4, 3, 3, 5], dtype=np.int32) # P, N, B, R, Q
 
-# A non-linear table where the index is the sum of attack units, and the value is the penalty.
-# The penalty grows exponentially, rewarding multi-piece attacks.
-# 一個非線性表格，索引是攻擊單位的總和，值是懲罰分數。懲罰呈指數增長，獎勵多子協同攻擊。
-# Updated: Steeper, quadratic-plus growth curve
-KING_SAFETY_TABLE = np.array([
-    min(int(i**2) / 2, 1000) for i in range(100)
-], dtype=np.int32)
+# --- kingDanger Linear Formula Weights (Inspired by Stockfish 11) ---
+# These contribute to a kingDanger score that is then squared.
+# 這些值貢獻到 kingDanger 分數，最後進行二次轉換。
+
+# Weight per weak square in king zone (attacked by enemy, not defended by us except K)
+# 王圈內弱格（被敵攻、只被王守或不守）每個的 danger 貢獻
+KING_DANGER_WEAK_SQ = np.int32(3)
+
+# Weight per unsafe check square (enemy can check but not safely)
+# 不安全將軍格每個的 danger 貢獻
+KING_DANGER_UNSAFE_CHECK = np.int32(2)
+
+# Weight per enemy attack on squares adjacent to king (KING_ATTACKS[ksq])
+# 敵方攻擊到王鄰格每次的 danger 貢獻
+KING_DANGER_ATTACK_ON_KING_SQ = np.int32(1)
+
+# Flat deduction from kingDanger when enemy has no queen
+# 敵方無后時的固定 danger 扣除
+KING_DANGER_NO_QUEEN = np.int32(5)
+
+# Divisor for kingDanger² conversion (controls overall penalty magnitude)
+# kingDanger² 的除數（i²/2 與舊 KING_SAFETY_TABLE 等價）
+KING_DANGER_DIVISOR = np.int32(2)
+
+# --- Safe Check Penalties (in attack units, added to total_attack_units) ---
+# Represent danger of enemy pieces being able to safely give check.
+# Scaled for our system: SF11 values (780-1080) mapped to our table-index units (~5-7).
+SAFE_CHECK_KNIGHT = np.int32(6)
+SAFE_CHECK_BISHOP = np.int32(5)
+SAFE_CHECK_ROOK = np.int32(7)
+SAFE_CHECK_QUEEN = np.int32(6)
 
 # --- Phase 3: King Tropism / 王的向性 ---
 KING_TROPISM_MAX_DISTANCE = 14 # Max MANHATTAN distance / 最大曼哈頓距離
@@ -552,8 +574,6 @@ MAX_QUIESCENCE_DEPTH = 5
 RAZORING_MARGIN = 600 # Tightened from 700
 
 # Futility Pruning
-FP_MARGIN_D1 = 350 # Tightened from 400
-FP_MARGIN_D2 = 650 # Tightened from 700
 FP_BASE = 150      # Reduced base
 FP_MULTIPLIER = 180 # Reduced multiplier
 
@@ -586,8 +606,7 @@ for d in range(MAX_PLY):
 
 
 # ProbCut
-PROBCUT_R = 2
-PROBCUT_R_PRIME = 4
+PROBCUT_R = 4
 PROBCUT_MARGIN = 150 # centipawns
 
 # Delta Pruning

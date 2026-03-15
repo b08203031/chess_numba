@@ -113,6 +113,7 @@ def uci_loop():
                 history_table.fill(0)
                 butterfly_history.fill(0)
                 continuation_history.fill(0)
+                capture_history.fill(0)
                 pawn_correction_history.fill(0)
                 minor_correction_history.fill(0)
                 non_pawn_correction_history_white.fill(0)
