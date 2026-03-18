@@ -36,7 +36,14 @@ from chess_engine.core import SQUARE_TO_ALGEBRAIC
 from chess_engine.constants import MAX_PLY
 
 puzzles = [
-    {
+        {
+            "name": "對抗chess.com 2900時遇到的，引擎搜尋不到，但一搜到就知道大優",
+            "fen": "4rrk1/p2p1p1p/1p2p1p1/2nPq2P/2P5/4B3/PbB2PP1/1R1Q2KR w - - 2 20",
+            "solution": ["b1b2", "h5g6"],
+            "rating": "2400",
+            "theme": "sacrifice"
+        },
+        {
             "name": "Lichess Puzzle 006eO",
             "fen": "8/8/2p5/1p1p1k2/3P4/1PP1pK2/8/8 w - - 4 65",
             "solution": "b3b4",
