@@ -179,7 +179,7 @@ def find_piece_type_on_square(piece_bbs, square):
             return nb.int8(piece_type)
     return nb.int8(-1)
 
-@nb.njit(nb.int8(piece_bbs_signature, nb.uint8, nb.uint8), cache=True)
+@nb.njit(nb.int8(piece_bbs_signature, nb.uint8, nb.uint8), cache=True, inline='always')
 def find_piece_type_on_square_side(piece_bbs, square, side):
     """
     Finds the piece type on a square, but only for the given side (0=White, 1=Black).

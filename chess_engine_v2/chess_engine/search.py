@@ -63,8 +63,8 @@ from .move import move_to_uci
 
 from chess_engine.search_heuristics import (
     update_history, update_butterfly_history, update_capture_history,
-    update_continuation_history, score_captures, score_quiets,
-    get_lmr_reduction, score_moves, partial_insertion_sort_moves
+    update_continuation_history, score_captures, score_captures_with_tt, 
+    score_quiets, get_lmr_reduction, score_moves, partial_insertion_sort_moves
 )
 
 
@@ -83,8 +83,8 @@ def quiescence_search(piece_bbs, occupancy_bbs, game_state, alpha, beta, ply, se
 
 
 
-    # Check for stop flag every 2048 nodes
-    if (search_context.nodes_searched & 2047) == 0:
+    # Check for stop flag every 16384 nodes (at ~700k NPS this fires ~42x/sec)
+    if (search_context.nodes_searched & 16383) == 0:
         if search_context.stop_flag[0]:
             return np.int32(0), q_nodes
 
@@ -161,20 +161,16 @@ def quiescence_search(piece_bbs, occupancy_bbs, game_state, alpha, beta, ply, se
     # B1: Use TT best move for QSearch ordering (since we already probe TT above)
     qs_tt_move = tt_entry['best_move'] if tt_entry['flag'] != TT_FLAG_NONE else NO_MOVE
 
-    # Use score_moves to sort captures (SEE >= 0 first).
-    score_moves(
+    # Use score_captures_with_tt to specifically sort captures for QSearch (R5 Optimization)
+    score_captures_with_tt(
         piece_bbs, occupancy_bbs, game_state, 
         moves, 
         scores, 
         move_count,
-        qs_tt_move,  # B1: was NO_MOVE, now uses TT best move for better ordering
-        search_context.killer_moves[safe_ply*2:safe_ply*2+2], 
-        search_context.history_table, 
-        NO_MOVE, # No counter move
+        qs_tt_move,
         pinned_white,
         pinned_black,
-        search_context,
-        ply
+        search_context
     )
 
     legal_moves_tried = 0
@@ -265,7 +261,7 @@ def get_next_move(piece_bbs, occupancy_bbs, game_state, search_context, ply, tt_
             
         elif mp_stage == STAGE_GEN_CAPTURES:
             search_context.mp_captures_end[ply] = generate_pseudo_legal_captures_buffer(piece_bbs, occupancy_bbs, game_state, search_context.moves_buffer, ply)
-            score_captures(piece_bbs, occupancy_bbs, game_state, moves, scores, 0, search_context.mp_captures_end[ply], search_context)
+            score_captures(piece_bbs, occupancy_bbs, game_state, moves, scores, 0, search_context.mp_captures_end[ply], search_context, pinned_white, pinned_black)
             partial_insertion_sort_moves(moves, scores, 0, search_context.mp_captures_end[ply], -1000000)
             search_context.mp_current_idx[ply] = 0
             search_context.mp_stage[ply] = STAGE_GOOD_CAPTURES
@@ -276,26 +272,15 @@ def get_next_move(piece_bbs, occupancy_bbs, game_state, search_context, ply, tt_
             current_idx = search_context.mp_current_idx[ply]
             if current_idx < captures_end:
                 candidate_move = moves[current_idx]
+                candidate_score = scores[current_idx]
                 search_context.mp_current_idx[ply] += 1
                 
                 if candidate_move == tt_move or candidate_move == excluded_move:
                     continue
                     
-                from_sq = get_from_square(candidate_move)
-                to_sq = get_to_square(candidate_move)
-                side_to_move = game_state[0]
-                
-                # Fetch capture history strictly (ignore MVV-LVA score which could be 6300+)
-                aggressor_type_see = find_piece_type_on_square_side(piece_bbs, from_sq, side_to_move)
-                victim_type_see = find_piece_type_on_square_side(piece_bbs, to_sq, 1 - side_to_move)
-                hist_score = 0
-                if victim_type_see != -1:
-                    hist_score = search_context.capture_history[aggressor_type_see, to_sq, victim_type_see]
-                
-                # Dynamic SEE threshold: clamp to avoid allowing massive blunders
-                threshold = min(0, -(hist_score // SEE_HISTORY_DIVISOR)) # Max relaxation of ~-32cp
-                
-                if see_ge(piece_bbs, occupancy_bbs, side_to_move, from_sq, to_sq, threshold, pinned_white, pinned_black):
+                # R1 Optimization: Good captures have SCORE >= 0, Bad captures have SCORE < 0.
+                # Score was already computed with SEE inside `score_captures`.
+                if candidate_score >= 0:
                     move = candidate_move
                     return move
                 else:
@@ -379,8 +364,8 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
     quiescence_nodes = np.uint64(0)
     tt_hits = np.uint64(0)
 
-    # Check for stop flag every 2048 nodes
-    if (search_context.nodes_searched & 2047) == 0:
+    # Check for stop flag every 16384 nodes (at ~700k NPS this fires ~42x/sec)
+    if (search_context.nodes_searched & 16383) == 0:
         if search_context.stop_flag[0]:
             return (np.int32(0), NO_MOVE, nodes_searched, quiescence_nodes, tt_hits)
 
@@ -471,36 +456,12 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
     # Initialize PV for this ply to avoid ghost moves from previous searches
     search_context.pv_table[ply, ply] = NO_MOVE
 
-    # --- DTR-LMR: Strategic Bitmask Pre-calculation ---
+    # --- DTR-LMR: Strategic Bitmask (lazily initialised — computed on first quiet move) ---
+    # Note: storing side_to_move here because at make_move time it will have flipped
     side_to_move = game_state[0]
-    friendly_king_bb = piece_bbs[5] if side_to_move == WHITE else piece_bbs[11]
-    enemy_king_bb = piece_bbs[11] if side_to_move == WHITE else piece_bbs[5]
-    
     enemy_king_zone = np.uint64(0)
-    if enemy_king_bb:
-        enemy_king_sq = get_lsb_index(enemy_king_bb)
-        enemy_king_zone = BLACK_KING_ZONES[enemy_king_sq] if side_to_move == WHITE else WHITE_KING_ZONES[enemy_king_sq]
-    
     friendly_danger_rays = np.uint64(0)
-    if friendly_king_bb:
-        friendly_king_sq = get_lsb_index(friendly_king_bb)
-        enemy_offset = 6 if side_to_move == WHITE else 0
-        enemy_rooks = piece_bbs[3 + enemy_offset] | piece_bbs[4 + enemy_offset]
-        enemy_bishops = piece_bbs[2 + enemy_offset] | piece_bbs[4 + enemy_offset]
-        
-        # Orthogonal danger rays
-        temp_rays = ROOK_RAYS[friendly_king_sq] & enemy_rooks
-        while temp_rays:
-            pinner_sq = get_lsb_index(temp_rays)
-            friendly_danger_rays |= SQUARES_BETWEEN[friendly_king_sq, pinner_sq]
-            temp_rays &= temp_rays - np.uint64(1)
-            
-        # Diagonal danger rays
-        temp_rays = BISHOP_RAYS[friendly_king_sq] & enemy_bishops
-        while temp_rays:
-            pinner_sq = get_lsb_index(temp_rays)
-            friendly_danger_rays |= SQUARES_BETWEEN[friendly_king_sq, pinner_sq]
-            temp_rays &= temp_rays - np.uint64(1)
+    dtr_lmr_computed = False
 
     original_alpha = alpha
     
@@ -663,23 +624,26 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
         else:  # BLACK
             has_non_pawn = (piece_bbs[7] | piece_bbs[8] | piece_bbs[9] | piece_bbs[10]) != 0
     if ENABLE_NMP and depth >= 3 and not is_currently_in_check and has_non_pawn and static_score >= beta:
-        original_state_for_null = game_state.copy()
-        
+        # Manual save of only the fields make_null_move modifies (avoids heap allocation)
+        nmp_saved_side = game_state[0]
+        nmp_saved_ep   = game_state[2]
+        nmp_saved_hmc  = game_state[3]
+        nmp_saved_key  = game_state[4]
+
         # M7 Stack Pollution Fix for NMP
         search_context.move_stack[ply] = NO_MOVE
         search_context.piece_stack[ply] = -1
-        
+
         make_null_move(game_state)
-        
-        # Dynamic NMP Reduction: R = 3 + depth / 6 + min(3, (static_score - beta) / 200)
-        # nmp_reduction = 3 + depth // 6 + min(3, (static_score - beta) // 200)
+
+        # Dynamic NMP Reduction: R = 4 + depth / 3 + min(3, (static_score - beta) / 150)
         nmp_reduction = 4 + depth // 3 + min(3, (static_score - beta) // 150)
-        
+
         # C1: Extra reduction when not improving
         if not improving:
             nmp_reduction += 1
         search_depth = max(0, depth - nmp_reduction)
-        
+
         res_nm = _search(
             piece_bbs, occupancy_bbs, game_state, search_depth,
             -beta, -beta + 1, search_context, ply + 1, NO_MOVE, False, not cut_node
@@ -689,7 +653,11 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
         child_q_nodes = res_nm[3]
         child_tt_hits = res_nm[4]
 
-        game_state[:] = original_state_for_null
+        # Restore only the fields that were changed by make_null_move
+        game_state[0] = nmp_saved_side
+        game_state[2] = nmp_saved_ep
+        game_state[3] = nmp_saved_hmc
+        game_state[4] = nmp_saved_key
         null_move_score = -null_move_score
 
         if search_context.stop_flag[0]:
@@ -729,27 +697,21 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
             # Safe access to killers:
             safe_ply = min(ply, MAX_PLY - 1)
     
-            # Use score_moves to get SEE order. NO killer/history since these are captures only.
-            score_moves(
-                piece_bbs, occupancy_bbs, game_state, 
-                search_context.moves_buffer[ply], 
-                search_context.move_scores[ply], 
-                pc_move_count,
-                tt_move, 
-                search_context.killer_moves[safe_ply*2:safe_ply*2+2], # Pass normal slice to satisfy Numba compiler (killers won't match captures anyway)
-                search_context.history_table, 
-                NO_MOVE,
-                0, 0, # Pinned pieces not critically needed for ordering here, or we can use 0
-                search_context,
-                ply
+            # Pinned pieces for SEE legality — note: these are light (pinners only, no full scan)
+            pc_pinned_w = get_pinned_pieces(piece_bbs, occupancy_bbs, WHITE)
+            pc_pinned_b = get_pinned_pieces(piece_bbs, occupancy_bbs, BLACK)
+            
+            # Use score_captures for lightweight MVV-LVA + capture_history ordering (no killer/history overhead)
+            score_captures(
+                piece_bbs, occupancy_bbs, game_state,
+                search_context.moves_buffer[ply],
+                search_context.move_scores[ply],
+                0, pc_move_count, search_context,
+                pc_pinned_w, pc_pinned_b
             )
             
             pc_moves = search_context.moves_buffer[ply]
             pc_scores = search_context.move_scores[ply]
-            
-            pc_side = game_state[0]
-            pc_pinned_w = get_pinned_pieces(piece_bbs, occupancy_bbs, WHITE)
-            pc_pinned_b = get_pinned_pieces(piece_bbs, occupancy_bbs, BLACK)
     
             for i in range(pc_move_count):
                 # Selection sort
@@ -766,7 +728,7 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
     
                 # SEE filter: only try captures whose SEE >= probcut_beta - static_eval
                 see_threshold_pc = probcut_beta - static_score if static_score != -INFINITY else 0
-                if not see_ge(piece_bbs, occupancy_bbs, pc_side, pc_from, pc_to, see_threshold_pc, pc_pinned_w, pc_pinned_b):
+                if not see_ge(piece_bbs, occupancy_bbs, game_state[0], pc_from, pc_to, see_threshold_pc, pc_pinned_w, pc_pinned_b):
                     continue
     
                 pc_unmake = make_move(piece_bbs, occupancy_bbs, game_state, pc_move)
@@ -862,6 +824,9 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
     search_context.mp_bad_captures_count[ply] = 0
     search_context.mp_bad_captures_idx[ply] = 0
 
+    # opponent_pieces_bb is constant throughout this node (make/unmake restores occupancy)
+    opponent_pieces_bb = occupancy_bbs[1] if game_state[0] == 0 else occupancy_bbs[0]
+
     while True:
         move = get_next_move(
             piece_bbs, occupancy_bbs, game_state, search_context, ply,
@@ -872,13 +837,12 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
             break
         searched_move_count += 1
         
-        opponent_pieces_bb = occupancy_bbs[1] if game_state[0] == 0 else occupancy_bbs[0]
-        
         # --- Pre-move checks for extensions and move type ---
         from_sq = get_from_square(move)
         to_sq = get_to_square(move)
-        is_capture = ((opponent_pieces_bb & BB_SQUARES[to_sq]) != 0) or (get_special_move_flag(move) == SPECIAL_MOVE_FLAG_EN_PASSANT)
-        is_promotion = get_special_move_flag(move) == SPECIAL_MOVE_FLAG_PROMOTION
+        flag = get_special_move_flag(move)
+        is_capture = ((opponent_pieces_bb & BB_SQUARES[to_sq]) != 0) or (flag == SPECIAL_MOVE_FLAG_EN_PASSANT)
+        is_promotion = flag == SPECIAL_MOVE_FLAG_PROMOTION
         is_pseudo_quiet = not is_capture and not is_promotion
         
         # --- NEW: Shallow Depth Pruning (Stockfish Step 14) ---
@@ -913,16 +877,18 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                   
         # Removed unconditional pre_see_check_ok to prevent massive performance waste (Lazy Evaluation)
 
-        # --- Determine moved piece ---
-        moved_piece_type = find_piece_type_on_square_side(piece_bbs, from_sq, side_to_move)
-
         # --- Make the move ---
         unmake_info = make_move(piece_bbs, occupancy_bbs, game_state, move)
+        moved_piece_type = unmake_info[0]
         
-        # --- Lazy Legality Check ---
-        king_bb_after_move = piece_bbs[5] if (1 - game_state[0]) == 0 else piece_bbs[11]
-        king_sq = get_lsb_index(king_bb_after_move) if king_bb_after_move else 0
-        if is_square_attacked(piece_bbs, occupancy_bbs, king_sq, game_state[0]):
+        # --- Integrated Legality & Check Detection (R3) ---
+        # 1. Determine if the move was legal (our king is not left in check)
+        our_side = 1 - game_state[0] # game_state[0] is now the opponent
+        our_king_bb = piece_bbs[5] if our_side == WHITE else piece_bbs[11]
+        
+        # We assume king is found, else the engine has bigger problems
+        our_king_sq = get_lsb_index(our_king_bb) if our_king_bb else 0
+        if is_square_attacked(piece_bbs, occupancy_bbs, our_king_sq, game_state[0]):
             unmake_move(piece_bbs, occupancy_bbs, game_state, move, unmake_info)
             continue
             
@@ -931,8 +897,10 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
         search_context.move_stack[ply] = move # Record move in stack
         search_context.piece_stack[ply] = moved_piece_type # Record piece in stack
         
-        # --- Post-move checks ---
-        is_giving_check_after_move = is_in_check(piece_bbs, occupancy_bbs, game_state)
+        # 2. Determine if the move gives check to the opponent
+        their_king_bb = piece_bbs[11] if our_side == WHITE else piece_bbs[5]
+        their_king_sq = get_lsb_index(their_king_bb) if their_king_bb else 0
+        is_giving_check_after_move = is_square_attacked(piece_bbs, occupancy_bbs, their_king_sq, our_side)
         
         # Final determination of quiet move
         is_quiet_move = is_pseudo_quiet and not is_giving_check_after_move
@@ -941,6 +909,34 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
         is_king_penetration = False
         is_proactive_masking = False
         if is_quiet_move:
+            # B1: Lazy DTR-LMR — compute bitmasks only when first quiet move is reached
+            if not dtr_lmr_computed:
+                friendly_king_bb = piece_bbs[5] if side_to_move == WHITE else piece_bbs[11]
+                enemy_king_bb = piece_bbs[11] if side_to_move == WHITE else piece_bbs[5]
+
+                if enemy_king_bb:
+                    enemy_king_sq = get_lsb_index(enemy_king_bb)
+                    enemy_king_zone = BLACK_KING_ZONES[enemy_king_sq] if side_to_move == WHITE else WHITE_KING_ZONES[enemy_king_sq]
+
+                if friendly_king_bb:
+                    friendly_king_sq = get_lsb_index(friendly_king_bb)
+                    enemy_offset = 6 if side_to_move == WHITE else 0
+                    enemy_rooks = piece_bbs[3 + enemy_offset] | piece_bbs[4 + enemy_offset]
+                    enemy_bishops = piece_bbs[2 + enemy_offset] | piece_bbs[4 + enemy_offset]
+                    # Orthogonal danger rays
+                    temp_rays = ROOK_RAYS[friendly_king_sq] & enemy_rooks
+                    while temp_rays:
+                        pinner_sq = get_lsb_index(temp_rays)
+                        friendly_danger_rays |= SQUARES_BETWEEN[friendly_king_sq, pinner_sq]
+                        temp_rays &= temp_rays - np.uint64(1)
+                    # Diagonal danger rays
+                    temp_rays = BISHOP_RAYS[friendly_king_sq] & enemy_bishops
+                    while temp_rays:
+                        pinner_sq = get_lsb_index(temp_rays)
+                        friendly_danger_rays |= SQUARES_BETWEEN[friendly_king_sq, pinner_sq]
+                        temp_rays &= temp_rays - np.uint64(1)
+                dtr_lmr_computed = True
+
             # Check for King Zone Penetration
             if BB_SQUARES[to_sq] & enemy_king_zone:
                 is_king_penetration = True
@@ -981,17 +977,10 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                 unmake_move(piece_bbs, occupancy_bbs, game_state, move, unmake_info)
                 continue
         
-        # --- Determine total extension ---
+        # --- Determine total extension (SF18 style: unconditional check extension) ---
         check_extension = 0
         if is_giving_check_after_move:
-            # Lazy SEE Evaluation: Unmake to perfectly evaluate the pre-move position state
-            unmake_move(piece_bbs, occupancy_bbs, game_state, move, unmake_info)
-            # Use SEE_THRESHOLD (which is now 0) to ensure we don't extend on losing check sacrifices
-            # Pass game_state[0] instead of side_to_move because we unmade the move, so side to move has reverted
-            if see_ge(piece_bbs, occupancy_bbs, game_state[0], from_sq, to_sq, SEE_THRESHOLD, pinned_white, pinned_black):
-                check_extension = 1
-            # Remake move to restore state
-            unmake_info = make_move(piece_bbs, occupancy_bbs, game_state, move)
+            check_extension = 1
         
         current_extension = check_extension
 

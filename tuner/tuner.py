@@ -55,6 +55,17 @@ class SPSAOptimizer:
         self.n_samples = len(self.results)
         print(f"Loaded {self.n_samples} positions.")
         
+        # Display label distribution statistics
+        r = self.results
+        print(f"Label stats: min={r.min():.4f}, max={r.max():.4f}, mean={r.mean():.4f}, std={r.std():.4f}")
+        # Check if labels are continuous or discrete
+        unique_count = len(np.unique(np.round(r, 3)))
+        if unique_count <= 5:
+            print(f"  Warning: Only {unique_count} unique label values detected (likely discrete labels).")
+            print(f"  Consider regenerating data with continuous Sigmoid labels for better results.")
+        else:
+            print(f"  Continuous labels detected ({unique_count} unique values). Good.")
+        
         # Initial best
         self.best_theta = self.param_manager.get_initial_theta()
         print("Calculating initial error...")
@@ -68,41 +79,38 @@ class SPSAOptimizer:
         """
         cm = self.constraint_manager
         
-        # --- 1. Positive Values (Bonuses & Penalties stored as positive) ---
-        # Material
+        # --- Positive Values (Stored as positive) ---
         cm.add_range("MG_MATERIAL_VALUES", min_val=0)
         cm.add_range("EG_MATERIAL_VALUES", min_val=0)
-        
-        # Mobility Weights
-        cm.add_range("KNIGHT_MOBILITY_WEIGHT", min_val=0)
-        cm.add_range("BISHOP_MOBILITY_WEIGHT", min_val=0)
-        cm.add_range("ROOK_MOBILITY_WEIGHT", min_val=0)
-        cm.add_range("QUEEN_MOBILITY_WEIGHT", min_val=0)
-        
-        # Coordination Bonuses
         cm.add_range("BISHOP_PAIR_BONUS", min_val=0)
         cm.add_range("ROOK_ON_SEMI_OPEN_FILE_BONUS", min_val=0)
         cm.add_range("ROOK_ON_OPEN_FILE_BONUS", min_val=0)
         cm.add_range("ROOK_ON_SEVENTH_BONUS", min_val=0)
-        
-        # Pawn Bonuses
         cm.add_range("PASSED_PAWN_BONUS", min_val=0)
-        cm.add_range("CONNECTED_PASSED_PAWN_BONUS", min_val=0)
-        
-        # Penalties (Subtracted in eval, so must be positive in theta)
-        cm.add_range("BACKWARD_PAWN_PENALTY", min_val=0)
+        cm.add_range("CANDIDATE_PASSED_PAWN_BONUS", min_val=0)
         
         # Outposts
         cm.add_range("OUTPOST_BONUS_KNIGHT", min_val=0)
         cm.add_range("OUTPOST_BONUS_BISHOP", min_val=0)
         cm.add_range("OUTPOST_HOLE_BONUS", min_val=0)
 
-        # King Safety (Most are positive parameters used as penalties or bonuses)
-        cm.add_range("KING_SAFETY_WEAK_UNITS", min_val=0)
+        # King Safety / King Danger 
         cm.add_range("KING_SAFETY_ATTACK_UNITS", min_val=0)
-        cm.add_range("KING_SAFETY_TABLE", min_val=0)
+        cm.add_range("KING_DANGER_WEAK_SQ", min_val=1)
+        cm.add_range("KING_DANGER_UNSAFE_CHECK", min_val=1)
+        cm.add_range("KING_DANGER_ATTACK_ON_KING_SQ", min_val=1)
+        cm.add_range("KING_DANGER_NO_QUEEN", min_val=1)
+        cm.add_range("KING_DANGER_PINNED", min_val=1)
+        cm.add_range("KING_DANGER_DIVISOR", min_val=1)
+        cm.add_range("SAFE_CHECK_KNIGHT", min_val=0)
+        cm.add_range("SAFE_CHECK_BISHOP", min_val=0)
+        cm.add_range("SAFE_CHECK_ROOK", min_val=0)
+        cm.add_range("SAFE_CHECK_QUEEN", min_val=0)
+        
         cm.add_range("KING_TROPISM_WEIGHTS", min_val=0)
         cm.add_range("PAWN_STORM_PENALTY_BY_RANK", min_val=0)
+        cm.add_range("SCALING_WEIGHTS", min_val=0)
+        
         cm.add_range("PAWN_SHIELD_MISSING_PENALTY", min_val=0)
         cm.add_range("PAWN_SHIELD_INTACT_BONUS", min_val=0)
         cm.add_range("PAWN_SHIELD_ADVANCED_BONUS", min_val=0)
@@ -112,34 +120,41 @@ class SPSAOptimizer:
         
         # Threats
         cm.add_range("THREAT_SAFE_PAWN", min_val=0)
-        cm.add_range("THREAT_MINOR_ON_MAJOR", min_val=0)
-        cm.add_range("THREAT_ROOK_ON_QUEEN", min_val=0)
+        cm.add_range("THREAT_BY_MINOR", min_val=0)
+        cm.add_range("THREAT_BY_ROOK", min_val=0)
+        cm.add_range("THREAT_BY_KING", min_val=0)
         cm.add_range("THREAT_HANGING", min_val=0)
+        cm.add_range("THREAT_RESTRICTED_PIECE", min_val=0)
+        cm.add_range("THREAT_PAWN_PUSH", min_val=0)
         
-        # Initiative
         cm.add_range("INITIATIVE_BONUS", min_val=0)
+        cm.add_range("TRAPPED_ROOK", min_val=0)
+        cm.add_range("BISHOP_PAWNS_PENALTY", min_val=0)
+        cm.add_range("KING_PROTECTOR", min_val=0)
 
-        # --- 2. Negative Values (Penalties stored as negative) ---
+        # --- Negative Values (Stored as negative) ---
         cm.add_range("ISOLATED_PAWN_PENALTY", max_val=0)
         cm.add_range("DOUBLED_PAWN_PENALTY", max_val=0)
+        cm.add_range("BACKWARD_PAWN_PENALTY", max_val=0)
 
-        # --- 3. Monotonic Constraints ---
-
-        # 子力分數: P < N < B < R < Q (Axis 0)
+        # --- Monotonic Constraints ---
         cm.add_monotonic("MG_MATERIAL_VALUES", axis=0, direction='increasing')
         cm.add_monotonic("EG_MATERIAL_VALUES", axis=0, direction='increasing')
-        # Passed Pawn Bonus: Should increase with Rank (Axis 0)
+        
         cm.add_monotonic("PASSED_PAWN_BONUS", axis=0, direction='increasing')
+        cm.add_monotonic("CANDIDATE_PASSED_PAWN_BONUS", axis=0, direction='increasing')
+        cm.add_monotonic("CONNECTED_BONUS", axis=0, direction='increasing')
         
-        # King Safety Table: More attack units -> Higher penalty (Axis 0)
-        cm.add_monotonic("KING_SAFETY_TABLE", axis=0, direction='increasing')
-        
-        # King Tropism Weights: P < N < B < R < Q (Axis 0)
         cm.add_monotonic("KING_TROPISM_WEIGHTS", axis=0, direction='increasing')
-        
-        # King Safety Attack Units: P < N < B < R < Q (Axis 0)
         cm.add_monotonic("KING_SAFETY_ATTACK_UNITS", axis=0, direction='increasing')
-        cm.add_monotonic("KING_SAFETY_WEAK_UNITS", axis=0, direction='increasing')
+        cm.add_monotonic("SCALING_WEIGHTS", axis=0, direction='increasing')
+        cm.add_monotonic("PAWN_STORM_PENALTY_BY_RANK", axis=0, direction='decreasing') # Rank 0=inf, rank 7=0
+
+        # Mobility tables monotonicity (moves from 0 to N should strictly increase)
+        cm.add_monotonic("KNIGHT_MOBILITY_BONUS", axis=0, direction='increasing')
+        cm.add_monotonic("BISHOP_MOBILITY_BONUS", axis=0, direction='increasing')
+        cm.add_monotonic("ROOK_MOBILITY_BONUS", axis=0, direction='increasing')
+        cm.add_monotonic("QUEEN_MOBILITY_BONUS", axis=0, direction='increasing')
 
         print(f"Constraints configured: {len(cm.constraints)} constraints active.")
 
@@ -286,15 +301,16 @@ if __name__ == "__main__":
     parser.add_argument("--tune", nargs='+', help="List of parameter names to tune (others will be frozen)")
     parser.add_argument("--exclude", nargs='+', help="List of parameter names to exclude/freeze")
     parser.add_argument("--batch-size", type=int, default=32768, help="Mini-batch size for gradient estimation (e.g. 16384)")
+    parser.add_argument("--dataset", type=str, default="tuner/dataset.npz", help="Path to the preprocessed dataset .npz file")
     
     args = parser.parse_args()
 
     pm = ParameterManager()
     
-    if not os.path.exists("tuner/dataset.npz"):
-        print("Dataset not found. Please run preprocess_data.py first.")
+    if not os.path.exists(args.dataset):
+        print(f"Dataset not found at '{args.dataset}'. Please run preprocess_data.py first.")
     else:
-        optimizer = SPSAOptimizer("tuner/dataset.npz", pm)
+        optimizer = SPSAOptimizer(args.dataset, pm)
         optimizer.optimize(
             iterations=args.iter, 
             alpha=args.alpha, 

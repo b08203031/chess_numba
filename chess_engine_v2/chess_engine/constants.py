@@ -161,37 +161,40 @@ KNIGHT_PST_EG = _create_pst([
     [-50,-40,-30,-30,-30,-30,-40,-50]
 ])
 
+# SF11-inspired EG: bishops prefer activity and central diagonals in endgame
 BISHOP_PST_EG = _create_pst([
-    [-20,-10,-10,-10,-10,-10,-10,-20],
-    [-10,  0,  0,  0,  0,  0,  0,-10],
-    [-10,  0,  5, 10, 10,  5,  0,-10],
-    [-10,  5,  5, 10, 10,  5,  5,-10],
-    [-10,  0, 10, 10, 10, 10,  0,-10],
-    [-10, 10, 10, 10, 10, 10, 10,-10],
-    [-10,  5,  0,  0,  0,  0,  5,-10],
-    [-20,-10,-10,-10,-10,-10,-10,-20]
+    [-46,-24,-30,-10,-10,-30,-24,-46],
+    [-30,-10,-14,  0,  0,-14,-10,-30],
+    [-13,  0,  0,  8,  8,  0,  0,-13],
+    [-16,  0, 14, 13, 13, 14,  0,-16],
+    [-14,  0, 12, 13, 13, 12,  0,-14],
+    [-24,  5,  3,  5,  5,  3,  5,-24],
+    [-25,-16,  0,  1,  1,  0,-16,-25],
+    [-37,-34,-30,-19,-19,-30,-34,-37]
 ])
 
+# SF11-inspired EG: rooks more active, penalize confinement less, reward 7th-rank
 ROOK_PST_EG = _create_pst([
-    [0,  0,  0,  0,  0,  0,  0,  0],
-    [5, 10, 10, 10, 10, 10, 10,  5],
-    [-5,  0,  0,  0,  0,  0,  0, -5],
-    [-5,  0,  0,  0,  0,  0,  0, -5],
-    [-5,  0,  0,  0,  0,  0,  0, -5],
-    [-5,  0,  0,  0,  0,  0,  0, -5],
-    [-5,  0,  0,  0,  0,  0,  0, -5],
-    [0,  0,  0,  5,  5,  0,  0,  0]
+    [ 18,  0, 19, 13, 13, 19,  0, 18],
+    [  4,  5, 20, -5, -5, 20,  5,  4],
+    [  6, -8, -2,  8,  8, -2, -8,  6],
+    [ -6,  1, -9,  7,  7, -9,  1, -6],
+    [ -5,  8,  7, -6, -6,  7,  8, -5],
+    [  6,  1, -7, 10, 10, -7,  1,  6],
+    [ -12, -9, -1, -2, -2, -1, -9,-12],
+    [ -9,-13,-10, -9, -9,-10,-13, -9]
 ])
 
+# SF11-inspired EG: queens centralize more aggressively, avoid corners
 QUEEN_PST_EG = _create_pst([
-    [-20,-10,-10, -5, -5,-10,-10,-20],
-    [-10,  0,  0,  0,  0,  0,  0,-10],
-    [-10,  0,  5,  5,  5,  5,  0,-10],
-    [-5,  0,  5,  5,  5,  5,  0, -5],
-    [0,  0,  5,  5,  5,  5,  0, -5],
-    [-10,  5,  5,  5,  5,  5,  0,-10],
-    [-10,  0,  5,  0,  0,  0,  0,-10],
-    [-20,-10,-10, -5, -5,-10,-10,-20]
+    [-75,-52,-43,-36,-36,-43,-52,-75],
+    [-57,-31,-22, -4, -4,-22,-31,-57],
+    [-47,-18, -9,  3,  3, -9,-18,-47],
+    [-26, -3, 13, 24, 24, 13, -3,-26],
+    [-29, -6,  9, 21, 21,  9, -6,-29],
+    [-39,-18,-12,  1,  1,-12,-18,-39],
+    [-55,-27,-24, -8, -8,-24,-27,-55],
+    [-69,-57,-47,-36,-36,-47,-57,-69]
 ])
 
 KING_PST_EG = _create_pst([
@@ -239,37 +242,37 @@ INITIATIVE_PHASE_THRESHOLD = MAX_PHASE * 0.4 # Apply only when phase is above 40
 # 棋子機動性獎勵，原本的計算方式為：(移動次數 - 基礎移動數) * 權重，現已改為查表。
 # 這獎勵活躍的棋子，懲罰被阻擋或受限的棋子。
 
-# --- Knight Mobility (SF11 MobilityBonus × Pawn ratio MG×0.78 EG×0.56) --- max 8 squares
+# --- Knight Mobility (SF11 MobilityBonus × Pawn ratio MG×0.585 EG×0.42) --- max 8 squares
 KNIGHT_MOBILITY_BONUS = np.array([
-    [-48, -45], [-41, -31], [ -9, -17], [ -3,  -8],
-    [  2,   4], [ 10,   8], [ 17,  13], [ 22,  15], [ 26,  18]
+    [-36, -34], [-31, -23], [ -7, -13], [ -2,  -6],
+    [  2,   3], [  8,   6], [ 13,  10], [ 17,  11], [ 20,  14]
 ], dtype=np.int32)  # index 0..8
 
-# --- Bishop Mobility (SF11 MobilityBonus × Pawn ratio MG×0.78 EG×0.56) --- max 13 squares
+# --- Bishop Mobility (SF11 MobilityBonus × Pawn ratio MG×0.585 EG×0.42) --- max 13 squares
 BISHOP_MOBILITY_BONUS = np.array([
-    [-37, -33], [-16, -13], [ 12,  -2], [ 20,   7],
-    [ 30,  13], [ 40,  24], [ 43,  30], [ 49,  32],
-    [ 49,  36], [ 53,  41], [ 63,  44], [ 63,  48],
-    [ 71,  49], [ 76,  54]
+    [-28, -25], [-12, -10], [  9,  -2], [ 15,   5],
+    [ 23,  10], [ 30,  18], [ 32,  23], [ 37,  24],
+    [ 37,  27], [ 40,  31], [ 47,  33], [ 47,  36],
+    [ 53,  37], [ 57,  41]
 ], dtype=np.int32)  # index 0..13
 
-# --- Rook Mobility (SF11 MobilityBonus × Pawn ratio MG×0.78 EG×0.56) --- max 14 squares
+# --- Rook Mobility (SF11 MobilityBonus × Pawn ratio MG×0.585 EG×0.42) --- max 14 squares
 ROOK_MOBILITY_BONUS = np.array([
-    [-45, -43], [-21, -10], [-12,  16], [ -8,  31],
-    [ -4,  39], [ -2,  46], [  7,  63], [ 12,  66],
-    [ 23,  74], [ 23,  80], [ 25,  87], [ 30,  92],
-    [ 36,  93], [ 37,  95], [ 45,  96]
+    [-34, -32], [-16,  -8], [ -9,  12], [ -6,  23],
+    [ -3,  29], [ -2,  35], [  5,  47], [  9,  50],
+    [ 17,  56], [ 17,  60], [ 19,  65], [ 23,  69],
+    [ 27,  70], [ 28,  71], [ 34,  72]
 ], dtype=np.int32)  # index 0..14
 
-# --- Queen Mobility (SF11 MobilityBonus × Pawn ratio MG×0.78 EG×0.56) --- max 27 squares
+# --- Queen Mobility (SF11 MobilityBonus × Pawn ratio MG×0.585 EG×0.42) --- max 27 squares
 QUEEN_MOBILITY_BONUS = np.array([
-    [-30, -20], [-16,  -8], [  2,   4], [  2,  10],
-    [ 11,  19], [ 17,  30], [ 22,  34], [ 32,  41],
-    [ 34,  44], [ 37,  52], [ 44,  53], [ 47,  58],
-    [ 47,  63], [ 51,  67], [ 52,  69], [ 55,  71],
-    [ 55,  74], [ 57,  76], [ 62,  78], [ 69,  80],
-    [ 69,  83], [ 77,  93], [ 80,  95], [ 80,  98],
-    [ 83, 103], [ 85, 107], [ 88, 115], [ 91, 119]
+    [-23, -15], [-12,  -6], [  2,   3], [  2,   8],
+    [  8,  14], [ 13,  23], [ 17,  26], [ 24,  31],
+    [ 26,  33], [ 28,  39], [ 33,  40], [ 35,  44],
+    [ 35,  47], [ 38,  50], [ 39,  52], [ 41,  53],
+    [ 41,  56], [ 43,  57], [ 47,  59], [ 52,  60],
+    [ 52,  62], [ 58,  70], [ 60,  71], [ 60,  74],
+    [ 62,  77], [ 64,  80], [ 66,  86], [ 68,  89]
 ], dtype=np.int32)  # index 0..27
 
 
@@ -336,10 +339,14 @@ ISOLATED_PAWN_PENALTY = np.array([-10, -5], dtype=np.int32) # MG, EG
 # 每一個重疊兵的懲罰。
 DOUBLED_PAWN_PENALTY = np.array([-15, -10], dtype=np.int32) # MG, EG
 
-# --- Connected Passed Pawns / 連結通路兵 ---
-# Bonus for each passed pawn that is connected to another passed pawn.
-# 每個連結通路兵的獎勵。
-CONNECTED_PASSED_PAWN_BONUS = np.array([15, 35], dtype=np.int32) # MG, EG
+# --- Connected Pawn Bonus by Rank (SF11) / SF11 連結兵獎勵（按橫排） ---
+# Applied to ALL pawns that are in phalanx (side-by-side) or supported (diagonally behind).
+# 適用於所有處於並列或受支撐狀態的兵。
+CONNECTED_BONUS = np.array([0, 4, 7, 12, 19, 28, 39, 0], dtype=np.int32)
+CONNECTED_SUPPORT_WEIGHT = np.int32(10)  # SF11 value was 21
+
+# --- Connected Passed Pawns / 連結通路兵 --- (legacy, kept for reference)
+CONNECTED_PASSED_PAWN_BONUS = np.array([15, 35], dtype=np.int32) # MG, EG (not used in evaluation)
 
 # =============================================================================
 # --- Outpost Constants / 前哨常量 ---
@@ -468,27 +475,27 @@ EG_SAFETY_SCALE = 0.5 # Scale down endgame king safety impact / 縮減殘局王�
 THREAT_SAFE_PAWN = np.array([70, 45], dtype=np.int32)  # SF11: (173, 94)
 
 # ThreatByMinor[target_piece_type]: Minor (N/B) attacks piece of given type.
-# Index: 0=None, 1=Pawn, 2=Knight, 3=Bishop, 4=Rook, 5=Queen
+# Index: 0=Pawn, 1=Knight, 2=Bishop, 3=Rook, 4=Queen, 5=King
 # 輕子威脅：馬/象攻擊對應類型棋子的獎勵。
 THREAT_BY_MINOR = np.array([
-    [ 0,  0],  # None (unused)
     [ 5, 18],  # vs Pawn    (SF11: 6, 32)
     [46, 23],  # vs Knight  (SF11: 59, 41)
     [46, 23],  # vs Bishop  (SF11: 59, 41)
     [62, 32],  # vs Rook    (SF11: 79, 56)
     [70, 67],  # vs Queen   (SF11: 90, 119)
+    [ 0,  0],  # vs King    (should not occur)
 ], dtype=np.int32)
 
 # ThreatByRook[target_piece_type]: Rook attacks piece of given type (only if weak).
-# Index: 0=None, 1=Pawn, 2=Knight, 3=Bishop, 4=Rook, 5=Queen
+# Index: 0=Pawn, 1=Knight, 2=Bishop, 3=Rook, 4=Queen, 5=King
 # 車威脅：車攻擊對應類型棋子的獎勵。
 THREAT_BY_ROOK = np.array([
-    [ 0,  0],  # None
     [ 2, 25],  # vs Pawn    (SF11: 3, 44)
     [30, 40],  # vs Knight  (SF11: 38, 71)
     [30, 34],  # vs Bishop  (SF11: 38, 61)
     [ 0, 21],  # vs Rook    (SF11: 0, 38)
     [40, 21],  # vs Queen   (SF11: 51, 38)
+    [ 0,  0],  # vs King    (should not occur)
 ], dtype=np.int32)
 
 # ThreatByKing: King attacks a weakly defended enemy piece.
@@ -519,12 +526,12 @@ THREAT_ROOK_ON_QUEEN = np.array([20, 10], dtype=np.int32)   # kept for reference
 
 # KingProtector: Penalty for minor piece being far from own king.
 # 王保護者：輕子距離己方王越遠，懲罰越重（每格切比雪夫距離）。
-KING_PROTECTOR = np.array([5, 4], dtype=np.int32)  # mg, eg — per distance unit; SF11: (7, 8)
+# SF11: (7, 8). Scaled to 0.75× of our previous value (which itself was already below SF11)
+# to compensate for mobility being scaled down 0.75×.
+KING_PROTECTOR = np.array([4, 3], dtype=np.int32)  # mg, eg — per distance unit
 
 # MinorBehindPawn: Bonus for minor piece sheltered behind a pawn.
 # 輕子藏兵後：輕子站在兵後方的獎勵。
-MINOR_BEHIND_PAWN = np.array([14, 2], dtype=np.int32)  # SF11: (18, 3)
-
 # BishopPawns: Penalty per own pawn on same color as bishop.
 # 壞象懲罰：象同色上的己方兵數量懲罰（含封閉中心加重）。
 BISHOP_PAWNS_PENALTY = np.array([2, 4], dtype=np.int32)  # SF11: (3, 7)
@@ -732,7 +739,8 @@ TT_SIZE_MB = 256
 # --- Backward Pawns / 後兵 ---
 # Penalty for a backward pawn.
 # 後兵的懲罰。
-BACKWARD_PAWN_PENALTY = np.array([10, 25], dtype=np.int32) # MG, EG
+# Negative values, applied with += (consistent with ISOLATED_PAWN_PENALTY and DOUBLED_PAWN_PENALTY)
+BACKWARD_PAWN_PENALTY = np.array([-10, -25], dtype=np.int32) # MG, EG
 
 # File constants
 NOT_A_FILE = ~np.uint64(0x0101010101010101)

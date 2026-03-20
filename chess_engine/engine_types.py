@@ -23,7 +23,7 @@ game_state_signature = numba.uint64[::1]
 piece_counts_signature = numba.types.UniTuple(numba.int32, 12)
 
 unmake_info_signature = numba.types.Tuple([
-    numba.int8, numba.uint8, numba.uint8, numba.uint8, numba.uint64, numba.uint64,
+    numba.int8, numba.int8, numba.uint8, numba.uint8, numba.uint8, numba.uint64, numba.uint64,
     numba.uint64, numba.uint64, numba.uint64
 ])
 

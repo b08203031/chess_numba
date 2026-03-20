@@ -236,24 +236,41 @@ INITIATIVE_PHASE_THRESHOLD = MAX_PHASE * 0.4 # Apply only when phase is above 40
 # =============================================================================
 # Bonus for piece mobility, calculated as: (move_count - base_moves) * weight.
 # This rewards active pieces and penalizes pieces that are blocked or restricted.
-# 棋子機動性獎勵，計算方式為：(移動次數 - 基礎移動數) * 權重。
+# 棋子機動性獎勵，原本的計算方式為：(移動次數 - 基礎移動數) * 權重，現已改為查表。
 # 這獎勵活躍的棋子，懲罰被阻擋或受限的棋子。
 
-# --- Knight Mobility ---
-KNIGHT_MOBILITY_BASE_MOVES = 4
-KNIGHT_MOBILITY_WEIGHT = np.array([4, 2], dtype=np.int32) # MG, EG
+# --- Knight Mobility (SF11 MobilityBonus × Pawn ratio MG×0.78 EG×0.56) --- max 8 squares
+KNIGHT_MOBILITY_BONUS = np.array([
+    [-48, -45], [-41, -31], [ -9, -17], [ -3,  -8],
+    [  2,   4], [ 10,   8], [ 17,  13], [ 22,  15], [ 26,  18]
+], dtype=np.int32)  # index 0..8
 
-# --- Bishop Mobility ---
-BISHOP_MOBILITY_BASE_MOVES = 5
-BISHOP_MOBILITY_WEIGHT = np.array([4, 2], dtype=np.int32) # MG, EG
+# --- Bishop Mobility (SF11 MobilityBonus × Pawn ratio MG×0.78 EG×0.56) --- max 13 squares
+BISHOP_MOBILITY_BONUS = np.array([
+    [-37, -33], [-16, -13], [ 12,  -2], [ 20,   7],
+    [ 30,  13], [ 40,  24], [ 43,  30], [ 49,  32],
+    [ 49,  36], [ 53,  41], [ 63,  44], [ 63,  48],
+    [ 71,  49], [ 76,  54]
+], dtype=np.int32)  # index 0..13
 
-# --- Rook Mobility ---
-ROOK_MOBILITY_BASE_MOVES = 6
-ROOK_MOBILITY_WEIGHT = np.array([3, 1], dtype=np.int32) # MG, EG
+# --- Rook Mobility (SF11 MobilityBonus × Pawn ratio MG×0.78 EG×0.56) --- max 14 squares
+ROOK_MOBILITY_BONUS = np.array([
+    [-45, -43], [-21, -10], [-12,  16], [ -8,  31],
+    [ -4,  39], [ -2,  46], [  7,  63], [ 12,  66],
+    [ 23,  74], [ 23,  80], [ 25,  87], [ 30,  92],
+    [ 36,  93], [ 37,  95], [ 45,  96]
+], dtype=np.int32)  # index 0..14
 
-# --- Queen Mobility ---
-QUEEN_MOBILITY_BASE_MOVES = 8
-QUEEN_MOBILITY_WEIGHT = np.array([2, 1], dtype=np.int32) # MG, EG
+# --- Queen Mobility (SF11 MobilityBonus × Pawn ratio MG×0.78 EG×0.56) --- max 27 squares
+QUEEN_MOBILITY_BONUS = np.array([
+    [-30, -20], [-16,  -8], [  2,   4], [  2,  10],
+    [ 11,  19], [ 17,  30], [ 22,  34], [ 32,  41],
+    [ 34,  44], [ 37,  52], [ 44,  53], [ 47,  58],
+    [ 47,  63], [ 51,  67], [ 52,  69], [ 55,  71],
+    [ 55,  74], [ 57,  76], [ 62,  78], [ 69,  80],
+    [ 69,  83], [ 77,  93], [ 80,  95], [ 80,  98],
+    [ 83, 103], [ 85, 107], [ 88, 115], [ 91, 119]
+], dtype=np.int32)  # index 0..27
 
 
 # =============================================================================
@@ -390,6 +407,10 @@ KING_DANGER_ATTACK_ON_KING_SQ = np.int32(1)
 # 敵方無后時的固定 danger 扣除
 KING_DANGER_NO_QUEEN = np.int32(5)
 
+# Penalty per pinned piece on the defending side (SF11-inspired)
+# 防守方被牽制棋子的 danger 懲罰（直接計算成數分數，會乘以材質 scaling factor）
+KING_DANGER_PINNED = np.int32(10)
+
 # Divisor for kingDanger² conversion (controls overall penalty magnitude)
 # kingDanger² 的除數（i²/2 與舊 KING_SAFETY_TABLE 等價）
 KING_DANGER_DIVISOR = np.int32(2)
@@ -437,23 +458,80 @@ EG_SAFETY_SCALE = 0.5 # Scale down endgame king safety impact / 縮減殘局王�
 # =============================================================================
 # Derived from Stockfish 11 but simplified and scaled.
 
-# Threat By Safe Pawn: Friendly pawn attacks enemy piece (N, B, R, Q).
-# 兵的威脅：己方兵攻擊敵方棋子（N, B, R, Q）。
-THREAT_SAFE_PAWN = np.array([45, 45], dtype=np.int32) # MG, EG
+# =============================================================================
+# --- Threat Evaluation Constants (SF11-inspired, scaled by Pawn ratio) ---
+# =============================================================================
+# All values scaled from SF11 by Pawn ratio: MG×0.78, EG×0.56
 
-# Minor Attacking Major: Knight/Bishop attacking Rook/Queen.
-# 輕子攻擊重子：馬/象攻擊車/后。
-THREAT_MINOR_ON_MAJOR = np.array([25, 15], dtype=np.int32) # MG, EG
+# ThreatBySafePawn: Friendly safe pawn attacks enemy non-pawn piece.
+# 安全兵的威脅：己方安全兵攻擊敵方非兵棋子。
+THREAT_SAFE_PAWN = np.array([70, 45], dtype=np.int32)  # SF11: (173, 94)
 
-# Rook Attacking Queen: Rook attacking Queen.
-# 車捉后：車攻擊后。
-THREAT_ROOK_ON_QUEEN = np.array([20, 10], dtype=np.int32) # MG, EG
+# ThreatByMinor[target_piece_type]: Minor (N/B) attacks piece of given type.
+# Index: 0=None, 1=Pawn, 2=Knight, 3=Bishop, 4=Rook, 5=Queen
+# 輕子威脅：馬/象攻擊對應類型棋子的獎勵。
+THREAT_BY_MINOR = np.array([
+    [ 0,  0],  # None (unused)
+    [ 5, 18],  # vs Pawn    (SF11: 6, 32)
+    [46, 23],  # vs Knight  (SF11: 59, 41)
+    [46, 23],  # vs Bishop  (SF11: 59, 41)
+    [62, 32],  # vs Rook    (SF11: 79, 56)
+    [70, 67],  # vs Queen   (SF11: 90, 119)
+], dtype=np.int32)
 
-# Hanging Pieces: Enemy piece is attacked and undefended.
-# 懸掛子：敵方棋子被攻擊且未被防守。
-# This is a bonus for the ATTACKER.
-# 這是給攻擊者的獎勵。
-THREAT_HANGING = np.array([25, 15], dtype=np.int32) # MG, EG
+# ThreatByRook[target_piece_type]: Rook attacks piece of given type (only if weak).
+# Index: 0=None, 1=Pawn, 2=Knight, 3=Bishop, 4=Rook, 5=Queen
+# 車威脅：車攻擊對應類型棋子的獎勵。
+THREAT_BY_ROOK = np.array([
+    [ 0,  0],  # None
+    [ 2, 25],  # vs Pawn    (SF11: 3, 44)
+    [30, 40],  # vs Knight  (SF11: 38, 71)
+    [30, 34],  # vs Bishop  (SF11: 38, 61)
+    [ 0, 21],  # vs Rook    (SF11: 0, 38)
+    [40, 21],  # vs Queen   (SF11: 51, 38)
+], dtype=np.int32)
+
+# ThreatByKing: King attacks a weakly defended enemy piece.
+# 王攻擊弱子：王攻擊敵方弱子的獎勵。
+THREAT_BY_KING = np.array([19, 50], dtype=np.int32)  # SF11: (24, 89)
+
+# Hanging: Enemy piece is attacked + not strongly protected.
+# 懸掛子：敵方棋子被攻擊且未被強力保護。
+THREAT_HANGING = np.array([54, 20], dtype=np.int32)  # SF11: (69, 36)
+
+# RestrictedPiece: Enemy piece moves are restricted by our attacks.
+# 限制棋子行動力：敵方棋子的走子受到我方攻擊限制。
+THREAT_RESTRICTED_PIECE = np.array([5, 4], dtype=np.int32)  # SF11: (7, 7)
+
+# ThreatByPawnPush: Pawn push threatens enemy pieces on next move.
+# 兵推威脅：兵推進後能威脅敵子。
+THREAT_PAWN_PUSH = np.array([37, 22], dtype=np.int32)  # SF11: (48, 39)
+
+# --- Legacy aliases (kept for backward compatibility, now unused in threats) ---
+# Minor Attacking Major (replaced by THREAT_BY_MINOR)
+THREAT_MINOR_ON_MAJOR = np.array([25, 15], dtype=np.int32)  # kept for reference
+# Rook Attacking Queen (replaced by THREAT_BY_ROOK)
+THREAT_ROOK_ON_QUEEN = np.array([20, 10], dtype=np.int32)   # kept for reference
+
+# =============================================================================
+# --- Per-Piece Bonus/Penalty Constants (SF11-inspired, scaled by Pawn ratio) ---
+# =============================================================================
+
+# KingProtector: Penalty for minor piece being far from own king.
+# 王保護者：輕子距離己方王越遠，懲罰越重（每格切比雪夫距離）。
+KING_PROTECTOR = np.array([5, 4], dtype=np.int32)  # mg, eg — per distance unit; SF11: (7, 8)
+
+# MinorBehindPawn: Bonus for minor piece sheltered behind a pawn.
+# 輕子藏兵後：輕子站在兵後方的獎勵。
+MINOR_BEHIND_PAWN = np.array([14, 2], dtype=np.int32)  # SF11: (18, 3)
+
+# BishopPawns: Penalty per own pawn on same color as bishop.
+# 壞象懲罰：象同色上的己方兵數量懲罰（含封閉中心加重）。
+BISHOP_PAWNS_PENALTY = np.array([2, 4], dtype=np.int32)  # SF11: (3, 7)
+
+# TrappedRook: Penalty for rook with mobility <= 3 trapped by own king.
+# 困車懲罰：車移動格數 ≤ 3 且在己方王同側。
+TRAPPED_ROOK = np.array([41, 6], dtype=np.int32)  # SF11: (52, 10)
 
 # --- Endgame Scale Factors ---
 SCALE_FACTOR_NORMAL = 64

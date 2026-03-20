@@ -74,7 +74,7 @@ def make_move(piece_bbs: np.ndarray, occupancy_bbs: np.ndarray, game_state: np.n
 
     Returns:
         tuple: unmake_info，包含撤銷這步棋所需的信息。
-               (captured_piece_type, old_castling_rights, old_ep_square, old_halfmove_clock, old_zobrist_key, old_pawn_key, old_minor_key, old_non_pawn_key_white, old_non_pawn_key_black)
+               (moving_piece_type, captured_piece_type, old_castling_rights, old_ep_square, old_halfmove_clock, old_zobrist_key, old_pawn_key, old_minor_key, old_non_pawn_key_white, old_non_pawn_key_black)
     """
     side = game_state[0]
     current_castling_rights = game_state[1]
@@ -259,6 +259,7 @@ def make_move(piece_bbs: np.ndarray, occupancy_bbs: np.ndarray, game_state: np.n
     game_state[NON_PAWN_KEY_BLACK_INDEX] = np_black_key
 
     return (
+        np.int8(moving_piece_type),
         captured_piece_type,
         np.uint8(current_castling_rights),
         np.uint8(current_ep_square),
@@ -285,7 +286,7 @@ def unmake_move(piece_bbs: np.ndarray, occupancy_bbs: np.ndarray, game_state: np
         move (np.uint16): 要撤銷的移動。
         unmake_info (tuple): `make_move` 返回的撤銷信息。
     """
-    captured_piece_type, old_castling_rights, old_ep_square, old_halfmove_clock, old_zobrist_key, old_pawn_key, old_minor_key, old_np_white_key, old_np_black_key = unmake_info
+    moving_piece_type, captured_piece_type, old_castling_rights, old_ep_square, old_halfmove_clock, old_zobrist_key, old_pawn_key, old_minor_key, old_np_white_key, old_np_black_key = unmake_info
 
     side = 1 - game_state[0]
 
@@ -293,7 +294,6 @@ def unmake_move(piece_bbs: np.ndarray, occupancy_bbs: np.ndarray, game_state: np
     to_sq = get_to_square(move)
     flag = get_special_move_flag(move)
 
-    moving_piece_type = find_piece_type_for_square(piece_bbs, to_sq, side)
     if flag == SPECIAL_MOVE_FLAG_PROMOTION:
         moving_piece_type = PAWN
 

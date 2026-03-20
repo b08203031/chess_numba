@@ -9,6 +9,8 @@
 *   **嚴謹的約束系統**：防止參數出現不合理的數值（如負數獎勵、數值倒掛）。
 *   **精確的評估同步**：調參器的評估函數完全鏡像主引擎邏輯，包含前哨 (Outposts)、安全機動性 (Safe Mobility) 與不可阻擋通路兵 (Unstoppable Pawns)。
 *   **靈活的參數鎖定**：可選擇性調整或鎖定特定參數。
+*   **連續 Sigmoid 標籤**：使用 Stockfish 的 centipawn 分數轉換為 Sigmoid 值，保留完整資訊。
+*   **智慧篩選**：自動過濾低 ELO 對局、開局階段、以及過於懸殊的局面。
 
 ---
 
@@ -16,26 +18,44 @@
 
 要訓練出一個強大的引擎，請遵循以下步驟：
 
+### 步驟 0: 準備 PGN 訓練數據
+
+從 TWIC (The Week in Chess) 下載頂尖高手對局：
+*   網址：https://theweekinchess.com/twic
+*   建議下載 10-20 期 TWIC PGN，並合併為一個檔案
+*   目前的預設檔案是 `twic1613.pgn`
+
 ### 步驟 1: 生成訓練數據 (Generation)
 
 使用 `tuner/generate_training_data.py` 從大師對局 (PGN) 中提取局面。
 
+*   **連續標籤**：使用 Stockfish 的分數轉換為 Sigmoid 值（0~1 之間連續值），比離散標籤能保留更多資訊。
 *   **自動分流**：程式會自動將局面分為 **中局 (Middlegame)** 與 **殘局 (Endgame)** 兩個檔案。
-*   **嚴格清洗**：使用 Stockfish 作為裁判，過濾掉評估錯誤或靜態評估不穩定的局面（如剛吃子後）。
+*   **嚴格清洗**：
+    *   跳過前 12 步開局（可調整 `--min-move`）
+    *   過濾掉 |score| > 200cp 的局面（可調整 `--max-cp`）
+    *   過濾掉雙方 ELO < 2400 的對局（可調整 `--min-elo`）
+    *   過濾掉將軍、吃子後、材質嚴重失衡的局面
 *   **並行加速**：程式會自動偵測核心數並啟動多個 Worker。
 
 **建議指令：**
 
 ```bash
-# 生成所有對局 (--games 0)，使用預設 Stockfish 路徑
+# 生成所有對局 (--games 0)，使用預設設定
 python tuner/generate_training_data.py --games 0
+
+# 自訂篩選條件
+python tuner/generate_training_data.py --games 0 --min-elo 2400 --max-cp 200 --min-move 12
 ```
 
 **常用參數：**
 *   `--pgn <file>`: 指定 PGN 檔案（預設會自動尋找 `twic1613.pgn`）。
 *   `--stockfish-path <path>`: 指定 Stockfish 執行檔路徑。
+*   `--stockfish-depth <N>`: Stockfish 分析深度（預設 10）。
+*   `--max-cp <N>`: 最大允許的 centipawn 分數差距（預設 200 = ±2.0 分）。
+*   `--min-elo <N>`: 雙方最低 ELO 門檻（預設 2400，設 0 停用）。
+*   `--min-move <N>`: 跳過的開局步數（預設 12）。
 *   `--workers <N>`: 指定使用的 CPU 核心數（預設為 CPU 總數 - 1）。
-*   `--consistency-threshold`: 設定和棋的允許誤差範圍 (cp)。
 
 ### 步驟 2: 轉換數據格式 (Preprocess)
 
@@ -47,7 +67,11 @@ python tuner/preprocess_data.py
 
 這會自動合併目錄下的中局與殘局檔案。如果您只想針對特定階段調參，可以指定檔案：
 ```bash
+# 只用殘局數據
 python tuner/preprocess_data.py --files tuner/training_data_endgame_cleaned.jsonl --output tuner/dataset_endgame.npz
+
+# 只用中局數據
+python tuner/preprocess_data.py --files tuner/training_data_middlegame_cleaned.jsonl --output tuner/dataset_middlegame.npz
 ```
 
 ### 步驟 3: 執行調參 (Tuning)
@@ -59,6 +83,9 @@ python tuner/preprocess_data.py --files tuner/training_data_endgame_cleaned.json
 ```bash
 # 使用 Mini-batch (每次隨機取 16384 筆)，迭代 5000 次
 python -m tuner.tuner --iter 5000 --batch-size 16384
+
+# 使用特定的數據集
+python -m tuner.tuner --iter 5000 --batch-size 16384 --dataset tuner/dataset_endgame.npz
 ```
 
 **參數說明：**
@@ -66,8 +93,9 @@ python -m tuner.tuner --iter 5000 --batch-size 16384
 *   `--batch-size <N>`: **(效能關鍵)** 每次迭代使用的樣本數。
     *   設為 `16384` 或 `32768` 可以大幅加快訓練速度，且通常能獲得不錯的收斂效果。
     *   若不設定，則每次都計算整個數據集的誤差（最準確但最慢）。
-*   `--alpha`: 學習率（預設 20000）。數值越大變動越劇烈。
-*   `--c`: 擾動幅度（預設 5.0）。
+*   `--alpha`: 學習率（預設 30000）。數值越大變動越劇烈。
+*   `--c`: 擾動幅度（預設 2.0）。
+*   `--dataset`: 指定 `.npz` 數據集路徑（預設 `tuner/dataset.npz`）。
 
 ---
 
@@ -92,7 +120,7 @@ python -m tuner.tuner --iter 5000 --batch-size 16384
 
 **目前的約束規則：**
 1.  **範圍限制 (Range)**：
-    *   獎勵項 (Bonus) 必須 >= 0 (如 `PASSED_PAWN_BONUS`, `OUTPOST_BONUS`).
+    *   獎勵項 (Bonus) 必須 >= 0 (如 `PASSED_PAWN_BONUS`, `OUTPOST_BONUS`)。
     *   懲罰項 (Penalty) 必須 >= 0 (如 `BACKWARD_PAWN_PENALTY`, 因為程式邏輯是 `score -= penalty`)。
     *   例外：`ISOLATED_PAWN_PENALTY` 必須 <= 0 (因為程式邏輯是 `score += penalty`)。
 2.  **單調性限制 (Monotonicity)**：
@@ -102,7 +130,29 @@ python -m tuner.tuner --iter 5000 --batch-size 16384
 
 ---
 
-## 4. 輸出結果
+## 4. 數據標籤方式
+
+### 連續 Sigmoid 標籤 (推薦)
+
+目前的系統使用 Stockfish 的 centipawn 分數，轉換為 Sigmoid 值：
+
+```
+Sigmoid(score) = 1 / (1 + 10^(-score/400))
+```
+
+| Stockfish 分數 | Sigmoid 標籤 | 含義 |
+| :---: | :---: | :--- |
+| +200 cp | 0.760 | 白方明顯優勢 |
+| +100 cp | 0.640 | 白方輕微優勢 |
+| 0 cp | 0.500 | 均勢 |
+| -100 cp | 0.360 | 黑方輕微優勢 |
+| -200 cp | 0.240 | 黑方明顯優勢 |
+
+這比離散標籤 (0/0.5/1) 能保留更多資訊，例如「+150cp 的優勢」和「+50cp 的優勢」會得到不同的標籤值。
+
+---
+
+## 5. 輸出結果
 
 當調參器發現更低的 MSE (Mean Squared Error) 時，會自動更新輸出檔案：
 
@@ -110,7 +160,7 @@ python -m tuner.tuner --iter 5000 --batch-size 16384
 
 您可以直接將此檔案的內容複製回引擎的 `constants.py`，或修改引擎程式碼以直接 import 此檔案。
 
-## 5. 常見問題 (FAQ)與超參數調整指南
+## 6. 常見問題 (FAQ) 與超參數調整指南
 
 ### 如何調整 Alpha (學習率) 與 C (擾動幅度)？
 
@@ -134,3 +184,6 @@ A: 引擎內部的邏輯是 `score -= BACKWARD_PAWN_PENALTY`，所以參數本�
 
 **Q: Mini-batch 會影響準確度嗎？**
 A: 會有些許雜訊，但 SPSA 本身就是隨機算法。使用 Mini-batch 能讓你在相同的時間內跑更多次迭代，通常能更快找到全域最佳解。建議最後可以用全量數據 (`--batch-size` 不設) 微調一下。
+
+**Q: 應該用 MG+EG 混合數據還是分開訓練？**
+A: **推薦使用混合數據**。因為引擎使用 Tapered Evaluation（漸進式評估），一個 theta 向量同時包含 MG 和 EG 的參數，需要兩個階段的數據同時訓練才能正確收斂。如果想「只調殘局」，可以用 `--dataset tuner/dataset_endgame.npz` 搭配 `--tune` 只調殘局相關參數。

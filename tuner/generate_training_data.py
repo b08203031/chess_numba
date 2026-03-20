@@ -8,12 +8,12 @@ Texel's Tuning Method 設計。它通過以下步驟工作：
 3.  每個 Worker 使用獨立的 Stockfish 引擎實例進行並行分析與清洗。
 4.  主進程收集結果並寫入 JSON Lines 文件。
 
-數據清洗邏輯更新 (Score-based Labeling):
-不依賴 PGN 的原始結果，而是完全根據 Stockfish 的靜態評分來賦予標籤：
-- Score > 100 cp: Result = 1.0 (白勝)
-- Score < -100 cp: Result = 0.0 (黑勝)
-- -100 <= Score <= 100 cp: Result = 0.5 (和棋)
-這能讓引擎學會識別明顯的勝勢。
+數據清洗邏輯更新 (Continuous Sigmoid Labeling):
+使用 Stockfish 的 centipawn 分數轉換為 Sigmoid 值作為連續標籤：
+- Sigmoid(score) = 1 / (1 + 10^(-score/400))
+- 過濾掉 |score| > max_cp 的局面（預設 200cp = ±2.0 分）
+- 過濾掉雙方 ELO 低於門檻的對局（預設 2400）
+- 跳過前 N 步開局（預設 12 步）
 """
 import chess
 import chess.pgn
@@ -23,6 +23,7 @@ import sys
 import os
 import argparse
 import shutil
+import math
 import concurrent.futures
 import multiprocessing
 
@@ -31,10 +32,7 @@ import multiprocessing
 STOCKFISH_ENGINE = None
 
 def parse_result(result_str: str) -> float:
-    # 雖然新的邏輯不依賴 PGN 結果進行驗證，但我們仍然需要解析它來過濾掉未完成的比賽嗎？
-    # 不，新的邏輯是 "Label Override"，只要局面合法且 Stockfish 能給分，我們就用 Stockfish 的分。
-    # 但為了避免解析到 header 損壞的局，還是保留基本的解析，或者直接忽略。
-    # 原代碼用它來做初步過濾，我們這裡可以放寬，但保留此函數以防萬一需要。
+    """解析 PGN 結果字串。保留以防需要過濾未完成的對局。"""
     if result_str == '1-0':
         return 1.0
     elif result_str == '0-1':
@@ -48,11 +46,7 @@ def should_skip_position(board):
     if board.is_check():
         return True
     
-    # 這裡的材質檢查是用於過濾 "明顯材質失衡" 的局面嗎？
-    # 原代碼 logic: absolute diff > 5 pawn values -> skip?
-    # 這似乎是用來過濾掉已經太過懸殊的局面，避免過擬合？
-    # 或者是在靜態評估訓練中，我們希望專注於材質相對平衡但有位置優勢的局面？
-    # 用戶指示 "保留過濾條件"。
+    # 過濾明顯材質失衡的局面（超過 5 分差距）
     material_diff = 0
     piece_values = {chess.PAWN: 1, chess.KNIGHT: 3, chess.BISHOP: 3, chess.ROOK: 5, chess.QUEEN: 9}
     for piece_type, value in piece_values.items():
@@ -90,15 +84,15 @@ def setup_stockfish_engine(path: str):
         print(f"Error: Stockfish executable not found at the specified path: {path}", file=sys.stderr)
         sys.exit(1)
 
-def get_stockfish_label(board: chess.Board, depth: int) -> float:
+def get_stockfish_sigmoid_label(board: chess.Board, depth: int, max_cp: int = 200) -> float:
     """
-    使用 Stockfish 分析局面並返回強制標籤 (Label Override)。
+    使用 Stockfish 分析局面並返回連續 Sigmoid 標籤。
+    
+    過濾掉 |score| > max_cp 的局面（太過懸殊，對訓練無益）。
     
     Returns:
-        1.0 if score > 100 cp (White winning)
-        0.0 if score < -100 cp (Black winning)
-        0.5 if -100 <= score <= 100 (Draw/Equal)
-        None if analysis fails
+        Sigmoid(score) 介於 0.0~1.0 之間的連續值
+        None if |score| > max_cp, analysis fails, or mate detected
     """
     if STOCKFISH_ENGINE is None:
         raise RuntimeError("Stockfish engine is not initialized.")
@@ -108,28 +102,56 @@ def get_stockfish_label(board: chess.Board, depth: int) -> float:
         score_obj = info["score"].white()
         
         if score_obj.is_mate():
-            # Mate is always a win (> 100) or loss (< -100)
-            score = 30000 if score_obj.mate() > 0 else -30000
-        else:
-            score = score_obj.score()
-
-        # Score-based Labeling Logic
-        if score > 100:
-            return 1.0
-        elif score < -100:
-            return 0.0
-        else:
-            return 0.5
+            # Mate 局面一定超過 max_cp 閾值，直接過濾
+            return None
+        
+        score = score_obj.score()
+        
+        # 過濾掉過於懸殊的局面
+        if abs(score) > max_cp:
+            return None
+        
+        # 轉換為 Sigmoid: 1 / (1 + 10^(-score/400))
+        sigmoid = 1.0 / (1.0 + math.pow(10.0, -score / 400.0))
+        return sigmoid
             
     except (chess.engine.EngineTerminatedError, chess.engine.EngineError):
         return None
 
+def check_elo(headers, min_elo):
+    """
+    檢查雙方 ELO 是否都高於門檻。
+    如果 PGN 沒有 ELO 資訊，則放行（回傳 True）。
+    
+    Args:
+        headers: PGN game headers dict
+        min_elo: 最低 ELO 門檻（0 表示不篩選）
+    
+    Returns:
+        True if both players meet the ELO threshold
+    """
+    if min_elo <= 0:
+        return True
+    
+    try:
+        white_elo = int(headers.get("WhiteElo", "0"))
+        black_elo = int(headers.get("BlackElo", "0"))
+    except (ValueError, TypeError):
+        # 無法解析 ELO，放行
+        return True
+    
+    # 如果兩方都是 0（無 ELO 資訊），放行
+    if white_elo == 0 and black_elo == 0:
+        return True
+    
+    return white_elo >= min_elo and black_elo >= min_elo
+
 # --- Worker Function for Parallel Processing ---
 
-def process_game_batch(games_data, stockfish_path, depth, threshold, min_move, max_move):
+def process_game_batch(games_data, stockfish_path, depth, max_cp, min_move, max_move):
     """
     Worker function to process a batch of games.
-    games_data: list of (game_headers, moves_list) tuples.
+    games_data: list of (game_headers, moves_uci_list) tuples.
     """
     # Initialize engine for this worker
     setup_stockfish_engine(stockfish_path)
@@ -137,21 +159,20 @@ def process_game_batch(games_data, stockfish_path, depth, threshold, min_move, m
     mg_results = []
     eg_results = []
     discarded = 0
+    filtered_by_score = 0
     
     try:
-        for headers, moves_san in games_data:
-            # We don't strictly need the PGN result anymore for validation,
-            # but we still might want to ensure the game has a valid result structure?
-            # For now, we process all games provided.
-            
+        for headers, moves_uci in games_data:
             # Reconstruct board
             board = chess.Board() 
             if "FEN" in headers:
                 board.set_fen(headers["FEN"])
 
-            for i, move_san in enumerate(moves_san):
+            for i, move_uci in enumerate(moves_uci):
                 try:
-                    move = board.parse_san(move_san)
+                    move = chess.Move.from_uci(move_uci)
+                    if move not in board.legal_moves:
+                        break
                 except ValueError:
                     break 
                 
@@ -167,26 +188,28 @@ def process_game_batch(games_data, stockfish_path, depth, threshold, min_move, m
                 if min_move <= board.fullmove_number <= max_move:
                     if not board.is_checkmate() and not board.is_stalemate() and not board.is_insufficient_material() and not should_skip_position(board):
                         
-                        # Use Stockfish to generate the label directly
-                        label = get_stockfish_label(board, depth)
+                        # Use Stockfish to generate the continuous sigmoid label
+                        label = get_stockfish_sigmoid_label(board, depth, max_cp)
                         
                         if label is not None:
                             fen = board.fen()
-                            data = json.dumps({"fen": fen, "result": label})
+                            data = json.dumps({"fen": fen, "result": round(label, 6)})
                             
                             if is_endgame_position(board):
                                 eg_results.append(data)
                             else:
                                 mg_results.append(data)
                         else:
-                            discarded += 1
+                            filtered_by_score += 1
+                    else:
+                        discarded += 1
     finally:
         if STOCKFISH_ENGINE:
             STOCKFISH_ENGINE.quit()
             
-    return mg_results, eg_results, discarded
+    return mg_results, eg_results, discarded, filtered_by_score
 
-def generate_data_parallel(pgn_file, output_mg, output_eg, min_move, max_move, games_limit, depth, threshold, stockfish_path, num_workers=None):
+def generate_data_parallel(pgn_file, output_mg, output_eg, min_move, max_move, games_limit, depth, max_cp, min_elo, stockfish_path, num_workers=None):
     """
     Main driver for parallel generation.
     """
@@ -194,13 +217,16 @@ def generate_data_parallel(pgn_file, output_mg, output_eg, min_move, max_move, g
         num_workers = max(1, multiprocessing.cpu_count() - 1) 
         
     print(f"Starting parallel generation with {num_workers} workers...", file=sys.stderr)
+    print(f"Settings: min_move={min_move}, max_move={max_move}, max_cp={max_cp}, min_elo={min_elo}, depth={depth}", file=sys.stderr)
     
     BATCH_SIZE = 50 
     
     games_read = 0
+    games_skipped_elo = 0
     mg_total = 0
     eg_total = 0
     discarded_total = 0
+    filtered_by_score_total = 0
     
     current_batch = []
     futures = []
@@ -221,28 +247,35 @@ def generate_data_parallel(pgn_file, output_mg, output_eg, min_move, max_move, g
                 
             if game is None:
                 break
+            
+            headers = dict(game.headers)
+            
+            # ELO 篩選
+            if not check_elo(headers, min_elo):
+                games_skipped_elo += 1
+                continue
                 
             games_read += 1
             
-            headers = dict(game.headers)
+            # 使用 UCI 格式（與 process_game_batch 中的 Move.from_uci 對應）
             moves = [move.uci() for move in game.mainline_moves()] 
             
             current_batch.append((headers, moves))
             
             if len(current_batch) >= BATCH_SIZE:
-                future = executor.submit(process_game_batch, current_batch, stockfish_path, depth, threshold, min_move, max_move)
+                future = executor.submit(process_game_batch, current_batch, stockfish_path, depth, max_cp, min_move, max_move)
                 futures.append(future)
                 current_batch = []
                 
         if current_batch:
-            future = executor.submit(process_game_batch, current_batch, stockfish_path, depth, threshold, min_move, max_move)
+            future = executor.submit(process_game_batch, current_batch, stockfish_path, depth, max_cp, min_move, max_move)
             futures.append(future)
             
-        print(f"All games read. Waiting for {len(futures)} tasks to complete...", file=sys.stderr)
+        print(f"All games read ({games_read} accepted, {games_skipped_elo} skipped by ELO). Waiting for {len(futures)} tasks to complete...", file=sys.stderr)
         
         for future in concurrent.futures.as_completed(futures):
             try:
-                mg_res, eg_res, discarded = future.result()
+                mg_res, eg_res, discarded, filtered_by_score = future.result()
                 
                 for line in mg_res:
                     f_mg.write(line + '\n')
@@ -252,18 +285,20 @@ def generate_data_parallel(pgn_file, output_mg, output_eg, min_move, max_move, g
                 mg_total += len(mg_res)
                 eg_total += len(eg_res)
                 discarded_total += discarded
+                filtered_by_score_total += filtered_by_score
                 
                 total_kept = mg_total + eg_total
-                print(f"\rProcessed Positions (Kept+Discarded): {total_kept + discarded_total} | MG: {mg_total} | EG: {eg_total}", end="", file=sys.stderr)
+                print(f"\rKept: {total_kept} (MG: {mg_total} | EG: {eg_total}) | Filtered(score): {filtered_by_score_total} | Discarded: {discarded_total}", end="", file=sys.stderr)
                      
             except Exception as e:
                 print(f"\nWorker exception: {e}", file=sys.stderr)
 
     print(f"\n--- Data Generation Complete ---", file=sys.stderr)
-    print(f"Total Games Read: {games_read}", file=sys.stderr)
+    print(f"Total Games Read: {games_read} (Skipped by ELO: {games_skipped_elo})", file=sys.stderr)
     print(f"Middlegame positions saved: {mg_total}", file=sys.stderr)
     print(f"Endgame positions saved: {eg_total}", file=sys.stderr)
-    print(f"Positions discarded: {discarded_total}", file=sys.stderr)
+    print(f"Positions filtered by score (|cp| > {max_cp}): {filtered_by_score_total}", file=sys.stderr)
+    print(f"Positions discarded (other): {discarded_total}", file=sys.stderr)
 
 if __name__ == '__main__':
     multiprocessing.freeze_support()
@@ -280,19 +315,24 @@ if __name__ == '__main__':
         default_pgn = os.path.join("tuner", "twic1613.pgn")
 
     parser = argparse.ArgumentParser(
-        description="Generate cleaned chess training data (Parallel Split MG/EG) using Stockfish Labeling.",
+        description="Generate cleaned chess training data (Parallel Split MG/EG) using Stockfish Sigmoid Labeling.",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter
     )
     parser.add_argument("--pgn", type=str, default=default_pgn, help="Input PGN file.")
     parser.add_argument("--output-mg", type=str, default="training_data_middlegame_cleaned.jsonl", help="Output MG file.")
     parser.add_argument("--output-eg", type=str, default="training_data_endgame_cleaned.jsonl", help="Output EG file.")
-    parser.add_argument("--min-move", type=int, default=8, help="Start move number.")
+    parser.add_argument("--min-move", type=int, default=12, help="Start move number (skip opening).")
     parser.add_argument("--max-move", type=int, default=200, help="End move number.")
     parser.add_argument("--games", type=int, default=1000, help="Games limit (0 for all).")
     
+    # Stockfish 相關
     parser.add_argument("--stockfish-path", type=str, default=default_stockfish, help="Stockfish executable path.")
     parser.add_argument("--stockfish-depth", type=int, default=10, help="Stockfish analysis depth.")
-    parser.add_argument("--consistency-threshold", type=int, default=30, help="Draw consistency threshold (cp). (Deprecated in score-based labeling)")
+    
+    # 篩選相關
+    parser.add_argument("--max-cp", type=int, default=200, help="Maximum absolute centipawn score to keep (filters extreme positions). 200 = ±2.0 pawns.")
+    parser.add_argument("--min-elo", type=int, default=2400, help="Minimum ELO for both players (0 to disable).")
+    
     parser.add_argument("--workers", type=int, default=None, help="Number of worker processes (default: CPU count - 1).")
 
     args = parser.parse_args()
@@ -312,7 +352,8 @@ if __name__ == '__main__':
         max_move=args.max_move,
         games_limit=args.games if args.games > 0 else None,
         depth=args.stockfish_depth,
-        threshold=args.consistency_threshold,
+        max_cp=args.max_cp,
+        min_elo=args.min_elo,
         stockfish_path=args.stockfish_path,
         num_workers=args.workers
     )

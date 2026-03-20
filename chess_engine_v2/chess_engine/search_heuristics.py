@@ -5,13 +5,8 @@ from chess_engine.move import (
     get_to_square, get_from_square, get_special_move_flag,
     SPECIAL_MOVE_FLAG_PROMOTION, SPECIAL_MOVE_FLAG_EN_PASSANT
 )
-from chess_engine.constants import (
-    MAX_HISTORY, HISTORY_MAX_MAIN, HISTORY_MAX_BUTTERFLY, HISTORY_MAX_CAPTURE, HISTORY_MAX_CONTINUATION,
-    CONTINUATION_HISTORY_FACTOR, LMR_TABLE,
-    MG_MATERIAL_VALUES, NO_MOVE, MAX_PLY, BB_SQUARES,
-    SCORE_TT_MOVE, SCORE_GOOD_CAPTURE_BONUS, SCORE_BAD_CAPTURE_PENALTY,
-    SCORE_KILLER_1, SCORE_KILLER_2, SCORE_COUNTER_MOVE
-)
+from chess_engine.constants import SCORE_GOOD_CAPTURE_BONUS, SCORE_BAD_CAPTURE_PENALTY, SCORE_KILLER_1, SCORE_KILLER_2, SCORE_COUNTER_MOVE, MAX_HISTORY, LMR_TABLE, MAX_PLY, SCORE_TT_MOVE, BB_SQUARES, NO_MOVE, HISTORY_MAX_MAIN, HISTORY_MAX_BUTTERFLY, HISTORY_MAX_CAPTURE, HISTORY_MAX_CONTINUATION
+from chess_engine.evaluation import MG_MATERIAL_VALUES
 from chess_engine.see import see_ge
 from chess_engine.bitboard_utils import find_piece_type_on_square, find_piece_type_on_square_side, get_lsb_index
 from chess_engine.board_operations import find_piece_type_for_square
@@ -77,7 +72,7 @@ def update_continuation_history(context, ply_offset, prev_move, prev_piece, curr
     context.continuation_history[ply_offset, prev_piece, prev_to, curr_piece, curr_to] = new_val
 
 @numba.njit(cache=True, boundscheck=False, fastmath=True)
-def score_captures(piece_bbs, occupancy_bbs, game_state, moves, scores, start_idx, end_idx, search_context):
+def score_captures(piece_bbs, occupancy_bbs, game_state, moves, scores, start_idx, end_idx, search_context, pinned_white, pinned_black):
     side_to_move = game_state[0]
     
     for i in range(start_idx, end_idx):
@@ -91,15 +86,61 @@ def score_captures(piece_bbs, occupancy_bbs, game_state, moves, scores, start_id
         if victim_type == -1 and get_special_move_flag(move) == SPECIAL_MOVE_FLAG_EN_PASSANT:
             victim_type = 0 # Pawn value for En Passant
             
-        # MVV-LVA without SEE
-        score = 0
+        mvv_lva = 0
         if victim_type != -1:
-             score = MG_MATERIAL_VALUES[victim_type % 6] * 7
+            mvv_lva = MG_MATERIAL_VALUES[victim_type % 6] - MG_MATERIAL_VALUES[aggressor_type % 6]
         
-        # Add capture history
-        if victim_type != -1:
-             score += search_context.capture_history[aggressor_type, to_square, victim_type]
+        # Identify good vs bad capture using SEE right here (R1 Optimization)
+        # Using threshold 0 to divide good/bad captures
+        is_good_capture = see_ge(piece_bbs, occupancy_bbs, side_to_move, from_sq, to_square, 0, pinned_white, pinned_black, aggressor_type, victim_type)
+        
+        score = 0
+        if is_good_capture:
+            score = SCORE_GOOD_CAPTURE_BONUS + mvv_lva
+            if victim_type != -1:
+                score += search_context.capture_history[aggressor_type, to_square, victim_type]
+        else:
+            score = SCORE_BAD_CAPTURE_PENALTY + mvv_lva
+            if victim_type != -1:
+                score += search_context.capture_history[aggressor_type, to_square, victim_type]
              
+        scores[i] = score
+
+@numba.njit(cache=True, boundscheck=False, fastmath=True)
+def score_captures_with_tt(piece_bbs, occupancy_bbs, game_state, moves, scores, move_count, tt_move, pinned_white, pinned_black, search_context):
+    side_to_move = game_state[0]
+    
+    for i in range(move_count):
+        move = moves[i]
+        score = 0
+        
+        if move == tt_move:
+            score = SCORE_TT_MOVE
+        else:
+            to_square = get_to_square(move)
+            from_sq = get_from_square(move)
+            
+            victim_type = find_piece_type_on_square_side(piece_bbs, to_square, 1 - side_to_move)
+            aggressor_type = find_piece_type_on_square_side(piece_bbs, from_sq, side_to_move)
+            
+            if victim_type == -1 and get_special_move_flag(move) == SPECIAL_MOVE_FLAG_EN_PASSANT:
+                victim_type = 0 # Pawn value for En Passant
+                
+            mvv_lva = 0
+            if victim_type != -1:
+                mvv_lva = MG_MATERIAL_VALUES[victim_type % 6] - MG_MATERIAL_VALUES[aggressor_type % 6]
+            
+            is_good_capture = see_ge(piece_bbs, occupancy_bbs, side_to_move, from_sq, to_square, 0, pinned_white, pinned_black, aggressor_type, victim_type)
+            
+            if is_good_capture:
+                score = SCORE_GOOD_CAPTURE_BONUS + mvv_lva
+                if victim_type != -1:
+                    score += search_context.capture_history[aggressor_type, to_square, victim_type]
+            else:
+                score = SCORE_BAD_CAPTURE_PENALTY + mvv_lva
+                if victim_type != -1:
+                    score += search_context.capture_history[aggressor_type, to_square, victim_type]
+                 
         scores[i] = score
 
 @numba.njit(cache=True, boundscheck=False, fastmath=True)
