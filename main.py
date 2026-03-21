@@ -142,17 +142,22 @@ def uci_loop():
                     game_history.append(game_state[4])
                     
                 elif "fen" in tokens:
-                    fen_start_index = tokens.index("fen") + 1
-                    # Stop before 'moves' if present
-                    if "moves" in tokens:
-                        moves_idx = tokens.index("moves")
-                        fen = " ".join(tokens[fen_start_index:moves_idx])
-                    else:
-                        fen = " ".join(tokens[fen_start_index:])
-                        
-                    piece_bbs, occupancy_bbs, game_state = parse_fen(fen)
-                    board_state = (piece_bbs, occupancy_bbs, game_state)
-                    game_history.append(game_state[4])
+                    try:
+                        fen_start_index = tokens.index("fen") + 1
+                        # Stop before 'moves' if present
+                        if "moves" in tokens:
+                            moves_idx = tokens.index("moves")
+                            fen = " ".join(tokens[fen_start_index:moves_idx])
+                        else:
+                            fen = " ".join(tokens[fen_start_index:])
+                            
+                        piece_bbs, occupancy_bbs, game_state = parse_fen(fen)
+                        board_state = (piece_bbs, occupancy_bbs, game_state)
+                        game_history.append(game_state[4])
+                    except Exception as e:
+                        log_info(f"Invalid FEN received: {e}")
+                        board_state = None # Invalidate current board state
+                        continue
                 
                 # Handle 'moves' / 處理 'moves'
                 if "moves" in tokens:

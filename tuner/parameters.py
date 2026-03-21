@@ -84,6 +84,7 @@ class ParameterManager:
         self._add_param("PAWN_SHIELD_PUSHED_PENALTY", constants.PAWN_SHIELD_PUSHED_PENALTY)
         self._add_param("KING_OPEN_FILE_PENALTY", constants.KING_OPEN_FILE_PENALTY)
         self._add_param("KING_SEMI_OPEN_FILE_PENALTY", constants.KING_SEMI_OPEN_FILE_PENALTY)
+        # NOTE: KING_SAFETY_WEAK_SQUARE_PENALTY intentionally skipped — not used in evaluation.py
 
         # --- Threats ---
         self._add_param("THREAT_SAFE_PAWN", constants.THREAT_SAFE_PAWN)
@@ -91,7 +92,7 @@ class ParameterManager:
         self._add_param("THREAT_BY_ROOK", constants.THREAT_BY_ROOK)
         self._add_param("THREAT_BY_KING", constants.THREAT_BY_KING)
         self._add_param("THREAT_HANGING", constants.THREAT_HANGING)
-        self._add_param("THREAT_RESTRICTED_PIECE", constants.THREAT_RESTRICTED_PIECE)
+        # NOTE: THREAT_RESTRICTED_PIECE intentionally skipped — not used in evaluation.py
         self._add_param("THREAT_PAWN_PUSH", constants.THREAT_PAWN_PUSH)
 
         # --- Per-Piece ---

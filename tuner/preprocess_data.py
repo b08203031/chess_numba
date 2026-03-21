@@ -4,7 +4,6 @@ import chess
 import glob
 import os
 import argparse
-from chess_engine.constants import STOP_SEARCH_FLAG
 
 def parse_fen_to_arrays(fen):
     board = chess.Board(fen)

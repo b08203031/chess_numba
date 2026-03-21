@@ -310,7 +310,7 @@ if __name__ == '__main__':
         else:
              default_stockfish = "stockfish"
 
-    default_pgn = "twic1613.pgn"
+    default_pgn = "tuner/twic1613.pgn"
     if not os.path.exists(default_pgn) and os.path.exists(os.path.join("tuner", "twic1613.pgn")):
         default_pgn = os.path.join("tuner", "twic1613.pgn")
 
@@ -319,15 +319,15 @@ if __name__ == '__main__':
         formatter_class=argparse.ArgumentDefaultsHelpFormatter
     )
     parser.add_argument("--pgn", type=str, default=default_pgn, help="Input PGN file.")
-    parser.add_argument("--output-mg", type=str, default="training_data_middlegame_cleaned.jsonl", help="Output MG file.")
-    parser.add_argument("--output-eg", type=str, default="training_data_endgame_cleaned.jsonl", help="Output EG file.")
+    parser.add_argument("--output-mg", type=str, default="tuner/training_data_middlegame_cleaned.jsonl", help="Output MG file.")
+    parser.add_argument("--output-eg", type=str, default="tuner/training_data_endgame_cleaned.jsonl", help="Output EG file.")
     parser.add_argument("--min-move", type=int, default=12, help="Start move number (skip opening).")
     parser.add_argument("--max-move", type=int, default=200, help="End move number.")
-    parser.add_argument("--games", type=int, default=1000, help="Games limit (0 for all).")
+    parser.add_argument("--games", type=int, default=0, help="Games limit (0 for all).")
     
     # Stockfish 相關
     parser.add_argument("--stockfish-path", type=str, default=default_stockfish, help="Stockfish executable path.")
-    parser.add_argument("--stockfish-depth", type=int, default=10, help="Stockfish analysis depth.")
+    parser.add_argument("--stockfish-depth", type=int, default=12, help="Stockfish analysis depth.")
     
     # 篩選相關
     parser.add_argument("--max-cp", type=int, default=200, help="Maximum absolute centipawn score to keep (filters extreme positions). 200 = ±2.0 pawns.")

@@ -153,7 +153,8 @@ class EngineProcess:
             try:
                 self.process.stdin.write(cmd + "\n")
                 self.process.stdin.flush()
-            except BrokenPipeError:
+            except (BrokenPipeError, OSError) as e:
+                print(f"[ERROR] Engine communication failed: {e}")
                 self.running = False
 
     def _read_stdout(self):
@@ -487,7 +488,10 @@ class ChessVisionApp(tk.Tk):
 
     def stop_analysis(self):
         if self.analyzing:
-            self.engine.stop_calculation()
+            try:
+                self.engine.stop_calculation()
+            except Exception as e:
+                print(f"[WARN] Failed to send stop command: {e}")
             self.analyzing = False # Stop immediately internally
             
         self.auto_detecting_opponent = False
@@ -738,10 +742,27 @@ class ChessVisionApp(tk.Tk):
                 parts[3] = user_ep
                 fen_final = " ".join(parts)
 
+            # --- FEN Validation ---
+            try:
+                temp_board = chess.Board(fen_final)
+                if not temp_board.is_valid():
+                    # Check for missing kings specifically as it's the most common "garbage" result
+                    reasons = []
+                    if not any(temp_board.pieces(chess.KING, chess.WHITE)): reasons.append("Missing White King")
+                    if not any(temp_board.pieces(chess.KING, chess.BLACK)): reasons.append("Missing Black King")
+                    
+                    error_msg = f"無效的局面 (Invalid Position): {', '.join(reasons) if reasons else 'Structure error'}"
+                    self.message_queue.put({"type": "error", "message": error_msg})
+                    self.message_queue.put({"type": "analysis_finished"})
+                    return
+            except ValueError as e:
+                self.message_queue.put({"type": "error", "message": f"FEN 解析錯誤 (FEN Parse Error): {e}"})
+                self.message_queue.put({"type": "analysis_finished"})
+                return
+
             self.message_queue.put({"type": "fen_update", "fen": fen_final})
             
             # Check for Game Over before sending to engine
-            temp_board = chess.Board(fen_final)
             if temp_board.is_game_over():
                 outcome = temp_board.outcome()
                 reason = "將殺 (Checkmate)" if temp_board.is_checkmate() else "平局/逼和 (Draw/Stalemate)"

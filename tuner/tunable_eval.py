@@ -65,23 +65,22 @@ IDX_THREAT_BY_MINOR = 1042
 IDX_THREAT_BY_ROOK = 1054
 IDX_THREAT_BY_KING = 1066
 IDX_THREAT_HANGING = 1068
-IDX_THREAT_RESTRICTED_PIECE = 1070
-IDX_THREAT_PAWN_PUSH = 1072
-IDX_KING_PROTECTOR = 1074
-IDX_BISHOP_PAWNS_PENALTY = 1076
-IDX_TRAPPED_ROOK = 1078
-IDX_INITIATIVE_BONUS = 1080
+IDX_THREAT_PAWN_PUSH = 1070
+IDX_KING_PROTECTOR = 1072
+IDX_BISHOP_PAWNS_PENALTY = 1074
+IDX_TRAPPED_ROOK = 1076
+IDX_INITIATIVE_BONUS = 1078
 
 
-@numba.njit(numba.int32(numba.float64[:], numba.int32), cache=True, inline='always')
+@numba.njit(numba.int32(numba.float64[:], numba.int32), cache=False, inline='always')
 def get_int(theta, idx):
     return numba.int32(theta[idx])
 
-@numba.njit(numba.int32(numba.float64[:], numba.int32, numba.int32), cache=True, inline='always')
+@numba.njit(numba.int32(numba.float64[:], numba.int32, numba.int32), cache=False, inline='always')
 def get_array_val(theta, base_idx, offset):
     return numba.int32(theta[base_idx + offset])
 
-@numba.njit(numba.int32(numba.float64[:], numba.int32, numba.int32, numba.int32, numba.int32), cache=True, inline='always')
+@numba.njit(numba.int32(numba.float64[:], numba.int32, numba.int32, numba.int32, numba.int32), cache=False, inline='always')
 def get_2d_val(theta, base_idx, row, col_size, col):
     return numba.int32(theta[base_idx + row * col_size + col])
 
@@ -193,7 +192,7 @@ WHITE_PASSED_PAWN_MASKS, BLACK_PASSED_PAWN_MASKS = _create_passed_pawn_masks()
 
 
 
-@numba.njit(numba.types.UniTuple(numba.int32, 6)(piece_bbs_signature, numba.float64[:]), cache=True, boundscheck=False, fastmath=True)
+@numba.njit(numba.types.UniTuple(numba.int32, 6)(piece_bbs_signature, numba.float64[:]), cache=False, boundscheck=False, fastmath=True)
 def evaluate_pawn_structure(piece_bbs, theta):
     """
     評估雙方的兵型結構（通路兵、孤兵、重疊兵、後兵、連結兵）。
@@ -470,7 +469,7 @@ def evaluate_pawn_structure(piece_bbs, theta):
     return mg_score, eg_score, white_pawn_tropism, black_pawn_tropism, white_pawn_storm, black_pawn_storm
 
 
-@numba.njit(numba.types.UniTuple(numba.int32, 2)(piece_bbs_signature, piece_counts_signature, numba.float64[:]), cache=True, boundscheck=False, fastmath=True)
+@numba.njit(numba.types.UniTuple(numba.int32, 2)(piece_bbs_signature, piece_counts_signature, numba.float64[:]), cache=False, boundscheck=False, fastmath=True)
 def evaluate_piece_coordination(piece_bbs, piece_counts, theta):
     """
     評估棋子協同性特徵（雙象、車在開放線）。
@@ -556,7 +555,7 @@ def evaluate_piece_coordination(piece_bbs, piece_counts, theta):
     return mg_score, eg_score
 
 
-@numba.njit(numba.int32(numba.int32, numba.uint64, numba.uint64, numba.int32, numba.float64[:]), cache=True, boundscheck=False, fastmath=True)
+@numba.njit(numba.int32(numba.int32, numba.uint64, numba.uint64, numba.int32, numba.float64[:]), cache=False, boundscheck=False, fastmath=True)
 def _evaluate_pawn_shield_for_color(king_sq, friendly_pawns, enemy_pawns, color, theta):
     """
     Evaluates the pawn shield in front of the king for a single color.
@@ -604,7 +603,7 @@ def _evaluate_pawn_shield_for_color(king_sq, friendly_pawns, enemy_pawns, color,
 
     return score
 
-@numba.njit(numba.int32(numba.int32, numba.int32, piece_bbs_signature, occupancy_bbs_signature, numba.uint64, numba.uint64, numba.uint64, numba.float64[:]), cache=True, boundscheck=False, fastmath=True)
+@numba.njit(numba.int32(numba.int32, numba.int32, piece_bbs_signature, occupancy_bbs_signature, numba.uint64, numba.uint64, numba.uint64, numba.float64[:]), cache=False, boundscheck=False, fastmath=True)
 def _evaluate_king_attackers(king_sq, color, piece_bbs, occupancy_bbs, enemy_attacks_bb, friendly_attacks_bb, king_zone, theta):
     """
     Calculates king danger using a multi-indicator linear formula inspired by SF11,
@@ -773,7 +772,7 @@ def _evaluate_king_attackers(king_sq, color, piece_bbs, occupancy_bbs, enemy_att
     else:
         return np.int32(0)
 
-@numba.njit(numba.types.UniTuple(numba.int32, 2)(piece_bbs_signature, occupancy_bbs_signature, numba.uint64, numba.uint64, numba.int32, numba.int32, numba.int32, numba.int32, piece_counts_signature, numba.uint64, numba.uint64, numba.uint64, numba.uint64, numba.float64[:]), cache=True, boundscheck=False, fastmath=True)
+@numba.njit(numba.types.UniTuple(numba.int32, 2)(piece_bbs_signature, occupancy_bbs_signature, numba.uint64, numba.uint64, numba.int32, numba.int32, numba.int32, numba.int32, piece_counts_signature, numba.uint64, numba.uint64, numba.uint64, numba.uint64, numba.float64[:]), cache=False, boundscheck=False, fastmath=True)
 def evaluate_king_safety(piece_bbs, occupancy_bbs, white_attacks, black_attacks, white_tropism, black_tropism, white_pawn_storm_score, black_pawn_storm_score, piece_counts, white_attacks2, black_attacks2, pinned_white, pinned_black, theta):
     """
     King Safety evaluation. Combines pawn shield, king attackers, tropism, and pawn storm.
@@ -827,7 +826,7 @@ def evaluate_king_safety(piece_bbs, occupancy_bbs, white_attacks, black_attacks,
     return mg_safety_score, eg_safety_score
 
 
-@numba.njit(numba.types.Tuple((numba.uint64, numba.uint64, numba.uint64, numba.uint64, numba.uint64, numba.uint64, numba.uint64, numba.uint64, numba.int32, numba.int32, numba.int32, numba.int32, numba.int32, numba.int32, numba.int32, numba.int32))(piece_bbs_signature, occupancy_bbs_signature, numba.float64[:]), cache=True, boundscheck=False, fastmath=True)
+@numba.njit(numba.types.Tuple((numba.uint64, numba.uint64, numba.uint64, numba.uint64, numba.uint64, numba.uint64, numba.uint64, numba.uint64, numba.int32, numba.int32, numba.int32, numba.int32, numba.int32, numba.int32, numba.int32, numba.int32))(piece_bbs_signature, occupancy_bbs_signature, numba.float64[:]), cache=False, boundscheck=False, fastmath=True)
 def evaluate_attacks_mobility_threats(piece_bbs, occupancy_bbs, theta):
     (wp_bb, wn_bb, wb_bb, wr_bb, wq_bb, wk_bb,
      bp_bb, bn_bb, bb_bb, br_bb, bq_bb, bk_bb) = piece_bbs
@@ -1288,7 +1287,7 @@ def evaluate_attacks_mobility_threats(piece_bbs, occupancy_bbs, theta):
             white_attacks2, black_attacks2, pinned_white, pinned_black,
             mg_mobility, eg_mobility, mg_threats, eg_threats, white_piece_tropism, black_piece_tropism, mg_outpost, eg_outpost)
 
-@numba.njit(numba.int32(piece_bbs_signature, numba.uint64, numba.float64[:]), cache=True, boundscheck=False, fastmath=True)
+@numba.njit(numba.int32(piece_bbs_signature, numba.uint64, numba.float64[:]), cache=False, boundscheck=False, fastmath=True)
 def _evaluate_king_pawn_endgame(piece_bbs, side_to_move, theta):
     """
     專門為王兵殘局設計的評估函數。包含不可阻擋通路兵的檢測（方形法則）。
@@ -1382,7 +1381,7 @@ def _evaluate_king_pawn_endgame(piece_bbs, side_to_move, theta):
     return score
 
 
-@numba.njit(numba.types.Tuple((numba.int32, numba.int32, numba.int32))(numba.int32, numba.uint64, numba.boolean, numba.float64[:]), cache=True, boundscheck=False, fastmath=True, inline='always')
+@numba.njit(numba.types.Tuple((numba.int32, numba.int32, numba.int32))(numba.int32, numba.uint64, numba.boolean, numba.float64[:]), cache=False, boundscheck=False, fastmath=True, inline='always')
 def _process_piece_score_and_count(piece_type, bb, is_white, theta):
     mg = 0
     eg = 0
@@ -1407,7 +1406,7 @@ def _process_piece_score_and_count(piece_type, bb, is_white, theta):
         
     return mg, eg, count
 
-@numba.njit(numba.int32(piece_bbs_signature, occupancy_bbs_signature, game_state_signature, numba.float64[:], numba.boolean), cache=True, boundscheck=False, fastmath=True)
+@numba.njit(numba.int32(piece_bbs_signature, occupancy_bbs_signature, game_state_signature, numba.float64[:], numba.boolean), cache=False, boundscheck=False, fastmath=True)
 def evaluate_position_tunable(piece_bbs, occupancy_bbs, game_state, theta, lazy=False):
     """
     使用 Tapered Evaluation (加權評估) 模型評估目前局面，並從當前執棋方的角度返回分數。

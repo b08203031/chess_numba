@@ -149,9 +149,9 @@ def parse_fen(fen_string: str):
     ], dtype=np.uint64)
 
     # --- Sanity Checks / 健全性檢查 ---
-    assert (occupancy_bbs[0] | occupancy_bbs[1]) == occupancy_bbs[2], \
-        "FEN Parser Error: Occupancy calculation is incorrect."
-    assert np.count_nonzero(occupancy_bbs[0] & occupancy_bbs[1]) == 0, \
-        "FEN Parser Error: White and black pieces overlap on the same square."
+    if (occupancy_bbs[0] | occupancy_bbs[1]) != occupancy_bbs[2]:
+        raise ValueError("FEN Parser Error: Occupancy calculation is incorrect.")
+    if np.count_nonzero(occupancy_bbs[0] & occupancy_bbs[1]) != 0:
+        raise ValueError("FEN Parser Error: White and black pieces overlap on the same square.")
 
     return piece_bbs, occupancy_bbs, game_state

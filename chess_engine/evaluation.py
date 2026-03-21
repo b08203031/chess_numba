@@ -197,12 +197,9 @@ def evaluate_pawn_structure(piece_bbs):
             mg_score += p_bonus_mg
             eg_score += p_bonus_eg
 
-            # Connected Passed Pawn Bonus
-            if adjacent_pawns:
-                 mg_score += CONNECTED_PASSED_PAWN_BONUS[0]
-                 eg_score += CONNECTED_PASSED_PAWN_BONUS[1]
+        # B. Connected Passed Pawn Bonus — removed, replaced by SF11 Connected formula below
 
-            # King Proximity Logic & Blocked Check
+        # King Proximity Logic & Blocked Check
             # If the passed pawn is blocked by the enemy King, reduce the bonus drastically
             block_sq = sq + 8
             if block_sq < 64:
@@ -270,8 +267,20 @@ def evaluate_pawn_structure(piece_bbs):
                      # Check if black pawns attack stop_sq
                      # PAWN_ATTACKS[0, stop_sq] gives squares occupied by Black pawns that attack stop_sq.
                      if (PAWN_ATTACKS[0, stop_sq] & black_pawns):
-                         mg_score -= BACKWARD_PAWN_PENALTY[0]
-                         eg_score -= BACKWARD_PAWN_PENALTY[1]
+                         mg_score += BACKWARD_PAWN_PENALTY[0]
+                         eg_score += BACKWARD_PAWN_PENALTY[1]
+
+        # --- SF11 Connected Pawn Bonus (all pawns: phalanx or supported) ---
+        phalanx = adjacent_pawns & RANK_MASKS[rank]
+        support_mask_behind = RANK_MASKS[max(0, rank - 1)] & ADJACENT_FILES_MASKS[file_idx]
+        support = white_pawns & support_mask_behind
+        if phalanx or support:
+            opposed = np.int32(1) if (WHITE_FORWARD_RANKS[sq] & FILE_MASKS[file_idx] & black_pawns) else np.int32(0)
+            ph = np.int32(1) if phalanx else np.int32(0)
+            sup_cnt = count_bits(support)
+            v = CONNECTED_BONUS[rank] * (np.int32(2) + ph - opposed) + CONNECTED_SUPPORT_WEIGHT * sup_cnt
+            mg_score += v
+            eg_score += v * max(np.int32(0), np.int32(rank) - np.int32(2)) // np.int32(2)
 
         temp_wp &= temp_wp - np.uint64(1)
 
@@ -318,12 +327,9 @@ def evaluate_pawn_structure(piece_bbs):
             mg_score -= p_bonus_mg
             eg_score -= p_bonus_eg
 
-            # Connected Passed Pawn Bonus
-            if adjacent_pawns:
-                 mg_score -= CONNECTED_PASSED_PAWN_BONUS[0]
-                 eg_score -= CONNECTED_PASSED_PAWN_BONUS[1]
+        # B. Connected Passed Pawn Bonus — removed, replaced by SF11 Connected formula below
 
-            # King Proximity Logic & Blocked Check
+        # King Proximity Logic & Blocked Check
             block_sq = sq - 8
             if block_sq >= 0:
                 dist_friendly = CHEBYSHEV_DISTANCE[black_king_sq, block_sq]
@@ -371,8 +377,20 @@ def evaluate_pawn_structure(piece_bbs):
                      # Check if white pawns attack stop_sq
                      # PAWN_ATTACKS[1, stop_sq] gives squares occupied by White pawns that attack stop_sq.
                      if (PAWN_ATTACKS[1, stop_sq] & white_pawns):
-                         mg_score += BACKWARD_PAWN_PENALTY[0]
-                         eg_score += BACKWARD_PAWN_PENALTY[1]
+                         mg_score -= BACKWARD_PAWN_PENALTY[0]
+                         eg_score -= BACKWARD_PAWN_PENALTY[1]
+
+        # --- SF11 Connected Pawn Bonus (all pawns: phalanx or supported) ---
+        phalanx = adjacent_pawns & RANK_MASKS[rank]
+        support_mask_ahead = RANK_MASKS[min(7, rank + 1)] & ADJACENT_FILES_MASKS[file_idx]
+        support = black_pawns & support_mask_ahead
+        if phalanx or support:
+            opposed = np.int32(1) if (BLACK_FORWARD_RANKS[sq] & FILE_MASKS[file_idx] & white_pawns) else np.int32(0)
+            ph = np.int32(1) if phalanx else np.int32(0)
+            sup_cnt = count_bits(support)
+            v = CONNECTED_BONUS[relative_rank] * (np.int32(2) + ph - opposed) + CONNECTED_SUPPORT_WEIGHT * sup_cnt
+            mg_score -= v
+            eg_score -= v * max(np.int32(0), np.int32(relative_rank) - np.int32(2)) // np.int32(2)
 
         temp_bp &= temp_bp - np.uint64(1)
 
@@ -469,11 +487,20 @@ def evaluate_piece_coordination(piece_bbs, piece_counts):
 def _evaluate_pawn_shield_for_color(king_sq, friendly_pawns, enemy_pawns, color):
     """
     Evaluates the pawn shield in front of the king for a single color.
-    評估單一方國王前方的兵盾。
+    Only active when the king is near the back rank (SF11-style guard).
+    評估單一方國王前方的兵盾。只在王靠近底線時有效。
     """
     score = np.int32(0)
+    king_rank = king_sq // 8
     king_file = king_sq % 8
-    
+
+    # Only evaluate pawn shield when king is near back rank
+    # White: rank 0-2, Black: rank 5-7
+    if color == 0 and king_rank > 2:
+        return score
+    if color == 1 and king_rank < 5:
+        return score
+
     original_rank = 1 if color == 0 else 6
     one_step_rank = 2 if color == 0 else 5
 
@@ -494,7 +521,7 @@ def _evaluate_pawn_shield_for_color(king_sq, friendly_pawns, enemy_pawns, color)
             else:
                 pawn_sq = get_msb_index(pawns_on_file)
             pawn_rank = pawn_sq // 8
-            
+
             if pawn_rank == original_rank:
                 score += PAWN_SHIELD_INTACT_BONUS
             elif pawn_rank == one_step_rank:
@@ -818,10 +845,7 @@ def evaluate_attacks_mobility_threats(piece_bbs, occupancy_bbs):
         mg_mobility -= KING_PROTECTOR[0] * CHEBYSHEV_DISTANCE[sq, white_king_sq]
         eg_mobility -= KING_PROTECTOR[1] * CHEBYSHEV_DISTANCE[sq, white_king_sq]
 
-        # MinorBehindPawn: bonus if sheltered behind any pawn
-        if (all_occupancy >> np.uint64(8)) & BB_SQUARES[sq] & (wp_bb | bp_bb):
-            mg_mobility += MINOR_BEHIND_PAWN[0]
-            eg_mobility += MINOR_BEHIND_PAWN[1]
+
         
         # Tropism: Distance to Black King
         distance = MANHATTAN_DISTANCE[sq, black_king_sq]
@@ -858,13 +882,12 @@ def evaluate_attacks_mobility_threats(piece_bbs, occupancy_bbs):
         mg_mobility -= KING_PROTECTOR[0] * CHEBYSHEV_DISTANCE[sq, white_king_sq]
         eg_mobility -= KING_PROTECTOR[1] * CHEBYSHEV_DISTANCE[sq, white_king_sq]
 
-        # MinorBehindPawn: bonus if sheltered behind any pawn
-        if (all_occupancy >> np.uint64(8)) & BB_SQUARES[sq] & (wp_bb | bp_bb):
-            mg_mobility += MINOR_BEHIND_PAWN[0]
-            eg_mobility += MINOR_BEHIND_PAWN[1]
+
 
         # BishopPawns: penalty per own pawn on same color square as bishop
-        bishop_color_mask = np.uint64(0x55AA55AA55AA55AA) if (sq % 2) == 0 else np.uint64(0xAA55AA55AA55AA55)
+        # Square color: (rank + file) % 2, where rank = sq//8, file = sq%8
+        bishop_color = (sq // 8 + sq % 8) % 2
+        bishop_color_mask = np.uint64(0xAA55AA55AA55AA55) if bishop_color == 1 else np.uint64(0x55AA55AA55AA55AA)
         same_color_pawns = count_bits(wp_bb & bishop_color_mask)
         mg_mobility -= BISHOP_PAWNS_PENALTY[0] * same_color_pawns
         eg_mobility -= BISHOP_PAWNS_PENALTY[1] * same_color_pawns
@@ -899,9 +922,12 @@ def evaluate_attacks_mobility_threats(piece_bbs, occupancy_bbs):
         mg_mobility += ROOK_MOBILITY_BONUS[clamped, 0]
         eg_mobility += ROOK_MOBILITY_BONUS[clamped, 1]
         
-        # TrappedRook: penalty if mobility very low and king hasn't castled
-        if moves <= 3 and not (wk_bb & np.uint64(0x60)) and not (wk_bb & np.uint64(0x06)):
-            if (sq % 8) > (get_lsb_index(wk_bb) % 8):  # rook is kingside
+        # TrappedRook: SF11 bilateral detection
+        # Penalty when rook is between king and the nearest edge on either side
+        if moves <= 3:
+            king_file = white_king_sq % 8
+            rook_file = sq % 8
+            if (king_file < 4) == (rook_file < king_file):
                 mg_mobility -= TRAPPED_ROOK[0]
                 eg_mobility -= TRAPPED_ROOK[1]
         
@@ -947,10 +973,7 @@ def evaluate_attacks_mobility_threats(piece_bbs, occupancy_bbs):
         mg_mobility += KING_PROTECTOR[0] * CHEBYSHEV_DISTANCE[sq, black_king_sq]
         eg_mobility += KING_PROTECTOR[1] * CHEBYSHEV_DISTANCE[sq, black_king_sq]
 
-        # MinorBehindPawn: bonus if sheltered behind any pawn
-        if (all_occupancy << np.uint64(8)) & BB_SQUARES[sq] & (wp_bb | bp_bb):
-            mg_mobility -= MINOR_BEHIND_PAWN[0]
-            eg_mobility -= MINOR_BEHIND_PAWN[1]
+
         
         # Tropism: Distance to White King
         distance = MANHATTAN_DISTANCE[sq, white_king_sq]
@@ -988,13 +1011,12 @@ def evaluate_attacks_mobility_threats(piece_bbs, occupancy_bbs):
         mg_mobility += KING_PROTECTOR[0] * CHEBYSHEV_DISTANCE[sq, black_king_sq]
         eg_mobility += KING_PROTECTOR[1] * CHEBYSHEV_DISTANCE[sq, black_king_sq]
 
-        # MinorBehindPawn: bonus if sheltered behind any pawn
-        if (all_occupancy << np.uint64(8)) & BB_SQUARES[sq] & (wp_bb | bp_bb):
-            mg_mobility -= MINOR_BEHIND_PAWN[0]
-            eg_mobility -= MINOR_BEHIND_PAWN[1]
+
 
         # BishopPawns: penalty per own pawn on same color square as bishop
-        bishop_color_mask = np.uint64(0x55AA55AA55AA55AA) if (sq % 2) == 0 else np.uint64(0xAA55AA55AA55AA55)
+        # Square color: (rank + file) % 2, where rank = sq//8, file = sq%8
+        bishop_color = (sq // 8 + sq % 8) % 2
+        bishop_color_mask = np.uint64(0xAA55AA55AA55AA55) if bishop_color == 1 else np.uint64(0x55AA55AA55AA55AA)
         same_color_pawns = count_bits(bp_bb & bishop_color_mask)
         mg_mobility += BISHOP_PAWNS_PENALTY[0] * same_color_pawns
         eg_mobility += BISHOP_PAWNS_PENALTY[1] * same_color_pawns
@@ -1030,9 +1052,11 @@ def evaluate_attacks_mobility_threats(piece_bbs, occupancy_bbs):
         mg_mobility -= ROOK_MOBILITY_BONUS[clamped, 0]
         eg_mobility -= ROOK_MOBILITY_BONUS[clamped, 1]
         
-        # TrappedRook: penalty if mobility very low and king hasn't castled
-        if moves <= 3 and not (bk_bb & np.uint64(0x6000000000000000)) and not (bk_bb & np.uint64(0x0600000000000000)):
-            if (sq % 8) > (get_lsb_index(bk_bb) % 8):  # rook is kingside
+        # TrappedRook: SF11 bilateral detection
+        if moves <= 3:
+            king_file = black_king_sq % 8
+            rook_file = sq % 8
+            if (king_file < 4) == (rook_file < king_file):
                 mg_mobility += TRAPPED_ROOK[0]
                 eg_mobility += TRAPPED_ROOK[1]
         
@@ -1166,13 +1190,6 @@ def evaluate_attacks_mobility_threats(piece_bbs, occupancy_bbs):
         count = count_bits(white_hanging)
         mg_threats -= THREAT_HANGING[0] * count
         eg_threats -= THREAT_HANGING[1] * count
-
-    # --- 6. RestrictedPiece: enemy piece attacked by us & not strongly protected ---
-    restricted_black = all_black_pieces & black_attacks & white_attacks & ~white_strongly_protected
-    restricted_white = all_white_pieces & white_attacks & black_attacks & ~black_strongly_protected
-    diff = count_bits(restricted_black) - count_bits(restricted_white)
-    mg_threats += np.int32(THREAT_RESTRICTED_PIECE[0] * diff)
-    eg_threats += np.int32(THREAT_RESTRICTED_PIECE[1] * diff)
 
     # --- 7. ThreatByPawnPush ---
     # White pawns push threat: non-rank8 squares that would attack enemy non-pawns
@@ -1419,9 +1436,41 @@ def evaluate_position(piece_bbs, occupancy_bbs, game_state, lazy: bool = False):
     # --- 9. 根據遊戲階段進行插值計算 ---
     final_score = (mg_score * phase + eg_score * (MAX_PHASE - phase)) // MAX_PHASE
 
+    # --- 9.5 OCB Endgame Scale Factor / 異色象殘局縮放因子 ---
+    # When both sides have exactly one bishop on opposite color squares and no
+    # major pieces (rooks/queens), the position is likely drawn. Scale down eg.
+    # 當雙方各有一個異色格象且無車后時，局面趨向和棋，縮減殘局差距。
+    if phase < MAX_PHASE // 2:  # Only in near-endgame
+        w_bishops = cnt_2  # white bishop count
+        b_bishops = cnt_8  # black bishop count
+        w_majors = cnt_3 + cnt_4  # white rooks + queens
+        b_majors = cnt_9 + cnt_10  # black rooks + queens
+        if w_bishops == 1 and b_bishops == 1 and w_majors == 0 and b_majors == 0:
+            # Check if bishops are on opposite color squares
+            wb_sq = get_lsb_index(piece_bbs[2])
+            bb_sq = get_lsb_index(piece_bbs[8])
+            wb_color = (wb_sq >> 3 ^ wb_sq) & 1
+            bb_color = (bb_sq >> 3 ^ bb_sq) & 1
+            if wb_color != bb_color:
+                # Opposite color bishops: scale based on pawn count
+                total_pawns = cnt_0 + cnt_6
+                if total_pawns <= 1:
+                    scale = SCALE_FACTOR_OCB_ONE_PAWN    # 16/64
+                elif total_pawns <= 2:
+                    scale = SCALE_FACTOR_OCB_TWO_PAWNS   # 32/64
+                else:
+                    scale = SCALE_FACTOR_OCB_MULTIPLE_PAWNS  # 48/64
+                # Apply: shrink the endgame portion of the score
+                eg_portion = eg_score * (MAX_PHASE - phase) // MAX_PHASE
+                mg_portion = final_score - eg_portion
+                final_score = mg_portion + eg_portion * scale // SCALE_FACTOR_NORMAL
+
     # --- 10. (Optional) Initiative Bonus / 主動權獎勵 ---
     if phase > INITIATIVE_PHASE_THRESHOLD:
-        final_score += INITIATIVE_BONUS
+        if side_to_move == 0:
+            final_score += INITIATIVE_BONUS
+        else:
+            final_score -= INITIATIVE_BONUS
 
     # --- 11. 從當前執棋方的角度返回最終分數 ---
     if side_to_move == 0:  # 白方回合
