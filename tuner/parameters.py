@@ -102,6 +102,14 @@ class ParameterManager:
         
         # --- Other ---
         self._add_param("INITIATIVE_BONUS", constants.INITIATIVE_BONUS)
+        self._add_param("MAX_KING_ATTACKERS", constants.MAX_KING_ATTACKERS)
+        self._add_param("PROXIMITY_ENEMY_WEIGHT", constants.PROXIMITY_ENEMY_WEIGHT)
+        self._add_param("PROXIMITY_FRIENDLY_WEIGHT", constants.PROXIMITY_FRIENDLY_WEIGHT)
+        self._add_param("MAX_PROXIMITY_BONUS", constants.MAX_PROXIMITY_BONUS)
+        self._add_param("KING_DANGER_SINGLE_ATTACKER_DIVISOR", constants.KING_DANGER_SINGLE_ATTACKER_DIVISOR)
+        self._add_param("UNSTOPPABLE_PAWN_BONUS", constants.UNSTOPPABLE_PAWN_BONUS)
+        self._add_param("EG_KING_PAWN_PROXIMITY_WEIGHT", constants.EG_KING_PAWN_PROXIMITY_WEIGHT)
+        self._add_param("BLOCKED_PASSER_DIVISOR", constants.BLOCKED_PASSER_DIVISOR)
 
     def get_initial_theta(self):
         return np.array(self.theta, dtype=np.float64)

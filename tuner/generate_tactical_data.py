@@ -22,20 +22,18 @@ import multiprocessing
 
 STOCKFISH_ENGINE = None
 
-def should_skip_position(board):
-    if board.is_check():
-        return True
-    
-    # 過濾材質失衡的局面（我們只要分差 <= 100cp 的均勢局面）
+def get_material_diff(board):
+    # 計算材質分差 (White - Black)
     material_diff = 0
     piece_values = {chess.PAWN: 100, chess.KNIGHT: 300, chess.BISHOP: 300, chess.ROOK: 500, chess.QUEEN: 900}
     for piece_type, value in piece_values.items():
         material_diff += len(board.pieces(piece_type, chess.WHITE)) * value
         material_diff -= len(board.pieces(piece_type, chess.BLACK)) * value
-    
-    if abs(material_diff) > 100:
-        return True
+    return material_diff
 
+def should_skip_position(board):
+    if board.is_check():
+        return True
     return False
 
 def setup_stockfish_engine(path: str):
@@ -76,15 +74,12 @@ def get_stockfish_tactical_label(board: chess.Board, depth: int, min_cp: int = 2
         
         score = score_obj.score()
         
-        # 戰術過濾：我們只想要分數懸殊的局面
-        if abs(score) < min_cp:
-            return None
-            
+        # 返回原始分數與標籤
         # 防止指數溢出
-        score = max(min(score, 2000), -2000)
+        bounded_score = max(min(score, 2000), -2000)
+        sigmoid = 1.0 / (1.0 + math.pow(10.0, -bounded_score / 400.0))
         
-        sigmoid = 1.0 / (1.0 + math.pow(10.0, -score / 400.0))
-        return sigmoid
+        return sigmoid, score
             
     except (chess.engine.EngineTerminatedError, chess.engine.EngineError):
         return None
@@ -136,13 +131,29 @@ def process_game_batch(games_data, stockfish_path, depth, min_cp, min_move, max_
                 if min_move <= board.fullmove_number <= max_move:
                     if not board.is_checkmate() and not board.is_stalemate() and not board.is_insufficient_material() and not should_skip_position(board):
                         
-                        label = get_stockfish_tactical_label(board, depth, min_cp)
+                        mat_diff = get_material_diff(board)
+                        analysis = get_stockfish_tactical_label(board, depth, min_cp)
                         
-                        if label is not None:
-                            fen = board.fen()
-                            data = json.dumps({"fen": fen, "result": round(label, 6)})
-                            results.append(data)
-                            positions_extracted += 1
+                        if analysis is not None:
+                            label, score = analysis
+                            
+                            keep = False
+                            # 1. 材質均勢且分數懸殊
+                            if abs(mat_diff) <= 100 and abs(score) >= min_cp:
+                                keep = True
+                            # 2. 子力落後但 SF 判斷領先 (戰術補償)
+                            elif mat_diff < -100 and score >= min_cp: # White is down but winning
+                                keep = True
+                            elif mat_diff > 100 and score <= -min_cp: # White is up but losing (Black has compensation)
+                                keep = True
+                            
+                            if keep:
+                                fen = board.fen()
+                                data = json.dumps({"fen": fen, "result": round(label, 6)})
+                                results.append(data)
+                                positions_extracted += 1
+                            else:
+                                filtered_by_score += 1
                         else:
                             filtered_by_score += 1
                     else:

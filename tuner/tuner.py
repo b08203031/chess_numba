@@ -139,6 +139,14 @@ class SPSAOptimizer:
         cm.add_range("KING_PROTECTOR", min_val=0)
         cm.add_range("CONNECTED_BONUS", min_val=0)
         cm.add_range("CONNECTED_SUPPORT_WEIGHT", min_val=0)
+        cm.add_range("MAX_KING_ATTACKERS", min_val=0)
+        cm.add_range("PROXIMITY_ENEMY_WEIGHT", min_val=0)
+        cm.add_range("PROXIMITY_FRIENDLY_WEIGHT", min_val=0)
+        cm.add_range("MAX_PROXIMITY_BONUS", min_val=0)
+        cm.add_range("KING_DANGER_SINGLE_ATTACKER_DIVISOR", min_val=1)
+        cm.add_range("UNSTOPPABLE_PAWN_BONUS", min_val=0)
+        cm.add_range("EG_KING_PAWN_PROXIMITY_WEIGHT", min_val=0)
+        cm.add_range("BLOCKED_PASSER_DIVISOR", min_val=1)
         
         # --- Negative Values (Stored as negative) ---
         cm.add_range("ISOLATED_PAWN_PENALTY", max_val=0)
@@ -394,17 +402,17 @@ if __name__ == "__main__":
     
     # New arguments
     parser.add_argument("--tune", nargs='+', help="List of parameter names to tune (others will be frozen)")
-    parser.add_argument("--exclude", nargs='+', default=[
-        "KING_SAFETY_ATTACK_UNITS", "KING_DANGER_WEAK_SQ", "KING_DANGER_UNSAFE_CHECK", 
-        "KING_DANGER_ATTACK_ON_KING_SQ", "KING_DANGER_NO_QUEEN", "KING_DANGER_PINNED", 
-        "KING_DANGER_DIVISOR", "SAFE_CHECK_KNIGHT", "SAFE_CHECK_BISHOP", "SAFE_CHECK_ROOK", 
-        "SAFE_CHECK_QUEEN", "KING_TROPISM_WEIGHTS", "KING_PROTECTOR",
-        "PAWN_SHIELD_MISSING_PENALTY", "PAWN_SHIELD_INTACT_BONUS", "PAWN_SHIELD_ADVANCED_BONUS",
-        "PAWN_SHIELD_PUSHED_PENALTY", "KING_OPEN_FILE_PENALTY", "KING_SEMI_OPEN_FILE_PENALTY"
-    ], help="List of parameter names to exclude/freeze")
+    parser.add_argument("--exclude", nargs='+', help="List of parameter names to exclude/freeze")
     parser.add_argument("--batch-size", type=int, default=32768, help="Mini-batch size for gradient estimation (e.g. 16384)")
     parser.add_argument("--dataset", type=str, default="tuner/dataset.npz", help="Path to the preprocessed dataset .npz file")
-    
+    # default=[
+    #     "KING_SAFETY_ATTACK_UNITS", "KING_DANGER_WEAK_SQ", "KING_DANGER_UNSAFE_CHECK", 
+    #     "KING_DANGER_ATTACK_ON_KING_SQ", "KING_DANGER_NO_QUEEN", "KING_DANGER_PINNED", 
+    #     "KING_DANGER_DIVISOR", "SAFE_CHECK_KNIGHT", "SAFE_CHECK_BISHOP", "SAFE_CHECK_ROOK", 
+    #     "SAFE_CHECK_QUEEN", "KING_TROPISM_WEIGHTS", "KING_PROTECTOR",
+    #     "PAWN_SHIELD_MISSING_PENALTY", "PAWN_SHIELD_INTACT_BONUS", "PAWN_SHIELD_ADVANCED_BONUS",
+    #     "PAWN_SHIELD_PUSHED_PENALTY", "KING_OPEN_FILE_PENALTY", "KING_SEMI_OPEN_FILE_PENALTY"
+    # ]
     args = parser.parse_args()
 
     pm = ParameterManager()
