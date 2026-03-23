@@ -35,9 +35,9 @@ PAWN, KNIGHT, BISHOP, ROOK, QUEEN, KING = 0, 1, 2, 3, 4, 5
 #  0  ,   1   ,   2   ,  3  ,   4  ,  5
 
 # 中局（Middle Game）材質值
-MG_MATERIAL_VALUES = np.array([100, 338, 338, 482, 898, 0], dtype=np.int32)
+MG_MATERIAL_VALUES = np.array([100, 342, 342, 470, 902, 0], dtype=np.int32)
 # 殘局（End Game）材質值
-EG_MATERIAL_VALUES = np.array([120, 317, 348, 510, 947, 0], dtype=np.int32)
+EG_MATERIAL_VALUES = np.array([120, 320, 345, 496, 953, 0], dtype=np.int32)
 
 # =============================================================================
 # --- Game Phase Calculation / 遊戲階段計算 ---
@@ -222,21 +222,21 @@ MAX_PHASE = np.sum(PHASE_WEIGHTS * np.array([8, 2, 2, 2, 1, 1])) * 2 # Pawns are
 # ])
 
 PST_MG = np.array([
-    [2, 3, 0, 2, 2, -4, 5, 0, 0, 0, 6, -15, -9, 8, 3, 2, -4, -5, 0, 4, 5, -3, 6, 0, 1, -8, -2, -8, 11, -3, -11, -6, 4, -2, 2, -2, 8, 4, 1, 5, 5, 3, 17, 25, 30, 19, 6, 10, 51, 55, 47, 48, 49, 51, 53, 47, -1, -4, 6, 0, 5, 4, 1, 5],
-    [-55, -29, -26, -26, -21, -22, -34, -53, -40, -18, 1, 9, 5, -1, -16, -37, -22, 6, 0, 15, 15, 3, 5, -24, -20, -2, 14, 21, 9, 15, -7, -23, -25, 2, 12, 17, -3, 1, 1, -25, -35, 0, 14, 14, 13, 12, -5, -32, -41, -16, 3, 1, -1, -1, -17, -42, -56, -42, -28, -28, -31, -29, -39, -53],
-    [-25, -9, 3, -3, -7, 2, -12, -21, -10, 14, -3, -2, 11, -2, 9, -13, -8, 10, 9, -5, -4, 13, 10, -8, -12, 4, 4, 8, 6, 0, 0, -5, -13, 10, 6, 8, 7, -3, 4, -13, -9, 4, 1, 8, 7, 3, -4, -10, -5, 3, 0, -2, 3, -1, 0, -11, -21, -6, -13, -11, -10, -6, -9, -20],
-    [2, 2, 1, 0, 2, -2, 8, 9, 0, -3, 0, 1, -7, 1, 1, -5, -3, -5, -5, 0, -1, -3, -1, -4, -8, 3, 2, 4, 1, -2, -1, -5, -12, 4, 3, -6, 3, -1, 2, -5, -6, -3, 2, -3, 1, -2, 4, -9, 1, 8, 10, 8, 7, 15, 11, 0, 0, -1, -2, 1, 1, -5, -1, -3],
-    [-15, -3, -7, 13, 0, -8, -6, -22, -10, -3, 4, -1, 7, 3, 1, -6, -6, 11, 1, -2, 2, -2, 1, -8, 1, -1, 4, 1, 1, 2, 1, -1, -10, -1, 7, 5, 2, 1, -1, -1, -10, 4, 4, 0, 2, 8, 0, -11, -9, -5, 0, -1, 0, -1, 1, -14, -19, -10, -5, -3, -3, -7, -5, -21],
-    [21, 24, 13, 5, 7, 14, 18, 21, 19, 24, 4, 1, 3, 5, 26, 21, -10, -17, -17, -22, -19, -22, -24, -6, -18, -30, -33, -37, -34, -32, -29, -22, -30, -37, -40, -47, -50, -39, -36, -34, -33, -41, -42, -47, -47, -40, -38, -31, -33, -34, -39, -52, -48, -41, -41, -28, -32, -44, -38, -52, -50, -43, -39, -30],
+    [3, 2, 2, 2, 0, -6, 4, -1, -6, -7, -5, -17, -5, 1, 2, -9, -10, -8, -7, -14, 0, 1, 4, -1, -1, -7, -1, -11, 9, 0, -9, -4, 7, 0, -1, 5, 10, 4, 0, 2, 5, 1, 18, 16, 28, 15, 3, 8, 47, 51, 44, 47, 49, 50, 51, 45, -3, -4, 6, -1, 3, 3, 1, 7],
+    [-53, -21, -24, -25, -21, -22, -33, -56, -40, -15, 0, 5, 3, -3, -16, -33, -19, 5, 5, 17, 17, 2, 3, -23, -13, -3, 14, 22, 4, 14, -11, -21, -22, 4, 15, 13, -16, -3, -1, -25, -34, 0, 15, 16, 15, 14, -5, -33, -38, -14, 1, 1, 0, 2, -17, -40, -55, -43, -28, -25, -26, -30, -36, -51],
+    [-21, -4, 4, -3, -5, 7, -10, -21, -6, 13, -1, -4, 10, 3, 2, -11, -7, 9, 7, 1, -2, 14, 6, -4, -6, 5, 3, 6, 3, -1, 2, -5, -13, 14, 8, 5, 5, -5, 6, -14, -8, 6, 3, 7, 7, 0, -6, -12, -1, 9, 3, -3, 7, -2, 2, -11, -24, -9, -10, -10, -12, -9, -7, -19],
+    [-4, 0, 0, 3, 4, -5, 10, 6, 1, -5, 1, 0, -4, -3, 1, -6, -1, -3, -6, -2, -1, -2, -1, -3, -6, 1, 1, 7, 1, -3, -2, -5, -12, 3, 2, -6, 3, -2, 3, -5, -4, -5, 0, -3, -1, -4, 1, -8, -2, 7, 4, 7, 5, 14, 11, -1, -1, -2, -4, 3, 3, -4, 1, -3],
+    [-13, -1, -3, 13, 1, -6, -7, -19, -10, -2, 8, 4, 10, 3, 2, -7, -5, 10, -1, -4, 0, -5, 0, -11, 2, -1, 6, 0, 1, 2, -2, -3, -8, -1, 8, 4, 1, 2, -1, -5, -10, 7, 4, -1, 0, 9, 3, -10, -10, -5, 1, -1, 0, -1, -1, -11, -21, -9, -6, -3, -4, -8, -8, -20],
+    [21, 25, 15, 6, 7, 13, 16, 16, 17, 26, 8, 2, 4, 5, 29, 20, -8, -17, -17, -23, -17, -25, -24, -4, -20, -27, -33, -40, -35, -33, -29, -23, -30, -36, -41, -50, -50, -43, -35, -35, -31, -40, -43, -46, -47, -39, -37, -30, -34, -35, -39, -50, -47, -43, -44, -27, -31, -45, -37, -53, -54, -44, -39, -32],
 ], dtype=np.int32)
 
 PST_EG = np.array([
-    [6, 3, 3, -5, -3, -2, -1, 0, 5, 12, 13, 9, 8, 10, 13, 9, 11, 12, 12, 19, 11, 7, 15, 13, 16, 13, 13, 9, 4, 1, 2, 17, 22, 20, 18, 12, 17, 16, 20, 19, 43, 44, 41, 46, 42, 48, 45, 46, 77, 78, 76, 80, 76, 83, 74, 76, -1, -2, -1, 3, -1, -3, 1, 5],
-    [-50, -38, -30, -28, -26, -26, -37, -45, -41, -23, 5, -1, 4, 1, -19, -36, -28, -1, 6, 14, 15, 9, -3, -25, -30, 9, 15, 21, 20, 13, 8, -29, -25, 1, 17, 21, 16, 14, 1, -29, -31, 9, 14, 15, 17, 12, 8, -30, -34, -26, 2, 10, 4, 4, -18, -38, -53, -43, -31, -29, -36, -29, -37, -46],
-    [-39, -32, -22, -16, -17, -20, -35, -32, -23, -13, -4, -3, -1, -5, -11, -28, -24, 4, 4, -1, -1, 5, 6, -24, -14, 1, 13, 9, 14, 8, -1, -16, -15, 3, 11, 9, 10, 13, -5, -20, -12, -2, 1, 9, 2, 4, 0, -12, -27, -8, -13, 4, -8, -14, -12, -33, -49, -21, -28, -9, -6, -31, -23, -45],
-    [-6, -11, -12, -8, -14, -7, -15, -9, -9, -6, 0, -1, 0, -1, -9, -16, 4, -4, -5, 9, 2, -10, -1, 8, 1, 7, 10, -7, -12, 8, 9, -3, -4, -1, -11, 2, 5, -10, -1, -8, 2, -6, -1, 6, 2, -1, -10, 3, -2, -1, 14, -5, -6, 19, 2, 1, 18, 1, 22, 9, 16, 22, -2, 18],
-    [-71, -54, -46, -32, -34, -47, -58, -70, -50, -31, -22, -6, -9, -30, -29, -56, -41, -15, -11, 0, -1, -8, -17, -41, -26, -10, 9, 20, 15, 10, -6, -29, -26, -11, 13, 23, 25, 13, -1, -26, -52, -15, -14, 2, 1, -8, -18, -50, -55, -35, -17, -7, -2, -20, -32, -56, -72, -55, -43, -40, -33, -45, -58, -78],
-    [-50, -31, -35, -24, -25, -18, -37, -42, -29, -29, 1, 10, 2, 2, -31, -24, -30, -10, 17, 30, 25, 19, -9, -22, -31, -8, 31, 39, 35, 24, -13, -35, -30, -16, 29, 37, 38, 25, -7, -27, -26, -10, 21, 25, 22, 17, -12, -29, -31, -23, -11, 3, 1, -6, -17, -24, -49, -37, -32, -20, -17, -32, -39, -48],
+    [4, 2, 0, -8, -2, -1, 2, 2, 3, 13, 13, 11, 8, 10, 9, 4, 8, 11, 9, 19, 10, 8, 11, 8, 17, 13, 10, 5, -4, -6, 0, 13, 19, 18, 13, 5, 11, 8, 15, 15, 37, 40, 38, 42, 40, 44, 44, 39, 75, 75, 74, 78, 76, 78, 73, 72, -4, 1, -2, 3, 0, -4, 2, 6],
+    [-50, -35, -29, -27, -25, -25, -35, -48, -40, -23, 6, -1, 1, 2, -19, -36, -27, 1, 5, 15, 16, 6, -4, -26, -29, 8, 16, 19, 17, 10, 7, -26, -25, 3, 13, 19, 16, 11, 3, -31, -31, 9, 9, 14, 15, 11, 10, -31, -35, -27, 3, 10, 4, 5, -17, -37, -49, -44, -33, -27, -36, -29, -38, -45],
+    [-39, -31, -19, -13, -16, -18, -38, -31, -23, -11, -7, -3, 2, -7, -14, -25, -23, 4, 4, -3, -1, 7, 6, -22, -11, 3, 10, 6, 9, 6, -1, -18, -14, 4, 9, 7, 11, 11, -7, -19, -9, 0, 2, 10, 5, 3, 1, -12, -27, -8, -15, 5, -10, -14, -10, -34, -47, -21, -29, -10, -3, -33, -26, -44],
+    [-3, -11, -8, -9, -12, -8, -15, -11, -9, -6, 1, -3, 2, -4, -10, -18, 5, -4, -5, 8, 4, -11, -4, 8, 3, 8, 11, -9, -8, 10, 7, -6, -2, 0, -11, 1, 6, -10, 0, -7, 2, -6, -2, 4, -2, -2, -9, 3, -5, -4, 8, -4, -11, 18, -1, 2, 18, 1, 23, 8, 18, 21, 1, 18],
+    [-70, -50, -43, -30, -36, -47, -57, -71, -50, -31, -21, -1, -10, -32, -27, -56, -40, -14, -8, 2, 1, -8, -20, -38, -23, -10, 9, 21, 16, 12, -7, -26, -26, -12, 11, 24, 27, 13, 1, -29, -51, -12, -14, 1, 0, -13, -18, -53, -54, -33, -15, -6, 0, -19, -32, -55, -72, -54, -43, -36, -34, -48, -58, -78],
+    [-51, -32, -36, -24, -21, -13, -36, -40, -29, -27, 0, 13, 4, 6, -25, -23, -29, -12, 16, 29, 24, 19, -5, -19, -29, -11, 29, 38, 32, 21, -15, -36, -29, -19, 30, 35, 34, 26, -6, -28, -26, -12, 20, 25, 20, 18, -12, -29, -32, -23, -10, 2, 4, -5, -18, -25, -50, -35, -37, -20, -18, -32, -37, -45],
 ], dtype=np.int32)
 # =============================================================================
 # --- Other Evaluation Constants / 其他評估常量 ---
@@ -246,7 +246,7 @@ PST_EG = np.array([
 # A small bonus awarded to the side to move, acknowledging the advantage of having the turn.
 # This bonus is tapered and disappears in the endgame.
 # 給予輪到行棋一方的小獎勵，承認擁有下棋權的優勢。此獎勵是漸進的，在殘局中會消失。
-INITIATIVE_BONUS = 39 # centipawns
+INITIATIVE_BONUS = 21 # centipawns
 INITIATIVE_PHASE_THRESHOLD = MAX_PHASE * 0.4 # Apply only when phase is above 40% of max / 僅在階段值高於最大值的 40% 時應用
 
 
@@ -260,84 +260,84 @@ INITIATIVE_PHASE_THRESHOLD = MAX_PHASE * 0.4 # Apply only when phase is above 40
 
 # --- Knight Mobility (SF11 MobilityBonus × Pawn ratio MG×0.585 EG×0.42) --- max 8 squares
 KNIGHT_MOBILITY_BONUS = np.array([
-    [-29, -30],
-    [-5, -16],
-    [18, -7],
-    [18, 3],
-    [18, 4],
-    [18, 4],
-    [18, 7],
-    [18, 9],
-    [19, 11],
+    [-28, -29],
+    [1, -16],
+    [18, -4],
+    [19, 7],
+    [19, 7],
+    [22, 7],
+    [22, 7],
+    [22, 8],
+    [23, 10],
 ], dtype=np.int32)  # index 0..8
 
 # --- Bishop Mobility (SF11 MobilityBonus × Pawn ratio MG×0.585 EG×0.42) --- max 13 squares
 BISHOP_MOBILITY_BONUS = np.array([
-    [-11, -24],
-    [10, -1],
-    [22, 3],
-    [22, 9],
-    [22, 10],
-    [22, 19],
-    [22, 23],
-    [25, 25],
-    [31, 28],
-    [37, 33],
-    [45, 34],
-    [50, 42],
-    [53, 44],
+    [-7, -23],
+    [10, 0],
+    [22, 4],
+    [26, 9],
+    [27, 11],
+    [27, 21],
+    [27, 22],
+    [27, 25],
+    [29, 28],
+    [35, 31],
+    [42, 32],
+    [49, 41],
+    [52, 44],
     [55, 46],
 ], dtype=np.int32)  # index 0..13
 
 # --- Rook Mobility (SF11 MobilityBonus × Pawn ratio MG×0.585 EG×0.42) --- max 14 squares
 ROOK_MOBILITY_BONUS = np.array([
-    [-18, -27],
-    [7, -5],
-    [24, 18],
-    [24, 30],
-    [24, 36],
-    [24, 36],
-    [24, 48],
-    [24, 49],
-    [24, 50],
-    [24, 52],
-    [24, 56],
-    [24, 62],
-    [24, 68],
-    [28, 71],
-    [30, 72],
+    [-8, -27],
+    [17, -4],
+    [27, 20],
+    [27, 33],
+    [27, 36],
+    [27, 40],
+    [28, 48],
+    [29, 48],
+    [29, 49],
+    [29, 50],
+    [30, 56],
+    [30, 60],
+    [31, 69],
+    [31, 70],
+    [32, 71],
 ], dtype=np.int32)  # index 0..14
 
 # --- Queen Mobility (SF11 MobilityBonus × Pawn ratio MG×0.585 EG×0.42) --- max 27 squares
 QUEEN_MOBILITY_BONUS = np.array([
-    [-24, -18],
-    [-8, -9],
-    [21, 6],
-    [21, 10],
-    [21, 19],
-    [29, 24],
-    [29, 29],
-    [29, 31],
-    [29, 35],
-    [29, 38],
-    [29, 40],
-    [30, 44],
-    [32, 46],
-    [33, 48],
-    [37, 51],
-    [39, 53],
-    [46, 61],
-    [48, 62],
-    [48, 62],
-    [53, 64],
-    [55, 65],
+    [-27, -17],
+    [-5, -11],
+    [23, 8],
+    [23, 10],
+    [23, 18],
+    [32, 26],
+    [33, 29],
+    [34, 33],
+    [36, 34],
+    [36, 38],
+    [36, 41],
+    [36, 43],
+    [36, 47],
+    [37, 47],
+    [37, 53],
+    [38, 53],
+    [47, 63],
+    [50, 65],
+    [50, 66],
+    [53, 66],
+    [57, 66],
     [62, 73],
-    [64, 74],
-    [65, 76],
-    [66, 78],
-    [67, 82],
-    [67, 88],
-    [67, 92],
+    [66, 75],
+    [67, 76],
+    [68, 77],
+    [68, 81],
+    [71, 87],
+    [71, 92],
 ], dtype=np.int32)  # index 0..27
 
 
@@ -348,16 +348,16 @@ QUEEN_MOBILITY_BONUS = np.array([
 # --- Bishop Pair / 雙象優勢 ---
 # Bonus for having both bishops. This bonus is generally stronger in open positions.
 # 擁有雙象的獎勵。這個獎勵在開放局面中通常更強。
-BISHOP_PAIR_BONUS = np.array([22, 25], dtype=np.int32) # MG, EG
+BISHOP_PAIR_BONUS = np.array([26, 26], dtype=np.int32) # MG, EG
 
 # --- Rook on Open/Semi-Open File / 車在開放線/半開放線 ---
 # Bonus for a rook on a file with no friendly pawns (semi-open)
 # or no pawns at all (open).
 # 車在沒有己方兵（半開放線）或完全沒有兵（開放線）的直線上的獎勵。
-ROOK_ON_SEMI_OPEN_FILE_BONUS = np.array([10, 5], dtype=np.int32) # MG, EG
-ROOK_ON_OPEN_FILE_BONUS = np.array([20, 10], dtype=np.int32) # MG, EG
+ROOK_ON_SEMI_OPEN_FILE_BONUS = np.array([12, 8], dtype=np.int32) # MG, EG
+ROOK_ON_OPEN_FILE_BONUS = np.array([15, 4], dtype=np.int32) # MG, EG
 
-ROOK_ON_SEVENTH_BONUS = np.array([0, 27], dtype=np.int32) # MG, EG
+ROOK_ON_SEVENTH_BONUS = np.array([0, 12], dtype=np.int32) # MG, EG
 
 # =============================================================================
 # --- Pawn Structure Constants / 兵型結構常量 ---
@@ -371,11 +371,11 @@ ROOK_ON_SEVENTH_BONUS = np.array([0, 27], dtype=np.int32) # MG, EG
 PASSED_PAWN_BONUS = np.array([
     [0, 0], # Rank 1
     [0, 0], # Rank 2
-    [2, 7], # Rank 3
-    [15, 23], # Rank 4
-    [30, 40], # Rank 5
-    [63, 123], # Rank 6
-    [149, 241], # Rank 7
+    [1, 2], # Rank 3
+    [7, 12], # Rank 4
+    [22, 24], # Rank 5
+    [54, 98], # Rank 6
+    [143, 229], # Rank 7
     [0, 0], # Rank 8
 ], dtype=np.int32)
 
@@ -387,36 +387,33 @@ CANDIDATE_PASSED_PAWN_BONUS = np.array([
     [0, 0], # Rank 2
     [0, 0], # Rank 3
     [0, 0], # Rank 4
-    [17, 24], # Rank 5
-    [37, 71], # Rank 6
-    [80, 128], # Rank 7
+    [11, 13], # Rank 5
+    [35, 71], # Rank 6
+    [80, 130], # Rank 7
     [0, 0], # Rank 8
 ], dtype=np.int32)
 
 # --- Isolated Pawns / 孤兵 ---
 # Penalty for each isolated pawn on a file.
 # 每一個孤兵的懲罰。
-ISOLATED_PAWN_PENALTY = np.array([0, -13], dtype=np.int32) # MG, EG
+ISOLATED_PAWN_PENALTY = np.array([-5, -19], dtype=np.int32) # MG, EG
 
 # --- Doubled Pawns / 重疊兵 ---
 # Penalty for each doubled pawn on a file.
 # 每一個重疊兵的懲罰。
-DOUBLED_PAWN_PENALTY = np.array([-13, -23], dtype=np.int32) # MG, EG
-
-# --- Connected Pawn Bonus by Rank (SF11) / SF11 連結兵獎勵（按橫排） ---
-# Applied to ALL pawns that are in phalanx (side-by-side) or supported (diagonally behind).
-# 適用於所有處於並列或受支撐狀態的兵。
-CONNECTED_BONUS = np.array([0, 4, 7, 12, 19, 28, 39, 0], dtype=np.int32)
-CONNECTED_SUPPORT_WEIGHT = np.int32(10)  # SF11 value was 21
-
-# --- Connected Passed Pawns / 連結通路兵 --- (legacy, kept for reference)
-CONNECTED_PASSED_PAWN_BONUS = np.array([15, 35], dtype=np.int32) # MG, EG (not used in evaluation)
+DOUBLED_PAWN_PENALTY = np.array([-16, -28], dtype=np.int32) # MG, EG
 
 # --- Backward Pawns / 後兵 ---
 # Penalty for a backward pawn.
 # 後兵的懲罰。
 # Negative values, applied with += (consistent with ISOLATED_PAWN_PENALTY and DOUBLED_PAWN_PENALTY)
-BACKWARD_PAWN_PENALTY = np.array([0, -14], dtype=np.int32) # MG, EG
+BACKWARD_PAWN_PENALTY = np.array([-1, -5], dtype=np.int32) # MG, EG
+
+# --- Connected Pawn Bonus by Rank (SF11) / SF11 連結兵獎勵（按橫排） ---
+# Applied to ALL pawns that are in phalanx (side-by-side) or supported (diagonally behind).
+# 適用於所有處於並列或受支撐狀態的兵。
+CONNECTED_BONUS = np.array([0, 0, 1, 3, 5, 7, 35, 0], dtype=np.int32)
+CONNECTED_SUPPORT_WEIGHT = np.int32(10)  # SF11 value was 21
 
 # =============================================================================
 # --- Outpost Constants / 前哨常量 ---
@@ -432,10 +429,10 @@ OUTPOST_BONUS_KNIGHT = np.array([
     [0, 0], # Rank 1
     [0, 0], # Rank 2
     [0, 0], # Rank 3
-    [23, 14], # Rank 4
-    [46, 37], # Rank 5
+    [20, 10], # Rank 4
+    [44, 34], # Rank 5
     [53, 42], # Rank 6
-    [54, 45], # Rank 7
+    [54, 44], # Rank 7
     [0, 0], # Rank 8
 ], dtype=np.int32)
 
@@ -443,17 +440,17 @@ OUTPOST_BONUS_KNIGHT = np.array([
 OUTPOST_BONUS_BISHOP = np.array([
     [0, 0], # Rank 1
     [0, 0], # Rank 2
-    [1, 4], # Rank 3
-    [18, 8], # Rank 4
-    [32, 21], # Rank 5
-    [36, 26], # Rank 6
-    [37, 33], # Rank 7
+    [0, 1], # Rank 3
+    [15, 6], # Rank 4
+    [30, 19], # Rank 5
+    [37, 26], # Rank 6
+    [38, 34], # Rank 7
     [0, 0], # Rank 8
 ], dtype=np.int32)
 
 # Bonus if the outpost is a "Hole" (cannot be attacked by enemy pawns at all).
 # 如果前哨是“洞”（完全無法被敵方兵攻擊），則給予額外獎勵。
-OUTPOST_HOLE_BONUS = np.array([15, 3], dtype=np.int32) # MG, EG
+OUTPOST_HOLE_BONUS = np.array([10, 0], dtype=np.int32) # MG, EG
 
 # =============================================================================
 # --- King Safety Constants (NEW - based on Chessprogramming Wiki) / 王的安全常量 ---
@@ -500,6 +497,9 @@ SAFE_CHECK_BISHOP = np.int32(5)
 SAFE_CHECK_ROOK = np.int32(7)
 SAFE_CHECK_QUEEN = np.int32(6)
 
+# 攻擊王翼的棋子數量的最大值
+MAX_KING_ATTACKERS = np.int32(1000)
+
 # --- Phase 3: King Tropism / 王的向性 ---
 KING_TROPISM_MAX_DISTANCE = 14 # Max MANHATTAN distance / 最大曼哈頓距離
 KING_TROPISM_WEIGHTS = np.array([0, 1, 1, 2, 3], dtype=np.int32) # P, N, B, R, Q
@@ -515,7 +515,7 @@ KING_TROPISM_WEIGHTS = np.array([0, 1, 1, 2, 3], dtype=np.int32) # P, N, B, R, Q
 # For White King (Rank 0), enemy Black pawn at Rank 2 is index 2.
 # For Black King (Rank 7), enemy White pawn at Rank 5 is index 2 (7-5=2).
 # Values: [Dummy, Dummy, Rank2, Rank3, Rank4, Rank5, Rank6, Rank7]
-PAWN_STORM_PENALTY_BY_RANK = np.array([0, 122, 78, 30, 13, 13, 11, 0], dtype=np.int32)
+PAWN_STORM_PENALTY_BY_RANK = np.array([0, 121, 73, 25, 13, 4, 3, 0], dtype=np.int32)
 
 SCALING_WEIGHTS = np.array([0, 4, 4, 6, 10], dtype=np.int32) # N, B, R, Q - for scaling factor / 用於縮放因子的權重
 MAX_SCALING_MATERIAL = (2*4 + 2*4 + 2*6 + 1*10) # Sum of all weights for one side / 一方所有權重的總和
@@ -542,17 +542,17 @@ EG_SAFETY_SCALE = 0.5 # Scale down endgame king safety impact / 縮減殘局王�
 
 # ThreatBySafePawn: Friendly safe pawn attacks enemy non-pawn piece.
 # 安全兵的威脅：己方安全兵攻擊敵方非兵棋子。
-THREAT_SAFE_PAWN = np.array([58, 37], dtype=np.int32)  # SF11: (173, 94)
+THREAT_SAFE_PAWN = np.array([57, 33], dtype=np.int32)  # SF11: (173, 94)
 
 # ThreatByMinor[target_piece_type]: Minor (N/B) attacks piece of given type.
 # Index: 0=Pawn, 1=Knight, 2=Bishop, 3=Rook, 4=Queen, 5=King
 # 輕子威脅：馬/象攻擊對應類型棋子的獎勵。
 THREAT_BY_MINOR = np.array([
-    [0, 17], # vs Pawn
-    [27, 18], # vs Knight
-    [36, 22], # vs Bishop
-    [61, 29], # vs Rook
-    [67, 64], # vs Queen
+    [0, 19], # vs Pawn
+    [22, 16], # vs Knight
+    [33, 19], # vs Bishop
+    [60, 27], # vs Rook
+    [66, 64], # vs Queen
     [0, 0], # vs King
 ], dtype=np.int32)
 
@@ -560,21 +560,21 @@ THREAT_BY_MINOR = np.array([
 # Index: 0=Pawn, 1=Knight, 2=Bishop, 3=Rook, 4=Queen, 5=King
 # 車威脅：車攻擊對應類型棋子的獎勵。
 THREAT_BY_ROOK = np.array([
-    [1, 26], # vs Pawn
-    [24, 32], # vs Knight
-    [22, 28], # vs Bishop
-    [2, 24], # vs Rook
+    [2, 30], # vs Pawn
+    [18, 30], # vs Knight
+    [18, 30], # vs Bishop
+    [3, 24], # vs Rook
     [40, 20], # vs Queen
     [0, 0], # vs King
 ], dtype=np.int32)
 
 # ThreatByKing: King attacks a weakly defended enemy piece.
 # 王攻擊弱子：王攻擊敵方弱子的獎勵。
-THREAT_BY_KING = np.array([27, 61], dtype=np.int32)  # SF11: (24, 89)
+THREAT_BY_KING = np.array([34, 60], dtype=np.int32)  # SF11: (24, 89)
 
 # Hanging: Enemy piece is attacked + not strongly protected.
 # 懸掛子：敵方棋子被攻擊且未被強力保護。
-THREAT_HANGING = np.array([24, 3], dtype=np.int32)  # SF11: (69, 36)
+THREAT_HANGING = np.array([17, 5], dtype=np.int32)  # SF11: (69, 36)
 
 # RestrictedPiece: Enemy piece moves are restricted by our attacks.
 # 限制棋子行動力：敵方棋子的走子受到我方攻擊限制。
@@ -582,13 +582,7 @@ THREAT_RESTRICTED_PIECE = np.array([5, 4], dtype=np.int32)  # SF11: (7, 7)
 
 # ThreatByPawnPush: Pawn push threatens enemy pieces on next move.
 # 兵推威脅：兵推進後能威脅敵子。
-THREAT_PAWN_PUSH = np.array([15, 9], dtype=np.int32) # SF11: (48, 39)
-
-# --- Legacy aliases (kept for backward compatibility, now unused in threats) ---
-# Minor Attacking Major (replaced by THREAT_BY_MINOR)
-THREAT_MINOR_ON_MAJOR = np.array([25, 15], dtype=np.int32)  # kept for reference
-# Rook Attacking Queen (replaced by THREAT_BY_ROOK)
-THREAT_ROOK_ON_QUEEN = np.array([20, 10], dtype=np.int32)   # kept for reference
+THREAT_PAWN_PUSH = np.array([19, 4], dtype=np.int32) # SF11: (48, 39)
 
 # =============================================================================
 # --- Per-Piece Bonus/Penalty Constants (SF11-inspired, scaled by Pawn ratio) ---
@@ -604,11 +598,11 @@ KING_PROTECTOR = np.array([4, 3], dtype=np.int32)  # mg, eg — per distance uni
 # 輕子藏兵後：輕子站在兵後方的獎勵。
 # BishopPawns: Penalty per own pawn on same color as bishop.
 # 壞象懲罰：象同色上的己方兵數量懲罰（含封閉中心加重）。
-BISHOP_PAWNS_PENALTY = np.array([2, 13], dtype=np.int32)  # SF11: (3, 7)
+BISHOP_PAWNS_PENALTY = np.array([0, 6], dtype=np.int32)  # SF11: (3, 7)
 
 # TrappedRook: Penalty for rook with mobility <= 3 trapped by own king.
 # 困車懲罰：車移動格數 ≤ 3 且在己方王同側。
-TRAPPED_ROOK = np.array([26, 3], dtype=np.int32)  # SF11: (52, 10)
+TRAPPED_ROOK = np.array([21, 0], dtype=np.int32)  # SF11: (52, 10)
 
 # --- Endgame Scale Factors ---
 SCALE_FACTOR_NORMAL = 64
@@ -810,3 +804,267 @@ TT_SIZE_MB = 256
 NOT_A_FILE = ~np.uint64(0x0101010101010101)
 NOT_H_FILE = ~np.uint64(0x8080808080808080)
 
+# === 新增的可調魔法數字 (New Tunable Magic Numbers) ===
+PROXIMITY_ENEMY_WEIGHT = np.int32(5)
+PROXIMITY_FRIENDLY_WEIGHT = np.int32(2)
+MAX_PROXIMITY_BONUS = np.int32(150)
+KING_DANGER_SINGLE_ATTACKER_DIVISOR = np.int32(2)
+UNSTOPPABLE_PAWN_BONUS = np.int32(800)
+EG_KING_PAWN_PROXIMITY_WEIGHT = np.int32(5)
+BLOCKED_PASSER_DIVISOR = np.int32(2)
+
+
+
+MG_MATERIAL_VALUES = np.array([100, 329, 344, 481, 898, 0], dtype=np.int32)
+
+EG_MATERIAL_VALUES = np.array([120, 312, 339, 484, 942, 0], dtype=np.int32)
+
+PST_MG = np.array([
+    [17, 2, -20, -13, -10, -13, 12, 2, -4, -2, -4, -12, -4, 5, -7, -10, -12, -4, -12, 2, 1, 2, -2, 0, 0, -9, 2, -13, 11, -3, -19, -8, 8, -2, -12, 17, 5, 17, -14, 3, -9, -8, 10, 25, 28, 12, 3, 0, 46, 61, 28, 35, 48, 51, 51, 47, 7, -9, 0, -4, 0, 2, -1, 20],
+    [-44, -32, -36, -27, -31, -13, -36, -45, -55, -26, 2, 1, 5, -1, -17, -12, -18, 6, -11, 16, 5, -9, 8, -13, -11, 6, 4, 2, 11, 17, -20, -24, -39, 6, 10, 20, -7, 5, 0, -33, -25, -3, -3, 22, 4, 6, 2, -48, -64, 4, 11, -7, -4, -10, -41, -49, -57, -52, -34, -11, -22, -42, -44, -72],
+    [-30, -1, 6, -1, -8, 16, -1, -19, -15, 3, 0, -10, 6, 5, -3, -5, -7, 11, 12, 1, 0, -1, 3, -6, -5, 9, -10, 4, -9, -11, 15, -16, -12, -7, -5, 12, 26, 8, -11, -27, -21, -6, -9, -12, 17, 6, 1, -8, 2, -11, 15, 4, 7, 12, 3, -3, -31, 13, -9, 0, -23, 6, -31, -7],
+    [-10, 9, 0, 9, -3, -7, 11, -2, -4, 3, -15, -8, -9, -10, -13, -12, 1, -1, -4, 9, -15, 0, 3, -25, -6, -23, 2, 8, 10, 25, 2, -23, -7, 7, 4, -9, 8, -12, -10, -2, -22, 5, 12, 0, 3, -11, 27, 5, 14, 7, 19, 1, 11, 20, 19, -10, 5, 2, 14, 11, -7, 18, -3, -7],
+    [-10, -3, -11, 1, -2, -14, -22, -15, -4, -8, 6, -3, 6, -3, -22, 4, -22, 4, 12, -6, -20, 0, -13, -16, -21, 16, 8, -5, -10, -1, 14, 5, 23, 19, 3, 18, 0, 16, -8, -7, -2, -6, -13, -7, 5, 8, 27, -19, -22, -21, 8, 5, 7, 1, -3, -4, -32, 5, 12, 3, 13, -12, -15, -11],
+    [30, 25, 7, 10, 4, 15, 30, 21, 19, 29, 8, 9, 6, -8, 16, 30, -15, -29, 2, -14, -30, -36, -42, -10, -16, -39, -56, -37, -33, -22, -13, -41, -25, -42, -54, -65, -60, -47, -40, -33, -44, -24, -34, -39, -44, -36, -40, -29, -40, -51, -43, -58, -32, -38, -37, -18, -40, -56, -26, -48, -47, -59, -49, -47],
+], dtype=np.int32)
+
+PST_EG = np.array([
+    [8, 3, -7, -9, -9, -10, -1, -16, 5, 26, 20, -12, 11, 12, 12, 0, 20, 13, 13, 21, 1, -4, 10, 0, 22, 9, 9, -7, -1, -1, 0, 7, 39, 9, 15, 5, 18, -8, 27, 19, 37, 40, 31, 38, 32, 33, 31, 46, 90, 70, 70, 68, 97, 89, 86, 91, -9, -2, 3, 5, 4, 4, -26, 18],
+    [-41, -45, -21, -36, -19, -30, -50, -55, -57, -27, -3, -12, -2, 12, -14, -46, -21, -21, -4, 4, 16, -7, -22, -13, -20, 6, 13, 27, 20, 37, -1, -31, -39, -5, 35, 10, 7, 7, -11, -49, -25, 19, 33, 21, 22, -10, 3, -36, -20, -16, 10, 13, 2, 0, -35, -31, -66, -42, -22, -22, -21, -40, -11, -31],
+    [-36, -39, -19, -7, -22, -16, -40, -32, -27, -12, 3, 5, 15, -26, -25, -31, -50, 8, 7, 15, 1, 10, 0, -5, -4, -27, 4, 0, 2, -17, 1, -5, -28, -1, 0, 18, -1, 23, -13, -28, -6, -4, 21, 7, 16, 1, 15, -5, -36, -2, -28, -20, -19, 16, 15, -30, -42, -31, -24, -18, 3, -27, -30, -33],
+    [1, -10, -17, -6, -7, -11, -15, 7, -23, -3, -3, -18, -16, 14, -6, -15, -8, 12, -18, 8, -12, -14, -9, 5, -22, 21, 15, 1, 0, 8, 14, -2, -3, -7, -11, -14, 14, -26, -10, -3, -3, -13, -15, -2, 0, 2, -26, 3, 19, -1, 16, -18, -4, 5, -3, -11, 6, -6, 40, 5, 20, 15, 1, 17],
+    [-71, -57, -52, -14, -22, -52, -52, -89, -28, -39, -46, -9, -31, -47, -29, -61, -30, -19, -14, -15, -8, 3, -4, -37, -20, -21, 3, 1, 15, 20, -3, -29, -15, -16, 33, -2, 4, 8, -8, -30, -44, -15, -31, -4, 13, 5, -22, -49, -71, -43, -27, -1, -14, -25, -28, -41, -65, -49, -47, -39, -44, -43, -65, -69],
+    [-39, -23, -31, -17, -6, -26, -43, -33, -43, -26, -2, 11, -2, 3, -17, -14, -24, -2, 8, 13, 29, 28, 2, -17, -41, 10, 23, 30, 11, 14, -8, -43, -41, -3, 14, 49, 47, 19, -8, -33, -5, 4, 29, 19, 36, 6, -7, -41, -3, -27, -5, 7, 19, -19, -12, -40, -40, -36, -29, -32, -35, -28, -38, -37],
+], dtype=np.int32)
+
+KNIGHT_MOBILITY_BONUS = np.array([
+    [-42, -41],
+    [18, -11],
+    [34, -6],
+    [42, 4],
+    [44, 10],
+    [48, 20],
+    [50, 23],
+    [54, 27],
+    [58, 30],
+], dtype=np.int32)
+
+BISHOP_MOBILITY_BONUS = np.array([
+    [-25, -24],
+    [3, -14],
+    [20, 6],
+    [28, 6],
+    [33, 19],
+    [37, 30],
+    [39, 41],
+    [41, 50],
+    [46, 53],
+    [49, 58],
+    [52, 61],
+    [56, 62],
+    [62, 66],
+    [66, 68],
+], dtype=np.int32)
+
+ROOK_MOBILITY_BONUS = np.array([
+    [-3, -20],
+    [17, -8],
+    [31, 30],
+    [31, 32],
+    [31, 38],
+    [36, 45],
+    [36, 51],
+    [42, 52],
+    [48, 55],
+    [53, 55],
+    [55, 62],
+    [56, 66],
+    [59, 75],
+    [62, 85],
+    [63, 87],
+], dtype=np.int32)
+
+QUEEN_MOBILITY_BONUS = np.array([
+    [-20, 8],
+    [-2, 9],
+    [16, 11],
+    [35, 19],
+    [36, 19],
+    [47, 29],
+    [49, 37],
+    [55, 38],
+    [57, 49],
+    [62, 50],
+    [63, 57],
+    [66, 60],
+    [67, 64],
+    [68, 69],
+    [68, 76],
+    [72, 79],
+    [73, 81],
+    [74, 87],
+    [76, 95],
+    [78, 96],
+    [79, 97],
+    [81, 99],
+    [84, 100],
+    [90, 100],
+    [91, 102],
+    [96, 102],
+    [101, 103],
+    [101, 109],
+], dtype=np.int32)
+
+BISHOP_PAIR_BONUS = np.array([30, 16], dtype=np.int32)
+
+ROOK_ON_SEMI_OPEN_FILE_BONUS = np.array([13, 10], dtype=np.int32)
+
+ROOK_ON_OPEN_FILE_BONUS = np.array([10, 0], dtype=np.int32)
+
+ROOK_ON_SEVENTH_BONUS = np.array([0, 23], dtype=np.int32)
+
+PASSED_PAWN_BONUS = np.array([
+    [0, 0],
+    [0, 0],
+    [0, 0],
+    [1, 23],
+    [23, 46],
+    [61, 99],
+    [153, 250],
+    [0, 0],
+], dtype=np.int32)
+
+CANDIDATE_PASSED_PAWN_BONUS = np.array([
+    [0, 0],
+    [0, 0],
+    [0, 0],
+    [3, 2],
+    [16, 9],
+    [28, 65],
+    [58, 137],
+    [0, 0],
+], dtype=np.int32)
+
+ISOLATED_PAWN_PENALTY = np.array([-9, -10], dtype=np.int32)
+
+DOUBLED_PAWN_PENALTY = np.array([-15, -34], dtype=np.int32)
+
+BACKWARD_PAWN_PENALTY = np.array([-1, -11], dtype=np.int32)
+
+CONNECTED_BONUS = np.array([0, 0, 0, 2, 3, 19, 30, 0], dtype=np.int32)
+
+CONNECTED_SUPPORT_WEIGHT = 0
+
+OUTPOST_BONUS_KNIGHT = np.array([
+    [0, 0],
+    [0, 0],
+    [0, 12],
+    [10, 20],
+    [41, 48],
+    [66, 48],
+    [76, 63],
+    [0, 0],
+], dtype=np.int32)
+
+OUTPOST_BONUS_BISHOP = np.array([
+    [0, 0],
+    [0, 0],
+    [2, 10],
+    [20, 21],
+    [32, 23],
+    [48, 24],
+    [52, 29],
+    [0, 0],
+], dtype=np.int32)
+
+OUTPOST_HOLE_BONUS = np.array([2, 2], dtype=np.int32)
+
+KING_SAFETY_ATTACK_UNITS = np.array([4, 8, 8, 10, 12], dtype=np.int32)
+
+KING_DANGER_WEAK_SQ = 4
+
+KING_DANGER_UNSAFE_CHECK = 5
+
+KING_DANGER_ATTACK_ON_KING_SQ = 4
+
+KING_DANGER_NO_QUEEN = 13
+
+KING_DANGER_PINNED = 13
+
+KING_DANGER_DIVISOR = 48
+
+SAFE_CHECK_KNIGHT = 24
+
+SAFE_CHECK_BISHOP = 23
+
+SAFE_CHECK_ROOK = 22
+
+SAFE_CHECK_QUEEN = 17
+
+KING_TROPISM_WEIGHTS = np.array([0, 0, 0, 0, 0], dtype=np.int32)
+
+PAWN_STORM_PENALTY_BY_RANK = np.array([7, 104, 70, 24, 11, 3, 3, 0], dtype=np.int32)
+
+SCALING_WEIGHTS = np.array([0, 4, 4, 6, 10], dtype=np.int32)
+
+PAWN_SHIELD_MISSING_PENALTY = 0
+
+PAWN_SHIELD_INTACT_BONUS = 14
+
+PAWN_SHIELD_ADVANCED_BONUS = 3
+
+PAWN_SHIELD_PUSHED_PENALTY = 1
+
+KING_OPEN_FILE_PENALTY = 22
+
+KING_SEMI_OPEN_FILE_PENALTY = 0
+
+THREAT_SAFE_PAWN = np.array([62, 35], dtype=np.int32)
+
+THREAT_BY_MINOR = np.array([
+    [1, 17],
+    [19, 46],
+    [32, 20],
+    [48, 35],
+    [69, 55],
+    [0, 0],
+], dtype=np.int32)
+
+THREAT_BY_ROOK = np.array([
+    [4, 16],
+    [14, 26],
+    [27, 43],
+    [16, 37],
+    [42, 25],
+    [0, 0],
+], dtype=np.int32)
+
+THREAT_BY_KING = np.array([35, 47], dtype=np.int32)
+
+THREAT_HANGING = np.array([7, 8], dtype=np.int32)
+
+THREAT_PAWN_PUSH = np.array([9, 10], dtype=np.int32)
+
+KING_PROTECTOR = np.array([0, 0], dtype=np.int32)
+
+BISHOP_PAWNS_PENALTY = np.array([0, 7], dtype=np.int32)
+
+TRAPPED_ROOK = np.array([11, 9], dtype=np.int32)
+
+INITIATIVE_BONUS = 24
+
+MAX_KING_ATTACKERS = 1016
+
+PROXIMITY_ENEMY_WEIGHT = 3
+
+PROXIMITY_FRIENDLY_WEIGHT = 6
+
+MAX_PROXIMITY_BONUS = 147
+
+KING_DANGER_SINGLE_ATTACKER_DIVISOR = 1
+
+UNSTOPPABLE_PAWN_BONUS = 781
+
+EG_KING_PAWN_PROXIMITY_WEIGHT = 0
+
+BLOCKED_PASSER_DIVISOR = 5

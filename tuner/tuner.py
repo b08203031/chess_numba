@@ -396,7 +396,7 @@ class SPSAOptimizer:
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--iter", type=int, default=1000, help="Number of SPSA iterations")
+    parser.add_argument("--iter", type=int, default=20000, help="Number of SPSA iterations")
     parser.add_argument("--alpha", type=float, default=30000.0, help="Learning rate scaling (a)")
     parser.add_argument("--c", type=float, default=5.0, help="Perturbation scaling (c)")
     

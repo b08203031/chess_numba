@@ -96,7 +96,8 @@ def probe_tt(tt, zobrist_key):
     num_buckets = len(tt) // 4
     base_index = (zobrist_key & np.uint64(num_buckets - 1)) * 4
     
-    key32 = np.uint32(zobrist_key)
+    # 使用 Zobrist key 的高 32 位元作為驗證鍵值，避免與雜湊桶索引（低位元）重複導致碰撞
+    key32 = np.uint32(zobrist_key >> np.uint64(32))
     for i in range(4):
         entry = tt[base_index + i]
         if entry['key'] == key32:
@@ -125,7 +126,9 @@ def store_tt(tt, zobrist_key, depth, score, static_eval, flag, best_move, curren
         
     num_buckets = len(tt) // 4
     base_index = (zobrist_key & np.uint64(num_buckets - 1)) * 4
-    key32 = np.uint32(zobrist_key)
+    
+    # 使用 Zobrist key 的高 32 位元作為驗證鍵值
+    key32 = np.uint32(zobrist_key >> np.uint64(32))
     
     # 1. 尋找完全相同的局面 (Exact Match)
     for i in range(4):

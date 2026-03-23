@@ -191,8 +191,8 @@ def evaluate_pawn_structure(piece_bbs):
             p_bonus_mg = PASSED_PAWN_BONUS[rank, 0]
             p_bonus_eg = PASSED_PAWN_BONUS[rank, 1]
             if is_blocked:
-                p_bonus_mg //= 2
-                p_bonus_eg //= 2
+                p_bonus_mg //= BLOCKED_PASSER_DIVISOR
+                p_bonus_eg //= BLOCKED_PASSER_DIVISOR
                 
             mg_score += p_bonus_mg
             eg_score += p_bonus_eg
@@ -212,10 +212,9 @@ def evaluate_pawn_structure(piece_bbs):
                 
                 if rank > 3: # Only consider advanced passed pawns for proximity logic to save time/noise
                     # Bonus if friendly king is closer, penalty if enemy is closer
-                    # Weight: 5 * Enemy - 2 * Friendly
-                    proximity_bonus = (dist_enemy * 5 - dist_friendly * 2) * rank # Scale by rank
+                    proximity_bonus = (dist_enemy * PROXIMITY_ENEMY_WEIGHT - dist_friendly * PROXIMITY_FRIENDLY_WEIGHT) * rank # Scale by rank
                     # Limit the impact
-                    proximity_bonus = max(-150, min(150, proximity_bonus))
+                    proximity_bonus = max(-MAX_PROXIMITY_BONUS, min(MAX_PROXIMITY_BONUS, proximity_bonus))
                     eg_score += proximity_bonus
 
         # B. Candidate Passed Pawn Logic
@@ -239,8 +238,8 @@ def evaluate_pawn_structure(piece_bbs):
                 # If blocked by any piece directly in front, halve it too
                 is_blocked = ((white_pieces | black_pieces) & (np.uint64(1) << np.uint64(sq + 8))) != 0
                 if is_blocked:
-                    c_bonus_mg //= 2
-                    c_bonus_eg //= 2
+                    c_bonus_mg //= BLOCKED_PASSER_DIVISOR
+                    c_bonus_eg //= BLOCKED_PASSER_DIVISOR
                     
                 mg_score += c_bonus_mg
                 eg_score += c_bonus_eg
@@ -321,8 +320,8 @@ def evaluate_pawn_structure(piece_bbs):
             p_bonus_mg = PASSED_PAWN_BONUS[relative_rank, 0]
             p_bonus_eg = PASSED_PAWN_BONUS[relative_rank, 1]
             if is_blocked:
-                p_bonus_mg //= 2
-                p_bonus_eg //= 2
+                p_bonus_mg //= BLOCKED_PASSER_DIVISOR
+                p_bonus_eg //= BLOCKED_PASSER_DIVISOR
                 
             mg_score -= p_bonus_mg
             eg_score -= p_bonus_eg
@@ -337,8 +336,8 @@ def evaluate_pawn_structure(piece_bbs):
 
                 # Rule 1: Pawn Blocked by Enemy King
                 if relative_rank > 3:
-                    proximity_bonus = (dist_enemy * 5 - dist_friendly * 2) * relative_rank
-                    proximity_bonus = max(-150, min(150, proximity_bonus))
+                    proximity_bonus = (dist_enemy * PROXIMITY_ENEMY_WEIGHT - dist_friendly * PROXIMITY_FRIENDLY_WEIGHT) * relative_rank
+                    proximity_bonus = max(-MAX_PROXIMITY_BONUS, min(MAX_PROXIMITY_BONUS, proximity_bonus))
                     eg_score -= proximity_bonus
 
         # B. Candidate Passed Pawn Logic (Black)
@@ -356,8 +355,8 @@ def evaluate_pawn_structure(piece_bbs):
                 
                 is_blocked = ((white_pieces | black_pieces) & (np.uint64(1) << np.uint64(sq - 8))) != 0
                 if is_blocked:
-                    c_bonus_mg //= 2
-                    c_bonus_eg //= 2
+                    c_bonus_mg //= BLOCKED_PASSER_DIVISOR
+                    c_bonus_eg //= BLOCKED_PASSER_DIVISOR
                     
                 mg_score -= c_bonus_mg
                 eg_score -= c_bonus_eg
@@ -689,13 +688,13 @@ def _evaluate_king_attackers(king_sq, color, piece_bbs, occupancy_bbs, enemy_att
 
     # Single attacker: halve the final danger score (softened threat)
     if attacker_count == 1:
-        kingDanger = kingDanger // 2
+        kingDanger = kingDanger // KING_DANGER_SINGLE_ATTACKER_DIVISOR
 
     # Quadratic transformation (equivalent to old KING_SAFETY_TABLE[i] = i²/2)
     if kingDanger > 0:
         penalty = kingDanger * kingDanger // KING_DANGER_DIVISOR
         # Cap at 1000 to avoid extreme values
-        penalty = min(penalty, np.int32(1000))
+        penalty = min(penalty, MAX_KING_ATTACKERS)
         return -penalty
     else:
         return np.int32(0)
@@ -1251,7 +1250,7 @@ def _evaluate_king_pawn_endgame(piece_bbs, side_to_move):
             
             # If King is too far -> Unstoppable
             if king_dist > adjusted_pawn_steps:
-                 score += 800 # Queen value approx
+                 score += UNSTOPPABLE_PAWN_BONUS
             
         temp_wp &= temp_wp - np.uint64(1)
 
@@ -1275,7 +1274,7 @@ def _evaluate_king_pawn_endgame(piece_bbs, side_to_move):
                 adjusted_pawn_steps += 1
                 
             if king_dist > adjusted_pawn_steps:
-                score -= 800
+                score -= UNSTOPPABLE_PAWN_BONUS
 
         temp_bp &= temp_bp - np.uint64(1)
 
@@ -1295,7 +1294,7 @@ def _evaluate_king_pawn_endgame(piece_bbs, side_to_move):
         sq = get_lsb_index(temp_pawns)
         # 距離越近，獎勵/懲罰越小，所以用最大距離減去實際距離
         distance = MANHATTAN_DISTANCE[white_king_sq, sq]
-        score += (KING_TROPISM_MAX_DISTANCE - distance) * 5 # 給予一個較小的權重
+        score += (KING_TROPISM_MAX_DISTANCE - distance) * EG_KING_PAWN_PROXIMITY_WEIGHT
         temp_pawns &= temp_pawns - np.uint64(1)
 
     # Black king proximity
@@ -1303,7 +1302,7 @@ def _evaluate_king_pawn_endgame(piece_bbs, side_to_move):
     while temp_pawns:
         sq = get_lsb_index(temp_pawns)
         distance = MANHATTAN_DISTANCE[black_king_sq, sq]
-        score -= (KING_TROPISM_MAX_DISTANCE - distance) * 5
+        score -= (KING_TROPISM_MAX_DISTANCE - distance) * EG_KING_PAWN_PROXIMITY_WEIGHT
         temp_pawns &= temp_pawns - np.uint64(1)
 
     return score

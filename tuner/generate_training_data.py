@@ -46,14 +46,14 @@ def should_skip_position(board):
     if board.is_check():
         return True
     
-    # 過濾明顯材質失衡的局面（超過 5 分差距）
+    # 過濾明顯材質失衡的局面（超過 2 分差距，約等於兩個兵）
     material_diff = 0
     piece_values = {chess.PAWN: 1, chess.KNIGHT: 3, chess.BISHOP: 3, chess.ROOK: 5, chess.QUEEN: 9}
     for piece_type, value in piece_values.items():
         material_diff += len(board.pieces(piece_type, chess.WHITE)) * value
         material_diff -= len(board.pieces(piece_type, chess.BLACK)) * value
     
-    if abs(material_diff) > 5:
+    if abs(material_diff) > 2:
         return True
 
     return False

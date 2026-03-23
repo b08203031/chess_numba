@@ -1,12 +1,15 @@
 """
 從 PGN 文件生成「戰術/殺王」專用數據集的腳本。(多進程並行處理)
 
-這個腳本的過濾邏輯（黃金條件）：
-1. 雙方總材質分差 (Material Difference) <= 100cp (約 1 兵以內)。
-2. Stockfish 預測分數 >= 200cp 或 <= -200cp，或是強制將殺 (Mate)。
-3. 每盤棋最多只抽取 2 個符合條件的局面，避免過度擬合同一局。
+這個腳本專注於萃取傳統靜態評估函數容易誤判的「反直覺/高度動態」局面：
 
-這個資料集專門用於解鎖並優化高度非線性的「國王安全參數」。
+我們考慮/過濾的局面包含以下四種（黃金條件）：
+1. 【平衡破局 (Balanced Breakthroughs)】：雙方總材質分差 (Material Difference) <= 100cp (約 1 兵以內)，但 Stockfish 分數卻極度懸殊 (|cp| >= 200)。
+2. 【棄子攻勢 (Sacrifices/Tactical Comp)】：一方子力落後 (落後 >= 100cp)，但 Stockfish 評估卻是大幅領先 (cp >= 200)。
+3. 【堡壘與死鎖 (Fortress/Dead Draws)】：一方子力大幅領先 (例如多一個輕子，領先 >= 300cp)，但 Stockfish 評估卻接近平手 (-50 <= cp <= 50)。這能教導引擎避免無勝算的子力優勢。
+4. 【困子與結構敗局 (Trapped Pieces/Busts)】：一方子力大幅領先 (領先 >= 300cp)，但 Stockfish 評估卻是完全落後或均勢 (cp <= 50)。這能教導引擎死子與王城被破的危險。
+
+這個資料集專門用於解鎖並優化高度非線性的「國王安全參數」與「殘局縮放因子」。
 """
 import chess
 import chess.pgn
@@ -68,9 +71,9 @@ def get_stockfish_tactical_label(board: chess.Board, depth: int, min_cp: int = 2
         if score_obj.is_mate():
             mate_moves = score_obj.mate()
             if mate_moves > 0:
-                return 1.0
+                return 1.0, 2000
             else:
-                return 0.0
+                return 0.0, -2000
         
         score = score_obj.score()
         
@@ -138,13 +141,18 @@ def process_game_batch(games_data, stockfish_path, depth, min_cp, min_move, max_
                             label, score = analysis
                             
                             keep = False
-                            # 1. 材質均勢且分數懸殊
+                            # 1. 【平衡破局】材質均勢且分數懸殊
                             if abs(mat_diff) <= 100 and abs(score) >= min_cp:
                                 keep = True
-                            # 2. 子力落後但 SF 判斷領先 (戰術補償)
+                            # 2. 【棄子攻勢】子力落後但 SF 判斷領先 (戰術補償)
                             elif mat_diff < -100 and score >= min_cp: # White is down but winning
                                 keep = True
                             elif mat_diff > 100 and score <= -min_cp: # White is up but losing (Black has compensation)
+                                keep = True
+                            # 3. & 4. 【堡壘與困子】子力大幅領先，但 SF 判斷是和局或甚至落後
+                            elif mat_diff >= 300 and score <= 50: # White is up a piece+, but score is <= +0.50
+                                keep = True
+                            elif mat_diff <= -300 and score >= -50: # Black is up a piece+, but score is >= -0.50
                                 keep = True
                             
                             if keep:
