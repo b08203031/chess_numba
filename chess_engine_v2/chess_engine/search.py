@@ -45,7 +45,8 @@ from chess_engine.constants import (
     CONTINUATION_HISTORY_FACTOR, HISTORY_MAX_CONTINUATION, HISTORY_MAX_PAWN, PAWN_HISTORY_MASK,
     GOOD_QUIET_THRESHOLD,
     FIFTY_MOVE_RULE_LIMIT, FIFTY_MOVE_SCALE_THRESHOLD, FIFTY_MOVE_MAX_SCALE,
-    SEE_HISTORY_DIVISOR, LMR_CONT_HISTORY_MULT, LMR_CONT_HISTORY_DIVISOR,
+    SEE_HISTORY_DIVISOR,
+    HISTORY_WEIGHT_MAIN, HISTORY_WEIGHT_CONT_1, HISTORY_WEIGHT_CONT_2, HISTORY_WEIGHT_CONT_4,
     LMR_TABLE, ENABLE_MATE_DISTANCE_PRUNING
 )
 from chess_engine.bitboard_utils import find_piece_type_on_square, find_piece_type_on_square_side
@@ -1051,26 +1052,26 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
             # Dynamic LMR Logic
             lmr = 0
             if ENABLE_LMR and depth >= LMR_MIN_DEPTH and is_quiet_move and quiet_move_counter >= LMR_MIN_QUIET_MOVE_INDEX:
-                # Get History Score for adjustment
+                # Get History Score for adjustment (V2-Tailored SNR weights)
                 aggressor_type = find_piece_type_on_square_side(piece_bbs, from_sq, game_state[0])
-                history_score = search_context.history_table[aggressor_type, to_sq]
+                history_score = search_context.history_table[aggressor_type, to_sq] * HISTORY_WEIGHT_MAIN
                 
                 # Add Multi-level Continuation History context to LMR
                 if ply > 0:
                     p1_move = search_context.move_stack[ply - 1]
                     p1_piece = search_context.piece_stack[ply - 1]
                     if p1_move != NO_MOVE and p1_piece != -1:
-                        history_score += search_context.continuation_history[0, p1_piece, get_to_square(p1_move), aggressor_type, to_sq] * 2
+                        history_score += search_context.continuation_history[0, p1_piece, get_to_square(p1_move), aggressor_type, to_sq] * HISTORY_WEIGHT_CONT_1
                 if ply > 1:
                     p2_move = search_context.move_stack[ply - 2]
                     p2_piece = search_context.piece_stack[ply - 2]
                     if p2_move != NO_MOVE and p2_piece != -1:
-                        history_score += search_context.continuation_history[1, p2_piece, get_to_square(p2_move), aggressor_type, to_sq]
+                        history_score += search_context.continuation_history[1, p2_piece, get_to_square(p2_move), aggressor_type, to_sq] * HISTORY_WEIGHT_CONT_2
                 if ply > 3:
                     p4_move = search_context.move_stack[ply - 4]
                     p4_piece = search_context.piece_stack[ply - 4]
                     if p4_move != NO_MOVE and p4_piece != -1:
-                        history_score += search_context.continuation_history[2, p4_piece, get_to_square(p4_move), aggressor_type, to_sq]
+                        history_score += search_context.continuation_history[2, p4_piece, get_to_square(p4_move), aggressor_type, to_sq] * HISTORY_WEIGHT_CONT_4
 
                 lmr = get_lmr_reduction(depth, legal_moves_tried, history_score, improving, is_pv)
 
@@ -1088,17 +1089,6 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                     to_rank = to_sq // 8
                     if (game_state[0] == 0 and to_rank >= 5) or (game_state[0] == 1 and to_rank <= 2):
                         lmr = max(0, lmr - 2)
-
-                # A4: Continuation History adjustment in LMR
-                if ply > 0:
-                    prev_mv = search_context.move_stack[ply - 1]
-                    if prev_mv != NO_MOVE:
-                        p_to = get_to_square(prev_mv)
-                        p_piece = find_piece_type_for_square(piece_bbs, p_to, 1 - game_state[0])
-                        if p_piece != -1:
-                            cont_score = search_context.continuation_history[0, p_piece, p_to, aggressor_type, to_sq]
-                            # Scale: ±1 reduction for V2 history scale (divisor 8192)
-                            lmr -= int(float(cont_score) / LMR_CONT_HISTORY_DIVISOR * LMR_CONT_HISTORY_MULT)
 
                 # Clamp LMR to avoid reducing below depth 1
                 lmr = max(0, min(lmr, search_depth - 1))
