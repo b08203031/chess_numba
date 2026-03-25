@@ -61,6 +61,7 @@ def uci_loop():
     butterfly_history = np.zeros((64, 64), dtype=np.int32)
     continuation_history = np.zeros((3, 12, 64, 12, 64), dtype=np.int16)
     capture_history = np.zeros((12, 64, 12), dtype=np.int32)
+    pawn_history = np.full((8192, 12, 64), -1238, dtype=np.int16)
     pawn_correction_history = np.zeros(16384, dtype=np.int16) # CORRECTION_HISTORY_SIZE
     minor_correction_history = np.zeros(16384, dtype=np.int16)
     non_pawn_correction_history_white = np.zeros(16384, dtype=np.int16)
@@ -114,6 +115,7 @@ def uci_loop():
                 butterfly_history.fill(0)
                 continuation_history.fill(0)
                 capture_history.fill(0)
+                pawn_history.fill(-1238)
                 pawn_correction_history.fill(0)
                 minor_correction_history.fill(0)
                 non_pawn_correction_history_white.fill(0)
@@ -142,22 +144,17 @@ def uci_loop():
                     game_history.append(game_state[4])
                     
                 elif "fen" in tokens:
-                    try:
-                        fen_start_index = tokens.index("fen") + 1
-                        # Stop before 'moves' if present
-                        if "moves" in tokens:
-                            moves_idx = tokens.index("moves")
-                            fen = " ".join(tokens[fen_start_index:moves_idx])
-                        else:
-                            fen = " ".join(tokens[fen_start_index:])
-                            
-                        piece_bbs, occupancy_bbs, game_state = parse_fen(fen)
-                        board_state = (piece_bbs, occupancy_bbs, game_state)
-                        game_history.append(game_state[4])
-                    except Exception as e:
-                        log_info(f"Invalid FEN received: {e}")
-                        board_state = None # Invalidate current board state
-                        continue
+                    fen_start_index = tokens.index("fen") + 1
+                    # Stop before 'moves' if present
+                    if "moves" in tokens:
+                        moves_idx = tokens.index("moves")
+                        fen = " ".join(tokens[fen_start_index:moves_idx])
+                    else:
+                        fen = " ".join(tokens[fen_start_index:])
+                        
+                    piece_bbs, occupancy_bbs, game_state = parse_fen(fen)
+                    board_state = (piece_bbs, occupancy_bbs, game_state)
+                    game_history.append(game_state[4])
                 
                 # Handle 'moves' / 處理 'moves'
                 if "moves" in tokens:
@@ -235,7 +232,7 @@ def uci_loop():
                 # Create a new context for this search / 為此搜尋創建新的上下文
                 global_search_context = SearchContext(
                     transposition_table, killer_moves, pv_table, history_table,
-                    butterfly_history, continuation_history, capture_history,
+                    butterfly_history, continuation_history, capture_history, pawn_history,
                     pawn_correction_history, minor_correction_history,
                     non_pawn_correction_history_white, non_pawn_correction_history_black
                 )

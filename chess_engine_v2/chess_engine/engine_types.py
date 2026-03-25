@@ -58,6 +58,7 @@ search_context_spec = [
     ('mp_bad_captures_count', numba.int32[::1]),
     ('mp_bad_captures_idx', numba.int32[::1]),
     ('continuation_history', numba.int16[:, :, :, :, :]),
+    ('pawn_history', numba.int16[:, :, :]),
     ('pawn_correction_history', numba.int16[:]),
     ('minor_correction_history', numba.int16[:]),
     ('non_pawn_correction_history_white', numba.int16[:]),
@@ -89,12 +90,13 @@ class SearchContext:
         static_eval_stack (numba.int32[::1]): 靜態評估值堆疊，用於判斷 Improving。
 
         continuation_history (numba.int16[:, :, :, :, :]): 連續歷史表。
+        pawn_history (numba.int16[:, :, :]): 兵結構歷史表。
         pawn_correction_history (numba.int16[:]): 兵型修正歷史表。
         minor_correction_history (numba.int16[:]): 輕子修正歷史表。
         non_pawn_correction_history_white (numba.int16[:]): 白方非兵修正歷史表。
         non_pawn_correction_history_black (numba.int16[:]): 黑方非兵修正歷史表。
     """
-    def __init__(self, transposition_table, killer_moves, pv_table, history_table, butterfly_history, continuation_history, capture_history, pawn_correction_history, minor_correction_history, non_pawn_correction_history_white, non_pawn_correction_history_black):
+    def __init__(self, transposition_table, killer_moves, pv_table, history_table, butterfly_history, continuation_history, capture_history, pawn_history, pawn_correction_history, minor_correction_history, non_pawn_correction_history_white, non_pawn_correction_history_black):
         """
         初始化搜尋上下文。
 
@@ -106,6 +108,7 @@ class SearchContext:
             butterfly_history: 預先分配的蝴蝶歷史表。
             continuation_history: 預先分配的連續歷史表。
             capture_history: 預先分配的吃子歷史表。
+            pawn_history: 預先分配的兵結構歷史表。
             pawn_correction_history: 預先分配的兵型修正歷史表。
             minor_correction_history: 預先分配的輕子修正歷史表。
             non_pawn_correction_history_white: 預先分配的白方非兵修正歷史表。
@@ -118,6 +121,7 @@ class SearchContext:
         self.butterfly_history = butterfly_history
         self.continuation_history = continuation_history
         self.capture_history = capture_history
+        self.pawn_history = pawn_history
         self.pawn_correction_history = pawn_correction_history
         self.minor_correction_history = minor_correction_history
         self.non_pawn_correction_history_white = non_pawn_correction_history_white

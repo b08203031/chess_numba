@@ -5,7 +5,7 @@ from chess_engine.move import (
     get_to_square, get_from_square, get_special_move_flag,
     SPECIAL_MOVE_FLAG_PROMOTION, SPECIAL_MOVE_FLAG_EN_PASSANT
 )
-from chess_engine.constants import SCORE_GOOD_CAPTURE_BONUS, SCORE_BAD_CAPTURE_PENALTY, SCORE_KILLER_1, SCORE_KILLER_2, SCORE_COUNTER_MOVE, MAX_HISTORY, LMR_TABLE, MAX_PLY, SCORE_TT_MOVE, BB_SQUARES, NO_MOVE, HISTORY_MAX_MAIN, HISTORY_MAX_BUTTERFLY, HISTORY_MAX_CAPTURE, HISTORY_MAX_CONTINUATION
+from chess_engine.constants import SCORE_GOOD_CAPTURE_BONUS, SCORE_BAD_CAPTURE_PENALTY, SCORE_KILLER_1, SCORE_KILLER_2, SCORE_COUNTER_MOVE, MAX_HISTORY, LMR_TABLE, MAX_PLY, SCORE_TT_MOVE, BB_SQUARES, NO_MOVE, HISTORY_MAX_MAIN, HISTORY_MAX_BUTTERFLY, HISTORY_MAX_CAPTURE, HISTORY_MAX_CONTINUATION, HISTORY_MAX_PAWN, LMR_HISTORY_DIVISOR
 from chess_engine.evaluation import MG_MATERIAL_VALUES
 from chess_engine.see import see_ge
 from chess_engine.bitboard_utils import find_piece_type_on_square, find_piece_type_on_square_side, get_lsb_index
@@ -56,6 +56,22 @@ def update_capture_history(capture_history, piece_type, to_square, victim_type, 
     # Gravity formula
     new_value = current_value + clamped_bonus - (current_value * abs(clamped_bonus)) // HISTORY_MAX_CAPTURE
     capture_history[piece_type, to_square, victim_type] = new_value
+
+@numba.njit(cache=True, boundscheck=False, fastmath=True)
+def update_pawn_history(pawn_history, pawn_key_idx, piece_type, to_square, bonus):
+    """
+    Updates the pawn history table using the gravity formula and Stockfish asymmetric scaling.
+    pawn_history: [8192, 12, 64] (pawn_key_idx, piece_type, to_square)
+    """
+    current_value = pawn_history[pawn_key_idx, piece_type, to_square]
+    
+    # V2 asymmetric weighting: accept full positive bonus, but reduce the 1.5x malus by 2/3 for pawn history
+    scaled_bonus = bonus if bonus > 0 else (bonus * 2) // 3
+    clamped_bonus = min(max(scaled_bonus, -HISTORY_MAX_PAWN), HISTORY_MAX_PAWN)
+    
+    # Gravity formula with explicit int32 casting to avoid int16 overflow under Numba
+    new_value = np.int32(current_value) + clamped_bonus - (np.int32(current_value) * abs(clamped_bonus)) // HISTORY_MAX_PAWN
+    pawn_history[pawn_key_idx, piece_type, to_square] = new_value
 
 @numba.njit(cache=True, boundscheck=False, fastmath=True)
 def update_continuation_history(context, ply_offset, prev_move, prev_piece, curr_move, curr_piece, bonus):
@@ -144,7 +160,7 @@ def score_captures_with_tt(piece_bbs, occupancy_bbs, game_state, moves, scores, 
         scores[i] = score
 
 @numba.njit(cache=True, boundscheck=False, fastmath=True)
-def score_quiets(piece_bbs, occupancy_bbs, game_state, moves, scores, start_idx, end_idx, search_context, ply, killer_1, killer_2, counter_move):
+def score_quiets(piece_bbs, occupancy_bbs, game_state, moves, scores, start_idx, end_idx, search_context, ply, killer_1, killer_2, counter_move, pawn_key_idx):
     side_to_move = game_state[0]
     
     prev_move_1 = NO_MOVE
@@ -174,13 +190,16 @@ def score_quiets(piece_bbs, occupancy_bbs, game_state, moves, scores, start_idx,
         aggressor_type = find_piece_type_on_square_side(piece_bbs, from_sq, side_to_move)
         score = search_context.history_table[aggressor_type, to_square]
         
+        # Pawn History
+        score += search_context.pawn_history[pawn_key_idx, aggressor_type, to_square] * 2
+        
         # Butterfly History
         score += search_context.butterfly_history[from_sq, to_square]
         
         # Continuation History
         if prev_move_1 != NO_MOVE and prev_piece_1 != -1:
             cont_score = search_context.continuation_history[0, prev_piece_1, get_to_square(prev_move_1), aggressor_type, to_square]
-            score += cont_score * 2
+            score += cont_score
 
         if prev_move_2 != NO_MOVE and prev_piece_2 != -1:
             cont_score = search_context.continuation_history[1, prev_piece_2, get_to_square(prev_move_2), aggressor_type, to_square]
@@ -236,11 +255,11 @@ def score_quiets(piece_bbs, occupancy_bbs, game_state, moves, scores, start_idx,
             score -= 10000
 
         if move == killer_1:
-            score += 50000
+            score += 400000
         elif move == killer_2:
-            score += 40000
+            score += 350000
         elif move == counter_move:
-            score += 30000
+            score += 300000
 
         scores[i] = score
 
@@ -268,14 +287,14 @@ def get_lmr_reduction(depth, move_count, history_score, improving, is_pv):
     if not improving:
         reduction += 0.5
 
-    # History Adjustment: Scale +/- 1.5 reduction for max history
-    history_adjustment = (history_score / float(MAX_HISTORY)) * 1.5
+    # History Adjustment: V2-specific scaling for linear history
+    history_adjustment = (history_score / LMR_HISTORY_DIVISOR)
     reduction -= history_adjustment
 
     return max(0, int(reduction))
 
 @numba.njit(cache=True, boundscheck=False, fastmath=True)
-def score_moves(piece_bbs, occupancy_bbs, game_state, moves, scores, move_count, tt_move, killer_moves_at_ply, history_table, counter_move, pinned_white, pinned_black, search_context, ply):
+def score_moves(piece_bbs, occupancy_bbs, game_state, moves, scores, move_count, tt_move, killer_moves_at_ply, history_table, counter_move, pinned_white, pinned_black, search_context, ply, pawn_key_idx):
     side_to_move = game_state[0]
     opponent_pieces_bb = occupancy_bbs[1] if side_to_move == 0 else occupancy_bbs[0]
     
@@ -347,6 +366,9 @@ def score_moves(piece_bbs, occupancy_bbs, game_state, moves, scores, move_count,
                     from_sq = get_from_square(move)
                     aggressor_type = find_piece_type_on_square_side(piece_bbs, from_sq, side_to_move)
                     score = history_table[aggressor_type, to_square]
+                    
+                    # Pawn History
+                    score += search_context.pawn_history[pawn_key_idx, aggressor_type, to_square] * 2
                     
                     # Butterfly History
                     score += search_context.butterfly_history[from_sq, to_square]

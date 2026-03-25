@@ -42,9 +42,10 @@ from chess_engine.constants import (
     PRUNING_CAPTURE_SEE_MARGIN, PRUNING_QUIET_SEE_MARGIN, PRUNING_HISTORY_THRESHOLD,
     WHITE, BLACK, PAWN_KEY_INDEX, MINOR_KEY_INDEX, NON_PAWN_KEY_WHITE_INDEX, NON_PAWN_KEY_BLACK_INDEX, CORRECTION_HISTORY_SIZE, CORRECTION_HISTORY_MASK, CORRECTION_HISTORY_LIMIT, CORRECTION_HISTORY_DIVISOR, 
     CORRECTION_HISTORY_PAWN_WEIGHT, CORRECTION_HISTORY_MINOR_WEIGHT, CORRECTION_HISTORY_NON_PAWN_WEIGHT, CORRECTION_HISTORY_UPDATE_DEPTH, SCORE_MIN, SCORE_MAX,
-    CONTINUATION_HISTORY_FACTOR, HISTORY_MAX_CONTINUATION,
+    CONTINUATION_HISTORY_FACTOR, HISTORY_MAX_CONTINUATION, HISTORY_MAX_PAWN, PAWN_HISTORY_MASK,
+    GOOD_QUIET_THRESHOLD,
     FIFTY_MOVE_RULE_LIMIT, FIFTY_MOVE_SCALE_THRESHOLD, FIFTY_MOVE_MAX_SCALE,
-    SEE_HISTORY_DIVISOR, LMR_CONT_HISTORY_MULT,
+    SEE_HISTORY_DIVISOR, LMR_CONT_HISTORY_MULT, LMR_CONT_HISTORY_DIVISOR,
     LMR_TABLE, ENABLE_MATE_DISTANCE_PRUNING
 )
 from chess_engine.bitboard_utils import find_piece_type_on_square, find_piece_type_on_square_side
@@ -63,7 +64,7 @@ from .move import move_to_uci
 
 from chess_engine.search_heuristics import (
     update_history, update_butterfly_history, update_capture_history,
-    update_continuation_history, score_captures, score_captures_with_tt, 
+    update_continuation_history, update_pawn_history, score_captures, score_captures_with_tt, 
     score_quiets, get_lmr_reduction, score_moves, partial_insertion_sort_moves
 )
 
@@ -241,8 +242,8 @@ def quiescence_search(piece_bbs, occupancy_bbs, game_state, alpha, beta, ply, se
 
 get_next_move_return_type = numba.uint16
 
-@numba.njit(get_next_move_return_type(piece_bbs_signature, occupancy_bbs_signature, game_state_signature, search_context_type, numba.int32, numba.uint16, numba.uint16, numba.uint16, numba.uint16, numba.uint16, numba.uint64, numba.uint64), cache=True)
-def get_next_move(piece_bbs, occupancy_bbs, game_state, search_context, ply, tt_move, excluded_move, killer_1, killer_2, counter_move, pinned_white, pinned_black):
+@numba.njit(get_next_move_return_type(piece_bbs_signature, occupancy_bbs_signature, game_state_signature, search_context_type, numba.int32, numba.uint16, numba.uint16, numba.uint16, numba.uint16, numba.uint16, numba.uint64, numba.uint64, numba.uint64), cache=True)
+def get_next_move(piece_bbs, occupancy_bbs, game_state, search_context, ply, tt_move, excluded_move, killer_1, killer_2, counter_move, pinned_white, pinned_black, pawn_key_idx):
     moves = search_context.moves_buffer[ply]
     scores = search_context.move_scores[ply]
     bad_captures = search_context.bad_captures[ply]
@@ -294,10 +295,10 @@ def get_next_move(piece_bbs, occupancy_bbs, game_state, search_context, ply, tt_
         elif mp_stage == STAGE_GEN_QUIETS:
             captures_end = search_context.mp_captures_end[ply]
             search_context.mp_quiets_end[ply] = generate_pseudo_legal_quiets_buffer(piece_bbs, occupancy_bbs, game_state, search_context.moves_buffer, ply, captures_end)
-            score_quiets(piece_bbs, occupancy_bbs, game_state, moves, scores, captures_end, search_context.mp_quiets_end[ply], search_context, ply, killer_1, killer_2, counter_move)
+            score_quiets(piece_bbs, occupancy_bbs, game_state, moves, scores, captures_end, search_context.mp_quiets_end[ply], search_context, ply, killer_1, killer_2, counter_move, pawn_key_idx)
             
-            # Sort good quiets (score >= 0) to the front. Bad quiets (score < 0) remain at the back.
-            num_sorted = partial_insertion_sort_moves(moves, scores, captures_end, search_context.mp_quiets_end[ply], 0)
+            # Sort good quiets (score >= GOOD_QUIET_THRESHOLD) to the front. Bad quiets (score < GOOD_QUIET_THRESHOLD) remain at the back.
+            num_sorted = partial_insertion_sort_moves(moves, scores, captures_end, search_context.mp_quiets_end[ply], GOOD_QUIET_THRESHOLD)
             
             search_context.mp_current_idx[ply] = captures_end
             search_context.mp_stage[ply] = STAGE_GOOD_QUIETS
@@ -307,8 +308,8 @@ def get_next_move(piece_bbs, occupancy_bbs, game_state, search_context, ply, tt_
             quiets_end = search_context.mp_quiets_end[ply]
             current_idx = search_context.mp_current_idx[ply]
             
-            # Since Good Quiets are strictly sorted and have score >= 0 at the front, we just yield them until score < 0
-            if current_idx < quiets_end and scores[current_idx] >= 0:
+            # Since Good Quiets are strictly sorted and have score >= GOOD_QUIET_THRESHOLD at the front, we just yield them.
+            if current_idx < quiets_end and scores[current_idx] >= GOOD_QUIET_THRESHOLD:
                 candidate_move = moves[current_idx]
                 search_context.mp_current_idx[ply] += 1
                 
@@ -333,7 +334,7 @@ def get_next_move(piece_bbs, occupancy_bbs, game_state, search_context, ply, tt_
             quiets_end = search_context.mp_quiets_end[ply]
             current_idx = search_context.mp_current_idx[ply]
             
-            # These are the quiets with score < 0 that were left at the end of the array.
+            # These are the quiets with score < GOOD_QUIET_THRESHOLD that were left at the end of the array.
             if current_idx < quiets_end:
                 candidate_move = moves[current_idx]
                 search_context.mp_current_idx[ply] += 1
@@ -823,6 +824,8 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
     search_context.mp_quiets_end[ply] = 0
     search_context.mp_bad_captures_count[ply] = 0
     search_context.mp_bad_captures_idx[ply] = 0
+    
+    pawn_key_idx = game_state[PAWN_KEY_INDEX] & PAWN_HISTORY_MASK
 
     # opponent_pieces_bb is constant throughout this node (make/unmake restores occupancy)
     opponent_pieces_bb = occupancy_bbs[1] if game_state[0] == 0 else occupancy_bbs[0]
@@ -831,7 +834,7 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
         move = get_next_move(
             piece_bbs, occupancy_bbs, game_state, search_context, ply,
             tt_move, excluded_move, killer_1, killer_2, counter_move,
-            pinned_white, pinned_black
+            pinned_white, pinned_black, pawn_key_idx
         )
         if move == NO_MOVE:
             break
@@ -1094,8 +1097,8 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                         p_piece = find_piece_type_for_square(piece_bbs, p_to, 1 - game_state[0])
                         if p_piece != -1:
                             cont_score = search_context.continuation_history[0, p_piece, p_to, aggressor_type, to_sq]
-                            # Scale: ±1 reduction for max history
-                            lmr -= int(float(cont_score) / float(HISTORY_MAX_CONTINUATION) * LMR_CONT_HISTORY_MULT)
+                            # Scale: ±1 reduction for V2 history scale (divisor 8192)
+                            lmr -= int(float(cont_score) / LMR_CONT_HISTORY_DIVISOR * LMR_CONT_HISTORY_MULT)
 
                 # Clamp LMR to avoid reducing below depth 1
                 lmr = max(0, min(lmr, search_depth - 1))
@@ -1155,7 +1158,8 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
 
         alpha = max(alpha, evaluation)
         if alpha >= beta:
-            bonus = depth * depth
+            bonus = min(15 * depth, 300)
+            malus = (bonus * 3) // 2
             
             if is_capture:
                 # Update Capture History
@@ -1171,6 +1175,7 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                 # Apply Gravity Bonus to the cutoff move
                 update_history(search_context.history_table, aggressor_type, to_sq, bonus)
                 update_butterfly_history(search_context.butterfly_history, get_from_square(move), to_sq, bonus)
+                update_pawn_history(search_context.pawn_history, pawn_key_idx, aggressor_type, to_sq, bonus)
 
                 # --- Continuation History Update (Bonus) ---
                 if ply > 0:
@@ -1205,27 +1210,28 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                     bad_from = get_from_square(bad_move)
                     bad_to = get_to_square(bad_move)
                     bad_aggressor = find_piece_type_on_square_side(piece_bbs, bad_from, game_state[0])
-                    update_history(search_context.history_table, bad_aggressor, bad_to, -bonus)
-                    update_butterfly_history(search_context.butterfly_history, bad_from, bad_to, -bonus)
+                    update_history(search_context.history_table, bad_aggressor, bad_to, -malus)
+                    update_butterfly_history(search_context.butterfly_history, bad_from, bad_to, -malus)
+                    update_pawn_history(search_context.pawn_history, pawn_key_idx, bad_aggressor, bad_to, -malus)
                     
                     # --- Continuation History Update (Malus) ---
                     if ply > 0:
                         prev_move_played = search_context.move_stack[ply - 1]
                         prev_piece_played = search_context.piece_stack[ply - 1]
                         if prev_move_played != NO_MOVE and prev_piece_played != -1:
-                            update_continuation_history(search_context, 0, prev_move_played, prev_piece_played, bad_move, bad_aggressor, -bonus)
+                            update_continuation_history(search_context, 0, prev_move_played, prev_piece_played, bad_move, bad_aggressor, -malus)
 
                     if ply > 1:
                         prev_move_played = search_context.move_stack[ply - 2]
                         prev_piece_played = search_context.piece_stack[ply - 2]
                         if prev_move_played != NO_MOVE and prev_piece_played != -1:
-                            update_continuation_history(search_context, 1, prev_move_played, prev_piece_played, bad_move, bad_aggressor, -bonus)
+                            update_continuation_history(search_context, 1, prev_move_played, prev_piece_played, bad_move, bad_aggressor, -malus)
 
                     if ply > 3:
                         prev_move_played = search_context.move_stack[ply - 4]
                         prev_piece_played = search_context.piece_stack[ply - 4]
                         if prev_move_played != NO_MOVE and prev_piece_played != -1:
-                            update_continuation_history(search_context, 2, prev_move_played, prev_piece_played, bad_move, bad_aggressor, -bonus)
+                            update_continuation_history(search_context, 2, prev_move_played, prev_piece_played, bad_move, bad_aggressor, -malus)
 
                 if move != search_context.killer_moves[ply * 2]:
                     search_context.killer_moves[ply * 2 + 1] = search_context.killer_moves[ply * 2]
@@ -1247,6 +1253,31 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
     final_flag = TT_FLAG_ALPHA if max_eval <= original_alpha else (TT_FLAG_BETA if max_eval >= beta else TT_FLAG_EXACT)
     if max_eval == -INFINITY:
         max_eval = original_alpha
+
+    # --- NEW: Opponent Move Bonus (Fail-Low / Alpha Flag Bonus) ---
+    if final_flag == TT_FLAG_ALPHA and ply > 0 and legal_moves_tried > 4:
+        prev_move = search_context.move_stack[ply - 1]
+        prev_piece = search_context.piece_stack[ply - 1]
+        
+        # Reward the opponent's previous move if it successfully caused us to fail low
+        if prev_move != NO_MOVE and prev_piece != -1:
+            if (prev_piece % 6) != 0:
+                prev_to = get_to_square(prev_move)
+                prev_from = get_from_square(prev_move)
+                pawn_key_idx = game_state[PAWN_KEY_INDEX] & PAWN_HISTORY_MASK
+                
+                base_bonus = min(15 * depth, 300)
+                sub_bonus = base_bonus // 4
+                
+                update_pawn_history(search_context.pawn_history, pawn_key_idx, prev_piece, prev_to, sub_bonus)
+                update_history(search_context.history_table, prev_piece, prev_to, sub_bonus)
+                update_butterfly_history(search_context.butterfly_history, prev_from, prev_to, sub_bonus)
+                
+                if ply > 1:
+                    our_prev_move = search_context.move_stack[ply - 2]
+                    our_prev_piece = search_context.piece_stack[ply - 2]
+                    if our_prev_move != NO_MOVE and our_prev_piece != -1:
+                        update_continuation_history(search_context, 0, our_prev_move, our_prev_piece, prev_move, prev_piece, sub_bonus)
 
     # M3: Apply 50-move scale-down to non-mate evaluations
     if fifty_move_scale < FIFTY_MOVE_MAX_SCALE and abs(max_eval) < MATE_IN_MAX_PLY:
@@ -1331,7 +1362,8 @@ def iterative_deepening_search(piece_bbs, occupancy_bbs, game_state, max_depth, 
     search_context.butterfly_history[:] = np.sign(b) * (np.abs(b) // 2)
     c = search_context.capture_history
     search_context.capture_history[:] = np.sign(c) * (np.abs(c) // 2)
-    # H10: Continuation history decay (was missing entirely — caused cross-game state pollution)
+    ph = search_context.pawn_history
+    search_context.pawn_history[:] = np.sign(ph) * (np.abs(ph) // 2)
     ch = search_context.continuation_history
     search_context.continuation_history[:] = np.sign(ch) * (np.abs(ch) // 2)
 

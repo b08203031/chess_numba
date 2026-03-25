@@ -96,7 +96,6 @@ def probe_tt(tt, zobrist_key):
     num_buckets = len(tt) // 4
     base_index = (zobrist_key & np.uint64(num_buckets - 1)) * 4
     
-    # 使用 Zobrist key 的高 32 位元作為驗證鍵值，避免與雜湊桶索引（低位元）重複導致碰撞
     key32 = np.uint32(zobrist_key >> np.uint64(32))
     for i in range(4):
         entry = tt[base_index + i]
@@ -126,8 +125,6 @@ def store_tt(tt, zobrist_key, depth, score, static_eval, flag, best_move, curren
         
     num_buckets = len(tt) // 4
     base_index = (zobrist_key & np.uint64(num_buckets - 1)) * 4
-    
-    # 使用 Zobrist key 的高 32 位元作為驗證鍵值
     key32 = np.uint32(zobrist_key >> np.uint64(32))
     
     # 1. 尋找完全相同的局面 (Exact Match)
@@ -175,8 +172,8 @@ def store_tt(tt, zobrist_key, depth, score, static_eval, flag, best_move, curren
         
         # 計算相對老化程度
         age = (current_generation - existing_entry['generation'] + 256) % 256
-        if age > 0:
-            age = 1  # 簡化的世代老化權重
+        if age > 15:
+            age = 15  # 簡化的世代老化權重
             
         # PV nodes get a virtual depth bonus of 2, making them harder to replace
         existing_pv_bonus = 2 if existing_entry['is_pv'] else 0
