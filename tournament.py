@@ -76,7 +76,7 @@ class Engine:
         # Trigger JIT compilation
         print(f"[{self.name}] Warming up...")
         self.send_command("setoption name OwnBook value false")
-        self.send_command("position startpos")
+        self.send_command("position kiwipete")
         self.send_command("go depth 2")
         while True:
             line = self.read_line()
