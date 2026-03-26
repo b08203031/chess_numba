@@ -933,7 +933,7 @@ def evaluate_attacks_mobility_threats(piece_bbs, occupancy_bbs, theta):
         
         # Outpost Logic (White Knight)
         if not (black_pawn_attacks & BB_SQUARES[sq]):
-            if (PAWN_ATTACKS[BLACK, sq] & wp_bb):
+            if (PAWN_ATTACKS[WHITE, sq] & wp_bb):
                 rank = sq // 8
                 mg_outpost += get_2d_val(theta, IDX_OUTPOST_BONUS_KNIGHT, rank, 2, 0)
                 eg_outpost += get_2d_val(theta, IDX_OUTPOST_BONUS_KNIGHT, rank, 2, 1)
@@ -978,7 +978,7 @@ def evaluate_attacks_mobility_threats(piece_bbs, occupancy_bbs, theta):
 
         # Outpost Logic (White Bishop)
         if not (black_pawn_attacks & BB_SQUARES[sq]):
-            if (PAWN_ATTACKS[BLACK, sq] & wp_bb):
+            if (PAWN_ATTACKS[WHITE, sq] & wp_bb):
                 rank = sq // 8
                 mg_outpost += get_2d_val(theta, IDX_OUTPOST_BONUS_BISHOP, rank, 2, 0)
                 eg_outpost += get_2d_val(theta, IDX_OUTPOST_BONUS_BISHOP, rank, 2, 1)
@@ -1061,7 +1061,7 @@ def evaluate_attacks_mobility_threats(piece_bbs, occupancy_bbs, theta):
 
         # Outpost Logic (Black Knight)
         if not (white_pawn_attacks & BB_SQUARES[sq]):
-            if (PAWN_ATTACKS[WHITE, sq] & bp_bb):
+            if (PAWN_ATTACKS[BLACK, sq] & bp_bb):
                 rank = sq // 8
                 rel_rank = 7 - rank
                 mg_outpost -= get_2d_val(theta, IDX_OUTPOST_BONUS_KNIGHT, rel_rank, 2, 0)
@@ -1107,7 +1107,7 @@ def evaluate_attacks_mobility_threats(piece_bbs, occupancy_bbs, theta):
 
         # Outpost Logic (Black Bishop)
         if not (white_pawn_attacks & BB_SQUARES[sq]):
-            if (PAWN_ATTACKS[WHITE, sq] & bp_bb):
+            if (PAWN_ATTACKS[BLACK, sq] & bp_bb):
                 rank = sq // 8
                 rel_rank = 7 - rank
                 mg_outpost -= get_2d_val(theta, IDX_OUTPOST_BONUS_BISHOP, rel_rank, 2, 0)

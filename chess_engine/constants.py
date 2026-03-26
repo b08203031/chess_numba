@@ -654,7 +654,7 @@ ENABLE_HISTORY_PRUNING = True      # Enable pruning based on History Score
 PRUNING_SHALLOW_DEPTH = 8         # Prune moves only if depth is below this
 PRUNING_CAPTURE_SEE_MARGIN = -150 # Tightened from -200 (More pruning)
 PRUNING_QUIET_SEE_MARGIN = -80    # Tightened from -100 (More pruning)
-PRUNING_HISTORY_THRESHOLD = -600 # Adjusted from -1000 to match V2 linear history scale
+PRUNING_HISTORY_THRESHOLD = -1000 # Adjusted from -1000 to match V2 linear history scale
 
 # Master switches for existing pruning techniques / 現有剪枝技術的總開關
 ENABLE_NMP = True           # Null Move Pruning

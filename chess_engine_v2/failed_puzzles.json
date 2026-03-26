@@ -11,6 +11,14 @@
         "theme": "sacrifice"
     },
     {
+        "name": "Lichess Puzzle 006eO",
+        "fen": "8/8/2p5/1p1p1k2/3P4/1PP1pK2/8/8 w - - 4 65",
+        "solution": "b3b4",
+        "engine_move": "f3e3",
+        "rating": "2186",
+        "theme": "defensiveMove endgame equality oneMove pawnEndgame"
+    },
+    {
         "name": "Lichess Puzzle 0078T",
         "fen": "rk5r/1b3R2/pp2p2q/4P2p/B6B/4p2P/PP4P1/5Q1K w - - 0 28",
         "solution": "f7b7",
@@ -25,14 +33,6 @@
         "engine_move": "d4c5",
         "rating": "1776",
         "theme": "crushing kingsideAttack long middlegame pin"
-    },
-    {
-        "name": "Lichess Puzzle 002LW",
-        "fen": "3r1rk1/1b3pp1/3p4/p3nPPQ/4P3/3q1BN1/8/2R2RK1 w - - 2 29",
-        "solution": "f5f6",
-        "engine_move": "c1c7",
-        "rating": "2489",
-        "theme": "advantage middlegame short"
     },
     {
         "name": "Lichess Puzzle 004Op",

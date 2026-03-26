@@ -488,17 +488,20 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
         #    d. The score bounds (Alpha/Beta) are valid for a cutoff
         #    e. We are NOT in a singular extension search (excluded_move == NO_MOVE)
         #       OR the TT move is NOT the excluded move.
-        if ply > 0 and not is_pv and tt_entry['depth'] >= depth and (excluded_move == NO_MOVE or tt_move != excluded_move):
+        tt_score = np.int32(tt_entry['score'])
+
+        # Adjust mate scores relative to the current ply
+        if tt_score > MATE_IN_MAX_PLY: tt_score -= ply
+        elif tt_score < -MATE_IN_MAX_PLY: tt_score += ply
+
+        # NEW: Apply 50-move scale down immediately to TT scores to avoid overlooking impending draws
+        if fifty_move_scale < FIFTY_MOVE_MAX_SCALE and abs(tt_score) < MATE_IN_MAX_PLY:
+            tt_score = tt_score * fifty_move_scale // FIFTY_MOVE_MAX_SCALE
+
+        tt_depth_margin = 1 if tt_score <= beta else 0
+
+        if ply > 0 and not is_pv and tt_entry['depth'] >= depth - tt_depth_margin and (excluded_move == NO_MOVE or tt_move != excluded_move) and (cut_node == (tt_score >= beta) or depth > 5):
             tt_hits += np.uint64(1)
-            tt_score = np.int32(tt_entry['score'])
-
-            # Adjust mate scores relative to the current ply
-            if tt_score > MATE_IN_MAX_PLY: tt_score -= ply
-            elif tt_score < -MATE_IN_MAX_PLY: tt_score += ply
-
-            # NEW: Apply 50-move scale down immediately to TT scores to avoid overlooking impending draws
-            if fifty_move_scale < FIFTY_MOVE_MAX_SCALE and abs(tt_score) < MATE_IN_MAX_PLY:
-                tt_score = tt_score * fifty_move_scale // FIFTY_MOVE_MAX_SCALE
 
             should_cutoff = False
             if tt_entry['flag'] == TT_FLAG_EXACT:
@@ -509,6 +512,34 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                 should_cutoff = True
 
             if should_cutoff:
+                # --- NEW: History bonus on TT fail-high cutoff ---
+                if tt_score >= beta and tt_move != NO_MOVE:
+                    tt_from = get_from_square(tt_move)
+                    tt_to = get_to_square(tt_move)
+                    tt_flag_move = get_special_move_flag(tt_move)
+                    opponent_pieces_bb = occupancy_bbs[1] if game_state[0] == 0 else occupancy_bbs[0]
+                    tt_is_capture = ((opponent_pieces_bb & BB_SQUARES[tt_to]) != 0) or (tt_flag_move == SPECIAL_MOVE_FLAG_EN_PASSANT)
+                    tt_is_promotion = tt_flag_move == SPECIAL_MOVE_FLAG_PROMOTION
+
+                    if not tt_is_capture and not tt_is_promotion:
+                        # Quiet ttMove caused fail-high: reward it
+                        tt_bonus = min(depth * depth, 300)
+                        tt_aggressor = find_piece_type_on_square_side(piece_bbs, tt_from, game_state[0])
+                        update_history(search_context.history_table, tt_aggressor, tt_to, tt_bonus)
+                        update_butterfly_history(search_context.butterfly_history, tt_from, tt_to, tt_bonus)
+
+                        safe_ply = min(ply, MAX_PLY - 1)
+                        if tt_move != search_context.killer_moves[safe_ply * 2]:
+                            search_context.killer_moves[safe_ply * 2 + 1] = search_context.killer_moves[safe_ply * 2]
+                            search_context.killer_moves[safe_ply * 2] = tt_move
+
+                        if ply > 0:
+                            prev_move_played = search_context.move_stack[ply - 1]
+                            if prev_move_played != NO_MOVE:
+                                p_from = get_from_square(prev_move_played)
+                                p_to = get_to_square(prev_move_played)
+                                search_context.counter_moves[p_from, p_to] = tt_move
+
                 search_context.pv_table[ply, ply] = NO_MOVE
                 return (tt_score, tt_entry['best_move'], nodes_searched, quiescence_nodes, tt_hits)
 

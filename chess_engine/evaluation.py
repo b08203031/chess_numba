@@ -265,8 +265,8 @@ def evaluate_pawn_structure(piece_bbs):
                  stop_sq = sq + 8
                  if stop_sq < 64:
                      # Check if black pawns attack stop_sq
-                     # PAWN_ATTACKS[0, stop_sq] gives squares occupied by Black pawns that attack stop_sq.
-                     if (PAWN_ATTACKS[0, stop_sq] & black_pawns):
+                     # PAWN_ATTACKS[1, stop_sq] gives squares occupied by Black pawns that attack stop_sq.
+                     if (PAWN_ATTACKS[1, stop_sq] & black_pawns):
                          mg_score += BACKWARD_PAWN_PENALTY[0]
                          eg_score += BACKWARD_PAWN_PENALTY[1]
 
@@ -375,8 +375,8 @@ def evaluate_pawn_structure(piece_bbs):
                  stop_sq = sq - 8
                  if stop_sq >= 0:
                      # Check if white pawns attack stop_sq
-                     # PAWN_ATTACKS[1, stop_sq] gives squares occupied by White pawns that attack stop_sq.
-                     if (PAWN_ATTACKS[1, stop_sq] & white_pawns):
+                     # PAWN_ATTACKS[0, stop_sq] gives squares occupied by White pawns that attack stop_sq.
+                     if (PAWN_ATTACKS[0, stop_sq] & white_pawns):
                          mg_score -= BACKWARD_PAWN_PENALTY[0]
                          eg_score -= BACKWARD_PAWN_PENALTY[1]
 

@@ -30,16 +30,8 @@
         "name": "Lichess Puzzle 002LW",
         "fen": "3r1rk1/1b3pp1/3p4/p3nPPQ/4P3/3q1BN1/8/2R2RK1 w - - 2 29",
         "solution": "f5f6",
-        "engine_move": "c1c7",
+        "engine_move": "g1h1",
         "rating": "2489",
         "theme": "advantage middlegame short"
-    },
-    {
-        "name": "Lichess Puzzle 004Op",
-        "fen": "2kr2r1/1bp4n/1pq1p2p/p1P5/1P3B2/P6P/5RP1/RB3QK1 b - - 4 26",
-        "solution": "d8d1",
-        "engine_move": "h7g5",
-        "rating": "2164",
-        "theme": "crushing deflection kingsideAttack middlegame pin sacrifice skewer veryLong"
     }
 ]

@@ -49,12 +49,11 @@ def create_transposition_table(size_mb):
     total_bytes = size_mb * 1024 * 1024
     max_entries = total_bytes // entry_size_bytes
     
-    # Find the largest power of 2 less than or equal to max_entries
-    # 找到小於或等於 max_entries 的最大 2 的冪次方
+    # Round down to nearest multiple of 4 (4-way bucket alignment)
     if max_entries <= 0:
         num_entries = 0
     else:
-        num_entries = 1 << (max_entries.bit_length() - 1)
+        num_entries = (max_entries // 4) * 4
         
     transposition_table = np.zeros(num_entries, dtype=tt_entry_dtype)
     return transposition_table
@@ -78,6 +77,19 @@ def clear_transposition_table(tt):
         tt[i]['is_pv'] = False
 
 @nb.njit(cache=True)
+def mul_hi64(a, b):
+    a = np.uint64(a)
+    b = np.uint64(b)
+    aL = np.uint32(a)
+    aH = np.uint32(a >> np.uint64(32))
+    bL = np.uint32(b)
+    bH = np.uint32(b >> np.uint64(32))
+    c1 = np.uint64(aL) * np.uint64(bL) >> np.uint64(32)
+    c2 = np.uint64(aH) * np.uint64(bL) + c1
+    c3 = np.uint64(aL) * np.uint64(bH) + np.uint64(np.uint32(c2))
+    return np.uint64(aH) * np.uint64(bH) + (c2 >> np.uint64(32)) + (c3 >> np.uint64(32))
+
+@nb.njit(cache=True)
 def probe_tt(tt, zobrist_key):
     """
     在置換表 (Bucket=4) 中查找項目。
@@ -94,9 +106,9 @@ def probe_tt(tt, zobrist_key):
         return _EMPTY_TT_ENTRY
         
     num_buckets = len(tt) // 4
-    base_index = (zobrist_key & np.uint64(num_buckets - 1)) * 4
+    base_index = mul_hi64(zobrist_key, np.uint64(num_buckets)) * 4
     
-    key32 = np.uint32(zobrist_key >> np.uint64(32))
+    key32 = np.uint32(zobrist_key)
     for i in range(4):
         entry = tt[base_index + i]
         if entry['key'] == key32:
@@ -124,8 +136,8 @@ def store_tt(tt, zobrist_key, depth, score, static_eval, flag, best_move, curren
         return
         
     num_buckets = len(tt) // 4
-    base_index = (zobrist_key & np.uint64(num_buckets - 1)) * 4
-    key32 = np.uint32(zobrist_key >> np.uint64(32))
+    base_index = mul_hi64(zobrist_key, np.uint64(num_buckets)) * 4
+    key32 = np.uint32(zobrist_key)
     
     # 1. 尋找完全相同的局面 (Exact Match)
     for i in range(4):

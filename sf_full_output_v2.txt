@@ -1,0 +1,48 @@
+Stockfish 17.1 by the Stockfish developers (see AUTHORS file)
+id name Stockfish 17.1
+id author the Stockfish developers (see AUTHORS file)
+
+option name Debug Log File type string default <empty>
+option name NumaPolicy type string default auto
+option name Threads type spin default 1 min 1 max 1024
+option name Hash type spin default 16 min 1 max 33554432
+option name Clear Hash type button
+option name Ponder type check default false
+option name MultiPV type spin default 1 min 1 max 256
+option name Skill Level type spin default 20 min 0 max 20
+option name Move Overhead type spin default 10 min 0 max 5000
+option name nodestime type spin default 0 min 0 max 10000
+option name UCI_Chess960 type check default false
+option name UCI_LimitStrength type check default false
+option name UCI_Elo type spin default 1320 min 1320 max 3190
+option name UCI_ShowWDL type check default false
+option name SyzygyPath type string default <empty>
+option name SyzygyProbeDepth type spin default 1 min 1 max 100
+option name Syzygy50MoveRule type check default true
+option name SyzygyProbeLimit type spin default 7 min 0 max 7
+option name EvalFile type string default nn-1c0000000000.nnue
+option name EvalFileSmall type string default nn-37f18f62d772.nnue
+uciok
+readyok
+info string Available processors: 0-15
+info string Using 1 thread
+info string NNUE evaluation using nn-1c0000000000.nnue (133MiB, (22528, 3072, 15, 32, 1))
+info string NNUE evaluation using nn-37f18f62d772.nnue (6MiB, (22528, 128, 15, 32, 1))
+info depth 1 seldepth 8 multipv 1 score cp -120 nodes 156 nps 156000 hashfull 0 tbhits 0 time 1 pv e2a6 b4c3
+info depth 2 seldepth 4 multipv 1 score cp -120 nodes 219 nps 219000 hashfull 0 tbhits 0 time 1 pv e2a6 b4c3
+info depth 3 seldepth 6 multipv 1 score cp -136 nodes 465 nps 465000 hashfull 0 tbhits 0 time 1 pv e2a6 b4c3 d2c3 e6d5
+info depth 4 seldepth 6 multipv 1 score cp -136 nodes 530 nps 265000 hashfull 0 tbhits 0 time 2 pv e2a6 b4c3 d2g5
+info depth 5 seldepth 7 multipv 1 score cp -180 nodes 1652 nps 550666 hashfull 0 tbhits 0 time 3 pv d5e6 e7e6 e2a6 e6e5
+info depth 6 seldepth 13 multipv 1 score cp -159 nodes 2286 nps 571500 hashfull 0 tbhits 0 time 4 pv e2a6 b4c3 d2c3 e6d5 e5g4 h3g2 f3g2
+info depth 7 seldepth 11 multipv 1 score cp -159 nodes 2415 nps 603750 hashfull 0 tbhits 0 time 4 pv e2a6 b4c3 d2c3 e6d5 e5g4 h3g2
+info depth 8 seldepth 13 multipv 1 score cp -152 nodes 2548 nps 637000 hashfull 0 tbhits 0 time 4 pv e2a6 b4c3 d2c3 e6d5 e5g4 h3g2 f3g2
+info depth 9 seldepth 14 multipv 1 score cp -155 nodes 3449 nps 689800 hashfull 0 tbhits 0 time 5 pv e2a6 b4c3 d2c3 e6d5 e5g4 f6g4 c3g7 h8h4 e1g1 h3g2 f1e1 g4h2
+info depth 10 seldepth 22 multipv 1 score cp -150 nodes 6406 nps 915142 hashfull 2 tbhits 0 time 7 pv e2a6 b4c3 d2c3 e6d5 e5g4 f6g4 c3g7 h8h4 e1c1 d5e4 f3g3 h3g2
+info depth 11 seldepth 18 multipv 1 score cp -104 nodes 8868 nps 985333 hashfull 2 tbhits 0 time 9 pv e2a6 b4c3 d2c3 e6d5 e5g4 f6g4 c3g7 h3g2 f3g2
+info depth 12 seldepth 21 multipv 1 score cp -94 nodes 24019 nps 1091772 hashfull 7 tbhits 0 time 22 pv d5e6 a6e2 c3e2 e7e6 d2f4 h3g2 h1g1 f6h5 e5d3 h5f4 e2f4 e6f6
+info depth 13 seldepth 19 multipv 1 score cp -142 nodes 36902 nps 1118242 hashfull 11 tbhits 0 time 33 pv e2a6 b4c3 d2c3 h3g2 f3g2 e6d5 e4d5 f6d5 e1f1 d5c3 e5g6 f7g6 a1e1 g7e5 b2c3
+info depth 14 seldepth 24 multipv 1 score cp -136 nodes 71898 nps 1123406 hashfull 24 tbhits 0 time 64 pv e2a6 b4c3 d2c3 e6d5 e5g4 h3g2 h1g1 f6g4 c3g7 g4e5 f3g3 h8h5 e1c1 d5e4 a6b7 e5f3 b7a8 f3g1 d1g1 b6a8
+info depth 15 seldepth 28 multipv 1 score cp -185 nodes 117555 nps 1119571 hashfull 38 tbhits 0 time 105 pv e2a6 b4c3 d2c3 h3g2 f3g2 e6d5 e1g1 f6e4 e5c6 d7c6 c3g7 h8h5 g1h1 h5g5 g2h3 f7f6 a6b7 a8b8 b7c6 e8f7 h3h7 g5h5 g7h6 f7e6 h7e7 e6e7
+info depth 16 seldepth 29 multipv 1 score cp -182 nodes 165741 nps 1112355 hashfull 54 tbhits 0 time 149 pv e2a6 b4c3 d2c3 h3g2 f3g2 e6d5 f2f4 e8f8 e1g1 d5e4 a1e1 a8e8 g1h1 d7d6 a6b5 d6e5 f4e5 f6d5 g2g6 d5c3 b2c3 g7e5
+info depth 17 seldepth 29 multipv 1 score cp -188 nodes 221926 nps 1109630 hashfull 76 tbhits 0 time 200 pv e2a6 b4c3 d2c3 h3g2 f3g2 e6d5 f2f4 f6e4 e1g1 g7e5 f4e5 e4c3 b2c3 h8h5 g1h1 h5e5 g2g3 d7d6 a6b5 e8d8 b5c6 a8b8 a2a3
+bestmove e2a6 ponder b4c3
