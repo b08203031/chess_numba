@@ -49,11 +49,12 @@ def create_transposition_table(size_mb):
     total_bytes = size_mb * 1024 * 1024
     max_entries = total_bytes // entry_size_bytes
     
-    # Round down to nearest multiple of 4 (4-way bucket alignment)
+    # Find the largest power of 2 less than or equal to max_entries
+    # 找到小於或等於 max_entries 的最大 2 的冪次方
     if max_entries <= 0:
         num_entries = 0
     else:
-        num_entries = (max_entries // 4) * 4
+        num_entries = 1 << (max_entries.bit_length() - 1)
         
     transposition_table = np.zeros(num_entries, dtype=tt_entry_dtype)
     return transposition_table

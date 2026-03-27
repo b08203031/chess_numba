@@ -57,6 +57,7 @@ from chess_engine.transposition_table import (
     probe_tt, store_tt, numba_tt_entry_type,
     TT_FLAG_NONE, TT_FLAG_EXACT, TT_FLAG_ALPHA, TT_FLAG_BETA
 )
+from chess_engine.zobrist import get_tt_key  # GHI protection: halfmove-aware TT key
 from chess_engine.engine_types import (
     piece_bbs_signature, occupancy_bbs_signature, game_state_signature,
     SearchContext, search_context_type
@@ -103,7 +104,8 @@ def quiescence_search(piece_bbs, occupancy_bbs, game_state, alpha, beta, ply, se
 
     # M4: TT Probe in QSearch — avoids re-evaluating positions already in TT
     zobrist_key = game_state[4]
-    tt_entry = probe_tt(search_context.transposition_table, zobrist_key)
+    tt_key = get_tt_key(zobrist_key, int(game_state[3]))  # GHI: halfmove-aware key for TT
+    tt_entry = probe_tt(search_context.transposition_table, tt_key)
     if tt_entry['flag'] != TT_FLAG_NONE and tt_entry['depth'] >= 0:
         qs_tt_score = np.int32(tt_entry['score'])
         if qs_tt_score > MATE_IN_MAX_PLY: qs_tt_score -= ply
@@ -475,7 +477,8 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
     moves_generated = False
 
     tt_move = NO_MOVE
-    tt_entry = probe_tt(search_context.transposition_table, zobrist_key)
+    tt_key = get_tt_key(zobrist_key, halfmove_clock)  # GHI: halfmove-aware key for TT
+    tt_entry = probe_tt(search_context.transposition_table, tt_key)
 
     # 1. ALWAYS retrieve the best move if available (Critical for Move Ordering)
     if tt_entry['flag'] != TT_FLAG_NONE:
@@ -488,20 +491,18 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
         #    d. The score bounds (Alpha/Beta) are valid for a cutoff
         #    e. We are NOT in a singular extension search (excluded_move == NO_MOVE)
         #       OR the TT move is NOT the excluded move.
-        tt_score = np.int32(tt_entry['score'])
-
-        # Adjust mate scores relative to the current ply
-        if tt_score > MATE_IN_MAX_PLY: tt_score -= ply
-        elif tt_score < -MATE_IN_MAX_PLY: tt_score += ply
-
-        # NEW: Apply 50-move scale down immediately to TT scores to avoid overlooking impending draws
-        if fifty_move_scale < FIFTY_MOVE_MAX_SCALE and abs(tt_score) < MATE_IN_MAX_PLY:
-            tt_score = tt_score * fifty_move_scale // FIFTY_MOVE_MAX_SCALE
-
-        tt_depth_margin = 1 if tt_score <= beta else 0
-
-        if ply > 0 and not is_pv and tt_entry['depth'] >= depth - tt_depth_margin and (excluded_move == NO_MOVE or tt_move != excluded_move) and (cut_node == (tt_score >= beta) or depth > 5):
+        #    f. (P1) The halfmove clock is < 96 to avoid GHI pollution near the 50-move rule.
+        if ply > 0 and not is_pv and tt_entry['depth'] >= depth and (excluded_move == NO_MOVE or tt_move != excluded_move) and halfmove_clock < 96:
             tt_hits += np.uint64(1)
+            tt_score = np.int32(tt_entry['score'])
+
+            # Adjust mate scores relative to the current ply
+            if tt_score > MATE_IN_MAX_PLY: tt_score -= ply
+            elif tt_score < -MATE_IN_MAX_PLY: tt_score += ply
+
+            # NEW: Apply 50-move scale down immediately to TT scores to avoid overlooking impending draws
+            if fifty_move_scale < FIFTY_MOVE_MAX_SCALE and abs(tt_score) < MATE_IN_MAX_PLY:
+                tt_score = tt_score * fifty_move_scale // FIFTY_MOVE_MAX_SCALE
 
             should_cutoff = False
             if tt_entry['flag'] == TT_FLAG_EXACT:
@@ -512,34 +513,6 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                 should_cutoff = True
 
             if should_cutoff:
-                # --- NEW: History bonus on TT fail-high cutoff ---
-                if tt_score >= beta and tt_move != NO_MOVE:
-                    tt_from = get_from_square(tt_move)
-                    tt_to = get_to_square(tt_move)
-                    tt_flag_move = get_special_move_flag(tt_move)
-                    opponent_pieces_bb = occupancy_bbs[1] if game_state[0] == 0 else occupancy_bbs[0]
-                    tt_is_capture = ((opponent_pieces_bb & BB_SQUARES[tt_to]) != 0) or (tt_flag_move == SPECIAL_MOVE_FLAG_EN_PASSANT)
-                    tt_is_promotion = tt_flag_move == SPECIAL_MOVE_FLAG_PROMOTION
-
-                    if not tt_is_capture and not tt_is_promotion:
-                        # Quiet ttMove caused fail-high: reward it
-                        tt_bonus = min(depth * depth, 300)
-                        tt_aggressor = find_piece_type_on_square_side(piece_bbs, tt_from, game_state[0])
-                        update_history(search_context.history_table, tt_aggressor, tt_to, tt_bonus)
-                        update_butterfly_history(search_context.butterfly_history, tt_from, tt_to, tt_bonus)
-
-                        safe_ply = min(ply, MAX_PLY - 1)
-                        if tt_move != search_context.killer_moves[safe_ply * 2]:
-                            search_context.killer_moves[safe_ply * 2 + 1] = search_context.killer_moves[safe_ply * 2]
-                            search_context.killer_moves[safe_ply * 2] = tt_move
-
-                        if ply > 0:
-                            prev_move_played = search_context.move_stack[ply - 1]
-                            if prev_move_played != NO_MOVE:
-                                p_from = get_from_square(prev_move_played)
-                                p_to = get_to_square(prev_move_played)
-                                search_context.counter_moves[p_from, p_to] = tt_move
-
                 search_context.pv_table[ply, ply] = NO_MOVE
                 return (tt_score, tt_entry['best_move'], nodes_searched, quiescence_nodes, tt_hits)
 
@@ -799,7 +772,7 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                     tt_store_score_pc = pc_score
                     if tt_store_score_pc > MATE_IN_MAX_PLY: tt_store_score_pc += ply
                     elif tt_store_score_pc < -MATE_IN_MAX_PLY: tt_store_score_pc -= ply
-                    store_tt(search_context.transposition_table, zobrist_key, depth - 3, tt_store_score_pc, np.int16(32767), TT_FLAG_BETA, pc_move, search_context.tt_generation, False)
+                    store_tt(search_context.transposition_table, tt_key, depth - 3, tt_store_score_pc, np.int16(32767), TT_FLAG_BETA, pc_move, search_context.tt_generation, False)
                     return (np.int32(pc_score), pc_move, nodes_searched, quiescence_nodes, tt_hits)
 
     # --- Razoring (must be after NMP, guarded by H3) ---
@@ -1365,7 +1338,7 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
     if raw_static_eval != -INFINITY and abs(raw_static_eval) < MATE_SCORE - MAX_PLY:
         tt_static_eval_to_store = np.int16(raw_static_eval)
 
-    store_tt(search_context.transposition_table, zobrist_key, depth, tt_score, tt_static_eval_to_store, final_flag, best_move, search_context.tt_generation, is_pv)
+    store_tt(search_context.transposition_table, tt_key, depth, tt_score, tt_static_eval_to_store, final_flag, best_move, search_context.tt_generation, is_pv)
 
     return (max_eval, best_move, nodes_searched, quiescence_nodes, tt_hits)
 
@@ -1480,7 +1453,9 @@ def iterative_deepening_search(piece_bbs, occupancy_bbs, game_state, max_depth, 
         last_completed_depth = current_depth
         last_score = score
 
-        tt_entry = probe_tt(transposition_table, game_state[4])
+        # GHI: use halfmove-aware key to match the key used inside the search
+        _id_tt_key = np.uint64(get_tt_key(game_state[4], int(game_state[3])))
+        tt_entry = probe_tt(transposition_table, _id_tt_key)
         if tt_entry['flag'] != TT_FLAG_NONE and tt_entry['best_move'] != NO_MOVE:
              best_move_from_last_depth = tt_entry['best_move']
         

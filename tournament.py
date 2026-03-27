@@ -373,8 +373,8 @@ if __name__ == "__main__":
     parser.add_argument("--engine2", default="main.py", help="Path to the second engine's main.py (default: main.py)")
     parser.add_argument("--name1", default="chess_engine_v2", help="Name of the first engine (default: chess_engine_v2)")
     parser.add_argument("--name2", default="chess_engine", help="Name of the second engine (default: chess_engine)")
-    parser.add_argument("--games", type=int, default=500, help="Number of games to play (default: 500)")
-    parser.add_argument("--time", type=int, default=300, help="Time per move in ms (default: 500)")
+    parser.add_argument("--games", type=int, default=700, help="Number of games to play (default: 500)")
+    parser.add_argument("--time", type=int, default=1000, help="Time per move in ms (default: 500)")
 
     args = parser.parse_args()
 
