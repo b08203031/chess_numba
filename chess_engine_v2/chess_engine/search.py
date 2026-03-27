@@ -26,7 +26,7 @@ from chess_engine.constants import (
     BB_SQUARES, MG_MATERIAL_VALUES, INFINITY, MAX_QUIESCENCE_DEPTH, ASPIRATION_WINDOW_SIZE,
     NULL_MOVE_REDUCTION, MAX_PLY, LMR_MIN_DEPTH, LMR_MIN_QUIET_MOVE_INDEX, LMR_REDUCTION, SEE_THRESHOLD,
     ENABLE_SEE_IN_QUIESCENCE, MATE_SCORE, MATE_IN_MAX_PLY, NO_MOVE,
-    RAZORING_MARGIN, FP_BASE, FP_MULTIPLIER, RFP_MARGIN_D1,
+    RAZORING_MARGIN, FP_BASE, FP_MULTIPLIER, RFP_BASE_MULT, RFP_MAX_DEPTH, RFP_NO_TT_PENALTY,
     ENABLE_DELTA_PRUNING, DELTA_PRUNING_MARGIN, LMP_MOVE_COUNT, ENABLE_LMP,
     ENABLE_PROBCUT, PROBCUT_R, PROBCUT_MARGIN,
     ENABLE_NMP, ENABLE_RAZORING, ENABLE_FP, ENABLE_RFP, ENABLE_LMR, ENABLE_IIR,
@@ -67,7 +67,7 @@ from .move import move_to_uci
 from chess_engine.search_heuristics import (
     update_history, update_butterfly_history, update_capture_history,
     update_continuation_history, update_pawn_history, score_captures, score_captures_with_tt, 
-    score_quiets, get_lmr_reduction, score_moves, partial_insertion_sort_moves
+    score_quiets, update_quiet_stats_on_tt_hit, get_lmr_reduction, score_moves, partial_insertion_sort_moves
 )
 
 
@@ -471,6 +471,7 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
     
     # --- Initialization ---
     move_count = 0
+    pawn_key_idx = game_state[PAWN_KEY_INDEX] & PAWN_HISTORY_MASK
     # ==========================================
     # PHASE 2: Transposition Table Probe
     # ==========================================
@@ -513,6 +514,24 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                 should_cutoff = True
 
             if should_cutoff:
+                # --- P3-C: History Update on TT Fail-High ---
+                if tt_entry['flag'] == TT_FLAG_BETA and tt_score >= beta and tt_move != NO_MOVE:
+                    tt_from = get_from_square(tt_move)
+                    tt_to = get_to_square(tt_move)
+                    tt_flag_special = get_special_move_flag(tt_move)
+                    
+                    our_side = game_state[0]
+                    enemy_side = 1 - our_side
+                    
+                    tt_is_capture = ((occupancy_bbs[enemy_side] & BB_SQUARES[tt_to]) != 0) or (tt_flag_special == SPECIAL_MOVE_FLAG_EN_PASSANT)
+                    tt_is_promotion = tt_flag_special == SPECIAL_MOVE_FLAG_PROMOTION
+
+                    if not tt_is_capture and not tt_is_promotion:
+                        tt_aggressor = find_piece_type_on_square_side(piece_bbs, tt_from, our_side)
+                        if tt_aggressor != -1 and ((occupancy_bbs[our_side] & BB_SQUARES[tt_to]) == 0):
+                            tt_bonus = min(15 * depth, 300) 
+                            update_quiet_stats_on_tt_hit(search_context, tt_move, tt_aggressor, tt_to, pawn_key_idx, tt_bonus, ply)
+
                 search_context.pv_table[ply, ply] = NO_MOVE
                 return (tt_score, tt_entry['best_move'], nodes_searched, quiescence_nodes, tt_hits)
 
@@ -613,12 +632,22 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
     # =====================================================================
     if not is_currently_in_check and not is_pv:
         # --- M5: Reverse Futility Pruning (returns static_score, not beta) ---
-        # C1: Tighter margin when not improving
-        rfp_margin = depth * RFP_MARGIN_D1
-        if not improving:
-            rfp_margin = rfp_margin * 3 // 4  # 25% tighter when not improving
-        if ENABLE_RFP and depth <= 5 and static_score - rfp_margin >= beta:
-            return (np.int32(static_score), NO_MOVE, nodes_searched, quiescence_nodes, tt_hits)
+        if ENABLE_RFP and depth <= RFP_MAX_DEPTH:
+            # V2 HCE-tuned dynamic margin calculation
+            rfp_multiplier = RFP_BASE_MULT
+            
+            # If no TT hit, HCE is less reliable without a guide, increase the margin for safety
+            if tt_entry['flag'] == TT_FLAG_NONE:
+                rfp_multiplier += RFP_NO_TT_PENALTY
+                
+            rfp_margin = rfp_multiplier * depth
+            
+            # C1: Tighter margin when not improving
+            if not improving:
+                rfp_margin = rfp_margin * 3 // 4  # 25% tighter when not improving
+                
+            if static_score - rfp_margin >= beta:
+                return (np.int32(static_score), NO_MOVE, nodes_searched, quiescence_nodes, tt_hits)
 
     # --- Null Move Pruning (guarded by H3) ---
     # M2: Check for non-pawn material (any N/B/R/Q) to avoid zugzwang in pawn endgames
@@ -829,8 +858,6 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
     search_context.mp_quiets_end[ply] = 0
     search_context.mp_bad_captures_count[ply] = 0
     search_context.mp_bad_captures_idx[ply] = 0
-    
-    pawn_key_idx = game_state[PAWN_KEY_INDEX] & PAWN_HISTORY_MASK
 
     # opponent_pieces_bb is constant throughout this node (make/unmake restores occupancy)
     opponent_pieces_bb = occupancy_bbs[1] if game_state[0] == 0 else occupancy_bbs[0]

@@ -674,7 +674,9 @@ FP_BASE = 150      # Reduced base
 FP_MULTIPLIER = 180 # Reduced multiplier
 
 # Reverse Futility Pruning
-RFP_MARGIN_D1 = 200 # Tightened from 250
+RFP_MAX_DEPTH = 8            # V2 tailored: Extended from 5 to 8
+RFP_BASE_MULT = 180           # Base margin multiplier per depth
+RFP_NO_TT_PENALTY = 40       # Extra margin multiplier if TT info is missing
 
 NMP_STATIC_MARGIN = 150
 

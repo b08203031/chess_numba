@@ -1,0 +1,40 @@
+import numba
+import numpy as np
+from chess_engine.engine_types import piece_bbs_signature, occupancy_bbs_signature, game_state_signature, search_context_type
+from chess_engine.ml_eval.inference import nnue_forward_incremental
+
+# The NNUE evaluation function needs to be a drop-in replacement for the
+# original evaluate_position in evaluation.py, which has this signature:
+# @numba.njit(numba.int32(piece_bbs_signature, occupancy_bbs_signature, game_state_signature, search_context_type, numba.boolean))
+
+@numba.njit(numba.int32(piece_bbs_signature, occupancy_bbs_signature, game_state_signature, search_context_type, numba.int32, numba.boolean), cache=True, boundscheck=False, fastmath=True)
+def evaluate_position(piece_bbs, occupancy_bbs, game_state, search_context, ply, lazy: bool = False):
+    """
+    Evaluates a chess position using the NNUE network.
+    
+    Args:
+        piece_bbs (np.ndarray): 12 個棋子的位元棋盤。
+        occupancy_bbs (np.ndarray): 3 個佔用位元棋盤 (白, 黑, 全)。
+        game_state (np.ndarray): 遊戲狀態封裝 [side_to_move, castling_rights, en_passant_sq, halfmove_clock, ...]。
+        ply (int): 節點目前的深度。
+        lazy (bool): 是否為懶惰評估。對於 NNUE 來說沒有區別，我們直接回傳完整計算結果。
+        
+    Returns:
+        int: 從行棋方視角的評估分數（Centipawn）。
+    """
+    # 1. 取得行棋方 (STM: 0=White, 1=Black)
+    side_to_move = numba.int32(game_state[0])
+    
+    # 2. 以 STM 視角取得神經網路評估值 logits
+    logit = nnue_forward_incremental(ply, side_to_move, search_context.accumulator_stack)
+    
+    # 3. 轉換為 Centipawn
+    K = 0.00575646273
+    stm_score = numba.int32(logit / K)
+    
+    # 4. Initiative Bonus
+    initiative_bonus = np.int32(15)
+    stm_score += initiative_bonus
+    
+    # The neural network naturally outputs the score relative to the side to move
+    return stm_score

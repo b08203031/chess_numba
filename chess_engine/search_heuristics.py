@@ -377,7 +377,7 @@ def score_moves(piece_bbs, occupancy_bbs, game_state, moves, scores, move_count,
                     if prev_move_1 != NO_MOVE and prev_piece_1 != -1:
                         cont_score = search_context.continuation_history[0, prev_piece_1, get_to_square(prev_move_1), aggressor_type, to_square]
                         if cont_score != 0:
-                            score += cont_score
+                            score += cont_score * 2
 
                     if prev_move_2 != NO_MOVE and prev_piece_2 != -1:
                         cont_score = search_context.continuation_history[1, prev_piece_2, get_to_square(prev_move_2), aggressor_type, to_square]

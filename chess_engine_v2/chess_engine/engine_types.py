@@ -36,6 +36,7 @@ search_context_spec = [
     ('pv_table', numba.uint16[:, :]),
     ('history_table', numba.int32[:, :]),
     ('nodes_searched', numba.uint64),
+    ('accumulator_stack', numba.float32[:, :, :]),
     ('end_time', numba.float64),
     ('stop_flag', numba.boolean[:]),
     ('game_history', numba.uint64[::1]),  # Array of Zobrist keys for game history
@@ -126,6 +127,7 @@ class SearchContext:
         self.minor_correction_history = minor_correction_history
         self.non_pawn_correction_history_white = non_pawn_correction_history_white
         self.non_pawn_correction_history_black = non_pawn_correction_history_black
+        self.accumulator_stack = np.zeros((MAX_PLY + 20, 2, 256), dtype=np.float32)
         self.nodes_searched = np.uint64(0)
         self.end_time = 0.0
         # 使用陣列來包裝布林值，以便可以作為引用傳遞並在外部修改

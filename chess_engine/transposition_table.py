@@ -78,19 +78,6 @@ def clear_transposition_table(tt):
         tt[i]['is_pv'] = False
 
 @nb.njit(cache=True)
-def mul_hi64(a, b):
-    a = np.uint64(a)
-    b = np.uint64(b)
-    aL = np.uint32(a)
-    aH = np.uint32(a >> np.uint64(32))
-    bL = np.uint32(b)
-    bH = np.uint32(b >> np.uint64(32))
-    c1 = np.uint64(aL) * np.uint64(bL) >> np.uint64(32)
-    c2 = np.uint64(aH) * np.uint64(bL) + c1
-    c3 = np.uint64(aL) * np.uint64(bH) + np.uint64(np.uint32(c2))
-    return np.uint64(aH) * np.uint64(bH) + (c2 >> np.uint64(32)) + (c3 >> np.uint64(32))
-
-@nb.njit(cache=True)
 def probe_tt(tt, zobrist_key):
     """
     在置換表 (Bucket=4) 中查找項目。
@@ -107,9 +94,9 @@ def probe_tt(tt, zobrist_key):
         return _EMPTY_TT_ENTRY
         
     num_buckets = len(tt) // 4
-    base_index = mul_hi64(zobrist_key, np.uint64(num_buckets)) * 4
+    base_index = (zobrist_key & np.uint64(num_buckets - 1)) * 4
     
-    key32 = np.uint32(zobrist_key)
+    key32 = np.uint32(zobrist_key >> np.uint64(32))
     for i in range(4):
         entry = tt[base_index + i]
         if entry['key'] == key32:
@@ -137,8 +124,8 @@ def store_tt(tt, zobrist_key, depth, score, static_eval, flag, best_move, curren
         return
         
     num_buckets = len(tt) // 4
-    base_index = mul_hi64(zobrist_key, np.uint64(num_buckets)) * 4
-    key32 = np.uint32(zobrist_key)
+    base_index = (zobrist_key & np.uint64(num_buckets - 1)) * 4
+    key32 = np.uint32(zobrist_key >> np.uint64(32))
     
     # 1. 尋找完全相同的局面 (Exact Match)
     for i in range(4):
