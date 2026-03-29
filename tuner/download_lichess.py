@@ -8,7 +8,8 @@ import os
 
 URL = "https://database.lichess.org/lichess_db_eval.jsonl.zst"
 TARGET_SAMPLES = 10_000_000  # 1千萬筆資料 (約為 144萬 的 7 倍！)
-OUTPUT_FILE = "tuner/ultimate_dataset.npz"
+SKIP_SAMPLES = 10_000_000    # 跳過前 1000 萬筆，去抓「全新」的 1000 萬筆！
+OUTPUT_FILE = "tuner/dataset_part2.npz"
 BATCH_LOG = 100_000
 
 # Sigmoid常數與Stockfish相仿，將 Centipawn 轉成 [0.0, 1.0] 勝率
@@ -56,6 +57,7 @@ def download_and_parse():
     all_stm = np.zeros((TARGET_SAMPLES, 1), dtype=np.uint8)
     all_results = np.zeros(TARGET_SAMPLES, dtype=np.float32)
     
+    skip_count = 0
     count = 0
     start_time = time.time()
     
@@ -78,6 +80,12 @@ def download_and_parse():
         buffer = lines.pop() # 最後一行可能不完整，留給下一次
         
         for line in lines:
+            if skip_count < SKIP_SAMPLES:
+                skip_count += 1
+                if skip_count % BATCH_LOG == 0:
+                    print(f"⏩ 正在快轉跳過已訓練過的舊資料... ({skip_count}/{SKIP_SAMPLES})")
+                continue
+                
             if count >= TARGET_SAMPLES:
                 break
             

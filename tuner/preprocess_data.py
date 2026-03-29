@@ -122,7 +122,7 @@ if __name__ == "__main__":
         files = args.files
     else:
         # 預設行為：抓取所有生成的 cleaned 資料以及 tactical 數據
-        files = glob.glob("tuner/training_data_*_cleaned.jsonl")
+        files = glob.glob("tuner/tactical_data.jsonl")
         tactical_file = "tuner/tactical_data.jsonl"
         if os.path.exists(tactical_file):
             files.append(tactical_file)

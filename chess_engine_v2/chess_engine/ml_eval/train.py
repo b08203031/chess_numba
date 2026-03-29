@@ -7,8 +7,8 @@ try:
     import torch
     import torch.nn as nn
     import torch.optim as optim
-    from torch.utils.data import Dataset, DataLoader, random_split
     from torch.optim.lr_scheduler import StepLR
+    # Using modern torch.amp for future compatibility
     TORCH_AVAILABLE = True
 except ImportError:
     TORCH_AVAILABLE = False
@@ -22,115 +22,7 @@ except ImportError:
     PLOTTING_AVAILABLE = False
     print("Matplotlib is not installed. Real-time plotting will be disabled. pip install matplotlib")
 
-class ChessDataset(Dataset):
-    """
-    HalfKA 優化版：儲存原始位元棋盤，在 `__getitem__` 即時利用 numba 解碼成稀疏表示 (Sparse Indices)。
-    以節省大量記憶體並大幅加速模型訓練。
-    """
-    def __init__(self, npz_path):
-        if not TORCH_AVAILABLE:
-            return
-            
-        print(f"Loading dataset from {npz_path}...")
-        data = np.load(npz_path)
-        
-        self.raw_bbs = data['piece_bbs']  # (N, 12) uint64
-        self.raw_results = data['results'] # (N,) float32
-        
-        if 'game_states' in data:
-            # game_states[0] 是 side_to_move (0=White, 1=Black)
-            self.raw_stm = data['game_states'][:, 0].astype(np.int8)
-        else:
-            self.raw_stm = np.zeros(self.raw_results.shape[0], dtype=np.int8)
 
-        # 建立鏡像映射地圖 (用於黑方視角)
-        self.mirror_map = np.zeros(768, dtype=np.int32)
-        for i in range(768):
-            p_idx = i // 64
-            sq = i % 64
-            # 棋子換色 (p_idx + 6) % 12, 格子上下翻轉 (sq ^ 56)
-            self.mirror_map[i] = ((p_idx + 6) % 12) * 64 + (sq ^ 56)
-
-        print(f"Dataset indexed. Total samples: {len(self.raw_results)}")
-        
-    def __len__(self):
-        return len(self.raw_results)
-
-    def __getitem__(self, idx):
-        bbs = self.raw_bbs[idx]
-        stm = self.raw_stm[idx]
-        
-        # 1. 直接取得 HalfKA 視角的稀疏索引
-        f_white = get_halfka_indices(bbs, False)
-        f_black = get_halfka_indices(bbs, True)
-        
-        # 2. 視角映射
-        if stm == 0:
-            features_stm = f_white
-            features_nstm = f_black
-            result = self.raw_results[idx]
-        else:
-            features_stm = f_black
-            features_nstm = f_white
-            result = 1.0 - self.raw_results[idx] # 黑方勝 = 視角下的 1.0
-            
-        return torch.tensor(features_stm, dtype=torch.long), torch.tensor(features_nstm, dtype=torch.long), torch.tensor(result, dtype=torch.float32)
-
-@numba.njit(numba.int32[:](numba.types.Array(numba.uint64, 1, 'C', readonly=False), numba.boolean), cache=True, fastmath=True)
-def get_halfka_indices(bbs, is_black_perspective):
-    indices = np.full(32, 45056, dtype=np.int32) # padding index = 45056
-    idx_count = 0
-    if is_black_perspective:
-        king_bb = bbs[11]
-        king_sq = 0
-        if king_bb:
-            lsb = king_bb & (~king_bb + np.uint64(1))
-            tmp = lsb >> np.uint64(1)
-            while tmp:
-                king_sq += 1
-                tmp >>= np.uint64(1)
-        king_sq = king_sq ^ 56
-        bucket = king_sq
-        for p_idx in range(12):
-            if p_idx == 11: continue # Skip Black King
-            mapped_type = (p_idx + 5) if p_idx < 6 else (p_idx - 6)
-            bb = bbs[p_idx]
-            while bb:
-                lsb = bb & (~bb + np.uint64(1))
-                sq = 0
-                tmp = lsb >> np.uint64(1)
-                while tmp:
-                    sq += 1
-                    tmp >>= np.uint64(1)
-                sq = sq ^ 56
-                indices[idx_count] = bucket * 704 + mapped_type * 64 + sq
-                idx_count += 1
-                bb &= bb - np.uint64(1)
-    else:
-        king_bb = bbs[5]
-        king_sq = 0
-        if king_bb:
-            lsb = king_bb & (~king_bb + np.uint64(1))
-            tmp = lsb >> np.uint64(1)
-            while tmp:
-                king_sq += 1
-                tmp >>= np.uint64(1)
-        bucket = king_sq
-        for p_idx in range(12):
-            if p_idx == 5: continue # Skip White King
-            mapped_type = p_idx if p_idx < 5 else (p_idx - 1)
-            bb = bbs[p_idx]
-            while bb:
-                lsb = bb & (~bb + np.uint64(1))
-                sq = 0
-                tmp = lsb >> np.uint64(1)
-                while tmp:
-                    sq += 1
-                    tmp >>= np.uint64(1)
-                indices[idx_count] = bucket * 704 + mapped_type * 64 + sq
-                idx_count += 1
-                bb &= bb - np.uint64(1)
-    return indices
                                       
 
 
@@ -191,13 +83,13 @@ def plot_loss(epoch, train_losses, val_losses):
 
 # --- 訓練超參數集中區 (Training Hyperparameters) ---
 class TrainingConfig:
-    DATASET_PATH = './tuner/ultimate_dataset.npz'
+    DATASET_PATH = './tuner/ultimate_halfka.npz'
     BATCH_SIZE = 16384 # 提升 Batch Size 減少任務分發開銷
-    LEARNING_RATE = 0.0005
+    LEARNING_RATE = 0.0001 #從頭的話：0.01
     
     # 學習率遞減設定 (StepLR)
-    SCHEDULER_STEP = 10
-    SCHEDULER_GAMMA = 0.5
+    SCHEDULER_STEP = 3
+    SCHEDULER_GAMMA = 0.5 # 減緩下降速度
     
     # 訓練與停止邏輯
     TOTAL_EPOCHS = 200
@@ -246,7 +138,7 @@ def train():
         levels = ['../', '../../', '../../../']
         found = False
         for lv in levels:
-            alt_path = os.path.join(lv, 'tuner/ultimate_dataset.npz')
+            alt_path = os.path.join(lv, 'tuner/ultimate_halfka.npz')
             if os.path.exists(alt_path):
                 dataset_path = alt_path
                 found = True
@@ -255,39 +147,37 @@ def train():
             print(f"Error: Dataset not found. Please check TrainingConfig.DATASET_PATH.")
             return
 
-    # Load dataset
-    full_dataset = ChessDataset(dataset_path)
+    print(f"Loading precomputed dataset into RAM from {dataset_path}...")
+    # Load fully into RAM for maximum slicing speed!
+    data = np.load(dataset_path)
+    features_stm_full = data['features_stm']
+    features_nstm_full = data['features_nstm']
+    targets_full = data['targets']
     
-    # Train/Validation Split
-    total_size = len(full_dataset)
+    total_size = len(targets_full)
     val_size = int(TrainingConfig.VAL_SPLIT * total_size)
     train_size = total_size - val_size
-    train_dataset, val_dataset = random_split(full_dataset, [train_size, val_size])
     
+    print(f"Dataset successfully mapped directly: {total_size} samples.")
     print(f"Train/Val split: {train_size} training samples, {val_size} validation samples.")
-
-    # 修正：Windows 下 num_workers 不宜過高，設為 4 以避免分頁檔不足的錯誤 (WinError 1455)
-    num_workers = 4
-    print(f"Assigning {num_workers} CPU workers for data pre-fetching (Safe Mode).")
     
-    train_loader = DataLoader(
-        train_dataset, 
-        batch_size=TrainingConfig.BATCH_SIZE, 
-        shuffle=True, 
-        num_workers=num_workers,
-        pin_memory=True if device.type == 'cuda' else False,
-        persistent_workers=True if num_workers > 0 else False,
-        prefetch_factor=2 if num_workers > 0 else None
-    )
-    val_loader = DataLoader(
-        val_dataset, 
-        batch_size=TrainingConfig.BATCH_SIZE, 
-        shuffle=False, 
-        num_workers=num_workers,
-        pin_memory=True if device.type == 'cuda' else False,
-        persistent_workers=True if num_workers > 0 else False,
-        prefetch_factor=2 if num_workers > 0 else None
-    )
+    # Static Validation Slices (Only slice pointers are copied)
+    val_f_stm = features_stm_full[train_size:]
+    val_f_nstm = features_nstm_full[train_size:]
+    val_tgt = targets_full[train_size:]
+    
+    # Static Train Slices
+    train_f_stm_cpu = features_stm_full[:train_size]
+    train_f_nstm_cpu = features_nstm_full[:train_size]
+    train_tgt_cpu = targets_full[:train_size]
+
+    print(f"Uploading ENTIRE {train_size:,} training dataset to GPU VRAM...")
+    # Using torch.int32 instead of torch.long saves 50% VRAM (4-bytes vs 8-bytes)
+    # 18M samples * 32 indices * 4 bytes * 2 (stm/nstm) = ~4.6 GB. Fits in 6GB 4050!
+    train_f_stm_cuda = torch.tensor(train_f_stm_cpu, dtype=torch.int32, device=device)
+    train_f_nstm_cuda = torch.tensor(train_f_nstm_cpu, dtype=torch.int32, device=device)
+    train_tgt_cuda = torch.tensor(train_tgt_cpu, dtype=torch.float32, device=device).unsqueeze(1)
+    print("VRAM Upload Complete! Ready for extreme speed training.")
     
     model = SimpleNNUE().to(device)
     
@@ -310,6 +200,7 @@ def train():
             best_checkpoint = torch.load(best_model_path, map_location=device)
             model.load_state_dict(best_checkpoint['model_state_dict'])
             best_val_loss = best_checkpoint.get('best_val_loss', float('inf'))
+            # best_val_loss = float('inf')
             print("="*60)
             print(f"🚀 成功讀取上次訓練好的權重 (Val Loss: {best_val_loss:.6f})！")
             print("🚀 本次訓練將以此權重為基礎，但重置 Epoch 與學習率。")
@@ -319,9 +210,15 @@ def train():
             best_val_loss = float('inf')
 
     criterion = nn.BCEWithLogitsLoss()
-    # 加入 weight_decay=1e-5 以抑制過擬合
-    optimizer = optim.Adam(model.parameters(), lr=TrainingConfig.LEARNING_RATE, weight_decay=1e-4)
+    # 加入 weight_decay=1e-5 以抑制模型死背資料 (Overfitting)
+    # Use Fused=True for RTX 4050 hardware acceleration
+    optimizer = optim.Adam(model.parameters(), lr=TrainingConfig.LEARNING_RATE, 
+                           weight_decay=1e-5, fused=True if device.type == 'cuda' else False)
     scheduler = StepLR(optimizer, step_size=TrainingConfig.SCHEDULER_STEP, gamma=TrainingConfig.SCHEDULER_GAMMA)
+    
+    # 使用最新的 torch.amp 語法避開 FutureWarning
+    scaler = torch.amp.GradScaler('cuda') 
+
 
     # --- 2. 決定是否接續完整訓練 ---
     if TrainingConfig.RESUME_FROM_CHECKPOINT and os.path.exists(checkpoint_path):
@@ -359,33 +256,60 @@ def train():
         model.train()
         total_train_loss = 0.0
         
-        for inputs_stm, inputs_nstm, targets in train_loader:
-            inputs_stm = inputs_stm.to(device)
-            inputs_nstm = inputs_nstm.to(device)
-            targets = targets.unsqueeze(1).to(device)
+        # In-memory slice-based shuffling (Ultra Fast)
+        perm = np.random.permutation(train_size)
+        num_train_batches = (train_size + TrainingConfig.BATCH_SIZE - 1) // TrainingConfig.BATCH_SIZE
+        
+        for batch_idx in range(num_train_batches):
+            start = batch_idx * TrainingConfig.BATCH_SIZE
+            end = min(start + TrainingConfig.BATCH_SIZE, train_size)
+            batch_slice = perm[start:end]
+            
+            # Pure GPU Slicing. Zero CPU-GPU transfer overhead!
+            # Casting to long inside GPU is extremely fast and required for Embedding layers
+            inputs_stm = train_f_stm_cuda[batch_slice].long()
+            inputs_nstm = train_f_nstm_cuda[batch_slice].long()
+            targets = train_tgt_cuda[batch_slice]
             
             optimizer.zero_grad()
-            outputs = model(inputs_stm, inputs_nstm)
-            loss = criterion(outputs, targets)
-            loss.backward()
-            optimizer.step()
-            total_train_loss += loss.item()
             
-        avg_train_loss = total_train_loss / len(train_loader)
+            # AMP Forward Pass (Modern Syntax)
+            with torch.amp.autocast('cuda'):
+                outputs = model(inputs_stm, inputs_nstm)
+                loss = criterion(outputs, targets)
+            
+            # AMP Scaled Backward
+            scaler.scale(loss).backward()
+            scaler.step(optimizer)
+            scaler.update()
+            
+            total_train_loss += loss.item()
+
+            if batch_idx % 100 == 0:
+                print(f" > Batch [{batch_idx}/{num_train_batches}] | Current Loss: {loss.item():.6f}")
+            
+        avg_train_loss = total_train_loss / num_train_batches
         
         # --- Validation Phase ---
         model.eval()
         total_val_loss = 0.0
+        num_val_batches = (val_size + TrainingConfig.BATCH_SIZE - 1) // TrainingConfig.BATCH_SIZE
+        
         with torch.no_grad():
-            for inputs_stm, inputs_nstm, targets in val_loader:
-                inputs_stm = inputs_stm.to(device)
-                inputs_nstm = inputs_nstm.to(device)
-                targets = targets.unsqueeze(1).to(device)
+            for batch_idx in range(num_val_batches):
+                start = batch_idx * TrainingConfig.BATCH_SIZE
+                end = min(start + TrainingConfig.BATCH_SIZE, val_size)
+                
+                # Keep validation on CPU RAM and only move batch-by-batch to save VRAM for training
+                inputs_stm = torch.tensor(val_f_stm[start:end], dtype=torch.long, device=device)
+                inputs_nstm = torch.tensor(val_f_nstm[start:end], dtype=torch.long, device=device)
+                targets = torch.tensor(val_tgt[start:end], dtype=torch.float32, device=device).unsqueeze(1)
+                
                 outputs = model(inputs_stm, inputs_nstm)
                 loss = criterion(outputs, targets)
                 total_val_loss += loss.item()
                 
-        avg_val_loss = total_val_loss / len(val_loader)
+        avg_val_loss = total_val_loss / num_val_batches
         
         # Step the scheduler
         current_lr = scheduler.get_last_lr()[0]
@@ -397,7 +321,7 @@ def train():
         elapsed = time.time() - start_time
         print(f"Epoch [{epoch_idx+1}/{total_epochs}] | LR: {current_lr:.6f} | Time: {elapsed:.1f}s | Train Loss: {avg_train_loss:.6f} | Val Loss: {avg_val_loss:.6f}")
         
-        # --- Checkpoint Saving ---
+        # --- Checkpoint Saving (Using Binary Stream to bypass Unicode path bugs) ---
         checkpoint_data = {
             'epoch': epoch_idx,
             'model_state_dict': model.state_dict(),
@@ -405,12 +329,15 @@ def train():
             'scheduler_state_dict': scheduler.state_dict(),
             'best_val_loss': min(best_val_loss, avg_val_loss),
         }
-        torch.save(checkpoint_data, checkpoint_path)
+        with open(checkpoint_path, 'wb') as f:
+            torch.save(checkpoint_data, f)
         
         if avg_val_loss < best_val_loss:
             best_val_loss = avg_val_loss
             epochs_since_best = 0
-            torch.save(checkpoint_data, os.path.join(weights_dir, 'best_model.pth'))
+            best_model_path = os.path.join(weights_dir, 'best_model.pth')
+            with open(best_model_path, 'wb') as f:
+                torch.save(checkpoint_data, f)
             print(f" NEW BEST! Saved to best_model.pth")
             export_weights(model)
         else:
