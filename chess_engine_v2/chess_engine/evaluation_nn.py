@@ -29,7 +29,7 @@ def evaluate_position(piece_bbs, occupancy_bbs, game_state, search_context, ply,
     logit = nnue_forward_incremental(ply, side_to_move, search_context.accumulator_stack)
     
     # 3. 轉換為 Centipawn
-    K = 0.00575646273
+    K = 0.00368208
     stm_score = numba.int32(logit / K)
     
     # 4. Initiative Bonus

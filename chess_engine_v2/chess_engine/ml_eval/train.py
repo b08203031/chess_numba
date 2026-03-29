@@ -1,6 +1,7 @@
 import os
 import numpy as np
 import time
+import numba
 
 try:
     import torch
@@ -23,7 +24,8 @@ except ImportError:
 
 class ChessDataset(Dataset):
     """
-    A simple dataset to load bitboards and evaluate results.
+    HalfKA 優化版：儲存原始位元棋盤，在 `__getitem__` 即時利用 numba 解碼成稀疏表示 (Sparse Indices)。
+    以節省大量記憶體並大幅加速模型訓練。
     """
     def __init__(self, npz_path):
         if not TORCH_AVAILABLE:
@@ -32,58 +34,105 @@ class ChessDataset(Dataset):
         print(f"Loading dataset from {npz_path}...")
         data = np.load(npz_path)
         
-        raw_bbs = data['piece_bbs'] # Shape: (N, 12)
-        raw_results = data['results'] # Shape: (N,)
+        self.raw_bbs = data['piece_bbs']  # (N, 12) uint64
+        self.raw_results = data['results'] # (N,) float32
         
-        # Some older datasets might not have 'stm' saved. Assume White (0) to move if missing.
-        if 'stm' in data:
-            raw_stm = data['stm']
+        if 'game_states' in data:
+            # game_states[0] 是 side_to_move (0=White, 1=Black)
+            self.raw_stm = data['game_states'][:, 0].astype(np.int8)
         else:
-            raw_stm = np.zeros(raw_results.shape[0], dtype=np.int8)
-        
-        N = raw_bbs.shape[0]
-        # 1. 向量化提取：先提取白方視角下的所有特徵 (N, 768)
-        features_all = np.zeros((N, 768), dtype=np.float32)
-        print(f"Extracting features from {N} bitboards using vectorized NumPy...")
-        for piece_idx in range(12):
-            bb = raw_bbs[:, piece_idx]
-            for sq in range(64):
-                is_set = (bb >> np.uint64(sq)) & np.uint64(1)
-                features_all[:, piece_idx * 64 + sq] = is_set.astype(np.float32)
-        
-        # 2. 建立鏡像映射地圖 (Mirror indices map)
-        mirror_map = np.zeros(768, dtype=np.int32)
+            self.raw_stm = np.zeros(self.raw_results.shape[0], dtype=np.int8)
+
+        # 建立鏡像映射地圖 (用於黑方視角)
+        self.mirror_map = np.zeros(768, dtype=np.int32)
         for i in range(768):
             p_idx = i // 64
             sq = i % 64
-            mirror_map[i] = ((p_idx + 6) % 12) * 64 + (sq ^ 56)
-        
-        features_mirrored = features_all[:, mirror_map]
+            # 棋子換色 (p_idx + 6) % 12, 格子上下翻轉 (sq ^ 56)
+            self.mirror_map[i] = ((p_idx + 6) % 12) * 64 + (sq ^ 56)
 
-        # 3. 根據行棋方 (STM) 分配
-        self.features_stm = np.zeros((N, 768), dtype=np.float32)
-        self.features_nstm = np.zeros((N, 768), dtype=np.float32)
-        
-        white_mask = (raw_stm == 0)
-        black_mask = (raw_stm == 1)
-        
-        # 當白方行棋：STM 視角 = 原始, NSTM 視角 = 鏡像
-        self.features_stm[white_mask] = features_all[white_mask]
-        self.features_nstm[white_mask] = features_mirrored[white_mask]
-        
-        # 當黑方行棋：STM 視角 = 鏡像, NSTM 視角 = 原始
-        self.features_stm[black_mask] = features_mirrored[black_mask]
-        self.features_nstm[black_mask] = features_all[black_mask]
-        
-        # 結果轉換為行棋方視角 (Label inversion if Black to move)
-        self.results = np.where(raw_stm == 0, raw_results, 1.0 - raw_results).astype(np.float32)
-        print(f"Dataset loaded. Total samples: {N}")
+        print(f"Dataset indexed. Total samples: {len(self.raw_results)}")
         
     def __len__(self):
-        return len(self.results)
-        
+        return len(self.raw_results)
+
     def __getitem__(self, idx):
-        return self.features_stm[idx], self.features_nstm[idx], self.results[idx]
+        bbs = self.raw_bbs[idx]
+        stm = self.raw_stm[idx]
+        
+        # 1. 直接取得 HalfKA 視角的稀疏索引
+        f_white = get_halfka_indices(bbs, False)
+        f_black = get_halfka_indices(bbs, True)
+        
+        # 2. 視角映射
+        if stm == 0:
+            features_stm = f_white
+            features_nstm = f_black
+            result = self.raw_results[idx]
+        else:
+            features_stm = f_black
+            features_nstm = f_white
+            result = 1.0 - self.raw_results[idx] # 黑方勝 = 視角下的 1.0
+            
+        return torch.tensor(features_stm, dtype=torch.long), torch.tensor(features_nstm, dtype=torch.long), torch.tensor(result, dtype=torch.float32)
+
+@numba.njit(numba.int32[:](numba.types.Array(numba.uint64, 1, 'C', readonly=False), numba.boolean), cache=True, fastmath=True)
+def get_halfka_indices(bbs, is_black_perspective):
+    indices = np.full(32, 45056, dtype=np.int32) # padding index = 45056
+    idx_count = 0
+    if is_black_perspective:
+        king_bb = bbs[11]
+        king_sq = 0
+        if king_bb:
+            lsb = king_bb & (~king_bb + np.uint64(1))
+            tmp = lsb >> np.uint64(1)
+            while tmp:
+                king_sq += 1
+                tmp >>= np.uint64(1)
+        king_sq = king_sq ^ 56
+        bucket = king_sq
+        for p_idx in range(12):
+            if p_idx == 11: continue # Skip Black King
+            mapped_type = (p_idx + 5) if p_idx < 6 else (p_idx - 6)
+            bb = bbs[p_idx]
+            while bb:
+                lsb = bb & (~bb + np.uint64(1))
+                sq = 0
+                tmp = lsb >> np.uint64(1)
+                while tmp:
+                    sq += 1
+                    tmp >>= np.uint64(1)
+                sq = sq ^ 56
+                indices[idx_count] = bucket * 704 + mapped_type * 64 + sq
+                idx_count += 1
+                bb &= bb - np.uint64(1)
+    else:
+        king_bb = bbs[5]
+        king_sq = 0
+        if king_bb:
+            lsb = king_bb & (~king_bb + np.uint64(1))
+            tmp = lsb >> np.uint64(1)
+            while tmp:
+                king_sq += 1
+                tmp >>= np.uint64(1)
+        bucket = king_sq
+        for p_idx in range(12):
+            if p_idx == 5: continue # Skip White King
+            mapped_type = p_idx if p_idx < 5 else (p_idx - 1)
+            bb = bbs[p_idx]
+            while bb:
+                lsb = bb & (~bb + np.uint64(1))
+                sq = 0
+                tmp = lsb >> np.uint64(1)
+                while tmp:
+                    sq += 1
+                    tmp >>= np.uint64(1)
+                indices[idx_count] = bucket * 704 + mapped_type * 64 + sq
+                idx_count += 1
+                bb &= bb - np.uint64(1)
+    return indices
+                                      
+
 
 if TORCH_AVAILABLE:
     class ClippedReLU(nn.Module):
@@ -96,23 +145,25 @@ if TORCH_AVAILABLE:
 
     class SimpleNNUE(nn.Module):
         """
-        4-layer dual-accumulator network (HalfKP style):
-        768 -> 256x2 (ClippedReLU) -> 512 -> 32 (ClippedReLU) -> 32 (ClippedReLU) -> 1
+        HalfKA architecture:
+        45056 Sparse -> 256x2 (ClippedReLU) -> 512 -> 32 -> 32 -> 1
         """
         def __init__(self):
             super(SimpleNNUE, self).__init__()
-            # FC1 acts as the accumulator (processes 768 features for one perspective)
-            self.fc1 = nn.Linear(768, 256)
-            # FC2 takes the concatenated accumulators (STM + NSTM)
+            # Sparse input layer (EmbeddingBag mode=sum is mathematically identical to Sparse Linear)
+            # 45056 is the padding index (it will output 0 vectors)
+            self.fc1 = nn.EmbeddingBag(45057, 256, mode="sum", padding_idx=45056)
+            self.fc1_bias = nn.Parameter(torch.zeros(256))
+            
             self.fc2 = nn.Linear(512, 32)
             self.fc3 = nn.Linear(32, 32)
             self.fc4 = nn.Linear(32, 1)
             self.crelu = ClippedReLU(127.0)
             
         def forward(self, x_stm, x_nstm):
-            # Pass both perspectives through the same FC1 weights
-            acc_stm = self.crelu(self.fc1(x_stm))
-            acc_nstm = self.crelu(self.fc1(x_nstm))
+            # Pass both perspectives through the same EmbeddingBag + Bias
+            acc_stm = self.crelu(self.fc1(x_stm) + self.fc1_bias)
+            acc_nstm = self.crelu(self.fc1(x_nstm) + self.fc1_bias)
             
             # Concatenate them: [STM (256), NSTM (256)] -> (512,)
             x = torch.cat((acc_stm, acc_nstm), dim=1)
@@ -140,18 +191,18 @@ def plot_loss(epoch, train_losses, val_losses):
 
 # --- 訓練超參數集中區 (Training Hyperparameters) ---
 class TrainingConfig:
-    DATASET_PATH = './training_data/stockfish_t80_jan2024.npz'
-    BATCH_SIZE = 4096
-    LEARNING_RATE = 0.0001
+    DATASET_PATH = './tuner/ultimate_dataset.npz'
+    BATCH_SIZE = 16384 # 提升 Batch Size 減少任務分發開銷
+    LEARNING_RATE = 0.0005
     
     # 學習率遞減設定 (StepLR)
-    SCHEDULER_STEP = 2
-    SCHEDULER_GAMMA = 0.8
+    SCHEDULER_STEP = 10
+    SCHEDULER_GAMMA = 0.5
     
     # 訓練與停止邏輯
-    TOTAL_EPOCHS = 100
+    TOTAL_EPOCHS = 200
     EARLY_STOPPING_PATIENCE = 20
-    RESUME_FROM_CHECKPOINT = False # 是否從上次的 .pth 檔案接續訓練
+    RESUME_FROM_CHECKPOINT = False # False: 僅讀取上次權重，但不接續 Epoch 數字與學習率
     
     # 資料分割比例
     VAL_SPLIT = 0.1
@@ -163,14 +214,21 @@ def export_weights(model):
     weights_dir = os.path.join(script_dir, 'weights')
     os.makedirs(weights_dir, exist_ok=True)
     
-    layers = [model.fc1, model.fc2, model.fc3, model.fc4]
-    for i, layer in enumerate(layers):
-        layer_num = i + 1
+    # 處理 fc1 (EmbeddingBag)
+    fc1_weight = model.fc1.weight.detach().cpu().numpy()[:45056].T  # 捨棄 padding_idx 並轉置為 (256, 45056)
+    fc1_bias = model.fc1_bias.detach().cpu().numpy()
+    np.save(os.path.join(weights_dir, 'fc1_weight.npy'), fc1_weight)
+    np.save(os.path.join(weights_dir, 'fc1_bias.npy'), fc1_bias)
+    print(f"Exported fc1 -> {fc1_weight.shape}")
+
+    # 處理後端層
+    layers = [(model.fc2, 2), (model.fc3, 3), (model.fc4, 4)]
+    for layer, num in layers:
         weight = layer.weight.detach().cpu().numpy()
         bias = layer.bias.detach().cpu().numpy()
-        np.save(os.path.join(weights_dir, f'fc{layer_num}_weight.npy'), weight)
-        np.save(os.path.join(weights_dir, f'fc{layer_num}_bias.npy'), bias)
-        print(f"Exported fc{layer_num} -> {weight.shape}")
+        np.save(os.path.join(weights_dir, f'fc{num}_weight.npy'), weight)
+        np.save(os.path.join(weights_dir, f'fc{num}_bias.npy'), bias)
+        print(f"Exported fc{num} -> {weight.shape}")
     print(f"All weights exported successfully to: {weights_dir}")
 
 def train():
@@ -208,8 +266,28 @@ def train():
     
     print(f"Train/Val split: {train_size} training samples, {val_size} validation samples.")
 
-    train_loader = DataLoader(train_dataset, batch_size=TrainingConfig.BATCH_SIZE, shuffle=True)
-    val_loader = DataLoader(val_dataset, batch_size=TrainingConfig.BATCH_SIZE, shuffle=False)
+    # 修正：Windows 下 num_workers 不宜過高，設為 4 以避免分頁檔不足的錯誤 (WinError 1455)
+    num_workers = 4
+    print(f"Assigning {num_workers} CPU workers for data pre-fetching (Safe Mode).")
+    
+    train_loader = DataLoader(
+        train_dataset, 
+        batch_size=TrainingConfig.BATCH_SIZE, 
+        shuffle=True, 
+        num_workers=num_workers,
+        pin_memory=True if device.type == 'cuda' else False,
+        persistent_workers=True if num_workers > 0 else False,
+        prefetch_factor=2 if num_workers > 0 else None
+    )
+    val_loader = DataLoader(
+        val_dataset, 
+        batch_size=TrainingConfig.BATCH_SIZE, 
+        shuffle=False, 
+        num_workers=num_workers,
+        pin_memory=True if device.type == 'cuda' else False,
+        persistent_workers=True if num_workers > 0 else False,
+        prefetch_factor=2 if num_workers > 0 else None
+    )
     
     model = SimpleNNUE().to(device)
     
@@ -226,20 +304,23 @@ def train():
     epochs_since_best = 0
     patience = TrainingConfig.EARLY_STOPPING_PATIENCE
     
-    # --- 1. 永遠嘗試讀取歷史「最高分紀錄」，防止被新訓練覆蓋掉 ---
+    # --- 1. 永遠嘗試讀取歷史「最高分紀錄」，作為本次訓練的起點 ---
     if os.path.exists(best_model_path) and not TrainingConfig.RESUME_FROM_CHECKPOINT:
         try:
             best_checkpoint = torch.load(best_model_path, map_location=device)
-            # 先確認架構相符（舊的 256 維度權重不能套用在 512 維度上）
             model.load_state_dict(best_checkpoint['model_state_dict'])
             best_val_loss = best_checkpoint.get('best_val_loss', float('inf'))
-            print(f"Loaded compatible historic best Val Loss: {best_val_loss:.6f} and best weights.")
+            print("="*60)
+            print(f"🚀 成功讀取上次訓練好的權重 (Val Loss: {best_val_loss:.6f})！")
+            print("🚀 本次訓練將以此權重為基礎，但重置 Epoch 與學習率。")
+            print("="*60)
         except Exception as e:
             print(f"Skipping incompatible historic checkpoint: architecture changed. Resetting to scratch.")
             best_val_loss = float('inf')
 
     criterion = nn.BCEWithLogitsLoss()
-    optimizer = optim.Adam(model.parameters(), lr=TrainingConfig.LEARNING_RATE)
+    # 加入 weight_decay=1e-5 以抑制過擬合
+    optimizer = optim.Adam(model.parameters(), lr=TrainingConfig.LEARNING_RATE, weight_decay=1e-4)
     scheduler = StepLR(optimizer, step_size=TrainingConfig.SCHEDULER_STEP, gamma=TrainingConfig.SCHEDULER_GAMMA)
 
     # --- 2. 決定是否接續完整訓練 ---

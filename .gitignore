@@ -11,3 +11,8 @@ stockfish/src/.depend
 stockfish/src/nn-*.nnue
 stockfish/src/stockfish
 *.pgn
+*.zip
+*.npz
+*.jsonl
+*.pth
+*.binpack

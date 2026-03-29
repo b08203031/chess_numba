@@ -10,7 +10,7 @@ from chess_engine.constants import MAX_PLY
 WEIGHTS_DIR = os.path.join(os.path.dirname(__file__), 'weights')
 
 # Global variables to hold the network weights for 4 layers (FP32 architecture)
-FC1_WEIGHT = np.zeros((256, 768), dtype=np.float32)
+FC1_WEIGHT = np.zeros((256, 45056), dtype=np.float32)
 FC1_BIAS = np.zeros((256,), dtype=np.float32)
 FC2_WEIGHT = np.zeros((32, 512), dtype=np.float32)
 FC2_BIAS = np.zeros((32,), dtype=np.float32)
@@ -50,70 +50,185 @@ weights_loaded = load_weights()
 def init_accumulator(piece_bbs, accumulator_stack):
     """
     Initializes the accumulator stack at ply 0 from scratch using the full bitboards.
-    This must be called at the root of the search.
-    Computes both White and Black (mirrored) perspectives.
+    Computes both White and Black (mirrored) perspectives for HalfKA.
     """
-    features_white = np.zeros(768, dtype=np.float32)
-    features_black = np.zeros(768, dtype=np.float32)
-    
-    for piece_idx in range(12):
-        bb = piece_bbs[piece_idx]
-        offset_white = piece_idx * 64
-        mirrored_piece_idx = (piece_idx + 6) % 12
-        offset_black = mirrored_piece_idx * 64
+    for i in range(256):
+        accumulator_stack[0, 0, i] = FC1_BIAS[i]
+        accumulator_stack[0, 1, i] = FC1_BIAS[i]
         
+    king_w_bb = piece_bbs[5]
+    king_w_sq = 0
+    if king_w_bb:
+        lsb = king_w_bb & (~king_w_bb + np.uint64(1))
+        tmp = lsb >> np.uint64(1)
+        while tmp:
+            king_w_sq += 1
+            tmp >>= np.uint64(1)
+            
+    king_b_bb = piece_bbs[11]
+    king_b_sq = 0
+    if king_b_bb:
+        lsb = king_b_bb & (~king_b_bb + np.uint64(1))
+        tmp = lsb >> np.uint64(1)
+        while tmp:
+            king_b_sq += 1
+            tmp >>= np.uint64(1)
+            
+    bucket_w = king_w_sq
+    for p_idx in range(12):
+        if p_idx == 5: continue
+        mapped_type_w = p_idx if p_idx < 5 else (p_idx - 1)
+        bb = piece_bbs[p_idx]
         while bb:
             lsb = bb & (~bb + np.uint64(1))
-            sq = numba.int32(0)
+            sq = 0
             tmp = lsb >> np.uint64(1)
             while tmp:
-                sq += numba.int32(1)
+                sq += 1
                 tmp >>= np.uint64(1)
-                
-            mirrored_sq = sq ^ 56
-            
-            features_white[offset_white + sq] = 1.0
-            features_black[offset_black + mirrored_sq] = 1.0
-            
+            f_w = bucket_w * 704 + mapped_type_w * 64 + sq
+            for i in range(256):
+                accumulator_stack[0, 0, i] += FC1_WEIGHT[i, f_w]
             bb &= bb - np.uint64(1)
             
-    for i in range(256):
-        acc_w = FC1_BIAS[i]
-        acc_b = FC1_BIAS[i]
-        for j in range(768):
-            if features_white[j] > 0:
-                acc_w += FC1_WEIGHT[i, j]
-            if features_black[j] > 0:
-                acc_b += FC1_WEIGHT[i, j]
-                
-        accumulator_stack[0, 0, i] = acc_w # White perspective
-        accumulator_stack[0, 1, i] = acc_b # Black perspective
+    bucket_b = king_b_sq ^ 56
+    for p_idx in range(12):
+        if p_idx == 11: continue
+        mapped_type_b = (p_idx + 5) if p_idx < 6 else (p_idx - 6)
+        bb = piece_bbs[p_idx]
+        while bb:
+            lsb = bb & (~bb + np.uint64(1))
+            sq = 0
+            tmp = lsb >> np.uint64(1)
+            while tmp:
+                sq += 1
+                tmp >>= np.uint64(1)
+            sq_b = sq ^ 56
+            f_b = bucket_b * 704 + mapped_type_b * 64 + sq_b
+            for i in range(256):
+                accumulator_stack[0, 1, i] += FC1_WEIGHT[i, f_b]
+            bb &= bb - np.uint64(1)
 
-@numba.njit(numba.void(numba.int32[:], numba.int32[:], numba.int32, numba.float32[:, :, :]), fastmath=True, cache=True)
-def update_accumulator(added_features, removed_features, ply, accumulator_stack):
+@numba.njit(numba.void(numba.types.Array(numba.uint64, 1, 'C'), numba.int32[:], numba.int32[:], numba.int32, numba.float32[:, :, :]), fastmath=True, cache=True)
+def update_accumulator(piece_bbs, added_features, removed_features, ply, accumulator_stack):
     """
     Incrementally updates both White and Black accumulators from ply-1 to ply.
+    If a king moves, fires a full refresh for its side.
     """
-    for i in range(256):
-        acc_w = accumulator_stack[ply - 1, 0, i]
-        acc_b = accumulator_stack[ply - 1, 1, i]
-        
+    white_king_moved = False
+    black_king_moved = False
+    
+    for f in added_features:
+        if f != -1:
+            p_idx = f // 64
+            if p_idx == 5: white_king_moved = True
+            elif p_idx == 11: black_king_moved = True
+
+    king_w_bb = piece_bbs[5]
+    king_w_sq = 0
+    if king_w_bb:
+        lsb = king_w_bb & (~king_w_bb + np.uint64(1))
+        tmp = lsb >> np.uint64(1)
+        while tmp:
+            king_w_sq += 1
+            tmp >>= np.uint64(1)
+            
+    king_b_bb = piece_bbs[11]
+    king_b_sq = 0
+    if king_b_bb:
+        lsb = king_b_bb & (~king_b_bb + np.uint64(1))
+        tmp = lsb >> np.uint64(1)
+        while tmp:
+            king_b_sq += 1
+            tmp >>= np.uint64(1)
+            
+    bucket_w = king_w_sq
+    bucket_b = king_b_sq ^ 56
+            
+    # --- White Update ---
+    if white_king_moved:
+        for i in range(256):
+            accumulator_stack[ply, 0, i] = FC1_BIAS[i]
+        for p_idx in range(12):
+            if p_idx == 5: continue
+            mapped_type_w = p_idx if p_idx < 5 else (p_idx - 1)
+            bb = piece_bbs[p_idx]
+            while bb:
+                lsb = bb & (~bb + np.uint64(1))
+                sq = 0
+                tmp = lsb >> np.uint64(1)
+                while tmp:
+                    sq += 1
+                    tmp >>= np.uint64(1)
+                f_w = bucket_w * 704 + mapped_type_w * 64 + sq
+                for i in range(256):
+                    accumulator_stack[ply, 0, i] += FC1_WEIGHT[i, f_w]
+                bb &= bb - np.uint64(1)
+    else:
+        for i in range(256):
+            accumulator_stack[ply, 0, i] = accumulator_stack[ply - 1, 0, i]
         for f in added_features:
             if f != -1:
-                acc_w += FC1_WEIGHT[i, f]
-                p_idx = f // 64; sq = f % 64
-                b_f = ((p_idx + 6) % 12) * 64 + (sq ^ 56)
-                acc_b += FC1_WEIGHT[i, b_f]
-                
+                p_idx = f // 64
+                if p_idx == 5: continue
+                mapped_type_w = p_idx if p_idx < 5 else (p_idx - 1)
+                sq = f % 64
+                f_w = bucket_w * 704 + mapped_type_w * 64 + sq
+                for i in range(256):
+                    accumulator_stack[ply, 0, i] += FC1_WEIGHT[i, f_w]
         for f in removed_features:
             if f != -1:
-                acc_w -= FC1_WEIGHT[i, f]
-                p_idx = f // 64; sq = f % 64
-                b_f = ((p_idx + 6) % 12) * 64 + (sq ^ 56)
-                acc_b -= FC1_WEIGHT[i, b_f]
-                
-        accumulator_stack[ply, 0, i] = acc_w
-        accumulator_stack[ply, 1, i] = acc_b
+                p_idx = f // 64
+                if p_idx == 5: continue
+                mapped_type_w = p_idx if p_idx < 5 else (p_idx - 1)
+                sq = f % 64
+                f_w = bucket_w * 704 + mapped_type_w * 64 + sq
+                for i in range(256):
+                    accumulator_stack[ply, 0, i] -= FC1_WEIGHT[i, f_w]
+
+    # --- Black Update ---
+    if black_king_moved:
+        for i in range(256):
+            accumulator_stack[ply, 1, i] = FC1_BIAS[i]
+        for p_idx in range(12):
+            if p_idx == 11: continue
+            mapped_type_b = (p_idx + 5) if p_idx < 6 else (p_idx - 6)
+            bb = piece_bbs[p_idx]
+            while bb:
+                lsb = bb & (~bb + np.uint64(1))
+                sq = 0
+                tmp = lsb >> np.uint64(1)
+                while tmp:
+                    sq += 1
+                    tmp >>= np.uint64(1)
+                sq_b = sq ^ 56
+                f_b = bucket_b * 704 + mapped_type_b * 64 + sq_b
+                for i in range(256):
+                    accumulator_stack[ply, 1, i] += FC1_WEIGHT[i, f_b]
+                bb &= bb - np.uint64(1)
+    else:
+        for i in range(256):
+            accumulator_stack[ply, 1, i] = accumulator_stack[ply - 1, 1, i]
+        for f in added_features:
+            if f != -1:
+                p_idx = f // 64
+                if p_idx == 11: continue
+                mapped_type_b = (p_idx + 5) if p_idx < 6 else (p_idx - 6)
+                sq = f % 64
+                sq_b = sq ^ 56
+                f_b = bucket_b * 704 + mapped_type_b * 64 + sq_b
+                for i in range(256):
+                    accumulator_stack[ply, 1, i] += FC1_WEIGHT[i, f_b]
+        for f in removed_features:
+            if f != -1:
+                p_idx = f // 64
+                if p_idx == 11: continue
+                mapped_type_b = (p_idx + 5) if p_idx < 6 else (p_idx - 6)
+                sq = f % 64
+                sq_b = sq ^ 56
+                f_b = bucket_b * 704 + mapped_type_b * 64 + sq_b
+                for i in range(256):
+                    accumulator_stack[ply, 1, i] -= FC1_WEIGHT[i, f_b]
 
 @numba.njit(numba.void(numba.int32, numba.float32[:, :, :]), fastmath=True, cache=True)
 def copy_accumulator(ply, accumulator_stack):
@@ -125,7 +240,7 @@ def copy_accumulator(ply, accumulator_stack):
 def nnue_forward_incremental(ply, stm, accumulator_stack):
     nstm = stm ^ 1
     
-    # Layer 1: ClippedReLU (0, 127) concatenated
+    # Layer 1: ClippedReLU (0, 127.0) concatenated
     layer1 = np.zeros(512, dtype=np.float32)
     for i in range(256):
         layer1[i] = max(0.0, min(127.0, accumulator_stack[ply, stm, i]))
@@ -191,75 +306,17 @@ def get_bb_differences(old_piece_bbs, new_piece_bbs):
             
     return added, removed
 
-@numba.njit(numba.float32(numba.float32[:]), fastmath=True, cache=True)
-def nnue_forward(features):
-    """
-    Performs a fast forward pass of the NNUE network using Numba (FP32).
-    """
-    
-    # Layer 1: Linear + ClippedReLU (0, 127)
-    layer1 = np.zeros(256, dtype=np.float32)
-    for i in range(256):
-        acc = FC1_BIAS[i]
-        for j in range(768):
-            if features[j] > 0:
-                acc += FC1_WEIGHT[i, j]
-        layer1[i] = max(0.0, min(127.0, acc))
-        
-    # Layer 2: Linear + ClippedReLU (0, 127)
-    layer2 = np.zeros(32, dtype=np.float32)
-    for i in range(32):
-        acc = FC2_BIAS[i]
-        for j in range(256):
-            if layer1[j] > 0:
-                acc += FC2_WEIGHT[i, j] * layer1[j]
-        layer2[i] = max(0.0, min(127.0, acc))
-        
-    # Layer 3: Linear + ClippedReLU (0, 127)
-    layer3 = np.zeros(32, dtype=np.float32)
-    for i in range(32):
-        acc = FC3_BIAS[i]
-        for j in range(32):
-            if layer2[j] > 0:
-                acc += FC3_WEIGHT[i, j] * layer2[j]
-        layer3[i] = max(0.0, min(127.0, acc))
-        
-    # Layer 4: Linear (Output)
-    output = FC4_BIAS[0]
-    for i in range(32):
-        if layer3[i] > 0:
-            output += FC4_WEIGHT[0, i] * layer3[i]
-        
-    return output
-
 @numba.njit(numba.int32(numba.types.Array(numba.uint64, 1, 'C')), fastmath=True, cache=True)
 def evaluate_position_nn(piece_bbs):
     """
     Evaluates a chess position using the neural network directly from bitboards.
+    This is mainly used in speed testing.
     """
-    # 1. Convert bitboards to 768 feature vector
-    features = np.zeros(768, dtype=np.float32)
-    
-    for piece_idx in range(12):
-        bb = piece_bbs[piece_idx]
-        offset = piece_idx * 64
-        while bb:
-            lsb = bb & (~bb + np.uint64(1))
-            sq = numba.int32(0)
-            tmp = lsb >> np.uint64(1)
-            while tmp:
-                sq += numba.int32(1)
-                tmp >>= np.uint64(1)
-            features[offset + sq] = 1.0
-            bb &= bb - np.uint64(1)
-            
-    # 2. Run the neural network
-    logit = nnue_forward(features)
-    
-    # 3. Convert logit to Centipawns
-    K = 0.00575646273
+    accumulator_stack = np.zeros((1, 2, 256), dtype=np.float32)
+    init_accumulator(piece_bbs, accumulator_stack)
+    logit = nnue_forward_incremental(0, 0, accumulator_stack) # assume White to move
+    K = 0.00368208
     cp_score = numba.int32(logit / K)
-    
     return cp_score
 
 if __name__ == '__main__':

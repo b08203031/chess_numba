@@ -121,10 +121,11 @@ if __name__ == "__main__":
     if args.files:
         files = args.files
     else:
-        # Default behavior: look for known generated files
-        # Prioritize the newly split files if they exist, else everything
-        potential_files = glob.glob("tuner/training_data_*_cleaned.jsonl")
-        files = potential_files
+        # 預設行為：抓取所有生成的 cleaned 資料以及 tactical 數據
+        files = glob.glob("tuner/training_data_*_cleaned.jsonl")
+        tactical_file = "tuner/tactical_data.jsonl"
+        if os.path.exists(tactical_file):
+            files.append(tactical_file)
     
     if not files:
         print("No training data found in tuner/ directory (matching 'tuner/training_data_*_cleaned.jsonl').")
