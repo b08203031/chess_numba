@@ -23,7 +23,7 @@ from chess_engine.move import (
     get_to_square, get_from_square, get_special_move_flag,
     SPECIAL_MOVE_FLAG_PROMOTION, SPECIAL_MOVE_FLAG_EN_PASSANT
 )
-from chess_engine.constants import (
+from chess_engine.constants_nn import (
     BB_SQUARES, MG_MATERIAL_VALUES, INFINITY, MAX_QUIESCENCE_DEPTH, ASPIRATION_WINDOW_SIZE,
     NULL_MOVE_REDUCTION, MAX_PLY, LMR_MIN_DEPTH, LMR_MIN_QUIET_MOVE_INDEX, LMR_REDUCTION, SEE_THRESHOLD,
     ENABLE_SEE_IN_QUIESCENCE, MATE_SCORE, MATE_IN_MAX_PLY, NO_MOVE,
@@ -212,9 +212,9 @@ def quiescence_search(piece_bbs, occupancy_bbs, game_state, alpha, beta, ply, se
                 if score_val < SCORE_GOOD_CAPTURE_BONUS:
                     continue
 
-        old_piece_bbs = piece_bbs.copy()
+        search_context.old_piece_bbs[ply, :] = piece_bbs[:]
         unmake_info = make_move(piece_bbs, occupancy_bbs, game_state, move)
-        added_features, removed_features = get_bb_differences(old_piece_bbs, piece_bbs)
+        added_features, removed_features = get_bb_differences(search_context.old_piece_bbs[ply], piece_bbs)
         update_accumulator(piece_bbs, added_features, removed_features, ply + 1, search_context.accumulator_stack)
         
         # --- Lazy Legality Check ---
@@ -677,8 +677,8 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
         copy_accumulator(ply + 1, search_context.accumulator_stack)
         make_null_move(game_state)
 
-        # Dynamic NMP Reduction: R = 4 + depth / 3 + min(3, (static_score - beta) / 150)
-        nmp_reduction = 4 + depth // 3 + min(3, (static_score - beta) // 150)
+        # Dynamic NMP Reduction: R = 4 + depth / 3 + min(3, (static_score - beta) / 190)
+        nmp_reduction = 4 + depth // 3 + min(3, (static_score - beta) // 190)
 
         # C1: Extra reduction when not improving
         if not improving:
@@ -772,9 +772,9 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                 if not see_ge(piece_bbs, occupancy_bbs, game_state[0], pc_from, pc_to, see_threshold_pc, pc_pinned_w, pc_pinned_b):
                     continue
     
-                old_piece_bbs = piece_bbs.copy()
+                search_context.old_piece_bbs[ply, :] = piece_bbs[:]
                 pc_unmake = make_move(piece_bbs, occupancy_bbs, game_state, pc_move)
-                added_features, removed_features = get_bb_differences(old_piece_bbs, piece_bbs)
+                added_features, removed_features = get_bb_differences(search_context.old_piece_bbs[ply], piece_bbs)
                 update_accumulator(piece_bbs, added_features, removed_features, ply + 1, search_context.accumulator_stack)
     
                 # Legality check
@@ -922,9 +922,9 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
         # Removed unconditional pre_see_check_ok to prevent massive performance waste (Lazy Evaluation)
 
         # --- Make the move ---
-        old_piece_bbs = piece_bbs.copy()
+        search_context.old_piece_bbs[ply, :] = piece_bbs[:]
         unmake_info = make_move(piece_bbs, occupancy_bbs, game_state, move)
-        added_features, removed_features = get_bb_differences(old_piece_bbs, piece_bbs)
+        added_features, removed_features = get_bb_differences(search_context.old_piece_bbs[ply], piece_bbs)
         update_accumulator(piece_bbs, added_features, removed_features, ply + 1, search_context.accumulator_stack)
         moved_piece_type = unmake_info[0]
         
@@ -1017,7 +1017,7 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                 margin = margin * 3 // 4
             
             # DGP Adjustment
-            if dissonance > 150:
+            if dissonance > 190:
                 margin += dissonance // 2
 
             if margin > 0 and static_score + margin < alpha:
@@ -1062,9 +1062,9 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                 search_context.mp_bad_captures_idx[ply] = saved_mp_bad_idx
 
                 # Re-make the move
-                old_piece_bbs = piece_bbs.copy()
+                search_context.old_piece_bbs[ply, :] = piece_bbs[:]
                 unmake_info = make_move(piece_bbs, occupancy_bbs, game_state, move)
-                added_features, removed_features = get_bb_differences(old_piece_bbs, piece_bbs)
+                added_features, removed_features = get_bb_differences(search_context.old_piece_bbs[ply], piece_bbs)
                 update_accumulator(piece_bbs, added_features, removed_features, ply + 1, search_context.accumulator_stack)
 
                 if search_context.stop_flag[0]:

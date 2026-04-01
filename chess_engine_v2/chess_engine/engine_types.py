@@ -36,7 +36,7 @@ search_context_spec = [
     ('pv_table', numba.uint16[:, :]),
     ('history_table', numba.int32[:, :]),
     ('nodes_searched', numba.uint64),
-    ('accumulator_stack', numba.float32[:, :, :]),
+    ('accumulator_stack', numba.int32[:, :, :]),
     ('end_time', numba.float64),
     ('stop_flag', numba.boolean[:]),
     ('game_history', numba.uint64[::1]),  # Array of Zobrist keys for game history
@@ -66,6 +66,7 @@ search_context_spec = [
     ('non_pawn_correction_history_black', numba.int16[:]),
     ('butterfly_history', numba.int32[:, :]),
     ('capture_history', numba.int32[:, :, :]),
+    ('old_piece_bbs', numba.uint64[:, :]),  # Pre-allocated buffer — eliminates piece_bbs.copy() heap allocs
 ]
 
 @jitclass(search_context_spec)
@@ -127,7 +128,7 @@ class SearchContext:
         self.minor_correction_history = minor_correction_history
         self.non_pawn_correction_history_white = non_pawn_correction_history_white
         self.non_pawn_correction_history_black = non_pawn_correction_history_black
-        self.accumulator_stack = np.zeros((MAX_PLY + 20, 2, 256), dtype=np.float32)
+        self.accumulator_stack = np.zeros((MAX_PLY + 20, 2, 512), dtype=np.int32)
         self.nodes_searched = np.uint64(0)
         self.end_time = 0.0
         # 使用陣列來包裝布林值，以便可以作為引用傳遞並在外部修改
@@ -149,6 +150,9 @@ class SearchContext:
         self.moves_buffer = np.zeros((MAX_PLY, 256), dtype=np.uint16)
         self.quiet_moves_tried = np.zeros((MAX_PLY, 256), dtype=np.uint16)
         self.bad_captures = np.zeros((MAX_PLY, 256), dtype=np.uint16)
+        # Pre-allocated snapshot buffer — replaces piece_bbs.copy() at every node
+        # Shape: (MAX_PLY, 12) — one row per ply, 12 uint64 bitboards per row
+        self.old_piece_bbs = np.zeros((MAX_PLY, 12), dtype=np.uint64)
         
         # Move Picker state arrays
         self.mp_stage = np.zeros(MAX_PLY, dtype=np.int32)

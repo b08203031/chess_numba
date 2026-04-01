@@ -1,19 +1,19 @@
 [
     {
+        "name": "Lichess Puzzle 006eO",
+        "fen": "8/8/2p5/1p1p1k2/3P4/1PP1pK2/8/8 w - - 4 65",
+        "solution": "b3b4",
+        "engine_move": "f3e3",
+        "rating": "2186",
+        "theme": "defensiveMove endgame equality oneMove pawnEndgame"
+    },
+    {
         "name": "Lichess Puzzle 005yO",
         "fen": "r1r2k2/ppq3bQ/4p2p/4n3/3p4/2P5/PBB2PPP/4R1K1 w - - 3 25",
         "solution": "b2a3",
         "engine_move": "c2b3",
         "rating": "2793",
         "theme": "advantage exposedKing middlegame quietMove veryLong"
-    },
-    {
-        "name": "Lichess Puzzle 006of",
-        "fen": "r2qr2k/1pp2Qp1/1b4np/pP2P3/P4n2/B1N2N1P/5PP1/R3R1K1 b - - 0 20",
-        "solution": "d8d3",
-        "engine_move": "b6f2",
-        "rating": "2500",
-        "theme": "advantage kingsideAttack long middlegame"
     },
     {
         "name": "Lichess Puzzle 002rd",
@@ -32,43 +32,19 @@
         "theme": "crushing endgame long rookEndgame"
     },
     {
-        "name": "Lichess Puzzle 002LW",
-        "fen": "3r1rk1/1b3pp1/3p4/p3nPPQ/4P3/3q1BN1/8/2R2RK1 w - - 2 29",
-        "solution": "f5f6",
-        "engine_move": "g5g6",
-        "rating": "2489",
-        "theme": "advantage middlegame short"
+        "name": "Lichess Puzzle 004sY",
+        "fen": "8/2k3n1/K2p2p1/2pP2Pp/2P4P/7B/8/8 b - - 1 57",
+        "solution": "c7d8",
+        "engine_move": "g7e8",
+        "rating": "2191",
+        "theme": "crushing endgame short"
     },
     {
         "name": "Lichess Puzzle 007eS",
         "fen": "6k1/p4p2/1p5p/4r3/P3B3/1P2KP2/2P3PP/8 b - - 1 29",
         "solution": "f7f5",
-        "engine_move": "b6b5",
+        "engine_move": "e5h5",
         "rating": "1230",
         "theme": "advantage endgame short"
-    },
-    {
-        "name": "Lichess Puzzle 0018S",
-        "fen": "2kr3r/p4p2/1p2p2p/1N1p2p1/3Q4/1P1P4/2q2PPP/5RK1 w - - 0 21",
-        "solution": "d4a1",
-        "engine_move": "g2g3",
-        "rating": "2652",
-        "theme": "advantage endgame pin short"
-    },
-    {
-        "name": "Lichess Puzzle 0048h",
-        "fen": "4r3/p5k1/2R4p/2Pp4/1P1pr1P1/P6P/8/3R3K b - - 0 35",
-        "solution": "e4e1",
-        "engine_move": "e4e2",
-        "rating": "1137",
-        "theme": "crushing endgame exposedKing long rookEndgame"
-    },
-    {
-        "name": "Lichess Puzzle 006NL",
-        "fen": "1r6/k2qn1b1/p1N1p1p1/2PpPpN1/2n2P1P/p4B2/1PP2Q2/1K1R3R b - - 0 32",
-        "solution": "e7c6",
-        "engine_move": "d7c6",
-        "rating": "2279",
-        "theme": "advancedPawn advantage middlegame pin veryLong"
     }
 ]

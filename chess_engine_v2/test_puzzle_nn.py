@@ -1,4 +1,6 @@
 import time
+import sys
+import json
 import numpy as np
 import shutil
 from pathlib import Path
@@ -773,6 +775,39 @@ def run_puzzle_test():
     """
     from chess_engine.engine_types import SearchContext
 
+    # --- Argument Parsing ---
+    target_fens = []
+    run_failed_only = "--failed-only" in sys.argv
+    nnue_only = "--nnue-only" in sys.argv
+    
+    # Find FEN arg if any
+    fen_arg = ""
+    for idx, arg in enumerate(sys.argv):
+        if arg == "--fen" and idx + 1 < len(sys.argv):
+            fen_arg = sys.argv[idx+1]
+            break
+            
+    if nnue_only:
+        print("🕯️  Mode: [PURE NNUE ONLY] (Depth 1, no search)")
+        depth = 1
+        time_limit_ms = 999999 
+    else:
+        print("🚀 Mode: [FULL SEARCH] (Depth 40, 3s limit)")
+        depth = 40
+        time_limit_ms = 3000
+
+    if run_failed_only:
+        try:
+            with open("failed_puzzles.json", "r") as f:
+                failed_data = json.load(f)
+                target_fens = [p["fen"] for p in failed_data]
+                print(f"--- Running {len(target_fens)} previously failed puzzles ---")
+        except FileNotFoundError:
+            print("--- No failed_puzzles.json found. Running all puzzles. ---")
+    elif fen_arg:
+        target_fens = [fen_arg]
+        print(f"--- Running specific FEN: {fen_arg} ---")
+
 
     # 1. Warm-up (triggers JIT compilation)
     print("--- WARMING UP (Compiling JIT functions) ---")
@@ -797,9 +832,6 @@ def run_puzzle_test():
     print("--- WARM-UP COMPLETE ---\n")
 
 
-    depth = 40  # Set a high depth, will be stopped by time
-    time_limit_ms = 3000
-
     total_tests = len(puzzles)
     passed_tests = 0
     failed_tests = 0
@@ -811,10 +843,13 @@ def run_puzzle_test():
 
     script_start_time = time.time()
 
+    relevant_puzzles = [p for p in puzzles if not target_fens or p['fen'] in target_fens]
+    total_tests_to_run = len(relevant_puzzles)
     
-
     for i, puzzle in enumerate(puzzles):
-        print("New game started. Caches and stats cleared.")
+        if target_fens and puzzle['fen'] not in target_fens:
+            continue
+            
         print(f"--- Running Test: {puzzle['name']} ---")
         print(f"FEN: {puzzle['fen']}")
 
@@ -938,7 +973,6 @@ def run_puzzle_test():
             print("-" * 20)
 
         # Save failed puzzles to JSON for analysis
-        import json
         with open("failed_puzzles.json", "w") as f:
             json.dump(failed_puzzles, f, indent=4)
         print("Failed puzzles saved to failed_puzzles.json")

@@ -16,3 +16,4 @@ stockfish/src/stockfish
 *.jsonl
 *.pth
 *.binpack
+*.npy

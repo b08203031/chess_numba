@@ -65,7 +65,7 @@ def get_halfka_indices(bbs, is_black_perspective):
     return indices
 
 @numba.njit(parallel=True, fastmath=True)
-def process_all_samples(bbs_array, stm_array, wdl_array, out_stm, out_nstm, out_wdl):
+def process_all_samples(bbs_array, stm_array, wdl_array, out_stm, out_nstm, out_wdl, out_piece_count):
     N = bbs_array.shape[0]
     for i in numba.prange(N):
         bbs = bbs_array[i]
@@ -84,6 +84,16 @@ def process_all_samples(bbs_array, stm_array, wdl_array, out_stm, out_nstm, out_
                 out_stm[i, j] = f_black[j]
                 out_nstm[i, j] = f_white[j]
             out_wdl[i] = 1.0 - wdl_array[i]
+        
+        # Count all pieces on board (including kings) for SF18-style bucket formula
+        # SF18 uses: bucket = (count<ALL_PIECES>() - 1) / 4
+        total_pieces = np.int8(0)
+        for p_idx in range(12):
+            bb = bbs[p_idx]
+            while bb:
+                total_pieces += np.int8(1)
+                bb &= bb - np.uint64(1)
+        out_piece_count[i] = total_pieces
 
 def main():
     if not os.path.exists(INPUT_FILE):
@@ -102,13 +112,14 @@ def main():
     print(f"Loaded {N} samples in {time.time() - start_time:.2f}s.")
     
     print("Allocating memory for HalfKA indices (this will use ~2.5 GB RAM)...")
-    out_stm = np.zeros((N, 32), dtype=np.int32)
-    out_nstm = np.zeros((N, 32), dtype=np.int32)
+    out_stm = np.zeros((N, 32), dtype=np.uint16)   # uint16 節耐2x RAM, 範圍 0~65535 完全容得下 HalfKA 索引
+    out_nstm = np.zeros((N, 32), dtype=np.uint16)  # 同上
     out_wdl = np.zeros(N, dtype=np.float32)
+    out_piece_count = np.zeros(N, dtype=np.int8)
     
-    print("Pre-computing HalfKA using multi-threaded Numba prange...")
+    print("Pre-computing HalfKA + piece counts using multi-threaded Numba prange...")
     compute_start = time.time()
-    process_all_samples(bbs, stm, wdl, out_stm, out_nstm, out_wdl)
+    process_all_samples(bbs, stm, wdl, out_stm, out_nstm, out_wdl, out_piece_count)
     print(f"Computation finished in {time.time() - compute_start:.2f}s!")
     
     print(f"Saving to {OUTPUT_FILE}...")
@@ -117,7 +128,8 @@ def main():
         OUTPUT_FILE,
         features_stm=out_stm,
         features_nstm=out_nstm,
-        targets=out_wdl
+        targets=out_wdl,
+        piece_counts=out_piece_count
     )
     print(f"Saved successfully in {time.time() - save_start:.2f}s!")
     
