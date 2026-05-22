@@ -1,11 +1,11 @@
 import torch
 import os
 import numpy as np
-from train import SimpleNNUE, export_weights
+from train import LayerStackNNUE, export_weights
 
 def quantize():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model = SimpleNNUE().to(device)
+    model = LayerStackNNUE().to(device)
     
     script_dir = os.path.dirname(os.path.abspath(__file__))
     weights_dir = os.path.join(script_dir, 'weights')

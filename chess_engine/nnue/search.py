@@ -5,25 +5,25 @@ import math
 import numpy as np
 import threading
 
-from chess_engine.evaluation_nn import evaluate_position
-from chess_engine.ml_eval.inference import init_accumulator, update_accumulator, get_bb_differences, copy_accumulator
-from chess_engine.move_generator import (
+from chess_engine.nnue.evaluation import evaluate_position
+from chess_engine.nnue.ml_eval.inference import init_accumulator, update_accumulator, get_bb_differences, copy_accumulator
+from chess_engine.nnue.move_generator import (
     generate_legal_moves, is_in_check, has_sufficient_material, generate_captures,
     generate_legal_moves_buffer, generate_captures_buffer,
     generate_pseudo_legal_moves_buffer, generate_pseudo_legal_captures_buffer,
     generate_pseudo_legal_quiets_buffer,
     is_square_attacked, is_move_pseudo_legal
 )
-from chess_engine.bitboard_utils import (
+from chess_engine.nnue.bitboard_utils import (
     get_lsb_index, WHITE_KING_ZONES, BLACK_KING_ZONES,
     ROOK_RAYS, BISHOP_RAYS, SQUARES_BETWEEN
 )
-from chess_engine.board_operations import make_move, unmake_move, make_null_move
-from chess_engine.move import (
+from chess_engine.nnue.board_operations import make_move, unmake_move, make_null_move
+from chess_engine.nnue.move import (
     get_to_square, get_from_square, get_special_move_flag,
     SPECIAL_MOVE_FLAG_PROMOTION, SPECIAL_MOVE_FLAG_EN_PASSANT
 )
-from chess_engine.constants_nn import (
+from chess_engine.nnue.constants import (
     BB_SQUARES, MG_MATERIAL_VALUES, INFINITY, MAX_QUIESCENCE_DEPTH, ASPIRATION_WINDOW_SIZE,
     NULL_MOVE_REDUCTION, MAX_PLY, LMR_MIN_DEPTH, LMR_MIN_QUIET_MOVE_INDEX, LMR_REDUCTION, SEE_THRESHOLD,
     ENABLE_SEE_IN_QUIESCENCE, MATE_SCORE, MATE_IN_MAX_PLY, NO_MOVE,
@@ -50,22 +50,22 @@ from chess_engine.constants_nn import (
     HISTORY_WEIGHT_MAIN, HISTORY_WEIGHT_CONT_1, HISTORY_WEIGHT_CONT_2, HISTORY_WEIGHT_CONT_4,
     LMR_TABLE, ENABLE_MATE_DISTANCE_PRUNING
 )
-from chess_engine.bitboard_utils import find_piece_type_on_square, find_piece_type_on_square_side
-from chess_engine.board_operations import find_piece_type_for_square
-from chess_engine.debug_utils import log_info
-from chess_engine.see import see, see_ge, get_pinned_pieces
-from chess_engine.transposition_table import (
+from chess_engine.nnue.bitboard_utils import find_piece_type_on_square, find_piece_type_on_square_side
+from chess_engine.nnue.board_operations import find_piece_type_for_square
+from chess_engine.nnue.debug_utils import log_info
+from chess_engine.nnue.see import see, see_ge, get_pinned_pieces
+from chess_engine.nnue.transposition_table import (
     probe_tt, store_tt, numba_tt_entry_type,
     TT_FLAG_NONE, TT_FLAG_EXACT, TT_FLAG_ALPHA, TT_FLAG_BETA
 )
-from chess_engine.zobrist import get_tt_key  # GHI protection: halfmove-aware TT key
-from chess_engine.engine_types import (
+from chess_engine.nnue.zobrist import get_tt_key  # GHI protection: halfmove-aware TT key
+from chess_engine.nnue.engine_types import (
     piece_bbs_signature, occupancy_bbs_signature, game_state_signature,
     SearchContext, search_context_type
 )
-from .move import move_to_uci
+from chess_engine.nnue.move import move_to_uci
 
-from chess_engine.search_heuristics import (
+from chess_engine.nnue.search_heuristics import (
     update_history, update_butterfly_history, update_capture_history,
     update_continuation_history, update_pawn_history, score_captures, score_captures_with_tt, 
     score_quiets, update_quiet_stats_on_tt_hit, get_lmr_reduction, score_moves, partial_insertion_sort_moves

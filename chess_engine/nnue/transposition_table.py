@@ -1,7 +1,7 @@
 # chess_engine/transposition_table.py
 import numpy as np
 import numba as nb
-from chess_engine.constants import TT_SIZE_MB
+from chess_engine.nnue.constants import TT_SIZE_MB
 
 # 1. Define constants for TT entry flags / 定義置換表項目標誌的常量
 TT_FLAG_NONE = 0

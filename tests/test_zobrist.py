@@ -6,11 +6,11 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".")
 import pytest
 import numpy as np
 
-from chess_engine.fen_parser import parse_fen
-from chess_engine.board_operations import make_move, unmake_move
-from chess_engine.zobrist import compute_initial_hash
-from chess_engine.move_generator import generate_legal_moves
-from chess_engine.move import move_to_uci
+from chess_engine.classical.fen_parser import parse_fen
+from chess_engine.classical.board_operations import make_move, unmake_move
+from chess_engine.classical.zobrist import compute_initial_hash
+from chess_engine.classical.move_generator import generate_legal_moves
+from chess_engine.classical.move import move_to_uci
 
 def uci_to_move(piece_bbs, occupancy_bbs, game_state, uci_string):
     """

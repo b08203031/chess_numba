@@ -1,7 +1,7 @@
 import numba
 import numpy as np
-from chess_engine.engine_types import piece_bbs_signature, occupancy_bbs_signature, game_state_signature, search_context_type
-from chess_engine.ml_eval.inference import nnue_forward_incremental
+from chess_engine.nnue.engine_types import piece_bbs_signature, occupancy_bbs_signature, game_state_signature, search_context_type
+from chess_engine.nnue.ml_eval.inference import nnue_forward_incremental
 
 # The NNUE evaluation function needs to be a drop-in replacement for the
 # original evaluate_position in evaluation.py, which has this signature:

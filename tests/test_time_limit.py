@@ -5,10 +5,10 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".")
 
 import time
 import numpy as np
-from chess_engine.search import iterative_deepening_search
-from chess_engine.fen_parser import parse_fen
-from chess_engine.transposition_table import create_transposition_table, TT_SIZE_MB
-from chess_engine.engine_types import SearchContext
+from chess_engine.classical.search import iterative_deepening_search
+from chess_engine.classical.fen_parser import parse_fen
+from chess_engine.classical.transposition_table import create_transposition_table, TT_SIZE_MB
+from chess_engine.classical.engine_types import SearchContext
 
 def test_search_time_limit():
     print("Testing search time limit...")

@@ -8,7 +8,7 @@ import shutil
 from pathlib import Path
 
 # --- Transposition Table Setup ---
-from chess_engine.transposition_table import TT_SIZE_MB, create_transposition_table, clear_transposition_table
+from chess_engine.classical.transposition_table import TT_SIZE_MB, create_transposition_table, clear_transposition_table
 transposition_table = create_transposition_table(TT_SIZE_MB)
 
 
@@ -26,18 +26,18 @@ def clear_numba_cache():
             shutil.rmtree(cache_dir)
     # log_info("--- Cache Cleared ---")
 
-from chess_engine.debug_utils import log_info
+from chess_engine.classical.debug_utils import log_info
 
 # Clear cache before importing the engine to avoid stale cache issues
 # clear_numba_cache()
 
-from chess_engine.fen_parser import parse_fen
-from chess_engine.search import iterative_deepening_search
-from chess_engine.move import move_to_uci
-from chess_engine.core import SQUARE_TO_ALGEBRAIC
+from chess_engine.classical.fen_parser import parse_fen
+from chess_engine.classical.search import iterative_deepening_search
+from chess_engine.classical.move import move_to_uci
+from chess_engine.classical.core import SQUARE_TO_ALGEBRAIC
 
 # Maximum search depth (Ply) for arrays like killer moves
-from chess_engine.constants import MAX_PLY
+from chess_engine.classical.classical.constants import MAX_PLY
 
 puzzles = [
         {
@@ -775,7 +775,7 @@ def run_puzzle_test():
     """
     Runs a search test for each puzzle and prints statistics.
     """
-    from chess_engine.engine_types import SearchContext
+    from chess_engine.classical.engine_types import SearchContext
 
 
     # 1. Warm-up (triggers JIT compilation)

@@ -7,11 +7,11 @@ import argparse
 import numpy as np
 import time
 
-from chess_engine.fen_parser import parse_fen
-from chess_engine.move_generator import generate_legal_moves
-from chess_engine.board_operations import make_move, unmake_move
-from chess_engine.move import get_from_square, get_to_square
-from chess_engine.core import perft, _jit_perft_divide, SQUARE_TO_ALGEBRAIC, PERFT_RESULTS
+from chess_engine.classical.fen_parser import parse_fen
+from chess_engine.classical.move_generator import generate_legal_moves
+from chess_engine.classical.board_operations import make_move, unmake_move
+from chess_engine.classical.move import get_from_square, get_to_square
+from chess_engine.classical.core import perft, _jit_perft_divide, SQUARE_TO_ALGEBRAIC, PERFT_RESULTS
 
 def do_perft(args):
     """?•ç? 'perft' ?½ä»¤??""

@@ -8,7 +8,7 @@ FC1_BOUNDARY = 4.0
 NUM_BUCKETS = 8
 X_LIM_DENSE = (-2.0, 2.0) # 稠密層觀察區間
 
-def inspect_weight(checkpoint_path="./chess_engine_v2/chess_engine/ml_eval/weights/latest_model.pth"):
+def inspect_weight(checkpoint_path="./chess_engine/nnue/ml_eval/weights/latest_model.pth"):
     if not os.path.exists(checkpoint_path):
         print(f"錯誤：找不到權重檔案 {checkpoint_path}")
         return
@@ -75,7 +75,7 @@ def inspect_weight(checkpoint_path="./chess_engine_v2/chess_engine/ml_eval/weigh
             ax.grid(axis='y', alpha=0.3)
         
         plt.tight_layout(rect=[0, 0.03, 1, 0.95])
-        plt.savefig(f"./chess_engine_v2/chess_engine/ml_eval/weights/{filename}", dpi=150)
+        plt.savefig(f"./chess_engine/nnue/ml_eval/weights/{filename}", dpi=150)
         plt.close()
 
     # --- 4. 執行繪圖任務 ---
@@ -88,7 +88,7 @@ def inspect_weight(checkpoint_path="./chess_engine_v2/chess_engine/ml_eval/weigh
     axs_m[0,1].hist(f2_all, bins=100, color='mediumseagreen', log=True); axs_m[0,1].set_title("FC2 (Dense)")
     axs_m[1,0].hist(f3_all, bins=100, color='coral', log=True); axs_m[1,0].set_title("FC3 (Dense)")
     axs_m[1,1].hist(f4_all, bins=100, color='mediumpurple', log=True); axs_m[1,1].set_title("FC4 (Output)")
-    plt.savefig("./chess_engine_v2/chess_engine/ml_eval/weights/all_layers_histogram.png", dpi=150); plt.close()
+    plt.savefig("./chess_engine/nnue/ml_eval/weights/all_layers_histogram.png", dpi=150); plt.close()
 
     # 圖表 2, 3, 4: 各層桶子解構
     print("🎨 產出 fc2_buckets_histogram.png...")

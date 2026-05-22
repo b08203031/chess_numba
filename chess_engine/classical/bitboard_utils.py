@@ -2,8 +2,8 @@ import numpy as np
 import numba as nb
 from numba.extending import intrinsic
 from numba import types
-from chess_engine.constants import BB_SQUARES
-from chess_engine.engine_types import piece_bbs_signature
+from chess_engine.classical.constants import BB_SQUARES
+from chess_engine.classical.engine_types import piece_bbs_signature
 
 # hardware intrinsic for leading zeros
 @intrinsic

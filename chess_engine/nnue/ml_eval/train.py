@@ -223,7 +223,7 @@ def train():
     dataset_path = TrainingConfig.DATASET_PATH
     if not os.path.exists(dataset_path):
         # 嘗試向上搜尋
-        levels = ['../', '../../', '../../../']
+        levels = ['../', '../../../', '../../../']
         found = False
         for lv in levels:
             alt_path = os.path.join(lv, 'tuner/ultimate_halfka.npz')

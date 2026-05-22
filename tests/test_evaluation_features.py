@@ -6,11 +6,11 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".")
 import unittest
 import numpy as np
 
-from chess_engine.fen_parser import parse_fen
-from chess_engine.evaluation import _evaluate_pawn_shield_for_color, _evaluate_king_attackers, evaluate_king_safety
-from chess_engine.zobrist import get_lsb_index
-from chess_engine.constants import KING_SAFETY_TABLE, KING_TROPISM_MAX_DISTANCE, KING_TROPISM_WEIGHTS, PAWN_STORM_PENALTY_BY_RANK
-from chess_engine.evaluation import MANHATTAN_DISTANCE
+from chess_engine.classical.fen_parser import parse_fen
+from chess_engine.classical.classical.evaluation import _evaluate_pawn_shield_for_color, _evaluate_king_attackers, evaluate_king_safety
+from chess_engine.classical.zobrist import get_lsb_index
+from chess_engine.classical.classical.constants import KING_SAFETY_TABLE, KING_TROPISM_MAX_DISTANCE, KING_TROPISM_WEIGHTS, PAWN_STORM_PENALTY_BY_RANK
+from chess_engine.classical.classical.evaluation import MANHATTAN_DISTANCE
 
 class TestPawnShieldEvaluation(unittest.TestCase):
     """
@@ -91,7 +91,7 @@ class TestKingAttackerEvaluation(unittest.TestCase):
         # We need to ensure 'enemy_attacks_bb' passed to function includes the knights' attacks on the king zone
         # The function checks: if not (enemy_attacks_bb & king_zone): return 0
         # So we must mock or compute the attacks.
-        from chess_engine.evaluation import _compute_all_attacks
+        from chess_engine.classical.classical.evaluation import _compute_all_attacks
         w_attacks, b_attacks, _, _ = _compute_all_attacks(piece_bbs, occupancy_bbs[2])
         
         expected_penalty = -KING_SAFETY_TABLE[4]
@@ -105,7 +105,7 @@ class TestKingAttackerEvaluation(unittest.TestCase):
         piece_bbs, occupancy_bbs, _ = parse_fen(fen)
         wk_sq = get_lsb_index(piece_bbs[5])
         
-        from chess_engine.evaluation import _compute_all_attacks
+        from chess_engine.classical.classical.evaluation import _compute_all_attacks
         w_attacks, b_attacks, _, _ = _compute_all_attacks(piece_bbs, occupancy_bbs[2])
 
         expected_penalty = -KING_SAFETY_TABLE[8]
@@ -117,7 +117,7 @@ class TestKingAttackerEvaluation(unittest.TestCase):
         fen = "rnbq1rk1/pppppp1p/8/8/8/8/PPPPPPPP/RNBQ1RK1 w - - 0 1"
         piece_bbs, occupancy_bbs, _ = parse_fen(fen)
         wk_sq = get_lsb_index(piece_bbs[5])
-        from chess_engine.evaluation import _compute_all_attacks
+        from chess_engine.classical.classical.evaluation import _compute_all_attacks
         w_attacks, b_attacks, _, _ = _compute_all_attacks(piece_bbs, occupancy_bbs[2])
         
         white_penalty = _evaluate_king_attackers(wk_sq, 0, piece_bbs, occupancy_bbs, b_attacks, w_attacks)
@@ -184,7 +184,7 @@ class TestKingAttackerEvaluation(unittest.TestCase):
         # 黑�???g8，被 f6 ?�白馬攻??
         fen_attack = "rnbq1rk1/pppp1ppp/5n2/8/8/8/PPPPPPPP/RNBQ1RK1 b - - 0 1"
         p_bbs, o_bbs, _ = parse_fen(fen_attack)
-        from chess_engine.evaluation import _compute_all_attacks
+        from chess_engine.classical.classical.evaluation import _compute_all_attacks
         w_att, b_att, _, _ = _compute_all_attacks(p_bbs, o_bbs[2])
         
         # Score is from the current player's (Black's) perspective, so a negative score is expected

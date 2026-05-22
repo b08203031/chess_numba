@@ -3,11 +3,11 @@
 import numba
 import numpy as np
 
-from chess_engine.constants import *
+from chess_engine.classical.constants import *
 
-from chess_engine.bitboard_utils import get_lsb_index, get_msb_index, count_bits, WHITE_KING_ZONES, BLACK_KING_ZONES, FILE_MASKS, find_piece_type_on_square_side, SQUARES_BETWEEN
-from chess_engine.engine_types import piece_bbs_signature, occupancy_bbs_signature, game_state_signature, piece_counts_signature
-from chess_engine.move_generator import (
+from chess_engine.classical.bitboard_utils import get_lsb_index, get_msb_index, count_bits, WHITE_KING_ZONES, BLACK_KING_ZONES, FILE_MASKS, find_piece_type_on_square_side, SQUARES_BETWEEN
+from chess_engine.classical.engine_types import piece_bbs_signature, occupancy_bbs_signature, game_state_signature, piece_counts_signature
+from chess_engine.classical.move_generator import (
     get_bishop_attacks, get_rook_attacks, get_queen_attacks, KNIGHT_ATTACKS, PAWN_ATTACKS, KING_ATTACKS,
     get_pinned_pieces
 )
@@ -265,8 +265,8 @@ def evaluate_pawn_structure(piece_bbs):
                  stop_sq = sq + 8
                  if stop_sq < 64:
                      # Check if black pawns attack stop_sq
-                     # PAWN_ATTACKS[0, stop_sq] gives squares occupied by Black pawns that attack stop_sq.
-                     if (PAWN_ATTACKS[0, stop_sq] & black_pawns):
+                     # PAWN_ATTACKS[1, stop_sq] gives squares occupied by Black pawns that attack stop_sq.
+                     if (PAWN_ATTACKS[1, stop_sq] & black_pawns):
                          mg_score += BACKWARD_PAWN_PENALTY[0]
                          eg_score += BACKWARD_PAWN_PENALTY[1]
 
@@ -375,8 +375,8 @@ def evaluate_pawn_structure(piece_bbs):
                  stop_sq = sq - 8
                  if stop_sq >= 0:
                      # Check if white pawns attack stop_sq
-                     # PAWN_ATTACKS[1, stop_sq] gives squares occupied by White pawns that attack stop_sq.
-                     if (PAWN_ATTACKS[1, stop_sq] & white_pawns):
+                     # PAWN_ATTACKS[0, stop_sq] gives squares occupied by White pawns that attack stop_sq.
+                     if (PAWN_ATTACKS[0, stop_sq] & white_pawns):
                          mg_score -= BACKWARD_PAWN_PENALTY[0]
                          eg_score -= BACKWARD_PAWN_PENALTY[1]
 
@@ -853,7 +853,7 @@ def evaluate_attacks_mobility_threats(piece_bbs, occupancy_bbs):
         
         # Outpost Logic (White Knight)
         if not (black_pawn_attacks & BB_SQUARES[sq]):
-            if (PAWN_ATTACKS[BLACK, sq] & wp_bb):
+            if (PAWN_ATTACKS[WHITE, sq] & wp_bb):
                 rank = sq // 8
                 mg_outpost += OUTPOST_BONUS_KNIGHT[rank, 0]
                 eg_outpost += OUTPOST_BONUS_KNIGHT[rank, 1]
@@ -898,7 +898,7 @@ def evaluate_attacks_mobility_threats(piece_bbs, occupancy_bbs):
 
         # Outpost Logic (White Bishop)
         if not (black_pawn_attacks & BB_SQUARES[sq]):
-            if (PAWN_ATTACKS[BLACK, sq] & wp_bb):
+            if (PAWN_ATTACKS[WHITE, sq] & wp_bb):
                 rank = sq // 8
                 mg_outpost += OUTPOST_BONUS_BISHOP[rank, 0]
                 eg_outpost += OUTPOST_BONUS_BISHOP[rank, 1]
@@ -981,7 +981,7 @@ def evaluate_attacks_mobility_threats(piece_bbs, occupancy_bbs):
 
         # Outpost Logic (Black Knight)
         if not (white_pawn_attacks & BB_SQUARES[sq]):
-            if (PAWN_ATTACKS[WHITE, sq] & bp_bb):
+            if (PAWN_ATTACKS[BLACK, sq] & bp_bb):
                 rank = sq // 8
                 rel_rank = 7 - rank
                 mg_outpost -= OUTPOST_BONUS_KNIGHT[rel_rank, 0]
@@ -1027,7 +1027,7 @@ def evaluate_attacks_mobility_threats(piece_bbs, occupancy_bbs):
 
         # Outpost Logic (Black Bishop)
         if not (white_pawn_attacks & BB_SQUARES[sq]):
-            if (PAWN_ATTACKS[WHITE, sq] & bp_bb):
+            if (PAWN_ATTACKS[BLACK, sq] & bp_bb):
                 rank = sq // 8
                 rel_rank = 7 - rank
                 mg_outpost -= OUTPOST_BONUS_BISHOP[rel_rank, 0]

@@ -2,14 +2,14 @@
 import numpy as np
 import numba
 
-from chess_engine.move import (
+from chess_engine.nnue.move import (
     encode_move, SPECIAL_MOVE_FLAG_NORMAL, SPECIAL_MOVE_FLAG_PROMOTION, SPECIAL_MOVE_FLAG_EN_PASSANT, SPECIAL_MOVE_FLAG_CASTLING,
     PROMO_QUEEN, PROMO_ROOK, PROMO_BISHOP, PROMO_KNIGHT,
     get_from_square, get_to_square, get_special_move_flag
 )
-from chess_engine.board_operations import make_move, unmake_move
-# from chess_engine.engine_types import board_state_flat_signature # This is no longer needed
-from chess_engine.constants import BB_SQUARES, ROOK, QUEEN, BISHOP, KING, KNIGHT, PAWN
+from chess_engine.nnue.board_operations import make_move, unmake_move
+# from chess_engine.nnue.engine_types import board_state_flat_signature # This is no longer needed
+from chess_engine.nnue.constants import BB_SQUARES, ROOK, QUEEN, BISHOP, KING, KNIGHT, PAWN
 import numba.types as nbt
 
 # =============================================================================
@@ -70,7 +70,7 @@ ROOK_MAGIC_NUMBERS = np.array([
     0x8220020041009aa, 0x201000208040041, 0x8006010850008204, 0x1094004093002402,
 ], dtype=np.uint64)
 
-from chess_engine.bitboard_utils import get_lsb_index, count_bits, SQUARES_BETWEEN, ROOK_RAYS, BISHOP_RAYS
+from chess_engine.nnue.bitboard_utils import get_lsb_index, count_bits, SQUARES_BETWEEN, ROOK_RAYS, BISHOP_RAYS
 
 @numba.njit(numba.uint64(numba.uint8), cache=True, boundscheck=False, fastmath=True)
 def mask_bishop_attacks(sq):
@@ -198,7 +198,7 @@ def _precompute_pawn_attacks():
 _precompute_pawn_attacks()
 
 
-from chess_engine.engine_types import piece_bbs_signature, occupancy_bbs_signature, game_state_signature
+from chess_engine.nnue.engine_types import piece_bbs_signature, occupancy_bbs_signature, game_state_signature
 
 
 @numba.njit(numba.boolean(piece_bbs_signature, occupancy_bbs_signature, numba.uint8, numba.uint8), cache=True, boundscheck=False, fastmath=True)

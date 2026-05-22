@@ -1,8 +1,8 @@
 # chess_engine/engine_types.py
 import numba
 import numpy as np
-from chess_engine.transposition_table import numba_tt_entry_type
-from chess_engine.constants import MAX_PLY, CORRECTION_HISTORY_SIZE
+from chess_engine.classical.transposition_table import numba_tt_entry_type
+from chess_engine.classical.constants import MAX_PLY, CORRECTION_HISTORY_SIZE
 
 """
 此模組定義了西洋棋引擎中使用的 Numba 類型和類別。

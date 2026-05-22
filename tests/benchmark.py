@@ -8,8 +8,8 @@ import numpy as np
 import shutil
 from pathlib import Path
 
-from chess_engine.engine_types import SearchContext
-from chess_engine.transposition_table import TT_SIZE_MB, create_transposition_table, clear_transposition_table
+from chess_engine.classical.engine_types import SearchContext
+from chess_engine.classical.transposition_table import TT_SIZE_MB, create_transposition_table, clear_transposition_table
 
 # --- Transposition Table Setup / ç½®æ?è¡¨è¨­ç½?---
 transposition_table = create_transposition_table(TT_SIZE_MB)
@@ -17,7 +17,7 @@ transposition_table = create_transposition_table(TT_SIZE_MB)
 killer_moves = np.zeros(128, dtype=np.uint16) # Adjusted for potential array size mismatch if not using constant
 # Wait, killer moves is defined as MAX_PLY * 2 in main.py. MAX_PLY is 128 in search.py but 64 in main.py.
 # Let's use the constant from constants.py
-from chess_engine.constants import MAX_PLY
+from chess_engine.classical.classical.constants import MAX_PLY
 killer_moves = np.zeros(MAX_PLY * 2, dtype=np.uint16) # MAX_PLY is 128
 history_table = np.zeros((12, 64), dtype=np.int32)
 butterfly_history = np.zeros((64, 64), dtype=np.int32)
@@ -35,7 +35,7 @@ search_context = SearchContext(
     pawn_correction_history, minor_correction_history, non_pawn_correction_history_white, non_pawn_correction_history_black
 )
 
-from chess_engine.debug_utils import log_info
+from chess_engine.classical.debug_utils import log_info
 
 def clear_numba_cache():
     """
@@ -51,9 +51,9 @@ def clear_numba_cache():
 
 # clear_numba_cache()
 
-from chess_engine.fen_parser import parse_fen
-from chess_engine.search import iterative_deepening_search
-from chess_engine.move import move_to_uci
+from chess_engine.classical.fen_parser import parse_fen
+from chess_engine.classical.search import iterative_deepening_search
+from chess_engine.classical.move import move_to_uci
 
 def run_benchmark_for_fen(fen, depth, name):
     """

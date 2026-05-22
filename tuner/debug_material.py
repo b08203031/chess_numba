@@ -22,7 +22,7 @@ else:
     print("ERROR: No model found in weights/. Has training started?")
     sys.exit(1)
 
-from chess_engine.ml_eval.train import LayerStackNNUE
+from chess_engine.nnue.ml_eval.train import LayerStackNNUE
 
 model = LayerStackNNUE(num_buckets=8)
 with open(model_path, 'rb') as fh:

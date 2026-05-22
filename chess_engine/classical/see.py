@@ -1,21 +1,21 @@
 
 import numba
 import numpy as np
-from chess_engine.constants import (
+from chess_engine.classical.constants import (
     BB_SQUARES,
     WHITE, BLACK, PAWN, KNIGHT, BISHOP, ROOK, QUEEN, KING,
     MG_MATERIAL_VALUES
 )
-from chess_engine.engine_types import piece_bbs_signature, occupancy_bbs_signature
-from chess_engine.bitboard_utils import find_piece_type_on_square, find_piece_type_on_square_side, SQUARES_BETWEEN, ROOK_RAYS, BISHOP_RAYS
+from chess_engine.classical.engine_types import piece_bbs_signature, occupancy_bbs_signature
+from chess_engine.classical.bitboard_utils import find_piece_type_on_square, find_piece_type_on_square_side, SQUARES_BETWEEN, ROOK_RAYS, BISHOP_RAYS
 import numba.types as nbt
 # Import Magic Bitboard functions
-from chess_engine.move_generator import (
+from chess_engine.classical.move_generator import (
     get_bishop_attacks, get_rook_attacks,
     PAWN_ATTACKS, KNIGHT_ATTACKS, KING_ATTACKS,
     get_pinned_pieces
 )
-from chess_engine.bitboard_utils import get_lsb_index, count_bits
+from chess_engine.classical.bitboard_utils import get_lsb_index, count_bits
 
 
 # Piece Values for SEE (based on Stockfish's internal values for SEE)

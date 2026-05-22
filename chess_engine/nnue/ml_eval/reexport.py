@@ -1,11 +1,11 @@
 import os
 import torch
 import numpy as np
-from chess_engine.ml_eval.train import SimpleNNUE, export_weights
+from chess_engine.nnue.ml_eval.train import LayerStackNNUE, export_weights
 
 def reexport():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model = SimpleNNUE().to(device)
+    model = LayerStackNNUE().to(device)
     
     script_dir = os.path.dirname(os.path.abspath(__file__))
     weights_dir = os.path.join(script_dir, 'weights')

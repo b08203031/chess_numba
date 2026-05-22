@@ -2,17 +2,17 @@
 
 import numpy as np
 import numba
-from chess_engine.move import (
+from chess_engine.nnue.move import (
     get_from_square, get_to_square, get_special_move_flag, get_promotion_piece,
     SPECIAL_MOVE_FLAG_PROMOTION, SPECIAL_MOVE_FLAG_EN_PASSANT, SPECIAL_MOVE_FLAG_CASTLING
 )
-from chess_engine.zobrist import (
+from chess_engine.nnue.zobrist import (
     PIECE_SQUARE_KEYS, SIDE_TO_MOVE_KEY, EN_PASSANT_FILE_KEYS, CASTLING_RIGHTS_KEYS
 )
-from chess_engine.engine_types import (
+from chess_engine.nnue.engine_types import (
     piece_bbs_signature, occupancy_bbs_signature, game_state_signature, unmake_info_signature
 )
-from chess_engine.constants import (
+from chess_engine.nnue.constants import (
     PAWN_KEY_INDEX, MINOR_KEY_INDEX, NON_PAWN_KEY_WHITE_INDEX, NON_PAWN_KEY_BLACK_INDEX
 )
 

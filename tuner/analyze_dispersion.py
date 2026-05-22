@@ -5,7 +5,7 @@ import torch
 import matplotlib.pyplot as plt
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
-from chess_engine_v2.chess_engine.ml_eval.train import LayerStackNNUE, TrainingConfig
+from chess_engine.nnue.ml_eval.train import LayerStackNNUE, TrainingConfig
 
 def analyze_dispersion():
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -27,9 +27,9 @@ def analyze_dispersion():
     del data 
     
     model = LayerStackNNUE()
-    weights_path = 'chess_engine_v2/chess_engine/ml_eval/weights/best_model.pth'
+    weights_path = 'chess_engine/nnue/ml_eval/weights/best_model.pth'
     if not os.path.exists(weights_path):
-        weights_path = 'chess_engine_v2/chess_engine/ml_eval/weights/latest_model.pth'
+        weights_path = 'chess_engine/nnue/ml_eval/weights/latest_model.pth'
         
     if not os.path.exists(weights_path):
         print("No PyTorch model weights found. Please run training first.")

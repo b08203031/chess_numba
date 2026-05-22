@@ -6,20 +6,20 @@ import random
 import threading
 import time
 
-from chess_engine.board_operations import make_move
-from chess_engine.core import generate_legal_moves
-from chess_engine.debug_utils import log_info
-from chess_engine.fen_parser import parse_fen
-from chess_engine.move import move_to_uci
-from chess_engine.search import iterative_deepening_search
-from chess_engine.time_manager import calculate_search_time
-from chess_engine.transposition_table import (
+from chess_engine.classical.board_operations import make_move
+from chess_engine.classical.core import generate_legal_moves
+from chess_engine.classical.debug_utils import log_info
+from chess_engine.classical.fen_parser import parse_fen
+from chess_engine.classical.move import move_to_uci
+from chess_engine.classical.search import iterative_deepening_search
+from chess_engine.classical.time_manager import calculate_search_time
+from chess_engine.classical.transposition_table import (
     create_transposition_table,
     clear_transposition_table,
     TT_SIZE_MB,
 )
-from chess_engine.opening_book import OpeningBook
-from chess_engine.engine_types import SearchContext
+from chess_engine.classical.opening_book import OpeningBook
+from chess_engine.classical.engine_types import SearchContext
 
 # Maximum search depth (Ply) for arrays like killer moves
 # 殺手步等陣列的最大搜尋深度（層數）

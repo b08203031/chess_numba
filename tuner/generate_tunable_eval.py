@@ -1,6 +1,6 @@
 import re
 
-EVAL_PATH = "chess_engine_v2/chess_engine/evaluation.py"
+EVAL_PATH = "chess_engine/classical/evaluation.py"
 TUNABLE_PATH = "tuner/tunable_eval.py"
 INDICES_PATH = "tuner/new_indices.txt"
 
@@ -12,7 +12,7 @@ with open(INDICES_PATH, 'r', encoding='utf-8') as f:
     indices_text = f.read()
 
 # Replace V2 relative imports with our new absolute ones
-text = text.replace("from chess_engine.constants import *", "from chess_engine_v2.chess_engine.constants import *")
+text = text.replace("from chess_engine.classical.constants import *", "from chess_engine.classical.constants import *")
 text = text.replace("from chess_engine.bitboard_utils import", "from chess_engine_v2.chess_engine.bitboard_utils import")
 text = text.replace("from chess_engine.engine_types import", "from chess_engine_v2.chess_engine.engine_types import")
 text = text.replace("from chess_engine.move_generator import", "from chess_engine_v2.chess_engine.move_generator import")

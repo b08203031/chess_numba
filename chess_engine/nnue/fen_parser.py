@@ -1,6 +1,6 @@
 # chess_engine/fen_parser.py
 import numpy as np
-from chess_engine.zobrist import compute_initial_hash
+from chess_engine.nnue.zobrist import compute_initial_hash
 
 # --- Piece Type and Color Constants (for mapping FEN chars) ---
 PIECE_MAP = {
@@ -100,7 +100,7 @@ def parse_fen(fen_string: str):
     non_pawn_white_key = np.uint64(0)
     non_pawn_black_key = np.uint64(0)
     
-    from chess_engine.zobrist import PIECE_SQUARE_KEYS, get_lsb_index
+    from chess_engine.nnue.zobrist import PIECE_SQUARE_KEYS, get_lsb_index
     
     # helper for keys
     def _add_pieces(pieces_bb, p_idx, is_pawn=False, is_minor=False, is_white=False):

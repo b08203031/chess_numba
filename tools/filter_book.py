@@ -16,16 +16,16 @@ class SuppressOutput:
         sys.stdout = self._original_stdout
 
 
-# 將 chess_engine_v2 加入路徑以匯入核心模組
-sys.path.append(os.path.join(os.path.dirname(__file__), "chess_engine_v2"))
+# 將根目錄加入路徑以匯入核心模組
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-from chess_engine.opening_book import POLYGLOT_DTYPE
-from chess_engine.fen_parser import parse_fen
-from chess_engine.search import iterative_deepening_search
-from chess_engine.time_manager import calculate_search_time
-from chess_engine.transposition_table import create_transposition_table, clear_transposition_table
-from chess_engine.engine_types import SearchContext
-from chess_engine.move import encode_move, SPECIAL_MOVE_FLAG_NORMAL, SPECIAL_MOVE_FLAG_PROMOTION, PROMO_KNIGHT, PROMO_BISHOP, PROMO_ROOK, PROMO_QUEEN, get_from_square, get_to_square, get_special_move_flag
+from chess_engine.classical.opening_book import POLYGLOT_DTYPE
+from chess_engine.classical.fen_parser import parse_fen
+from chess_engine.classical.search import iterative_deepening_search
+from chess_engine.classical.time_manager import calculate_search_time
+from chess_engine.classical.transposition_table import create_transposition_table, clear_transposition_table
+from chess_engine.classical.engine_types import SearchContext
+from chess_engine.classical.move import encode_move, SPECIAL_MOVE_FLAG_NORMAL, SPECIAL_MOVE_FLAG_PROMOTION, PROMO_KNIGHT, PROMO_BISHOP, PROMO_ROOK, PROMO_QUEEN, get_from_square, get_to_square, get_special_move_flag
 
 # --- 腳本設定參數 ---
 # 推薦的深度：
@@ -34,7 +34,7 @@ from chess_engine.move import encode_move, SPECIAL_MOVE_FLAG_NORMAL, SPECIAL_MOV
 # Depth 8: 非常快，但只適合過濾極其明顯的「大漏著」，無法評估長遠陣型。
 SEARCH_DEPTH = 12
 MAX_CANDIDATES = 2
-BOOK_PATH = "chess_engine_v2/chess_engine/polyglot.bin"
+BOOK_PATH = "chess_engine/polyglot.bin"
 OUTPUT_PATH = "polyglot_filtered.bin"
 MAX_POSITIONS_TO_EVALUATE = 1000000  # 防止 BFS 爆表
 

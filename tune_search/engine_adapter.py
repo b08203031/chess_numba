@@ -14,7 +14,7 @@ def patch_constants(args):
     Patches the chess_engine.constants module with values from args.
     This must be done BEFORE importing any other engine modules that might JIT compile functions.
     """
-    import chess_engine.constants as constants
+    import chess_engine.classical.constants as constants
     
     # Iterate over all arguments and update corresponding constants
     for arg_name, arg_value in vars(args).items():
@@ -67,7 +67,7 @@ def main():
         patch_constants(args)
     except ImportError:
         # This might happen if requirements aren't met, but we are in the same env
-        print("Error: Could not import chess_engine.constants")
+        print("Error: Could not import chess_engine.classical.constants")
         sys.exit(1)
 
     # 3. Start Engine

@@ -3,7 +3,7 @@ import numpy as np
 import numba
 from numba.extending import intrinsic
 from numba import types
-from chess_engine.engine_types import piece_bbs_signature, game_state_signature
+from chess_engine.classical.engine_types import piece_bbs_signature, game_state_signature
 
 WHITE = 0
 BLACK = 1
