@@ -5,9 +5,9 @@ import time
 import numba
 
 # ?�入路�?以便導入引�?
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "."))
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-from chess_engine.nnue.nnue.ml_eval.inference import init_accumulator, update_accumulator, nnue_forward_incremental
+from chess_engine.nnue.ml_eval.inference import init_accumulator, update_accumulator, nnue_forward_incremental
 
 def benchmark_incremental():
     print("="*60)

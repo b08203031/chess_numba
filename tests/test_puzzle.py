@@ -37,7 +37,7 @@ from chess_engine.classical.move import move_to_uci
 from chess_engine.classical.core import SQUARE_TO_ALGEBRAIC
 
 # Maximum search depth (Ply) for arrays like killer moves
-from chess_engine.classical.classical.constants import MAX_PLY
+from chess_engine.classical.constants import MAX_PLY
 
 puzzles = [
         {

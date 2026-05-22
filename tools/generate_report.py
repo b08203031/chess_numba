@@ -2,6 +2,9 @@ import json
 import io
 import sys
 import contextlib
+import sys
+import os
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'archive')))
 from debug_static import get_eval_breakdown
 from debug_deep_search import debug_search
 

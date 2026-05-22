@@ -1,6 +1,6 @@
 import sys
 import os
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "."))
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 
 import time
@@ -17,7 +17,7 @@ transposition_table = create_transposition_table(TT_SIZE_MB)
 killer_moves = np.zeros(128, dtype=np.uint16) # Adjusted for potential array size mismatch if not using constant
 # Wait, killer moves is defined as MAX_PLY * 2 in main.py. MAX_PLY is 128 in search.py but 64 in main.py.
 # Let's use the constant from constants.py
-from chess_engine.classical.classical.constants import MAX_PLY
+from chess_engine.classical.constants import MAX_PLY
 killer_moves = np.zeros(MAX_PLY * 2, dtype=np.uint16) # MAX_PLY is 128
 history_table = np.zeros((12, 64), dtype=np.int32)
 butterfly_history = np.zeros((64, 64), dtype=np.int32)

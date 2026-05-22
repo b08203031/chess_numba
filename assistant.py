@@ -5,7 +5,7 @@ import queue
 import subprocess
 import sys
 import os
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), 'tools')))
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), 'tools')))
 import time
 import chess
 import traceback
@@ -116,6 +116,7 @@ class EngineProcess:
                 stdin=subprocess.PIPE,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
+                cwd=os.path.dirname(os.path.abspath(__file__)),
                 text=True,  # Text mode for strings
                 bufsize=1   # Line buffered
             )
@@ -426,7 +427,7 @@ class ChessVisionApp(tk.Tk):
             if not hasattr(self, 'original_pil_images'):
                 self.original_pil_images = {}
                 script_dir = os.path.dirname(os.path.abspath(__file__))
-                template_dir = os.path.join(script_dir, "templates")
+                template_dir = os.path.join(script_dir, "data", "templates")
                 pieces = ['wP', 'wN', 'wB', 'wR', 'wQ', 'wK', 'bP', 'bN', 'bB', 'bR', 'bQ', 'bK']
                 
                 for p in pieces:
@@ -674,7 +675,12 @@ class ChessVisionApp(tk.Tk):
                 time.sleep(2)
                 self.is_first_analysis = False
 
-            import screen_recognizer
+            try:
+                from tools import screen_recognizer
+            except ImportError as e:
+                self.message_queue.put({"type": "error", "message": f"無法載入 screen_recognizer: {e}"})
+                self.message_queue.put({"type": "analysis_finished"})
+                return
             # Lazy init recognizer to avoid slow startup if not used
             if not self.recognizer:
                 try:

@@ -5,7 +5,7 @@ import numpy as np
 import numba
 
 # Ensure we can import the engine
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'chess_engine_v2')))
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from chess_engine.nnue.ml_eval.inference import init_accumulator, nnue_forward_incremental, weights_loaded
 
 if not weights_loaded:

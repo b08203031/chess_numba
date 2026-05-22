@@ -5,9 +5,9 @@ import numpy as np
 
 from chess_engine.classical.constants import *
 
-from chess_engine_v2.chess_engine.bitboard_utils import get_lsb_index, get_msb_index, count_bits, WHITE_KING_ZONES, BLACK_KING_ZONES, FILE_MASKS, find_piece_type_on_square_side, SQUARES_BETWEEN
-from chess_engine_v2.chess_engine.engine_types import piece_bbs_signature, occupancy_bbs_signature, game_state_signature, piece_counts_signature
-from chess_engine_v2.chess_engine.move_generator import (
+from chess_engine.classical.bitboard_utils import get_lsb_index, get_msb_index, count_bits, WHITE_KING_ZONES, BLACK_KING_ZONES, FILE_MASKS, find_piece_type_on_square_side, SQUARES_BETWEEN
+from chess_engine.classical.engine_types import piece_bbs_signature, occupancy_bbs_signature, game_state_signature, piece_counts_signature
+from chess_engine.classical.move_generator import (
     get_bishop_attacks, get_rook_attacks, get_queen_attacks, KNIGHT_ATTACKS, PAWN_ATTACKS, KING_ATTACKS,
     get_pinned_pieces
 )

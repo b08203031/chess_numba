@@ -340,7 +340,7 @@ class ScreenRecognizer:
 
 if __name__ == '__main__':
     try:
-        recognizer = ScreenRecognizer(templates_path="templates/")
+        recognizer = ScreenRecognizer()
         
         print("準備在 2 秒後自動偵測棋盤並進行辨識...")
         import time

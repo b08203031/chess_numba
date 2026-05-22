@@ -1,6 +1,6 @@
 import sys
 import os
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "."))
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 import time
 import sys
@@ -34,7 +34,7 @@ from chess_engine.nnue.debug_utils import log_info
 # clear_numba_cache()
 
 from chess_engine.nnue.fen_parser import parse_fen
-from chess_engine.nnue.nnue.search import iterative_deepening_search
+from chess_engine.nnue.search import iterative_deepening_search
 from chess_engine.nnue.move import move_to_uci
 from chess_engine.nnue.core import SQUARE_TO_ALGEBRAIC
 

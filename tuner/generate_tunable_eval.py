@@ -13,10 +13,10 @@ with open(INDICES_PATH, 'r', encoding='utf-8') as f:
 
 # Replace V2 relative imports with our new absolute ones
 text = text.replace("from chess_engine.classical.constants import *", "from chess_engine.classical.constants import *")
-text = text.replace("from chess_engine.bitboard_utils import", "from chess_engine_v2.chess_engine.bitboard_utils import")
-text = text.replace("from chess_engine.engine_types import", "from chess_engine_v2.chess_engine.engine_types import")
-text = text.replace("from chess_engine.move_generator import", "from chess_engine_v2.chess_engine.move_generator import")
-text = text.replace("from chess_engine.evaluation import", "from chess_engine_v2.chess_engine.evaluation import")
+text = text.replace("from chess_engine.bitboard_utils import", "from chess_engine.classical.bitboard_utils import")
+text = text.replace("from chess_engine.engine_types import", "from chess_engine.classical.engine_types import")
+text = text.replace("from chess_engine.move_generator import", "from chess_engine.classical.move_generator import")
+text = text.replace("from chess_engine.evaluation import", "from chess_engine.classical.evaluation import")
 
 # Insert tuner getters after the imports
 insert_pos = text.find("NOT_A_FILE =")

@@ -1,9 +1,12 @@
+import os
 import subprocess
 import time
 
 def run_sf_bench():
     # Use absolute path and double quotes for potential spaces
-    sf_path = r'c:\Users\ren cian\OneDrive\桌面\chess\chess_numba\chess_numba\stockfish\stockfish-windows-x86-64-avx2.exe'
+    _tools_dir = os.path.dirname(os.path.abspath(__file__))
+    _root_dir = os.path.dirname(_tools_dir)
+    sf_path = os.path.join(_root_dir, "external", "stockfish", "stockfish-windows-x86-64-avx2.exe" if os.name == "nt" else "src/stockfish")
     fen = "r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1"
     
     commands = [
