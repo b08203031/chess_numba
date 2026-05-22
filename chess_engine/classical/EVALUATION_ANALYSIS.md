@@ -39,12 +39,13 @@ Stockfish 11 (SF11) 的評估函數是以「手工設計 (Hand-Crafted Evaluatio
 4.  **孤兵 (Isolated) 與 重疊兵 (Doubled)**: 與常見邏輯類似。
 
 ### Antares Engine 的邏輯
+實作於 [evaluation.py](evaluation.py)：
 1.  **通路兵**:
     *   **判定**: 簡單邏輯，檢查前方與相鄰直行前方是否有敵兵。
-    *   **獎勵**: `PASSED_PAWN_BONUS` 表格。
+    *   **獎勵**: `PASSED_PAWN_BONUS` 表格，定義於 [constants.py](constants.py)。
     *   **缺失**: 缺乏國王距離修正，缺乏路徑安全性檢查。
 2.  **連結兵**:
-    *   `constants.py` 中定義了 `CONNECTED_PASSED_PAWN_BONUS`，但 **在 `evaluation.py` 中並未實際使用**。
+    *   [constants.py](constants.py) 中定義了 `CONNECTED_PASSED_PAWN_BONUS`，但 **在 `evaluation.py` 中並未實際使用**。
 3.  **後兵**: 完全缺乏後兵的檢測與懲罰邏輯。
 4.  **孤兵/重疊兵**: 已實作，邏輯標準。
 
@@ -95,10 +96,10 @@ Stockfish 11 的評估函數在「動態性」與「細節」上遠超目前的 
 
 ### 建議實作項目 (Action Items)
 
-根據上述分析，我建議立即執行以下兩項改進：
+根據上述分析，建議立即執行以下兩項改進：
 
 1.  **實作後兵 (Backward Pawn) 評估與啟用連結通路兵 (Connected Passed Pawn) 獎勵**
-    *   **內容**: 參考 SF11 的定義實作後兵檢測邏輯（懲罰）；並將 `constants.py` 中已定義但未使用的 `CONNECTED_PASSED_PAWN_BONUS` 正確應用於 `evaluate_pawn_structure`。
+    *   **內容**: 參考 SF11 的定義實作後兵檢測邏輯（懲罰）；並將 [constants.py](constants.py) 中已定義但未使用的 `CONNECTED_PASSED_PAWN_BONUS` 正確應用於 `evaluate_pawn_structure`。
     *   **效益**: 改善中局兵型判斷，避免造成結構性弱點；獎勵強勢的兵鏈。
 
 2.  **實作通路兵的國王距離 (King Proximity) 邏輯**

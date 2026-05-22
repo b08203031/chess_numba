@@ -109,4 +109,4 @@ def print_bullet_preview(bin_path, num_samples=3):
         print()
 
 if __name__ == '__main__':
-    print_bullet_preview("tuner/official_data.bin")
+    print_bullet_preview("tuner/official_data_farseerT75.bin")

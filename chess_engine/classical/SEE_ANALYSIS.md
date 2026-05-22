@@ -9,6 +9,8 @@
 
 SEE 的基本假設是：雙方都會以「最小價值」的棋子依次吃掉目標方格上的棋子（LVA - Least Valuable Attacker）。
 
+---
+
 ## 2. 演算法方法 (Methodology)
 
 目前的實現採用了類似 Stockfish 的 **Swap 演算法**：
@@ -20,7 +22,9 @@ SEE 的基本假設是：雙方都會以「最小價值」的棋子依次吃掉�
    - 每一步計算該方的「累積增益」。
    - **X-Ray 處理**：當一個滑動棋子（車、象、后）或兵被移走時，檢查其後方是否露出了新的 X-Ray 攻擊者。
    - **國王安全**：國王不能移動到受攻擊的方格進行吃子（這在模擬中代表吃子後會被立即反殺）。
-4. **Minimax 傳導**：從序列最後端向前傳導分數，模擬雙方在發現後續不利時會選擇停止吃子的情況。
+4. **Minimax 傳論**：從序列最後端向前傳導分數，模擬雙方在發現後續不利時會選擇停止吃子的情況。
+
+---
 
 ## 3. 細節檢查與邏輯驗證 (Details and Verification)
 
@@ -48,13 +52,17 @@ SEE 的基本假設是：雙方都會以「最小價值」的棋子依次吃掉�
 - **現狀**：當兵移動到最後一排（Rank 1 或 8）進行吃子時，該兵在後續的交換序列中被視為「后」（Queen）計算價值。
 - **分析**：這避免了引擎誤以為犧牲升變後的后只是一個兵的代價，從而優化了移動排序和剪枝邏輯。
 
+---
+
 ## 4. 相關檔案說明 (Related Files)
 
-- `chess_engine/see.py`: SEE 的核心實現。
-- `chess_engine/constants.py`: 定義了棋子價值和 SEE 閾值。
-- `chess_engine/search.py`: 在移動排序、靜態搜尋和淺深度剪枝中調用 `see_ge`。
-- `chess_engine/move_generator.py`: 提供基礎的攻擊生成邏輯。
-- `chess_engine/bitboard_utils.py`: 提供硬體加速的位元掃描和預計算的射線表。
+- [see.py](see.py) 與 [nnue/see.py](../nnue/see.py): SEE 的核心實現（兩版本完全獨立）。
+- [constants.py](constants.py) 與 [nnue/constants.py](../nnue/constants.py): 定義了棋子價值和 SEE 閾值。
+- [search.py](search.py) 與 [nnue/search.py](../nnue/search.py): 在移動排序、靜態搜尋和淺深度剪枝中調用 `see_ge`。
+- [move_generator.py](move_generator.py) 與 [nnue/move_generator.py](../nnue/move_generator.py): 提供基礎的攻擊生成邏輯。
+- [bitboard_utils.py](bitboard_utils.py) 與 [nnue/bitboard_utils.py](../nnue/bitboard_utils.py): 提供硬體加速的位元掃描和預計算的射線表。
+
+---
 
 ## 5. 優化與修正紀錄 (Optimization and Fix Records)
 

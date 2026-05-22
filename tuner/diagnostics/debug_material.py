@@ -4,10 +4,10 @@ Produces train_diagnosis.txt with actionable diagnostics grounded in
 the quantization chain: Q1=255, Q_HIDDEN=256, SCALE_OUT=400.0.
 """
 import sys, os, torch, numpy as np, math
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')))
 
 script_dir = os.path.dirname(os.path.abspath(__file__))
-weights_dir = os.path.abspath(os.path.join(script_dir, '..', 'chess_engine', 'nnue', 'ml_eval', 'weights'))
+weights_dir = os.path.abspath(os.path.join(script_dir, '..', '..', 'chess_engine', 'nnue', 'ml_eval', 'weights'))
 
 latest_model_path = os.path.join(weights_dir, 'latest_model.pth')
 best_model_path   = os.path.join(weights_dir, 'best_model.pth')

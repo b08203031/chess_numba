@@ -16,7 +16,7 @@ except ImportError:
     from train import LayerStackNNUE as NNUE
 
 ROOT_DIR = os.path.abspath(os.path.join(current_dir, "../../../")) 
-INPUT_FILE = os.path.join(ROOT_DIR, "tuner/ultimate_halfka.npz")
+INPUT_FILE = os.path.join(ROOT_DIR, "tuner/ultimate_halfka_farseerT75.npz")
 CHECKPOINT_PATH = os.path.join(current_dir, "weights/latest_model.pth")
 
 def inspect_bucket_loss_full_ram():

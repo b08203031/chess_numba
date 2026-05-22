@@ -6,7 +6,7 @@ import numpy as np
 import numba
 
 # Ensure we can import the engine
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')))
 from chess_engine.nnue.ml_eval.inference import init_accumulator, nnue_forward_incremental, weights_loaded
 
 if not weights_loaded:
@@ -48,9 +48,12 @@ def run_analysis():
     print("=== Analyzing failed_puzzles.json     ===")
     print("=========================================\n")
     
-    json_path = os.path.join(os.path.dirname(__file__), '..', 'failed_puzzles.json')
+    json_path = os.path.join(os.path.dirname(__file__), '..', '..', 'tests', 'failed_puzzles.json')
     if not os.path.exists(json_path):
-        print(f"Error: {json_path} not found.")
+        json_path = os.path.join(os.path.dirname(__file__), '..', '..', 'failed_puzzles.json')
+    
+    if not os.path.exists(json_path):
+        print(f"Error: failed_puzzles.json not found in tests/ or root.")
         return
 
     try:

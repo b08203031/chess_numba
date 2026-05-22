@@ -23,7 +23,7 @@ def evaluate_position(piece_bbs, occupancy_bbs, game_state, search_context, ply,
         int: 從行棋方視角的評估分數（Centipawn）。
     """
     # 1. 取得行棋方 (STM: 0=White, 1=Black)
-    side_to_move = numba.int32(game_state[0])
+    side_to_move = np.int32(game_state[0])
     
     # 2. 計算盤面全部棋子數量 (piece_count) 用作 NNUE 的 bucket 索引
     piece_count = 0
@@ -35,10 +35,6 @@ def evaluate_position(piece_bbs, occupancy_bbs, game_state, search_context, ply,
     
     # 3. 以 STM 視角取得神經網路評估值 logit (已轉換為 Centipawn)
     stm_score = nnue_forward_incremental(ply, side_to_move, search_context.accumulator_stack, piece_count)
-    
-    # 4. Initiative Bonus
-    initiative_bonus = np.int32(15)
-    stm_score += initiative_bonus
     
     # The neural network naturally outputs the score relative to the side to move
     return stm_score

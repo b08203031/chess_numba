@@ -2,7 +2,7 @@
 convert_bullet_bin.py — 將 Primer 輸出的 Bullet .bin 檔案轉換為 NNUE 訓練器的 .npz 格式
 
 用法:
-    python tuner/convert_bullet_bin.py input.bin [--output tuner/ultimate_halfka.npz] [--limit 40000000]
+    python tuner/nnue_pipeline/convert_bullet_bin.py input.bin [--output tuner/ultimate_halfka.npz] [--limit 40000000]
 
 Bullet .bin 格式 (32 bytes per struct, C++ 'ChessBoard'):
     uint64_t occupancy;      // 8 bytes (Pieces bitboard)
@@ -236,7 +236,7 @@ def cp_to_wdl(cp: int) -> float:
 def main():
     import argparse
     parser = argparse.ArgumentParser(description="Bullet .bin (32 bytes ChessBoard) -> NPZ 訓練資料")
-    parser.add_argument("input_bin", nargs="?", default="tuner/official_data.bin", help="輸入的 .bin 檔案路徑 (預設: tuner/official_data.bin)")
+    parser.add_argument("input_bin", nargs="?", default="tuner/official_data_farseerT75.bin", help="輸入的 .bin 檔案路徑 (預設: tuner/official_data_farseerT75.bin)")
     parser.add_argument("--output", "-o", default=DEFAULT_OUTPUT, help=f"輸出的 .npz 檔案路徑")
     parser.add_argument("--limit", "-n", type=int, default=DEFAULT_LIMIT, help=f"最大樣本數")
     args = parser.parse_args()

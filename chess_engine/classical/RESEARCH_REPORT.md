@@ -2,7 +2,7 @@
 
 ## 一、前言
 
-本報告深入研究了 **Stockfish 11**（2020 年，最後一代完全依靠手工評估函數的頂級引擎）的評估架構，並與您現有的 `chess_engine_v2` 評估函數進行逐項比較分析。Stockfish 11 的經典評估函數經過數十年的人類專家經驗 + 自動化參數調優（Texel Tuning / SPSA），代表了手工評估的巔峰。
+本報告深入研究了 **Stockfish 11**（2020 年，最後一代完全依靠手工評估函數的頂級引擎）的評估架構，並與您現有的 `chess_engine` 評估函數進行逐項比較分析。Stockfish 11 的經典評估函數經過數十年的人類專家經驗 + 自動化參數調優（Texel Tuning / SPSA），代表了手工評估的巔峰。
 
 ---
 
@@ -41,6 +41,7 @@ Stockfish 使用增量更新的 PST 值（包含材質），並通過 `material.
 | Queen | ~2538 | ~2682 |
 
 #### 您的引擎
+定義於 [constants.py](constants.py) 中：
 ```
 MG: [100, 320, 330, 500, 900]
 EG: [120, 310, 340, 530, 950]
@@ -86,6 +87,7 @@ EG: [-36, -15, 8, 18, 34, 54, 61, 73, 79, 92, 94, 104, 113, 120, 123, 126, 133, 
 - **車和后在殘局的機動性價值遠高於中局**
 
 #### 您的引擎 — 線性公式
+實作於 [evaluation.py](evaluation.py)：
 ```python
 mobility = (moves - BASE_MOVES) * WEIGHT
 # Knight: base=4, weight=[4,2]
@@ -98,7 +100,7 @@ mobility = (moves - BASE_MOVES) * WEIGHT
 > **嚴重差距**：線性模型無法捕捉機動性的非線性特徵。在 Stockfish 中：
 > 1. 一個被完全封鎖的車（0 格）受到 -58/-76 的懲罰，而您的引擎只有 -18/-6
 > 2. 車的殘局機動性權重巨大（EG 方向從 -76 到 +171，跨度 247），您的引擎僅 1 點/格
-> 3. 沒有遞減邊際效益 — 第 14 格和第 2 格的增益相同
+> 3. 沒有遞減邊際效益 — 第 14 格 and 第 2 格的增益相同
 
 **建議**：改用非線性查表（即使簡化版也好過線性）。
 
@@ -143,7 +145,7 @@ KnightSafeCheck = 790
 ```
 
 #### 您的引擎
-
+實作於 [evaluation.py](evaluation.py) 與 [constants.py](constants.py)：
 ```python
 KING_SAFETY_ATTACK_UNITS = [1, 2, 2, 5, 8]  # P, N, B, R, Q
 KING_SAFETY_TABLE = [min(i²/2, 1000) for i in range(100)]  # 非線性表格
@@ -152,7 +154,7 @@ KING_SAFETY_TABLE = [min(i²/2, 1000) for i in range(100)]  # 非線性表格
 
 > [!IMPORTANT]
 > **關鍵差距**：
-> 1. **缺少安全將軍檢測**：Stockfish 單獨計算每種棋子的安全將軍威脅，這是王安的核心。一個車的安全將  軍 = 1080 單位，幾乎等於觸發整個非線性懲罰。
+> 1. **缺少安全將軍檢測**：Stockfish 單獨計算每種棋子的安全將軍威脅，這是王安的核心。一個車的安全將軍 = 1080 單位，幾乎等於觸發整個非線性懲罰。
 > 2. **缺少弱格計算**：Stockfish 特別計算「被攻擊且不被雙重防守」的弱格（185/格）。
 > 3. **缺少牽制子/針對子**：被牽制子暴露國王（98/子）。
 > 4. **no-queen 折扣太小**：Stockfish 在沒有后時直接減 873 單位，幾乎取消國王危險。您的引擎通過 scaling，但效果不夠明顯。
@@ -168,29 +170,20 @@ Stockfish 的威脅系統按 **攻擊者×被攻擊者** 類型細分：
 
 **ThreatByMinor（輕子攻擊）按被攻擊棋子類型**：
 ```
-          None  Pawn  Knight Bishop  Rook  Queen
+           None  Pawn  Knight Bishop  Rook  Queen
 MG:  [  0,    6,    59,    79,    90,    79 ]
 EG:  [  0,   32,    41,    56,   119,   161 ]
 ```
 
 **ThreatByRook（車攻擊）按被攻擊棋子類型**：
 ```
-          None  Pawn  Knight Bishop  Rook  Queen
+           None  Pawn  Knight Bishop  Rook  Queen
 MG:  [  0,    3,    38,    38,     0,    51 ]
 EG:  [  0,   44,    71,    61,    38,    38 ]
 ```
 
-**其他威脅**：
-- `Hanging` = S(69, 36)（懸掛子）
-- `ThreatBySafePawn` = S(173, 94)（安全兵威脅非兵子）
-- `ThreatByKing` = S(24, 89)（王攻擊弱子）
-- `ThreatByPawnPush` = S(48, 39)（兵推進威脅）
-- `RestrictedPiece` = S(7, 7)（限制棋子移動）
-- `KnightOnQueen` = S(16, 12)（馬叉后潛力）
-- `SliderOnQueen` = S(59, 18)（滑行子瞄準后）
-
 #### 您的引擎
-
+實作於 [constants.py](constants.py)：
 ```python
 THREAT_SAFE_PAWN = [45, 45]         # vs SF: S(173, 94)
 THREAT_MINOR_ON_MAJOR = [25, 15]    # vs SF: S(79-90, 56-161) 分棋子類型
@@ -224,6 +217,7 @@ bonus += S(k*w, k*w);
 ```
 
 #### 您的引擎
+實作於 [constants.py](constants.py)：
 ```python
 PASSED_PAWN_BONUS = [
     [0,0], [0,0], [10,20], [30,50], [50,80], [80,150], [150,250], [0,0]
@@ -258,7 +252,7 @@ score = S(bonus * weight² / 16, 0)  // 僅影響中局
 **完全缺失。**
 
 > [!CAUTION]
-> 空間評估是 Stockfish 的核心模組之一。在中局中，一方控制更多空間通常意味著更靈活的棋子部署。這直接影響了引擎在開局和中局的棋力。
+> 空間評估是 Stockfish 的核心模組之一。在中局中，一方控制更多空間通常意著更靈活的棋子部署。這直接影響了引擎在開局和中局的棋力。
 
 ---
 
@@ -304,6 +298,7 @@ eg_correction = sign(eg) * max(complexity, -abs(eg));
 **設計理念**：這個修正防止引擎在評估值接近 0 時產生「和棋漂移」—— 即認為稍有優勢但實際上無法取勝的局面。它考慮：通路兵數量、總兵數、國王是否突前、兵是否分佈在兩翼等因素。
 
 #### 您的引擎
+實作於 [evaluation.py](evaluation.py)：
 ```python
 INITIATIVE_BONUS = 10  # 固定 10 cp 先手獎勵
 ```
@@ -342,7 +337,7 @@ Stockfish 有獨立的 `material.cpp` 處理材質不平衡——例如「雙象
 
 ## 四、優化優先級建議
 
-根據對棋力提升的預期影響，我將改進建議按優先級排列：
+根據對棋力提升的預期影響，將改進建議按優先級排列：
 
 ### 🔴 高優先級（預計 Elo 提升最大）
 

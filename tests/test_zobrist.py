@@ -13,14 +13,7 @@ from chess_engine.classical.move_generator import generate_legal_moves
 from chess_engine.classical.move import move_to_uci
 
 def uci_to_move(piece_bbs, occupancy_bbs, game_state, uci_string):
-    """
-    å°‹æ‰¾??UCI å­—ä¸²å°æ??„ç·¨ç¢¼ç§»?•ã€?
-    """
-    # Ensure game_state tuple has Numba-compatible types, as it's passed to a JIT function
-    # ç¢ºä? game_state ?·æ? Numba ?¼å®¹?„é???
-    # side, castling, ep, halfmove, zobrist = game_state
-    # The piece and occupancy bbs are already typed correctly when this is called from _test_zobrist_hash
-    # ?¶æ­¤?½æ•¸è¢«èª¿?¨æ?ï¼Œpiece_bbs ??occupancy_bbs å·²ç??¯æ­£ç¢ºç? NumPy ???
+    """Convert UCI string to move object."""
     moves = generate_legal_moves(piece_bbs, occupancy_bbs, game_state)
     for move in moves:
         if move_to_uci(move) == uci_string:
@@ -28,18 +21,9 @@ def uci_to_move(piece_bbs, occupancy_bbs, game_state, uci_string):
     return None
 
 def _test_zobrist_hash(fen, uci_move):
-    """
-    ?¸å? Zobrist ?ˆå?æ¸¬è©¦?½æ•¸??
-    
-    1. å¾?FEN ? è?å±€?¢ã€?
-    2. ?·è?ä¸€?‹ç§»?•ã€?
-    3. é©—è?å¢é??´æ–°??Zobrist ?µå€¼è?å®Œå…¨?æ–°è¨ˆç??„éµ?¼åŒ¹?ã€?
-    4. ?¤éŠ·ç§»å???
-    5. é©—è? Zobrist ?µå€¼å??¨æ¢å¾©ã€?
-    """
+    """Test Zobrist hash updates incrementally and matches scratch calculation."""
     # 1. Load position and get initial hash
     piece_bbs, occupancy_bbs, game_state = parse_fen(fen)
-    
     original_key = game_state[4]
 
     # Find the move object corresponding to the UCI string
@@ -51,8 +35,6 @@ def _test_zobrist_hash(fen, uci_move):
     updated_key = game_state[4]
 
     # 3. Recompute the hash from the new position and verify
-    # We create a temporary game state with a zeroed key to ensure the re-computation is truly from scratch.
-    # ?µå»ºä¸€?‹è‡¨?‚ç? game_state ä¸¦å? key æ­¸é›¶ï¼Œä»¥ç¢ºä??æ–°è¨ˆç??¯å??­é?å§‹ç???
     temp_game_state_for_recompute = game_state.copy()
     temp_game_state_for_recompute[4] = np.uint64(0)
     
@@ -66,67 +48,70 @@ def _test_zobrist_hash(fen, uci_move):
     restored_key = game_state[4]
     assert restored_key == original_key, f"Zobrist key mismatch after unmake_move for {uci_move} in FEN {fen}"
 
-# --- White Piece Test Cases / ?½æ–¹æ£‹å?æ¸¬è©¦?¨ä? ---
+# --- White Piece Test Cases ---
 
 def test_basic_move():
-    """æ¸¬è©¦ç°¡å–®?µæ¨?²ç? Zobrist ?µå€¼æ›´?°ã€?""
+    """Test basic Zobrist hash update."""
     fen = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
     uci_move = "e2e4"
     _test_zobrist_hash(fen, uci_move)
 
 def test_capture():
-    """æ¸¬è©¦ç°¡å–®?ƒå???Zobrist ?µå€¼æ›´?°ã€?""
-    # This position is after 1. e4 e5 2. Nf3 f6
+    """Test capture Zobrist hash update."""
     fen = "rnbqkbnr/pppp2pp/5p2/4p3/4P3/5N2/PPPP1PPP/RNBQKB1R w KQkq - 0 3"
     uci_move = "f3e5"
     _test_zobrist_hash(fen, uci_move)
 
 def test_castling_rights_loss_king_move():
-    """æ¸¬è©¦?‹ç§»?•å¤±?»æ?ä½æ?å¾Œç? Zobrist ?´æ–°??""
+    """Test king move castling rights loss Zobrist update."""
     fen = "rnbqkbnr/pppp1ppp/8/4p3/4P3/8/PPPP1PPP/RNBQKBNR w KQkq - 0 2"
     uci_move = "e1e2"
     _test_zobrist_hash(fen, uci_move)
 
 def test_castling_rights_loss_rook_move():
-    """æ¸¬è©¦è»Šç§»?•å¤±?»æ?ä½æ?å¾Œç? Zobrist ?´æ–°??""
+    """Test rook move castling rights loss Zobrist update."""
     fen = "r3k2r/pppppppp/8/8/8/8/PPPPPPPP/R3K2R w KQkq - 0 1"
     uci_move = "h1g1"
     _test_zobrist_hash(fen, uci_move)
 
 def test_en_passant():
-    """æ¸¬è©¦?ƒé?è·¯å…µ??Zobrist ?µå€¼æ›´?°ã€?""
+    """Test en passant Zobrist update."""
     fen = "rnbqkbnr/ppp1p1pp/8/3pPp2/8/8/PPPP1PPP/RNBQKBNR w KQkq f6 0 3"
     uci_move = "e5f6"
     _test_zobrist_hash(fen, uci_move)
 
 def test_promotion_simple():
-    """æ¸¬è©¦ç°¡å–®?‡è???Zobrist ?µå€¼æ›´?°ã€?""
+    """Test simple promotion Zobrist update."""
     fen = "rnbqkbr1/pp5P/2p1pp2/3p4/8/8/PPPP1PP1/RNBQKBNR w KQq - 0 1"
     uci_move = "h7h8q"
     _test_zobrist_hash(fen, uci_move)
 
 def test_promotion_capture():
-    """æ¸¬è©¦?ƒå??‡è???Zobrist ?µå€¼æ›´?°ã€?""
+    """Test promotion capture Zobrist update."""
     fen = "rnb1kbnr/ppP4p/4pp2/3p4/8/8/PPPP1PPP/RNBQKBNR w KQkq - 0 1"
     uci_move = "c7b8q"
     _test_zobrist_hash(fen, uci_move)
 
-# --- Black Piece Test Cases / é»‘æ–¹æ£‹å?æ¸¬è©¦?¨ä? ---
+# --- Black Piece Test Cases ---
 
 def test_black_en_passant():
-    """æ¸¬è©¦é»‘æ–¹?ƒé?è·¯å…µ??Zobrist ?µå€¼æ›´?°ã€?""
+    """Test Black en passant Zobrist update."""
     fen = "rnbqkbnr/pppp1ppp/8/8/4PpP1/8/PPPP3P/RNBQKBNR b KQkq g3 0 3"
     uci_move = "f4g3"
     _test_zobrist_hash(fen, uci_move)
 
 def test_black_promotion_capture():
-    """æ¸¬è©¦é»‘æ–¹?ƒå??‡è???Zobrist ?µå€¼æ›´?°ã€?""
+    """Test Black promotion capture Zobrist update."""
     fen = "rnbqkbnr/1Ppppp1p/8/8/8/8/pP1P1P1P/RNBQKBNR b KQkq - 0 1"
     uci_move = "a2b1q"
     _test_zobrist_hash(fen, uci_move)
 
 def test_black_castling():
-    """æ¸¬è©¦é»‘æ–¹?‹è??“ä???Zobrist ?µå€¼æ›´?°ã€?""
+    """Test Black castling Zobrist update."""
     fen = "r3k2r/pppppppp/8/8/8/8/PPPPPPPP/R3K2R b KQkq - 0 1"
     uci_move = "e8g8"
     _test_zobrist_hash(fen, uci_move)
+
+if __name__ == "__main__":
+    import pytest
+    sys.exit(pytest.main([__file__]))

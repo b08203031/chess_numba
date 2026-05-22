@@ -1,6 +1,6 @@
 # 引擎對戰測試指南 (Tournament Tutorial)
 
-本文件將引導您如何使用 `tournament.py` 腳本，讓兩個不同版本的西洋棋引擎（例如當前版本的 `chess_engine` 和另一版本的 `chess_engine_v2`）進行對戰。
+本文件將引導您如何使用 [tournament.py](tournament.py) 腳本，讓兩個不同版本的西洋棋引擎進行對戰。
 
 ## 環境準備
 
@@ -14,10 +14,10 @@ pip install chess numpy numba
 
 ## 基本使用方法
 
-腳本已經預設好了 `chess_engine` (當前目錄的 `main.py`) 以及 `chess_engine_v2` (`chess_engine_v2/main.py`) 作為對戰雙方。如果您只需要進行預設的對戰，只需執行以下指令：
+在工作區根目錄下，您可以使用以下指令啟動對戰（該腳本預設會尋找根目錄的 `main.py`）：
 
 ```bash
-python tournament.py
+python tools/tournament.py
 ```
 
 這會以預設設定進行 20 場比賽，每步考慮時間為 100 毫秒。
@@ -27,7 +27,7 @@ python tournament.py
 您可以透過命令列參數自訂對戰：
 
 ```bash
-python tournament.py --games 50 --time 200
+python tools/tournament.py --games 50 --time 200
 ```
 
 - `--games`：總對戰場數（預設：20）
@@ -38,7 +38,7 @@ python tournament.py --games 50 --time 200
 如果您想要測試其他版本的引擎，可以使用 `--engine1`, `--engine2` 參數指定對應的 `main.py` 路徑，並使用 `--name1`, `--name2` 參數為它們命名：
 
 ```bash
-python tournament.py --engine1 custom_engine/main.py --name1 custom_engine --engine2 main.py --name2 default_engine --games 10
+python tools/tournament.py --engine1 archive/main_old.py --name1 old_version --engine2 main.py --name2 new_version --games 50
 ```
 
 ## 查看結果
@@ -50,8 +50,8 @@ python tournament.py --engine1 custom_engine/main.py --name1 custom_engine --eng
 對戰結束後，腳本會輸出最終的統計數據，包括：
 - 總比賽場數
 - 雙方的最終得分、勝平負場數
-- 基於對戰結果估算出來的 **Elo 差異** 及 **95% 信賴區間**
+- 基於對戰結果估算出來的 **Elo 差異 (Estimated ELO Difference)** 及 **95% 信賴區間**。這有助於利用統計學方法（如 SPRT 測試）來判斷代碼修改是否真正帶來了棋力增長。
 
 ### 檢視棋譜 (PGN)
 
-所有的對局記錄將會自動儲存到當前目錄下的 `tournament_results.pgn` 檔案中。您可以將此檔案匯入任何西洋棋 GUI 軟體（如 Arena, Cute Chess, Lichess 等）來回放並分析對局。
+所有的對局記錄將會自動儲存到工作區根目錄下的 **`tournament_analysis/tournament_results.pgn`** 檔案中。您可以將此檔案匯入任何西洋棋 GUI 軟體（如 Arena, Cute Chess, Lichess 等）來回放並分析對局。

@@ -97,4 +97,4 @@ python -m tune_search.search_tuner --iter 3 --games 18 --concurrency 6 --tc "0.1
     *   直接按 `Ctrl+C`。由於使用了進程池，系統會嘗試優雅地關閉所有引擎進程。
 
 3.  **如何應用最佳參數？**
-    *   手動將 `tune_search/current_params.txt` 中的數值更新回 `chess_engine/constants.py`。
+    *   手動將 `tune_search/current_params.txt` 中的數值更新回 `chess_engine/classical/constants.py`。

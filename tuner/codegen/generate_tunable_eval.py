@@ -2,7 +2,7 @@ import re
 
 EVAL_PATH = "chess_engine/classical/evaluation.py"
 TUNABLE_PATH = "tuner/tunable_eval.py"
-INDICES_PATH = "tuner/new_indices.txt"
+INDICES_PATH = "tuner/codegen/new_indices.txt"
 
 with open(EVAL_PATH, 'r', encoding='utf-8') as f:
     text = f.read()

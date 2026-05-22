@@ -370,7 +370,9 @@ if __name__ == '__main__':
 
     default_stockfish = shutil.which('stockfish')
     if not default_stockfish:
-        if os.path.exists("./stockfish/stockfish-windows-x86-64-avx2.exe"):
+        if os.path.exists("./external/stockfish_dir/stockfish-windows-x86-64-avx2.exe"):
+             default_stockfish = "./external/stockfish_dir/stockfish-windows-x86-64-avx2.exe"
+        elif os.path.exists("./stockfish/stockfish-windows-x86-64-avx2.exe"):
              default_stockfish = "./stockfish/stockfish-windows-x86-64-avx2.exe"
         else:
              default_stockfish = "stockfish"

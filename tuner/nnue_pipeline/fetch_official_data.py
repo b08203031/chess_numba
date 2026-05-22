@@ -21,6 +21,10 @@ BINPACK_FILE = "tuner/official_data_farseerT75.binpack"
 BULLET_FILE = "tuner/official_data_farseerT75.bin"
 OUTPUT_NPZ = "tuner/ultimate_halfka_farseerT75.npz"
 
+# Paths relative to project root (chess_numba/)
+# primer.exe is in external/
+# convert_bullet_bin.py is in tuner/nnue_pipeline/
+
 TARGET_MB = 200
 
 def download_binpack_fast(url, out_path, target_mb):
@@ -47,7 +51,7 @@ def download_binpack_fast(url, out_path, target_mb):
 def run_primer(binpack_path, bin_path):
     print(f"⚙️ 呼叫 primer.exe 進行戰術將軍過濾與解壓縮...")
     cmd = [
-        "tuner/primer.exe", 
+        "external/primer.exe", 
         "convert", 
         binpack_path, 
         bin_path, 
@@ -71,7 +75,7 @@ def run_converter(bin_path, npz_path):
     print(f"🐍 呼叫 convert_bullet_bin.py 轉換為 NumPy (NPZ) 格式...")
     cmd = [
         sys.executable,
-        "tuner/convert_bullet_bin.py",
+        "tuner/nnue_pipeline/convert_bullet_bin.py",
         bin_path,
         "--output", npz_path
     ]

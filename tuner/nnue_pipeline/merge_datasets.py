@@ -57,7 +57,7 @@ def merge():
     elapsed = time.time() - start_time
     print(f"🎉 大功告成！全自動融合完成，耗時 {elapsed:.2f} 秒。")
     print(f"如果你想要節省硬碟空間，現在可以安全地刪除 `hf_dataset_20M.npz` 了。")
-    print(f"接下來，請務必重新執行 `python tuner/convert_dataset.py`，提煉出 HalfKA 的 NPZ！")
+    print(f"接下來，請務必重新執行 `python tuner/nnue_pipeline/convert_bullet_bin.py`，提煉出 HalfKAv2_hm 的 NPZ！")
 
 if __name__ == '__main__':
     merge()

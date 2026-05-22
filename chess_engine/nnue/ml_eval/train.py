@@ -37,8 +37,8 @@ if TORCH_AVAILABLE:
 
     class LayerStackNNUE(nn.Module):
         """
-        HalfKA + LayerStacks (SF18-style) with Structural Re-parameterization:
-        45056 Sparse -> 512x2 (ClippedReLU) -> Concat(1024)
+        HalfKAv2_hm + LayerStacks (SF18-style) with Structural Re-parameterization:
+        22528 Sparse -> 512x2 (ClippedReLU) -> Concat(1024)
             -> [8 x CReLU((W_fact + ΔW_b) · x) -> ... -> scalar]
         At export time: W_export[b] = W_fact + ΔW_b  (algebraically exact fusion)
         Bucket selection: bucket = (piece_count - 1) // 4  [same as SF18]
@@ -48,7 +48,7 @@ if TORCH_AVAILABLE:
             self.num_buckets = num_buckets
 
             # --- Shared FC1 (the big accumulator, stays unchanged) ---
-            self.fc1 = nn.EmbeddingBag(45057, 512, mode="sum", padding_idx=45056)
+            self.fc1 = nn.EmbeddingBag(22529, 512, mode="sum", padding_idx=22528)
             self.fc1_bias = nn.Parameter(torch.zeros(512))
             self.crelu = ClippedReLU(127.0)
 
@@ -120,27 +120,29 @@ def plot_loss(epoch, train_losses, val_losses):
 
 # --- 訓練超參數集中區 (Training Hyperparameters) ---
 class TrainingConfig:
-    DATASET_PATH = './tuner/ultimate_halfka.npz'
+    DATASET_PATH = './tuner/ultimate_halfka_farseerT75.npz'
     NUM_BUCKETS = 8  # SF18-style LayerStacks
     BATCH_SIZE = 8192
     
     # --- 差異化學習率 (Layerwise LR) ---
-    # 統一基準：由 0.001 開始，透過 Gamma 平滑冷卻至 200 Epochs
-    LR_FC1 = 0.00004
-    LR_DENSE = 0.00004
-    #正常要從0.001開始，但因為我們有resume_from_checkpoint，所以可以從0.0008開始
+    # Fresh training: Dense LR 高於 FC1，加速收斂
+    LR_FC1_FRESH = 0.0001
+    LR_DENSE_FRESH = 0.001
+    # Resume / Fine-tune: 統一低 LR 微調
+    LR_FC1_RESUME = 0.00004
+    LR_DENSE_RESUME = 0.00004
     LR_GAMMA = 0.99  # 每個 Epoch 衰減 1%
     
     # --- 差異化 Weight Decay (防止資訊熱寂) ---
     # FC1: wd=0 (稀疏層禁止密集衰減，否則罕見特徵會被殺死)
     WD_FC1 = 0.0
-    # Dense layers: 輕微懲罰，防止量化溢出
+    # Dense layers: wd=0.001 輕微懲罰，防止量化溢出
     WD_DENSE = 0.001
     
     # 訓練與停止邏輯
     TOTAL_EPOCHS = 200
     EARLY_STOPPING_PATIENCE = 20
-    RESUME_FROM_CHECKPOINT = True  # False: 拋棄受污染的舊大腦，使用新資料集完全從零重生
+    RESUME_FROM_CHECKPOINT = False  # False: 使用新資料集完全從零重生
     
     # 資料分割比例
     VAL_SPLIT = 0.1
@@ -166,18 +168,21 @@ def export_weights(model):
     def q_round(x):
         return np.round(x).astype(np.int32)
 
-    # 1. FC1 (Shared EmbeddingBag)
-    # No .T — store as (45056, 512) so inference.py accesses FC1_WEIGHT[f, :]
-    # This makes each feature index map to a contiguous 512-dim vector (cache-friendly)
-    fc1_weight = model.fc1.weight.detach().cpu().numpy()[:45056]  # (45056, 512)
+    # 1. FC1 (Shared EmbeddingBag) — HalfKAv2_hm: 22528 features
+    # No .T — store as (22528, 512) so inference.py accesses FC1_WEIGHT[f, :]
+    NUM_FEATURES = 22528
+    fc1_weight = model.fc1.weight.detach().cpu().numpy()[:NUM_FEATURES]  # (22528, 512)
     fc1_bias = model.fc1_bias.detach().cpu().numpy()
     fc1_weight_int = np.ascontiguousarray(
         np.clip(q_round(fc1_weight * QuantConfig.Q1), -32768, 32767).astype(np.int16)
     )
     fc1_bias_int = q_round(fc1_bias * QuantConfig.Q1).astype(np.int32)
+    assert fc1_weight_int.shape == (NUM_FEATURES, 512), f"FC1 shape mismatch: {fc1_weight_int.shape}"
     with open(os.path.join(weights_dir, 'fc1_weight.npy'), 'wb') as f: np.save(f, fc1_weight_int)
     with open(os.path.join(weights_dir, 'fc1_bias.npy'),   'wb') as f: np.save(f, fc1_bias_int)
-    print(f"Exported FC1 (INT16) -> {fc1_weight_int.shape}  (should be (45056, 512))")
+    # Saturation diagnostics for FC1
+    fc1_sat = 100.0 * np.sum(np.abs(fc1_weight_int) >= 32767) / fc1_weight_int.size
+    print(f"Exported FC1 (INT16) -> {fc1_weight_int.shape}  (sat: {fc1_sat:.4f}%)")
 
     # 2. 8x LayerStack buckets: W_export[b] = W_fact + ΔW_b (algebraically exact)
     num_buckets = model.num_buckets
@@ -199,10 +204,10 @@ def export_weights(model):
         with open(os.path.join(weights_dir, f'fc3_weight_b{b}.npy'), 'wb') as f: np.save(f, w_int)
         with open(os.path.join(weights_dir, f'fc3_bias_b{b}.npy'),   'wb') as f: np.save(f, bias_int)
 
-        # FC4: Global base + Bucket residual
+        # FC4: Global base + Bucket residual — with clipping to prevent int16 wrap
         w    = model.fact_fc4.weight.detach().cpu().numpy() + model.delta_fc4[b].weight.detach().cpu().numpy()
         bias = model.fact_fc4.bias.detach().cpu().numpy()   + model.delta_fc4[b].bias.detach().cpu().numpy()
-        w_int    = q_round(w * QuantConfig.Q_HIDDEN).astype(np.int16)
+        w_int    = np.clip(q_round(w * QuantConfig.Q_HIDDEN), -32768, 32767).astype(np.int16)
         bias_int = q_round(bias * QuantConfig.Q_HIDDEN * QuantConfig.Q1).astype(np.int32)
         with open(os.path.join(weights_dir, f'fc4_weight_b{b}.npy'), 'wb') as f: np.save(f, w_int)
         with open(os.path.join(weights_dir, f'fc4_bias_b{b}.npy'),   'wb') as f: np.save(f, bias_int)
@@ -226,7 +231,7 @@ def train():
         levels = ['../', '../../../', '../../../']
         found = False
         for lv in levels:
-            alt_path = os.path.join(lv, 'tuner/ultimate_halfka.npz')
+            alt_path = os.path.join(lv, 'tuner/ultimate_halfka_farseerT75.npz')
             if os.path.exists(alt_path):
                 dataset_path = alt_path
                 found = True
@@ -245,7 +250,7 @@ def train():
     if 'piece_counts' in data:
         piece_counts_full = data['piece_counts'].astype(np.int8)
     else:
-        print("WARNING: 'piece_counts' not found in dataset. Please re-run convert_dataset.py!")
+        print("WARNING: 'piece_counts' not found in dataset. Please re-run convert_bullet_bin.py!")
         piece_counts_full = np.full(len(targets_full), 32, dtype=np.int8)  # fallback: all bucket 7
     
     total_size = len(targets_full)
@@ -254,31 +259,26 @@ def train():
     
     print(f"Dataset successfully mapped directly: {total_size} samples.")
     
-    # --- Global Shuffle with Fixed Seed ---
-    # Ensures Validation set is representative while remaining "Fixed" across runs
-    print("Performing global shuffle with fixed seed (42)...")
-    indices = np.arange(total_size)
+    # --- Global Shuffle with Fixed Seed (Index-Only to save RAM) ---
+    # Only shuffle index array, avoiding full-array copy that would double RAM usage.
+    print("Performing index-only global shuffle with fixed seed (42)...")
+    shuffle_indices = np.arange(total_size)
     np.random.seed(42)
-    np.random.shuffle(indices)
+    np.random.shuffle(shuffle_indices)
     
-    features_stm_full = features_stm_full[indices]
-    features_nstm_full = features_nstm_full[indices]
-    targets_full = targets_full[indices]
-    piece_counts_full = piece_counts_full[indices]
+    train_indices = shuffle_indices[:train_size]
+    val_indices = shuffle_indices[train_size:]
     
     print(f"Train/Val split: {train_size} training samples, {val_size} validation samples.")
     
-    # Static Validation Slices (Only slice pointers are copied)
-    val_f_stm = features_stm_full[train_size:]
-    val_f_nstm = features_nstm_full[train_size:]
-    val_tgt = targets_full[train_size:]
-    val_pc = piece_counts_full[train_size:]
+    # Validation: copy once (small fraction of data)
+    val_f_stm = features_stm_full[val_indices]
+    val_f_nstm = features_nstm_full[val_indices]
+    val_tgt = targets_full[val_indices]
+    val_pc = piece_counts_full[val_indices]
     
-    # Static Train Slices
-    train_f_stm_cpu = features_stm_full[:train_size]
-    train_f_nstm_cpu = features_nstm_full[:train_size]
-    train_tgt_cpu = targets_full[:train_size]
-    train_pc_cpu = piece_counts_full[:train_size]
+    # Training: keep indices for double-indexing in batch loop (no copy)
+    train_pc_cpu = piece_counts_full[train_indices]  # small: N x 1 byte
     
     model = LayerStackNNUE(num_buckets=TrainingConfig.NUM_BUCKETS).to(device)
     
@@ -319,22 +319,25 @@ def train():
     criterion = nn.BCEWithLogitsLoss()
     
     # --- 分離式參數群組 (Parameter Groups) ---
-    # 基於稀疏動力學理論：FC1 (稀疏輸入層) 與 Dense 層需要完全不同的正則化策略
-    # FC1: wd=0 防止「資訊熱寂」(未被啟動的罕見特徵不會被衰減殺死)
-    # Dense: wd=0.0001 輕微懲罰，控制權重幅度以適應 INT16 量化
+    # FC1: wd=0 防止「資訊熱寂」(罕見特徵不會被衰減殺死)
+    # Dense: wd=0.001 輕微懲罰，控制權重幅度以適應 INT16 量化
     fc1_params = list(model.fc1.parameters()) + [model.fc1_bias]
     dense_params = (
         list(model.fact_fc2.parameters()) + list(model.fact_fc3.parameters()) + list(model.fact_fc4.parameters()) +
         list(model.delta_fc2.parameters()) + list(model.delta_fc3.parameters()) + list(model.delta_fc4.parameters())
     )
     
+    # Dynamic LR selection based on training mode
+    lr_fc1 = TrainingConfig.LR_FC1_RESUME if TrainingConfig.RESUME_FROM_CHECKPOINT else TrainingConfig.LR_FC1_FRESH
+    lr_dense = TrainingConfig.LR_DENSE_RESUME if TrainingConfig.RESUME_FROM_CHECKPOINT else TrainingConfig.LR_DENSE_FRESH
+    
     optimizer = optim.AdamW([
-        {'params': fc1_params,    'lr': TrainingConfig.LR_FC1,   'weight_decay': TrainingConfig.WD_FC1},
-        {'params': dense_params,  'lr': TrainingConfig.LR_DENSE, 'weight_decay': TrainingConfig.WD_DENSE},
+        {'params': fc1_params,    'lr': lr_fc1,   'weight_decay': TrainingConfig.WD_FC1},
+        {'params': dense_params,  'lr': lr_dense, 'weight_decay': TrainingConfig.WD_DENSE},
     ], fused=True if device.type == 'cuda' else False)
     
-    print(f"Optimizer: FC1 LR={TrainingConfig.LR_FC1}, WD={TrainingConfig.WD_FC1} | "
-          f"Dense LR={TrainingConfig.LR_DENSE}, WD={TrainingConfig.WD_DENSE}")
+    print(f"Optimizer: FC1 LR={lr_fc1}, WD={TrainingConfig.WD_FC1} | "
+          f"Dense LR={lr_dense}, WD={TrainingConfig.WD_DENSE}")
     
     # --- 指數衰減排程器 (ExponentialLR) ---
     # 官方基準：解耦驗證集，將排程器轉變為單純的時間觀測者
@@ -343,8 +346,9 @@ def train():
         gamma=TrainingConfig.LR_GAMMA
     )
     
-    # 使用最新的 torch.amp 語法避開 FutureWarning
-    scaler = torch.amp.GradScaler('cuda') 
+    # AMP safety: disable scaler on CPU to prevent warnings/errors
+    amp_enabled = device.type == 'cuda'
+    scaler = torch.amp.GradScaler('cuda', enabled=amp_enabled)
 
 
     # --- 2. 決定是否接續完整訓練 ---
@@ -369,25 +373,18 @@ def train():
     train_loss_history = []
     val_loss_history = []
     
-    # --- 分數階測度平滑 (Fractional Power Smoothing / Square Root Weighting) ---
-    # 權重 w_i = 1 / (p_i ** tao)。這在照顧少數樣本與尊重中局複雜度之間取得最佳平衡。
+    # --- Empirical Bucket Sampling (data-driven, not hardcoded) ---
+    # 權重 w_i = 1 / (p_i ** tao)。從資料集自動計算 empirical probability。
     tao = 0.25
-    BUCKET_WEIGHTS = np.array([
-        1.0 / (0.0102 ** tao),   # B0 (1-4 子): 9.9  -> 3.14 (大幅降溫)
-        1.0 / (0.0411 ** tao),   # B1 (5-8 子): 4.9  -> 2.22
-        1.0 / (0.0342 ** tao),   # B2 (9-12 子): 5.4 -> 2.32
-        1.0 / (0.0878 ** tao),   # B3 (13-16 子): 3.4 -> 1.84
-        1.0 / (0.1905 ** tao),   # B4 (17-20 子): 2.3 -> 1.51
-        1.0 / (0.3010 ** tao),   # B5 (21-24 子): 1.8 -> 1.35
-        1.0 / (0.2602 ** tao),   # B6 (25-28 子): 2.0 -> 1.40
-        1.0 / (0.0749 ** tao)    # B7 (29-32 子): 3.7 -> 1.91
-    ], dtype=np.float64)
     train_bucket_ids_np = np.clip((train_pc_cpu.astype(np.int32) - 1) // 4, 0, 7)
+    bucket_counts = np.bincount(train_bucket_ids_np, minlength=8).astype(np.float64)
+    bucket_probs = bucket_counts / bucket_counts.sum()
+    BUCKET_WEIGHTS = 1.0 / np.maximum(bucket_probs, 1e-12) ** tao
     sample_weights_np = BUCKET_WEIGHTS[train_bucket_ids_np].astype(np.float64)
     sample_weights_np /= sample_weights_np.sum()  # 正規化為機率
-    # 使用 NumPy Generator (Alias Method) 沿快速採樣
     _rng = np.random.default_rng()
-    print(f"✅ 加權採樣權重已預先計算，B0權重={BUCKET_WEIGHTS[0]:.1f}x, B5權重={BUCKET_WEIGHTS[5]:.1f}x")
+    print(f"✅ Empirical bucket sampling: B0={bucket_probs[0]:.4f} w={BUCKET_WEIGHTS[0]:.1f}x, "
+          f"B5={bucket_probs[5]:.4f} w={BUCKET_WEIGHTS[5]:.1f}x")
     
     if PLOTTING_AVAILABLE:
         plt.ion()
@@ -408,19 +405,20 @@ def train():
             start = batch_idx * TrainingConfig.BATCH_SIZE
             end = min(start + TrainingConfig.BATCH_SIZE, train_size)
             batch_slice = perm[start:end]
+            real_indices = train_indices[batch_slice]
             
-            # Dynamic GPU Transfer: Only move the current batch to save VRAM
-            inputs_stm = torch.tensor(train_f_stm_cpu[batch_slice], dtype=torch.long, device=device)
-            inputs_nstm = torch.tensor(train_f_nstm_cpu[batch_slice], dtype=torch.long, device=device)
-            targets = torch.tensor(train_tgt_cpu[batch_slice], dtype=torch.float32, device=device).unsqueeze(1).clamp(0.001, 0.999)  # Target Bounding: INT16 安全防線
+            # Dynamic GPU/CPU Transfer: load batches on the fly from the full dataset arrays
+            inputs_stm = torch.from_numpy(features_stm_full[real_indices]).long().to(device, non_blocking=True)
+            inputs_nstm = torch.from_numpy(features_nstm_full[real_indices]).long().to(device, non_blocking=True)
+            targets = torch.from_numpy(targets_full[real_indices]).to(device, non_blocking=True).unsqueeze(1).clamp(0.001, 0.999)  # Target Bounding: INT16 安全防線
             # SF18 bucket: (piece_count - 1) // 4, clamped to [0, 7]
             pc = train_pc_cpu[batch_slice].astype(np.int32)
-            bucket_ids = torch.tensor(np.clip((pc - 1) // 4, 0, 7), dtype=torch.long, device=device)
+            bucket_ids = torch.from_numpy(np.clip((pc - 1) // 4, 0, 7).astype(np.int64)).to(device, non_blocking=True)
             
             optimizer.zero_grad()
             
-            # AMP Forward Pass (Modern Syntax)
-            with torch.amp.autocast('cuda'):
+            # AMP Forward Pass (Modern Syntax, safe for CPU and CUDA)
+            with torch.amp.autocast(device_type=device.type, enabled=amp_enabled):
                 outputs = model(inputs_stm, inputs_nstm, bucket_ids)
                 loss = criterion(outputs, targets)
             

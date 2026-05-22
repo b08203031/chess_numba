@@ -1,0 +1,29 @@
+[
+    {
+        "name": "\u5c0d\u6297chess.com 2900\u6642\u9047\u5230\u7684\uff0c\u5f15\u64ce\u641c\u5c0b\u4e0d\u5230\uff0c\u4f46\u4e00\u641c\u5230\u5c31\u77e5\u9053\u5927\u512a",
+        "fen": "4rrk1/p2p1p1p/1p2p1p1/2nPq2P/2P5/4B3/PbB2PP1/1R1Q2KR w - - 2 20",
+        "solution": [
+            "b1b2",
+            "h5g6"
+        ],
+        "engine_move": "e3h6",
+        "rating": "2400",
+        "theme": "sacrifice"
+    },
+    {
+        "name": "Lichess Puzzle 0078T",
+        "fen": "rk5r/1b3R2/pp2p2q/4P2p/B6B/4p2P/PP4P1/5Q1K w - - 0 28",
+        "solution": "f7b7",
+        "engine_move": "f1d3",
+        "rating": "2286",
+        "theme": "attraction crushing defensiveMove exposedKing long middlegame queensideAttack sacrifice"
+    },
+    {
+        "name": "Lichess Puzzle 002LW",
+        "fen": "3r1rk1/1b3pp1/3p4/p3nPPQ/4P3/3q1BN1/8/2R2RK1 w - - 2 29",
+        "solution": "f5f6",
+        "engine_move": "c1c7",
+        "rating": "2489",
+        "theme": "advantage middlegame short"
+    }
+]
