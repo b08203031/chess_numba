@@ -88,6 +88,34 @@ def update_continuation_history(context, ply_offset, prev_move, prev_piece, curr
     context.continuation_history[ply_offset, prev_piece, prev_to, curr_piece, curr_to] = new_val
 
 @numba.njit(cache=True, boundscheck=False, fastmath=True)
+def update_quiet_stats_on_tt_hit(search_context, tt_move, tt_aggressor, tt_to, pawn_key_idx, tt_bonus, ply):
+    """
+    On TT fail-high, optimally update quiet move history stats.
+    Called only when tt_aggressor != -1.
+    """
+    tt_from = get_from_square(tt_move)
+    update_history(search_context.history_table, tt_aggressor, tt_to, tt_bonus)
+    update_butterfly_history(search_context.butterfly_history, tt_from, tt_to, tt_bonus)
+    update_pawn_history(search_context.pawn_history, pawn_key_idx, tt_aggressor, tt_to, tt_bonus)
+
+    # Continuation History
+    if ply > 0:
+        prev_move = search_context.move_stack[ply - 1]
+        prev_piece = search_context.piece_stack[ply - 1]
+        if prev_move != NO_MOVE and prev_piece != -1:
+            update_continuation_history(search_context, 0, prev_move, prev_piece, tt_move, tt_aggressor, tt_bonus)
+    if ply > 1:
+        prev_move = search_context.move_stack[ply - 2]
+        prev_piece = search_context.piece_stack[ply - 2]
+        if prev_move != NO_MOVE and prev_piece != -1:
+            update_continuation_history(search_context, 1, prev_move, prev_piece, tt_move, tt_aggressor, tt_bonus)
+    if ply > 3:
+        prev_move = search_context.move_stack[ply - 4]
+        prev_piece = search_context.piece_stack[ply - 4]
+        if prev_move != NO_MOVE and prev_piece != -1:
+            update_continuation_history(search_context, 2, prev_move, prev_piece, tt_move, tt_aggressor, tt_bonus)
+
+@numba.njit(cache=True, boundscheck=False, fastmath=True)
 def score_captures(piece_bbs, occupancy_bbs, game_state, moves, scores, start_idx, end_idx, search_context, pinned_white, pinned_black):
     side_to_move = game_state[0]
     
@@ -377,7 +405,7 @@ def score_moves(piece_bbs, occupancy_bbs, game_state, moves, scores, move_count,
                     if prev_move_1 != NO_MOVE and prev_piece_1 != -1:
                         cont_score = search_context.continuation_history[0, prev_piece_1, get_to_square(prev_move_1), aggressor_type, to_square]
                         if cont_score != 0:
-                            score += cont_score * 2
+                            score += cont_score
 
                     if prev_move_2 != NO_MOVE and prev_piece_2 != -1:
                         cont_score = search_context.continuation_history[1, prev_piece_2, get_to_square(prev_move_2), aggressor_type, to_square]

@@ -578,10 +578,10 @@ ROOK_QUEEN_BATTERY_BONUS = 5000 # Bonus for Rook moving to same file/rank as Que
 
 # History Heuristics Constants
 MAX_HISTORY = 16384 # Max value for history table to prevent overflow and saturation
-HISTORY_MAX_MAIN = 7183
-HISTORY_MAX_BUTTERFLY = 7183
-HISTORY_MAX_CAPTURE = 10692
-HISTORY_MAX_CONTINUATION = 30000
+HISTORY_MAX_MAIN = 16384
+HISTORY_MAX_BUTTERFLY = 16384
+HISTORY_MAX_CAPTURE = 16384
+HISTORY_MAX_CONTINUATION = 16384
 HISTORY_MAX_PAWN = 8192
 
 PAWN_HISTORY_SIZE = 8192
@@ -594,9 +594,13 @@ FIFTY_MOVE_MAX_SCALE = 256
 
 # History tuning in Search
 SEE_HISTORY_DIVISOR = 512
-LMR_CONT_HISTORY_MULT = 1.0
-LMR_HISTORY_DIVISOR = 4096.0
-LMR_CONT_HISTORY_DIVISOR = 8192.0
+LMR_HISTORY_DIVISOR = 10240
+
+# History Score Weighting in LMR (must be int)
+HISTORY_WEIGHT_MAIN = 2
+HISTORY_WEIGHT_CONT_1 = 4
+HISTORY_WEIGHT_CONT_2 = 2
+HISTORY_WEIGHT_CONT_4 = 2
 
 CORRECTION_HISTORY_SIZE = 16384
 CORRECTION_HISTORY_MASK = 16383
@@ -647,10 +651,10 @@ ENABLE_SHALLOW_SEE_PRUNING = True  # Enable SEE pruning for captures/quiets at s
 ENABLE_HISTORY_PRUNING = True      # Enable pruning based on History Score
 
 # NEW: Pruning Parameters (Tightened for Performance/Strength Balance)
-PRUNING_SHALLOW_DEPTH = 8         # Prune moves only if depth is below this
-PRUNING_CAPTURE_SEE_MARGIN = -150 # Tightened from -200 (More pruning)
-PRUNING_QUIET_SEE_MARGIN = -80    # Tightened from -100 (More pruning)
-PRUNING_HISTORY_THRESHOLD = -400 # Adjusted from -1000 to match V2 linear history scale
+PRUNING_SHALLOW_DEPTH = 12         # Prune moves only if depth is below this (was 8)
+PRUNING_CAPTURE_SEE_MARGIN = -185 # Stockfish dynamic margin: -185 * depth
+PRUNING_QUIET_SEE_MARGIN = -25    # Stockfish dynamic margin: -25 * depth^2
+PRUNING_HISTORY_THRESHOLD = -4000 # Adjusted from -1000 to match V2 linear history scale
 
 # Master switches for existing pruning techniques / 現有剪枝技術的總開關
 ENABLE_NMP = True           # Null Move Pruning
@@ -670,7 +674,9 @@ FP_BASE = 150      # Reduced base
 FP_MULTIPLIER = 180 # Reduced multiplier
 
 # Reverse Futility Pruning
-RFP_MARGIN_D1 = 200 # Tightened from 250
+RFP_MAX_DEPTH = 8            # V2 tailored: Extended from 5 to 8
+RFP_BASE_MULT = 180           # Base margin multiplier per depth
+RFP_NO_TT_PENALTY = 40       # Extra margin multiplier if TT info is missing
 
 NMP_STATIC_MARGIN = 150
 

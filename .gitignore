@@ -4,16 +4,28 @@ __pycache__/
 *.pyo
 *.pyd
 
-# Other
+# OS
 .DS_Store
-stockfish/src/*.o
-stockfish/src/.depend
-stockfish/src/nn-*.nnue
-stockfish/src/stockfish
-*.pgn
-*.zip
+
+# === Large binary files ===
+# Training data
+*.bin
+*.binpack
 *.npz
 *.jsonl
+
+# Model weights
 *.pth
-*.binpack
 *.npy
+
+# Stockfish
+*.exe
+
+# PGN
+*.pgn
+
+# Archive
+*.zip
+
+# IDE
+.vscode/

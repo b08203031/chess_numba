@@ -35,6 +35,35 @@ SIDE_TO_MOVE_KEY = np.uint64(0xf8d626aaaf278509)
 用於當前行棋方的 Zobrist 鍵值（如果輪到白方走棋，則 XOR 此值）。
 """
 
+# --- GHI (Graph History Interaction) 防護 ---
+# 12 組隨機鍵值，每組對應 8 個 halfmove 的「bucket」，覆蓋 halfmove 14~109。
+# 使用獨立隨機值（與 PIECE_SQUARE_KEYS 無關），在 TT 查詢時區分不同 halfmove 狀態，
+# 防止不同路徑下的相同棋盤位置互相污染 TT。
+# 重複判定（game_history / ply_path_stack）繼續使用原始 Zobrist key，不受此影響。
+RULE50_KEYS = np.array([
+    0xb3e60c6043a12eb7, 0xa7f9d3e8b1c5420f, 0x5d8a4f2e6b9c7103,
+    0xe2c41a9f580db367, 0x9f1b73c5a8e4d60e, 0x4c7e20b9f3618a5d,
+    0x138da4657bc2e90f, 0xd6f5928e0a4b713c, 0x72e3c18d46b0f59a,
+    0x8b1fa043d5962e7c, 0x3a9c7b41e80df265, 0x0e5d3a982c7f14b6,
+], dtype=np.uint64)
+
+@numba.njit(numba.uint64(numba.uint64, numba.int64), cache=True, inline='always')
+def get_tt_key(raw_key: np.uint64, halfmove_clock: int) -> np.uint64:
+    """將 halfmove clock 折入 Zobrist key，供 TT Probe/Store 使用。
+
+    - halfmove < 14：直接返回原始 key（開局及中局早期 GHI 罕見，保持高命中率）
+    - halfmove >= 14：每 8 步切換一個 bucket，XOR 對應的 RULE50_KEYS 值
+    
+    此函數是 V2 引擎 GHI 防護的核心，將路徑相關資訊（halfmove clock）
+    以低開銷的方式編碼進 TT 索引，避免不同 rule50 狀態的相同盤面互相污染。
+    """
+    if halfmove_clock < 14:
+        return raw_key
+    bucket = (halfmove_clock - 14) >> 3  # 右移 3 = 除以 8，效率優於除法
+    if bucket >= 12:
+        bucket = 11  # 上界保護：halfmove > 109 仍安全
+    return raw_key ^ RULE50_KEYS[bucket]
+
 EN_PASSANT_FILE_KEYS = np.array([
     0x70cc73d90bc26e24, 0xe21a6b35df0c3ad7, 0x003a93d8b2806962, 0x1c99ded33cb890a1,
     0xcf3145de0add4289, 0xd0e4427a5514fb72, 0x77c621cc9fb3a483, 0x67a34dac4356550b,

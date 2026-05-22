@@ -1,0 +1,58 @@
+[
+    {
+        "name": "Lichess Puzzle 006eO",
+        "fen": "4rrk1/p2p1p1p/1p2p1p1/2nPq2P/2P5/4B3/PbB2PP1/1R1Q2KR w - - 2 20",
+        "solution": "b1b2",
+        "engine_move": "h1h3",
+        "rating": "2186",
+        "theme": "defensiveMove endgame equality oneMove pawnEndgame"
+    },
+    {
+        "name": "Lichess Puzzle 006eO",
+        "fen": "8/8/2p5/1p1p1k2/3P4/1PP1pK2/8/8 w - - 4 65",
+        "solution": "b3b4",
+        "engine_move": "f3e3",
+        "rating": "2186",
+        "theme": "defensiveMove endgame equality oneMove pawnEndgame"
+    },
+    {
+        "name": "Lichess Puzzle 006eO",
+        "fen": "8/8/1p1k1p1p/3np3/2B2p2/PP1K1PP1/7P/8 w - - 0 37",
+        "solution": "c4d5",
+        "engine_move": "b3b4",
+        "rating": "2186",
+        "theme": "defensiveMove endgame equality oneMove pawnEndgame"
+    },
+    {
+        "name": "Lichess Puzzle 006eO",
+        "fen": "rk5r/1b3R2/pp2p2q/4P2p/B6B/4p2P/PP4P1/5Q1K w - - 0 28",
+        "solution": "f7b7",
+        "engine_move": "h1g1",
+        "rating": "2186",
+        "theme": "defensiveMove endgame equality oneMove pawnEndgame"
+    },
+    {
+        "name": "Lichess Puzzle 006eO",
+        "fen": "8/4kr2/R2p4/1p1Pp3/5pp1/3K1P2/PPP5/8 w - - 0 40",
+        "solution": "a6a7",
+        "engine_move": "f3g4",
+        "rating": "2186",
+        "theme": "defensiveMove endgame equality oneMove pawnEndgame"
+    },
+    {
+        "name": "Lichess Puzzle 006eO",
+        "fen": "8/2k3n1/K2p2p1/2pP2Pp/2P4P/7B/8/8 b - - 1 57",
+        "solution": "c7d8",
+        "engine_move": "g7e8",
+        "rating": "2186",
+        "theme": "defensiveMove endgame equality oneMove pawnEndgame"
+    },
+    {
+        "name": "Lichess Puzzle 006eO",
+        "fen": "6k1/p4p2/1p5p/4r3/P3B3/1P2KP2/2P3PP/8 b - - 1 29",
+        "solution": "f7f5",
+        "engine_move": "e5h5",
+        "rating": "2186",
+        "theme": "defensiveMove endgame equality oneMove pawnEndgame"
+    }
+]
