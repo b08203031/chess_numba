@@ -244,7 +244,7 @@ def score_quiets(piece_bbs, occupancy_bbs, game_state, moves, scores, start_idx,
                 if get_rook_attacks(opp_king_sq, all_pieces_bb) & BB_SQUARES[to_square]: is_check = True
             elif aggressor_type == 4 or aggressor_type == 10: # QUEEN
                 if get_queen_attacks(opp_king_sq, all_pieces_bb) & BB_SQUARES[to_square]: is_check = True
-            
+
             if is_check:
                 score += 15000
 

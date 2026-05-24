@@ -71,7 +71,6 @@ search_context_spec = [
     ('non_pawn_correction_history_black', numba.int16[:]),
     ('butterfly_history', numba.int32[:, :]),
     ('capture_history', numba.int32[:, :, :]),
-    ('old_piece_bbs', numba.uint64[:, :]),  # Pre-allocated buffer — eliminates piece_bbs.copy() heap allocs
     ('enable_nmp', numba.boolean),
     ('enable_rfp', numba.boolean),
     ('enable_razoring', numba.boolean),
@@ -164,10 +163,6 @@ class SearchContext:
         self.moves_buffer = np.zeros((MAX_PLY, 256), dtype=np.uint16)
         self.quiet_moves_tried = np.zeros((MAX_PLY, 256), dtype=np.uint16)
         self.bad_captures = np.zeros((MAX_PLY, 256), dtype=np.uint16)
-        # Pre-allocated snapshot buffer — replaces piece_bbs.copy() at every node
-        # Shape: (MAX_PLY, 12) — one row per ply, 12 uint64 bitboards per row
-        self.old_piece_bbs = np.zeros((MAX_PLY, 12), dtype=np.uint64)
-        
         # Move Picker state arrays
         self.mp_stage = np.zeros(MAX_PLY, dtype=np.int32)
         self.mp_current_idx = np.zeros(MAX_PLY, dtype=np.int32)

@@ -68,8 +68,8 @@ from chess_engine.classical.move import move_to_uci
 
 from chess_engine.classical.search_heuristics import (
     update_history, update_butterfly_history, update_capture_history,
-    update_continuation_history, update_pawn_history, score_captures, score_captures_with_tt, 
-    score_quiets, update_quiet_stats_on_tt_hit, get_lmr_reduction, score_moves, partial_insertion_sort_moves,
+    update_continuation_history, update_pawn_history, score_captures, score_captures_with_tt,
+    score_quiets, update_quiet_stats_on_tt_hit, get_lmr_reduction, partial_insertion_sort_moves,
     get_quiet_stat_score
 )
 
@@ -209,21 +209,16 @@ def quiescence_search(piece_bbs, occupancy_bbs, game_state, alpha, beta, ply, se
     moves = search_context.moves_buffer[ply]
     scores = search_context.move_scores[ply]
 
-    # Safe access to killers:
-    safe_ply = min(ply, MAX_PLY - 1)
-
-    # Optimization: Calculate pinned pieces once for QS pruning logic and score_moves
     pinned_white = get_pinned_pieces(piece_bbs, occupancy_bbs, WHITE)
     pinned_black = get_pinned_pieces(piece_bbs, occupancy_bbs, BLACK)
 
     # B1: Use TT best move for QSearch ordering (since we already probe TT above)
     qs_tt_move = tt_entry['best_move'] if tt_entry['flag'] != TT_FLAG_NONE else NO_MOVE
 
-    # Use score_captures_with_tt to specifically sort captures for QSearch (R5 Optimization)
     score_captures_with_tt(
-        piece_bbs, occupancy_bbs, game_state, 
-        moves, 
-        scores, 
+        piece_bbs, occupancy_bbs, game_state,
+        moves,
+        scores,
         move_count,
         qs_tt_move,
         pinned_white,
@@ -263,13 +258,10 @@ def quiescence_search(piece_bbs, occupancy_bbs, game_state, alpha, beta, ply, se
                     continue
 
         if not is_currently_in_check:
-            if ENABLE_SEE_IN_QUIESCENCE:
-                # Stockfish Alignment: Since SEE_THRESHOLD is 0, any move with score < SCORE_GOOD_CAPTURE_BONUS
-                # has already failed see_ge(..., 0) inside score_moves. We can just prune it directly!
+            if ENABLE_SEE_IN_QUIESCENCE and move != qs_tt_move:
                 if score_val < SCORE_GOOD_CAPTURE_BONUS:
                     continue
 
-        search_context.old_piece_bbs[ply, :] = piece_bbs[:]
         unmake_info = make_move(piece_bbs, occupancy_bbs, game_state, move)
         
         # --- Lazy Legality Check ---
@@ -359,8 +351,6 @@ def get_next_move(piece_bbs, occupancy_bbs, game_state, search_context, ply, tt_
                 if candidate_move == tt_move or candidate_move == excluded_move:
                     continue
                     
-                # R1 Optimization: Good captures have SCORE >= 0, Bad captures have SCORE < 0.
-                # Score was already computed with SEE inside `score_captures`.
                 if candidate_score >= 0:
                     move = candidate_move
                     return move
@@ -830,14 +820,9 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
             # We must only try captures.
             pc_move_count = generate_pseudo_legal_captures_buffer(piece_bbs, occupancy_bbs, game_state, search_context.moves_buffer, ply)
             
-            # Safe access to killers:
-            safe_ply = min(ply, MAX_PLY - 1)
-    
-            # Pinned pieces for SEE legality — note: these are light (pinners only, no full scan)
             pc_pinned_w = get_pinned_pieces(piece_bbs, occupancy_bbs, WHITE)
             pc_pinned_b = get_pinned_pieces(piece_bbs, occupancy_bbs, BLACK)
-            
-            # Use score_captures for lightweight MVV-LVA + capture_history ordering (no killer/history overhead)
+
             score_captures(
                 piece_bbs, occupancy_bbs, game_state,
                 search_context.moves_buffer[ply],
@@ -845,7 +830,7 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                 0, pc_move_count, search_context,
                 pc_pinned_w, pc_pinned_b
             )
-            
+
             pc_moves = search_context.moves_buffer[ply]
             pc_scores = search_context.move_scores[ply]
     
@@ -869,7 +854,6 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                 if not see_ge(piece_bbs, occupancy_bbs, game_state[0], pc_from, pc_to, see_threshold_pc, pc_pinned_w, pc_pinned_b):
                     continue
     
-                search_context.old_piece_bbs[ply, :] = piece_bbs[:]
                 pc_unmake = make_move(piece_bbs, occupancy_bbs, game_state, pc_move)
     
                 # Legality check
@@ -1024,7 +1008,6 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
         # Removed unconditional pre_see_check_ok to prevent massive performance waste (Lazy Evaluation)
 
         # --- Make the move ---
-        search_context.old_piece_bbs[ply, :] = piece_bbs[:]
         unmake_info = make_move(piece_bbs, occupancy_bbs, game_state, move)
         moved_piece_type = unmake_info[0]
         
@@ -1074,7 +1057,6 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                 pruned_moves += 1
                 continue
 
-            search_context.old_piece_bbs[ply, :] = piece_bbs[:]
             unmake_info = make_move(piece_bbs, occupancy_bbs, game_state, move)
             moved_piece_type = unmake_info[0]
             search_context.move_stack[ply] = move
@@ -1122,9 +1104,6 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
 
         if is_quiet_move:
             quiet_move_counter += 1
-            # Add to tried list for potential malus
-            quiet_moves_tried[quiet_moves_tried_count] = move
-            quiet_moves_tried_count += 1
             
             # Late Move Pruning (LMP) - Disabled in PV nodes
             if can_prune_quiet and search_context.enable_lmp and not is_exclusion_search and not is_currently_in_check and not is_pv:
@@ -1162,7 +1141,6 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                         margin += dissonance // 2
                     if static_score + margin < alpha:
                         continue
-                    search_context.old_piece_bbs[ply, :] = piece_bbs[:]
                     unmake_info = make_move(piece_bbs, occupancy_bbs, game_state, move)
                     moved_piece_type = unmake_info[0]
                     search_context.move_stack[ply] = move
@@ -1218,7 +1196,6 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                     search_context.mp_bad_captures_idx[ply] = saved_mp_bad_idx
 
                     # Re-make the move
-                    search_context.old_piece_bbs[ply, :] = piece_bbs[:]
                     unmake_info = make_move(piece_bbs, occupancy_bbs, game_state, move)
                     moved_piece_type = unmake_info[0]
                     search_context.move_stack[ply] = move
@@ -1243,6 +1220,10 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                             unmake_move(piece_bbs, occupancy_bbs, game_state, move, unmake_info)
                             return (np.int32(exclusion_beta), NO_MOVE, nodes_searched, quiescence_nodes, tt_hits)
         search_depth = depth - 1 + current_extension
+
+        if is_quiet_move:
+            quiet_moves_tried[quiet_moves_tried_count] = move
+            quiet_moves_tried_count += 1
 
         evaluation = 0
         if legal_moves_tried == 1:

@@ -9,5 +9,13 @@
         "engine_move": "e3h6",
         "rating": "2400",
         "theme": "sacrifice"
+    },
+    {
+        "name": "Lichess Puzzle 0078T",
+        "fen": "rk5r/1b3R2/pp2p2q/4P2p/B6B/4p2P/PP4P1/5Q1K w - - 0 28",
+        "solution": "f7b7",
+        "engine_move": "f1d3",
+        "rating": "2286",
+        "theme": "attraction crushing defensiveMove exposedKing long middlegame queensideAttack sacrifice"
     }
 ]
