@@ -39,7 +39,7 @@ from chess_engine.classical.constants import (
     STOP_SEARCH_FLAG, MAX_HISTORY,
     SCORE_TT_MOVE, SCORE_GOOD_CAPTURE_BONUS, SCORE_KILLER_1,
     SCORE_KILLER_2, SCORE_COUNTER_MOVE, SCORE_BAD_CAPTURE_PENALTY, NMP_STATIC_MARGIN,
-    NMP_MIN_SIDE_NON_PAWNS, LOW_MATERIAL_PRUNING_PIECE_COUNT,
+    NMP_MIN_SIDE_NON_PAWNS, NMP_VERIFICATION_DEPTH, LOW_MATERIAL_PRUNING_PIECE_COUNT,
     ENABLE_SHALLOW_SEE_PRUNING, ENABLE_HISTORY_PRUNING, PRUNING_SHALLOW_DEPTH,
     PRUNING_CAPTURE_SEE_MARGIN, PRUNING_QUIET_SEE_MARGIN, PRUNING_HISTORY_THRESHOLD,
     WHITE, BLACK, PAWN, KNIGHT, BISHOP, ROOK, QUEEN, PAWN_KEY_INDEX, MINOR_KEY_INDEX, NON_PAWN_KEY_WHITE_INDEX, NON_PAWN_KEY_BLACK_INDEX, CORRECTION_HISTORY_SIZE, CORRECTION_HISTORY_MASK, CORRECTION_HISTORY_LIMIT, CORRECTION_HISTORY_DIVISOR, 
@@ -645,23 +645,28 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
 
         static_score = apply_correction_history_score(game_state, search_context, raw_static_eval)
         
-        # --- H2 Enhancement: Refine static_score using TT Score Bound ---
+        # --- H2 Enhancement: Refine static_score using trusted TT Score Bounds ---
         if tt_entry['flag'] != TT_FLAG_NONE:
             tt_score = np.int32(tt_entry['score'])
             
             # Adjust mate scores relative to current ply
             if tt_score > MATE_IN_MAX_PLY: tt_score -= ply
             elif tt_score < -MATE_IN_MAX_PLY: tt_score += ply
-            
-            # If TT says score is at least tt_score (LOWER), and tt_score > static_score
-            if tt_entry['flag'] == TT_FLAG_BETA and tt_score > static_score:
-                static_score = tt_score
-            # If TT says score is at most tt_score (UPPER), and tt_score < static_score
-            elif tt_entry['flag'] == TT_FLAG_ALPHA and tt_score < static_score:
-                static_score = tt_score
-            # If TT has EXACT score, trust it completely
-            elif tt_entry['flag'] == TT_FLAG_EXACT:
-                static_score = tt_score
+
+            trusted_bound_depth = tt_entry['depth'] >= max(1, depth - 2)
+            trusted_exact_depth = tt_entry['depth'] >= depth
+            trusted_tt_score = trusted_bound_depth and abs(tt_score) < MATE_IN_MAX_PLY
+
+            if trusted_tt_score:
+                # If TT says score is at least tt_score (LOWER), and tt_score > static_score
+                if tt_entry['flag'] == TT_FLAG_BETA and tt_score > static_score:
+                    static_score = tt_score
+                # If TT says score is at most tt_score (UPPER), and tt_score < static_score
+                elif tt_entry['flag'] == TT_FLAG_ALPHA and tt_score < static_score:
+                    static_score = tt_score
+                # Exact scores may replace static eval only when they are deep enough for this node.
+                elif tt_entry['flag'] == TT_FLAG_EXACT and trusted_exact_depth:
+                    static_score = tt_score
         
         search_context.static_eval_stack[ply] = static_score
 
@@ -726,6 +731,7 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
 
     # --- Null Move Pruning (guarded by H3) ---
     if (search_context.enable_nmp and not is_exclusion_search and depth >= 3 and not is_currently_in_check
+            and not (ply > 0 and search_context.move_stack[ply - 1] == NO_MOVE)
             and not low_material_pruning_guard
             and side_non_pawn_count >= NMP_MIN_SIDE_NON_PAWNS):
         if static_score >= beta + NMP_STATIC_MARGIN:
@@ -773,8 +779,34 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
             if null_move_score >= beta:
                 if null_move_score >= MATE_IN_MAX_PLY:
                     null_move_score = beta
-                search_context.pv_table[ply, ply] = NO_MOVE
-                return (np.int32(null_move_score), NO_MOVE, nodes_searched, quiescence_nodes, tt_hits)
+                null_cutoff_verified = True
+
+                if depth >= NMP_VERIFICATION_DEPTH and abs(null_move_score) < MATE_IN_MAX_PLY:
+                    nmp_was_enabled = search_context.enable_nmp
+                    search_context.enable_nmp = False
+                    verification_depth = max(1, depth - nmp_reduction)
+                    res_verify = _search(
+                        piece_bbs, occupancy_bbs, game_state, verification_depth,
+                        beta - 1, beta, search_context, ply, NO_MOVE, False, cut_node
+                    )
+                    search_context.enable_nmp = nmp_was_enabled
+
+                    verify_score = res_verify[0]
+                    nodes_searched += res_verify[2]
+                    quiescence_nodes += res_verify[3]
+                    tt_hits += res_verify[4]
+
+                    if search_context.stop_flag[0]:
+                        return (np.int32(0), NO_MOVE, nodes_searched, quiescence_nodes, tt_hits)
+
+                    if verify_score < beta:
+                        null_cutoff_verified = False
+                    else:
+                        null_move_score = verify_score
+
+                if null_cutoff_verified:
+                    search_context.pv_table[ply, ply] = NO_MOVE
+                    return (np.int32(null_move_score), NO_MOVE, nodes_searched, quiescence_nodes, tt_hits)
 
     # --- ProbCut (must be before NMP, guarded by H3) ---
     if search_context.enable_probcut and not is_exclusion_search and depth >= 5 and abs(beta) < MATE_IN_MAX_PLY and not is_currently_in_check:

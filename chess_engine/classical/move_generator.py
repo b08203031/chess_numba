@@ -594,17 +594,6 @@ def generate_pseudo_legal_moves_buffer(piece_bbs, occupancy_bbs, game_state, mov
     return move_count
 
 @numba.njit(numba.int32(piece_bbs_signature, occupancy_bbs_signature, game_state_signature, numba.uint16[:, :], numba.int32), cache=True, boundscheck=False, fastmath=True)
-def generate_pseudo_legal_moves_buffer(piece_bbs, occupancy_bbs, game_state, moves_buffer, ply):
-    """
-    Generates all pseudo-legal moves for the current position into the provided buffer at the given ply.
-    Returns the count of legal moves.
-    """
-    move_count = generate_pseudo_legal_moves_buffer(piece_bbs, occupancy_bbs, game_state, moves_buffer, ply)
-    side_to_move = game_state[0]
-
-    return move_count
-
-@numba.njit(numba.int32(piece_bbs_signature, occupancy_bbs_signature, game_state_signature, numba.uint16[:, :], numba.int32), cache=True, boundscheck=False, fastmath=True)
 def generate_legal_moves_buffer(piece_bbs, occupancy_bbs, game_state, moves_buffer, ply):
     """
     Generates all fully legal moves for the current position into the provided buffer at the given ply.
@@ -1180,17 +1169,6 @@ def generate_pseudo_legal_captures_buffer(piece_bbs, occupancy_bbs, game_state, 
                 move_count += 1
                 capture_targets &= (capture_targets - np.uint64(1))
             bb &= (bb - np.uint64(1))
-
-    return move_count
-
-@numba.njit(numba.int32(piece_bbs_signature, occupancy_bbs_signature, game_state_signature, numba.uint16[:, :], numba.int32), cache=True, boundscheck=False, fastmath=True)
-def generate_pseudo_legal_captures_buffer(piece_bbs, occupancy_bbs, game_state, moves_buffer, ply):
-    """
-    Generates all pseudo-legal capture and promotion moves for the current position into the provided buffer at the given ply.
-    Returns the count of legal moves.
-    """
-    move_count = generate_pseudo_legal_captures_buffer(piece_bbs, occupancy_bbs, game_state, moves_buffer, ply)
-    side_to_move = game_state[0]
 
     return move_count
 

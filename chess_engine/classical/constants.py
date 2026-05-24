@@ -680,6 +680,7 @@ RFP_NO_TT_PENALTY = 40       # Extra margin multiplier if TT info is missing
 
 NMP_STATIC_MARGIN = 150
 NMP_MIN_SIDE_NON_PAWNS = 2
+NMP_VERIFICATION_DEPTH = 8
 LOW_MATERIAL_PRUNING_PIECE_COUNT = 7
 
 # Late Move Reductions (LMR)
