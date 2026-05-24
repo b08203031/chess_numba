@@ -69,13 +69,51 @@ from chess_engine.classical.move import move_to_uci
 from chess_engine.classical.search_heuristics import (
     update_history, update_butterfly_history, update_capture_history,
     update_continuation_history, update_pawn_history, score_captures, score_captures_with_tt, 
-    score_quiets, update_quiet_stats_on_tt_hit, get_lmr_reduction, score_moves, partial_insertion_sort_moves
+    score_quiets, update_quiet_stats_on_tt_hit, get_lmr_reduction, score_moves, partial_insertion_sort_moves,
+    get_quiet_stat_score
 )
 
 
 quiescence_search_return_type = numba.types.Tuple([
     numba.int32, numba.uint64
 ])
+
+@numba.njit(numba.int32(game_state_signature, search_context_type, numba.int32), cache=True)
+def apply_correction_history_score(game_state, search_context, raw_static_eval):
+    pawn_key = game_state[PAWN_KEY_INDEX]
+    minor_key = game_state[MINOR_KEY_INDEX]
+    np_white_key = game_state[NON_PAWN_KEY_WHITE_INDEX]
+    np_black_key = game_state[NON_PAWN_KEY_BLACK_INDEX]
+
+    global_pawn = search_context.pawn_correction_history[pawn_key & CORRECTION_HISTORY_MASK]
+    global_minor = search_context.minor_correction_history[minor_key & CORRECTION_HISTORY_MASK]
+    side = game_state[0]
+
+    if side == WHITE:
+        correction_sum = (global_pawn * CORRECTION_HISTORY_PAWN_WEIGHT +
+                         global_minor * CORRECTION_HISTORY_MINOR_WEIGHT +
+                         search_context.non_pawn_correction_history_white[np_white_key & CORRECTION_HISTORY_MASK] * CORRECTION_HISTORY_NON_PAWN_WEIGHT)
+    else:
+        correction_sum = (-global_pawn * CORRECTION_HISTORY_PAWN_WEIGHT -
+                         global_minor * CORRECTION_HISTORY_MINOR_WEIGHT +
+                         search_context.non_pawn_correction_history_black[np_black_key & CORRECTION_HISTORY_MASK] * CORRECTION_HISTORY_NON_PAWN_WEIGHT)
+
+    corrected = np.int32(raw_static_eval) + np.int32(correction_sum // CORRECTION_HISTORY_DIVISOR)
+    return np.int32(min(max(corrected, SCORE_MIN), SCORE_MAX))
+
+full_static_eval_return_type = numba.types.Tuple((numba.int32, numba.int32, numba.boolean))
+
+@numba.njit(full_static_eval_return_type(piece_bbs_signature, occupancy_bbs_signature, game_state_signature, search_context_type, numba.int32), cache=True)
+def compute_full_corrected_static_eval(piece_bbs, occupancy_bbs, game_state, search_context, ply):
+    raw_eval = evaluate_position(piece_bbs, occupancy_bbs, game_state, lazy=False)
+    corrected_eval = apply_correction_history_score(game_state, search_context, raw_eval)
+    search_context.static_eval_stack[ply] = corrected_eval
+
+    improving = False
+    if ply >= 2 and corrected_eval > search_context.static_eval_stack[ply - 2]:
+        improving = True
+
+    return raw_eval, corrected_eval, improving
 
 # @numba.njit(quiescence_search_return_type(
 #     piece_bbs_signature, occupancy_bbs_signature, game_state_signature,
@@ -597,44 +635,15 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
     
     # Correction History Adjustment
     raw_static_eval = -INFINITY
+    static_eval_is_full = False
 
     if not is_currently_in_check:
-        # Retrieve from TT if available
         if tt_entry['flag'] != TT_FLAG_NONE and tt_entry['static_eval'] != 32767:
-            raw_static_eval = np.int16(tt_entry['static_eval'])
+            raw_static_eval = np.int32(tt_entry['static_eval'])
         else:
             raw_static_eval = evaluate_position(piece_bbs, occupancy_bbs, game_state, lazy=True)
-        
-        # Apply Correction History
-        pawn_key = game_state[PAWN_KEY_INDEX]
-        minor_key = game_state[MINOR_KEY_INDEX]
-        np_white_key = game_state[NON_PAWN_KEY_WHITE_INDEX]
-        np_black_key = game_state[NON_PAWN_KEY_BLACK_INDEX]
-        
-        # Calculate sum of correction histories (Stockfish weights)
-        # Using native Python integers for intermediate sum to avoid repeated np.int64 calls
-        # Numba will optimize this to 64-bit registers anyway
-        
-        # pawn and minor keys are global (both colors), so we store them relative to WHITE.
-        global_pawn = search_context.pawn_correction_history[pawn_key & CORRECTION_HISTORY_MASK]
-        global_minor = search_context.minor_correction_history[minor_key & CORRECTION_HISTORY_MASK]
-        
-        # Determine side to move
-        side = game_state[0]
-        
-        if side == WHITE:
-            correction_sum = (global_pawn * CORRECTION_HISTORY_PAWN_WEIGHT +
-                             global_minor * CORRECTION_HISTORY_MINOR_WEIGHT +
-                             search_context.non_pawn_correction_history_white[np_white_key & CORRECTION_HISTORY_MASK] * CORRECTION_HISTORY_NON_PAWN_WEIGHT)
-        else:
-            # Invert global correction for Black (Absolute White Perspective)
-            correction_sum = (-global_pawn * CORRECTION_HISTORY_PAWN_WEIGHT -
-                             global_minor * CORRECTION_HISTORY_MINOR_WEIGHT +
-                             search_context.non_pawn_correction_history_black[np_black_key & CORRECTION_HISTORY_MASK] * CORRECTION_HISTORY_NON_PAWN_WEIGHT)
-        
-        # Apply scaling (Stockfish total sum / 2^17)
-        static_score = raw_static_eval + np.int16(correction_sum // CORRECTION_HISTORY_DIVISOR)
-        static_score = min(max(static_score, SCORE_MIN), SCORE_MAX)
+
+        static_score = apply_correction_history_score(game_state, search_context, raw_static_eval)
         
         # --- H2 Enhancement: Refine static_score using TT Score Bound ---
         if tt_entry['flag'] != TT_FLAG_NONE:
@@ -706,60 +715,66 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                 rfp_margin = rfp_margin * 3 // 4  # 25% tighter when not improving
                 
             if static_score - rfp_margin >= beta:
-                return (np.int32(static_score), NO_MOVE, nodes_searched, quiescence_nodes, tt_hits)
+                if not static_eval_is_full:
+                    raw_static_eval, static_score, improving = compute_full_corrected_static_eval(piece_bbs, occupancy_bbs, game_state, search_context, ply)
+                    static_eval_is_full = True
+                    rfp_margin = rfp_multiplier * depth
+                    if not improving:
+                        rfp_margin = rfp_margin * 3 // 4
+                if static_score - rfp_margin >= beta:
+                    return (np.int32(static_score), NO_MOVE, nodes_searched, quiescence_nodes, tt_hits)
 
     # --- Null Move Pruning (guarded by H3) ---
     if (search_context.enable_nmp and not is_exclusion_search and depth >= 3 and not is_currently_in_check
             and not low_material_pruning_guard
-            and side_non_pawn_count >= NMP_MIN_SIDE_NON_PAWNS
-            and static_score >= beta + NMP_STATIC_MARGIN):
-        # Manual save of only the fields make_null_move modifies (avoids heap allocation)
-        nmp_saved_side = game_state[0]
-        nmp_saved_ep   = game_state[2]
-        nmp_saved_hmc  = game_state[3]
-        nmp_saved_key  = game_state[4]
+            and side_non_pawn_count >= NMP_MIN_SIDE_NON_PAWNS):
+        if static_score >= beta + NMP_STATIC_MARGIN:
+            if not static_eval_is_full:
+                raw_static_eval, static_score, improving = compute_full_corrected_static_eval(piece_bbs, occupancy_bbs, game_state, search_context, ply)
+                static_eval_is_full = True
 
-        # M7 Stack Pollution Fix for NMP
-        search_context.move_stack[ply] = NO_MOVE
-        search_context.piece_stack[ply] = -1
+        if static_score >= beta + NMP_STATIC_MARGIN:
+            nmp_saved_side = game_state[0]
+            nmp_saved_ep   = game_state[2]
+            nmp_saved_hmc  = game_state[3]
+            nmp_saved_key  = game_state[4]
 
-        make_null_move(game_state)
+            search_context.move_stack[ply] = NO_MOVE
+            search_context.piece_stack[ply] = -1
 
-        # Dynamic NMP Reduction: R = 4 + depth / 3 + min(3, (static_score - beta) / 190)
-        nmp_reduction = 4 + depth // 3 + min(3, (static_score - beta) // 190)
+            make_null_move(game_state)
 
-        # C1: Extra reduction when not improving
-        if not improving:
-            nmp_reduction += 1
-        search_depth = max(0, depth - nmp_reduction)
+            nmp_reduction = 4 + depth // 3 + min(3, (static_score - beta) // 190)
 
-        res_nm = _search(
-            piece_bbs, occupancy_bbs, game_state, search_depth,
-            -beta, -beta + 1, search_context, ply + 1, NO_MOVE, False, not cut_node
-        )
-        null_move_score = res_nm[0]
-        child_nodes = res_nm[2]
-        child_q_nodes = res_nm[3]
-        child_tt_hits = res_nm[4]
+            if not improving:
+                nmp_reduction += 1
+            search_depth = max(0, depth - nmp_reduction)
 
-        # Restore only the fields that were changed by make_null_move
-        game_state[0] = nmp_saved_side
-        game_state[2] = nmp_saved_ep
-        game_state[3] = nmp_saved_hmc
-        game_state[4] = nmp_saved_key
-        null_move_score = -null_move_score
+            res_nm = _search(
+                piece_bbs, occupancy_bbs, game_state, search_depth,
+                -beta, -beta + 1, search_context, ply + 1, NO_MOVE, False, not cut_node
+            )
+            null_move_score = res_nm[0]
+            child_nodes = res_nm[2]
+            child_q_nodes = res_nm[3]
+            child_tt_hits = res_nm[4]
 
-        if search_context.stop_flag[0]:
-            return (np.int32(0), NO_MOVE, nodes_searched, quiescence_nodes, tt_hits)
+            game_state[0] = nmp_saved_side
+            game_state[2] = nmp_saved_ep
+            game_state[3] = nmp_saved_hmc
+            game_state[4] = nmp_saved_key
+            null_move_score = -null_move_score
 
-        nodes_searched += child_nodes; quiescence_nodes += child_q_nodes; tt_hits += child_tt_hits
+            if search_context.stop_flag[0]:
+                return (np.int32(0), NO_MOVE, nodes_searched, quiescence_nodes, tt_hits)
 
-        if null_move_score >= beta:
-            # M6: Don't trust mate scores from NMP
-            if null_move_score >= MATE_IN_MAX_PLY:
-                null_move_score = beta
-            search_context.pv_table[ply, ply] = NO_MOVE
-            return (np.int32(null_move_score), NO_MOVE, nodes_searched, quiescence_nodes, tt_hits)
+            nodes_searched += child_nodes; quiescence_nodes += child_q_nodes; tt_hits += child_tt_hits
+
+            if null_move_score >= beta:
+                if null_move_score >= MATE_IN_MAX_PLY:
+                    null_move_score = beta
+                search_context.pv_table[ply, ply] = NO_MOVE
+                return (np.int32(null_move_score), NO_MOVE, nodes_searched, quiescence_nodes, tt_hits)
 
     # --- ProbCut (must be before NMP, guarded by H3) ---
     if search_context.enable_probcut and not is_exclusion_search and depth >= 5 and abs(beta) < MATE_IN_MAX_PLY and not is_currently_in_check:
@@ -865,10 +880,14 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
     if not is_exclusion_search and not is_currently_in_check and not is_pv and depth <= 7:
         if (search_context.enable_razoring and not low_material_pruning_guard
                 and static_score + RAZORING_MARGIN < alpha and dissonance < 250):
-            razor_score, child_q_nodes = quiescence_search(piece_bbs, occupancy_bbs, game_state, alpha, alpha + 1, ply, search_context, 0)
-            quiescence_nodes += child_q_nodes
-            if razor_score + RAZORING_MARGIN < alpha:
-                return (np.int32(alpha), NO_MOVE, nodes_searched, quiescence_nodes, tt_hits)
+            if not static_eval_is_full:
+                raw_static_eval, static_score, improving = compute_full_corrected_static_eval(piece_bbs, occupancy_bbs, game_state, search_context, ply)
+                static_eval_is_full = True
+            if static_score + RAZORING_MARGIN < alpha:
+                razor_score, child_q_nodes = quiescence_search(piece_bbs, occupancy_bbs, game_state, alpha, alpha + 1, ply, search_context, 0)
+                quiescence_nodes += child_q_nodes
+                if razor_score + RAZORING_MARGIN < alpha:
+                    return (np.int32(alpha), NO_MOVE, nodes_searched, quiescence_nodes, tt_hits)
 
     # --- M1: IIR (Internal Iterative Reduction) replaces IID ---
     # Instead of doing a costly sub-search, just reduce depth for nodes without a TT move.
@@ -987,8 +1006,9 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                 and is_quiet_move):
             prune_quiet_move = False
             if ENABLE_HISTORY_PRUNING and moved_piece_type != -1:
-                history_score = search_context.history_table[moved_piece_type, to_sq]
-                if history_score < PRUNING_HISTORY_THRESHOLD * depth:
+                history_score = get_quiet_stat_score(search_context, ply, from_sq, to_sq, moved_piece_type, pawn_key_idx)
+                main_history_score = search_context.history_table[moved_piece_type, to_sq]
+                if history_score < PRUNING_HISTORY_THRESHOLD * depth and main_history_score < 0:
                     prune_quiet_move = True
 
             if prune_quiet_move:
@@ -1056,7 +1076,7 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
             
             # Late Move Pruning (LMP) - Disabled in PV nodes
             if search_context.enable_lmp and not is_exclusion_search and not is_currently_in_check and not is_pv:
-                limit = LMP_MOVE_COUNT[depth]
+                limit = LMP_MOVE_COUNT[min(depth, MAX_PLY - 1)]
                 if not improving: limit = limit // 2
                 limit = max(limit, 2)
 
@@ -1079,8 +1099,25 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                 margin += dissonance // 2
 
             if margin > 0 and static_score + margin < alpha:
-                unmake_move(piece_bbs, occupancy_bbs, game_state, move, unmake_info)
-                continue
+                if not static_eval_is_full:
+                    unmake_move(piece_bbs, occupancy_bbs, game_state, move, unmake_info)
+                    raw_static_eval, static_score, improving = compute_full_corrected_static_eval(piece_bbs, occupancy_bbs, game_state, search_context, ply)
+                    static_eval_is_full = True
+                    margin = FP_BASE + FP_MULTIPLIER * depth
+                    if not improving:
+                        margin = margin * 3 // 4
+                    if dissonance > 190:
+                        margin += dissonance // 2
+                    if static_score + margin < alpha:
+                        continue
+                    search_context.old_piece_bbs[ply, :] = piece_bbs[:]
+                    unmake_info = make_move(piece_bbs, occupancy_bbs, game_state, move)
+                    moved_piece_type = unmake_info[0]
+                    search_context.move_stack[ply] = move
+                    search_context.piece_stack[ply] = moved_piece_type
+                else:
+                    unmake_move(piece_bbs, occupancy_bbs, game_state, move, unmake_info)
+                    continue
         
         # --- Determine total extension (SF18 style: unconditional check extension) ---
         check_extension = 0
@@ -1157,26 +1194,8 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
             # Dynamic LMR Logic
             lmr = 0
             if search_context.enable_lmr and depth >= LMR_MIN_DEPTH and is_quiet_move and quiet_move_counter >= LMR_MIN_QUIET_MOVE_INDEX and moved_piece_type != -1:
-                # Get History Score for adjustment (V2-Tailored SNR weights)
                 aggressor_type = moved_piece_type
-                history_score = search_context.history_table[aggressor_type, to_sq] * HISTORY_WEIGHT_MAIN
-                
-                # Add Multi-level Continuation History context to LMR
-                if ply > 0:
-                    p1_move = search_context.move_stack[ply - 1]
-                    p1_piece = search_context.piece_stack[ply - 1]
-                    if p1_move != NO_MOVE and p1_piece != -1:
-                        history_score += search_context.continuation_history[0, p1_piece, get_to_square(p1_move), aggressor_type, to_sq] * HISTORY_WEIGHT_CONT_1
-                if ply > 1:
-                    p2_move = search_context.move_stack[ply - 2]
-                    p2_piece = search_context.piece_stack[ply - 2]
-                    if p2_move != NO_MOVE and p2_piece != -1:
-                        history_score += search_context.continuation_history[1, p2_piece, get_to_square(p2_move), aggressor_type, to_sq] * HISTORY_WEIGHT_CONT_2
-                if ply > 3:
-                    p4_move = search_context.move_stack[ply - 4]
-                    p4_piece = search_context.piece_stack[ply - 4]
-                    if p4_move != NO_MOVE and p4_piece != -1:
-                        history_score += search_context.continuation_history[2, p4_piece, get_to_square(p4_move), aggressor_type, to_sq] * HISTORY_WEIGHT_CONT_4
+                history_score = get_quiet_stat_score(search_context, ply, from_sq, to_sq, aggressor_type, pawn_key_idx)
 
                 lmr = get_lmr_reduction(depth, legal_moves_tried, history_score, improving, is_pv)
 

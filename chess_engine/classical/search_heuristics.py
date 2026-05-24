@@ -5,7 +5,7 @@ from chess_engine.classical.move import (
     get_to_square, get_from_square, get_special_move_flag,
     SPECIAL_MOVE_FLAG_PROMOTION, SPECIAL_MOVE_FLAG_EN_PASSANT
 )
-from chess_engine.classical.constants import SCORE_GOOD_CAPTURE_BONUS, SCORE_BAD_CAPTURE_PENALTY, SCORE_KILLER_1, SCORE_KILLER_2, SCORE_COUNTER_MOVE, MAX_HISTORY, LMR_TABLE, MAX_PLY, SCORE_TT_MOVE, BB_SQUARES, NO_MOVE, HISTORY_MAX_MAIN, HISTORY_MAX_BUTTERFLY, HISTORY_MAX_CAPTURE, HISTORY_MAX_CONTINUATION, HISTORY_MAX_PAWN, LMR_HISTORY_DIVISOR
+from chess_engine.classical.constants import SCORE_GOOD_CAPTURE_BONUS, SCORE_BAD_CAPTURE_PENALTY, SCORE_KILLER_1, SCORE_KILLER_2, SCORE_COUNTER_MOVE, MAX_HISTORY, LMR_TABLE, MAX_PLY, SCORE_TT_MOVE, BB_SQUARES, NO_MOVE, HISTORY_MAX_MAIN, HISTORY_MAX_BUTTERFLY, HISTORY_MAX_CAPTURE, HISTORY_MAX_CONTINUATION, HISTORY_MAX_PAWN, LMR_HISTORY_DIVISOR, HISTORY_WEIGHT_MAIN, HISTORY_WEIGHT_CONT_1, HISTORY_WEIGHT_CONT_2, HISTORY_WEIGHT_CONT_4
 from chess_engine.classical.constants import MG_MATERIAL_VALUES
 from chess_engine.classical.see import see_ge
 from chess_engine.classical.bitboard_utils import find_piece_type_on_square, find_piece_type_on_square_side, get_lsb_index
@@ -116,6 +116,32 @@ def update_quiet_stats_on_tt_hit(search_context, tt_move, tt_aggressor, tt_to, p
             update_continuation_history(search_context, 2, prev_move, prev_piece, tt_move, tt_aggressor, tt_bonus)
 
 @numba.njit(cache=True, boundscheck=False, fastmath=True)
+def get_quiet_stat_score(search_context, ply, from_sq, to_sq, aggressor_type, pawn_key_idx):
+    score = search_context.history_table[aggressor_type, to_sq] * HISTORY_WEIGHT_MAIN
+    score += search_context.pawn_history[pawn_key_idx, aggressor_type, to_sq] * 2
+    score += search_context.butterfly_history[from_sq, to_sq]
+
+    if ply > 0:
+        prev_move = search_context.move_stack[ply - 1]
+        prev_piece = search_context.piece_stack[ply - 1]
+        if prev_move != NO_MOVE and prev_piece != -1:
+            score += search_context.continuation_history[0, prev_piece, get_to_square(prev_move), aggressor_type, to_sq] * HISTORY_WEIGHT_CONT_1
+
+    if ply > 1:
+        prev_move = search_context.move_stack[ply - 2]
+        prev_piece = search_context.piece_stack[ply - 2]
+        if prev_move != NO_MOVE and prev_piece != -1:
+            score += search_context.continuation_history[1, prev_piece, get_to_square(prev_move), aggressor_type, to_sq] * HISTORY_WEIGHT_CONT_2
+
+    if ply > 3:
+        prev_move = search_context.move_stack[ply - 4]
+        prev_piece = search_context.piece_stack[ply - 4]
+        if prev_move != NO_MOVE and prev_piece != -1:
+            score += search_context.continuation_history[2, prev_piece, get_to_square(prev_move), aggressor_type, to_sq] * HISTORY_WEIGHT_CONT_4
+
+    return score
+
+@numba.njit(cache=True, boundscheck=False, fastmath=True)
 def score_captures(piece_bbs, occupancy_bbs, game_state, moves, scores, start_idx, end_idx, search_context, pinned_white, pinned_black):
     side_to_move = game_state[0]
     
@@ -191,51 +217,13 @@ def score_captures_with_tt(piece_bbs, occupancy_bbs, game_state, moves, scores, 
 def score_quiets(piece_bbs, occupancy_bbs, game_state, moves, scores, start_idx, end_idx, search_context, ply, killer_1, killer_2, counter_move, pawn_key_idx):
     side_to_move = game_state[0]
     
-    prev_move_1 = NO_MOVE
-    prev_piece_1 = -1
-    prev_move_2 = NO_MOVE
-    prev_piece_2 = -1
-    prev_move_4 = NO_MOVE
-    prev_piece_4 = -1
-    
-    if ply > 0:
-        prev_move_1 = search_context.move_stack[ply-1]
-        prev_piece_1 = search_context.piece_stack[ply-1]
-        
-    if ply > 1:
-        prev_move_2 = search_context.move_stack[ply-2]
-        prev_piece_2 = search_context.piece_stack[ply-2]
-        
-    if ply > 3:
-        prev_move_4 = search_context.move_stack[ply-4]
-        prev_piece_4 = search_context.piece_stack[ply-4]
-
     for i in range(start_idx, end_idx):
         move = moves[i]
         to_square = get_to_square(move)
         from_sq = get_from_square(move)
         
         aggressor_type = find_piece_type_on_square_side(piece_bbs, from_sq, side_to_move)
-        score = search_context.history_table[aggressor_type, to_square]
-        
-        # Pawn History
-        score += search_context.pawn_history[pawn_key_idx, aggressor_type, to_square] * 2
-        
-        # Butterfly History
-        score += search_context.butterfly_history[from_sq, to_square]
-        
-        # Continuation History
-        if prev_move_1 != NO_MOVE and prev_piece_1 != -1:
-            cont_score = search_context.continuation_history[0, prev_piece_1, get_to_square(prev_move_1), aggressor_type, to_square]
-            score += cont_score
-
-        if prev_move_2 != NO_MOVE and prev_piece_2 != -1:
-            cont_score = search_context.continuation_history[1, prev_piece_2, get_to_square(prev_move_2), aggressor_type, to_square]
-            score += cont_score
-
-        if prev_move_4 != NO_MOVE and prev_piece_4 != -1:
-            cont_score = search_context.continuation_history[2, prev_piece_4, get_to_square(prev_move_4), aggressor_type, to_square]
-            score += cont_score
+        score = get_quiet_stat_score(search_context, ply, from_sq, to_square, aggressor_type, pawn_key_idx)
 
         # Static Check Bonus
         opponent_king_bb = piece_bbs[11] if side_to_move == 0 else piece_bbs[5]
