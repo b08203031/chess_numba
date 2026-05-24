@@ -879,13 +879,16 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                     unmake_move(piece_bbs, occupancy_bbs, game_state, pc_move, pc_unmake)
                     continue
     
-                # Shallow verification search
-                search_context.move_stack[ply] = NO_MOVE
-                search_context.piece_stack[ply] = -1
+                saved_pc_stack_move = search_context.move_stack[ply]
+                saved_pc_stack_piece = search_context.piece_stack[ply]
+                search_context.move_stack[ply] = pc_move
+                search_context.piece_stack[ply] = pc_unmake[0]
                 res_pc = _search(
                     piece_bbs, occupancy_bbs, game_state, depth - PROBCUT_R,
                     -probcut_beta, -probcut_beta + 1, search_context, ply + 1, NO_MOVE, False, not cut_node
                 )
+                search_context.move_stack[ply] = saved_pc_stack_move
+                search_context.piece_stack[ply] = saved_pc_stack_piece
                 pc_score = -res_pc[0]
                 
                 # IMPORTANT: Must aggregate the search stats from ProbCut back into the parent
@@ -1031,11 +1034,12 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
         is_giving_check_after_move = is_square_attacked(piece_bbs, occupancy_bbs, their_king_sq, our_side)
         
         # Final determination of quiet move
-        is_quiet_move = is_pseudo_quiet and not is_giving_check_after_move
+        is_quiet_move = is_pseudo_quiet
+        can_prune_quiet = is_quiet_move and not is_giving_check_after_move
 
         if (search_context.enable_see_pruning and not is_exclusion_search
                 and depth <= PRUNING_SHALLOW_DEPTH and not is_currently_in_check and not is_pv
-                and is_quiet_move):
+                and can_prune_quiet):
             prune_quiet_move = False
             if ENABLE_HISTORY_PRUNING and moved_piece_type != -1:
                 history_score = get_quiet_stat_score(search_context, ply, from_sq, to_sq, moved_piece_type, pawn_key_idx)
@@ -1107,7 +1111,7 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
             quiet_moves_tried_count += 1
             
             # Late Move Pruning (LMP) - Disabled in PV nodes
-            if search_context.enable_lmp and not is_exclusion_search and not is_currently_in_check and not is_pv:
+            if can_prune_quiet and search_context.enable_lmp and not is_exclusion_search and not is_currently_in_check and not is_pv:
                 limit = LMP_MOVE_COUNT[min(depth, MAX_PLY - 1)]
                 if not improving: limit = limit // 2
                 limit = max(limit, 2)
@@ -1117,7 +1121,7 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                     continue  # H7: was 'break', changed to 'continue' to not skip bad captures
 
         # Futility Pruning (FP) - Disabled in PV nodes
-        if (search_context.enable_fp and not is_exclusion_search and is_quiet_move and depth <= 8 and not is_currently_in_check
+        if (search_context.enable_fp and not is_exclusion_search and can_prune_quiet and depth <= 8 and not is_currently_in_check
                 and not is_pv and not low_material_pruning_guard
                 and static_score != -INFINITY):
             # Dynamic Futility Margin: FP_BASE + FP_MULTIPLIER * depth
@@ -1151,9 +1155,9 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                     unmake_move(piece_bbs, occupancy_bbs, game_state, move, unmake_info)
                     continue
         
-        # --- Determine total extension (SF18 style: unconditional check extension) ---
+        # --- Determine total extension ---
         check_extension = 0
-        if is_giving_check_after_move:
+        if is_giving_check_after_move and (is_pv or move == tt_move or depth <= 4):
             check_extension = 1
         
         current_extension = check_extension
@@ -1162,58 +1166,66 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
         if ENABLE_SINGULAR_EXTENSIONS and excluded_move == NO_MOVE and move == tt_move and depth >= MIN_SINGULAR_DEPTH and not is_currently_in_check:
             if tt_entry['flag'] != TT_FLAG_NONE and (tt_entry['flag'] == TT_FLAG_EXACT or tt_entry['flag'] == TT_FLAG_BETA) and tt_entry['depth'] >= depth - 3:
                 se_tt_score = np.int32(tt_entry['score'])
-                exclusion_beta = se_tt_score - SINGULAR_EXTENSION_MARGIN
-                # Save MovePicker State to prevent Singular Extension from clobbering the parent
-                saved_mp_stage = search_context.mp_stage[ply]
-                saved_mp_idx = search_context.mp_current_idx[ply]
-                saved_mp_captures = search_context.mp_captures_end[ply]
-                saved_mp_quiets = search_context.mp_quiets_end[ply]
-                saved_mp_bad_cap = search_context.mp_bad_captures_count[ply]
-                saved_mp_bad_idx = search_context.mp_bad_captures_idx[ply]
+                if se_tt_score > MATE_IN_MAX_PLY:
+                    se_tt_score -= ply
+                elif se_tt_score < -MATE_IN_MAX_PLY:
+                    se_tt_score += ply
 
-                # Unmake to search position without this move
-                unmake_move(piece_bbs, occupancy_bbs, game_state, move, unmake_info)
-                res_ex = _search(
-                    piece_bbs, occupancy_bbs, game_state, (depth - 1) // 2, exclusion_beta - 1, exclusion_beta, search_context, ply, tt_move, False, cut_node)
-                exclusion_score = res_ex[0]
-                
-                nodes_searched += res_ex[2]; quiescence_nodes += res_ex[3]
-                tt_hits += res_ex[4]
-                
-                # Restore MovePicker State
-                search_context.mp_stage[ply] = saved_mp_stage
-                search_context.mp_current_idx[ply] = saved_mp_idx
-                search_context.mp_captures_end[ply] = saved_mp_captures
-                search_context.mp_quiets_end[ply] = saved_mp_quiets
-                search_context.mp_bad_captures_count[ply] = saved_mp_bad_cap
-                search_context.mp_bad_captures_idx[ply] = saved_mp_bad_idx
+                if abs(se_tt_score) >= MATE_IN_MAX_PLY:
+                    current_extension = max(current_extension, 0)
+                else:
+                    exclusion_beta = se_tt_score - SINGULAR_EXTENSION_MARGIN
 
-                # Re-make the move
-                search_context.old_piece_bbs[ply, :] = piece_bbs[:]
-                unmake_info = make_move(piece_bbs, occupancy_bbs, game_state, move)
-                moved_piece_type = unmake_info[0]
-                search_context.move_stack[ply] = move
-                search_context.piece_stack[ply] = moved_piece_type
+                    # Save MovePicker State to prevent Singular Extension from clobbering the parent
+                    saved_mp_stage = search_context.mp_stage[ply]
+                    saved_mp_idx = search_context.mp_current_idx[ply]
+                    saved_mp_captures = search_context.mp_captures_end[ply]
+                    saved_mp_quiets = search_context.mp_quiets_end[ply]
+                    saved_mp_bad_cap = search_context.mp_bad_captures_count[ply]
+                    saved_mp_bad_idx = search_context.mp_bad_captures_idx[ply]
 
-                if search_context.stop_flag[0]:
+                    # Unmake to search position without this move
                     unmake_move(piece_bbs, occupancy_bbs, game_state, move, unmake_info)
-                    return (np.int32(0), NO_MOVE, nodes_searched, quiescence_nodes, tt_hits)
-
-                if exclusion_score < exclusion_beta:
-                    current_extension = max(current_extension, 1)
-                    # Double extension for big margin
-                    if depth >= 8 and exclusion_score < exclusion_beta - SINGULAR_EXTENSION_MARGIN:
-                        current_extension = max(current_extension, 2)
-                elif search_context.enable_multicut and exclusion_beta >= beta:
-                    # --- MODERN MULTI-CUT PRUNING ---
-                    # If the singular search fails high (exclusion_score >= exclusion_beta)
-                    # AND the bounds at which it was searched are >= beta,
-                    # it means multiple moves (TT move + another move) fail high.
-                    # Conservative check: Never prune if we see a mate score!
-                    if abs(exclusion_score) < MATE_IN_MAX_PLY:
-                        unmake_move(piece_bbs, occupancy_bbs, game_state, move, unmake_info)
-                        return (np.int32(exclusion_beta), NO_MOVE, nodes_searched, quiescence_nodes, tt_hits)
+                    res_ex = _search(
+                        piece_bbs, occupancy_bbs, game_state, (depth - 1) // 2, exclusion_beta - 1, exclusion_beta, search_context, ply, tt_move, False, cut_node)
+                    exclusion_score = res_ex[0]
                     
+                    nodes_searched += res_ex[2]; quiescence_nodes += res_ex[3]
+                    tt_hits += res_ex[4]
+                    
+                    # Restore MovePicker State
+                    search_context.mp_stage[ply] = saved_mp_stage
+                    search_context.mp_current_idx[ply] = saved_mp_idx
+                    search_context.mp_captures_end[ply] = saved_mp_captures
+                    search_context.mp_quiets_end[ply] = saved_mp_quiets
+                    search_context.mp_bad_captures_count[ply] = saved_mp_bad_cap
+                    search_context.mp_bad_captures_idx[ply] = saved_mp_bad_idx
+
+                    # Re-make the move
+                    search_context.old_piece_bbs[ply, :] = piece_bbs[:]
+                    unmake_info = make_move(piece_bbs, occupancy_bbs, game_state, move)
+                    moved_piece_type = unmake_info[0]
+                    search_context.move_stack[ply] = move
+                    search_context.piece_stack[ply] = moved_piece_type
+
+                    if search_context.stop_flag[0]:
+                        unmake_move(piece_bbs, occupancy_bbs, game_state, move, unmake_info)
+                        return (np.int32(0), NO_MOVE, nodes_searched, quiescence_nodes, tt_hits)
+
+                    if exclusion_score < exclusion_beta:
+                        current_extension = max(current_extension, 1)
+                        # Double extension for big margin
+                        if depth >= 8 and exclusion_score < exclusion_beta - SINGULAR_EXTENSION_MARGIN:
+                            current_extension = max(current_extension, 2)
+                    elif search_context.enable_multicut and exclusion_beta >= beta:
+                        # --- MODERN MULTI-CUT PRUNING ---
+                        # If the singular search fails high (exclusion_score >= exclusion_beta)
+                        # AND the bounds at which it was searched are >= beta,
+                        # it means multiple moves (TT move + another move) fail high.
+                        # Conservative check: Never prune if we see a mate score!
+                        if abs(exclusion_score) < MATE_IN_MAX_PLY:
+                            unmake_move(piece_bbs, occupancy_bbs, game_state, move, unmake_info)
+                            return (np.int32(exclusion_beta), NO_MOVE, nodes_searched, quiescence_nodes, tt_hits)
         search_depth = depth - 1 + current_extension
 
         evaluation = 0
@@ -1238,6 +1250,8 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                 # No TT move bonus
                 if tt_move == NO_MOVE:
                     lmr += 1
+                if is_giving_check_after_move:
+                    lmr = max(0, lmr - 1)
 
                 # A2: Pawn push protection — don't reduce pawn pushes to 6th/7th rank
                 is_pawn = (moved_piece_type % 6) == PAWN
