@@ -1,0 +1,8 @@
+- [x] Modify `chess_engine/nnue/engine_types.py` to add dynamic pruning flags to `SearchContext` spec and constructor.
+- [x] Modify `chess_engine/nnue/search.py` to reference `search_context` flags instead of `constants.py` global constants.
+- [x] Modify `main_nn.py` to output option definitions, parse UCI `setoption` commands, and assign settings to `SearchContext`.
+- [x] Verify compilation of the modified engine.
+- [x] Execute calibration benchmark run for Priority P1 positions (depth 6).
+- [x] Analyze results and identify parameters to adjust.
+- [ ] Update `chess_engine/nnue/constants.py` with calibrated search pruning parameters.
+- [ ] Request user to run depth 8 benchmark to verify the adjusted parameters.

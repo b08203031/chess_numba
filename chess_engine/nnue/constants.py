@@ -679,6 +679,8 @@ RFP_BASE_MULT = 254           # 增加邊際
 RFP_NO_TT_PENALTY = 50       # Extra margin multiplier if TT info is missing
 
 NMP_STATIC_MARGIN = 190
+NMP_MIN_SIDE_NON_PAWNS = 2
+LOW_MATERIAL_PRUNING_PIECE_COUNT = 7
 
 # Late Move Reductions (LMR)
 LMR_MIN_DEPTH = 4           # 延後 LMR

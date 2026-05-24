@@ -1,0 +1,32 @@
+========================================================================
+NNUE Comprehensive Diagnosis Probe v3
+Source: latest_model.pth (current epoch) | Time: 2026-05-23 12:55:47
+========================================================================
+
+Epoch: 6 | Best Val Loss: 0.6811386709716797
+
+========================================================================
+1. FC1 SPARSE FEATURE TRANSFORMER
+========================================================================
+  Shape: (22528, 512) | dtype: float32 → quantized INT16 × Q1(255)
+  Weight stats: mean=0.00314, std=0.99985
+  Weight range: [-4.0000, 4.0000]
+  Saturation (|w| >= 128.5): 0.0000%
+  Near-zero (|w| < 1e-4): 0.01%
+  Bias range: [-0.0461, 0.6764], mean=0.2691
+
+  Accumulator Estimate (CLT, 31 features):
+    Pre-CReLU mean=0.366, std=5.567
+    Expected clipped above 1.0: 45.5%
+    Expected clipped below 0.0 (dead): 47.4%
+    Effective utilization of [0, 1.0] range: 7.2%
+
+  INT16 Overflow Check (worst case 31 features using actual max |w| = 4.0000):
+    Max weight sum (INT): 31620
+    Max bias (INT): 172
+    Worst total: 31792 / 32767 → SAFE
+  [STATUS] FC1 weights well within bounds. ✓
+
+========================================================================
+2. LAYERSTACK BUCKET ANALYSIS (Independent Layers)
+========================================================================

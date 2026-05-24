@@ -15,7 +15,7 @@
 *   **輸入特徵**：HalfKAv2_hm (King-Relative Piece Square, featuring interleaved channels and horizontal mirroring). 考慮了己方國王位置（經水平鏡像映射到 a-d 檔案）與全場其餘棋子位置的組合，共 **22,528** 種特徵。
 *   **維度**：**512**。能精準捕捉細微的局面結構差異。
 *   **計算方式**：採用增量更新（Incremental Update）。在搜尋樹遍歷中，每走一步只需對 Accumulator 進行加減法向量運算（除了國王移動觸發全重構外），運算複雜度為 $O(1)$。
-*   **激活函數**：`ClippedReLU(0.0, 127.0)`。
+*   **激活函數**：在訓練期（浮點數域）為 `ClippedReLU(0.0, 127.0)`。在推理期（整數域）由於輸入被乘以 $Q_1 = 127$ 進行縮放，其對應的激活邊界為 `ClippedReLU(0, 16129)`（其中 $127 \times 127 = 16129$）。
 *   **特徵拼接 (Concat)**：將行棋方 STM 的 512 維向量與非行棋方 NSTM 的 512 維向量拼接，形成 **1024** 維向量作為決策層的輸入。
 
 ### 第二層至第四層：決策分桶層 (8 LayerStack Buckets)
@@ -23,8 +23,8 @@
 $$\text{bucket} = \text{clamp}\left(\frac{\text{piece\_count} - 1}{4}, 0, 7\right)$$
 
 每個分桶內部包含三層全連接層：
-*   **FC2 (特徵融合層)**：$1024 \to 32$。經由 `ClippedReLU(0.0, 127.0)` 激活。
-*   **FC3 (特徵壓縮層)**：$32 \to 32$。經由 `ClippedReLU(0.0, 127.0)` 激活。
+*   **FC2 (特徵融合層)**：$1024 \to 32$。激活函數在訓練期為 `ClippedReLU(0.0, 127.0)`，推理期量化後對應為整數域的 `ClippedReLU(0, 16129)`。
+*   **FC3 (特徵壓縮層)**：$32 \to 32$。激活同上。
 *   **FC4 (決策輸出層)**：$32 \to 1$。線性輸出（Logit），隨後經量化縮放轉換為 Centipawn (cp) 分數。
 
 ---
@@ -46,9 +46,10 @@ $$\text{bucket} = \text{clamp}\left(\frac{\text{piece\_count} - 1}{4}, 0, 7\righ
 ### B. 零記憶體開銷與 JIT 優化 (Zero-Memory Overhead & JIT Optimization)
 *   **整數化量化 (Integer Quantization)**：
     *   模型透過 $Q_1 = 127$ 與 $Q_{\text{hidden}} = 128$ 進行整數化。
-    *   在 Numba 推理中，所有的除法與激活操作被轉化為極快的二進位位移運算（`>> 7`）和 `max/min` 邊界限制，完美契合 CPU 緩存與 SIMD 自動向量化。
+    *   在 Numba 推理中，所有的除法與激活操作被轉化為極快的二進位位移運算（`>> 7`）和 `max/min` 邊界限制，完美契合 CPU 緩存與 SIMD 自動向量化。最終輸出使用與 $\sigma(0.0025 \times \text{cp})$ 對齊的 `trunc_toward_zero(output, 41)`（即 `trunc(output / 41)`：對正數使用 `output // 41`，對負數使用 `-((-output) // 41)`，以確保正負估值在整數截斷時的對稱性，避免 Negamax 搜尋因非對稱截斷產生偏差）。
 *   **物理極限防爆 (Physical Weight Bounds)**：
-    *   在訓練期對 FC1 稀疏層進行物理上限夾逼（Clamping），確保在多子密集的複雜局面下，累加器激活值不會輕易溢出 INT16/INT32 的數值安全區。
+    *   在訓練期對 FC1 稀疏層進行物理上限夾逼（Clamping），限制單個權重絕對值不超過 `FC1_MAX_WEIGHT = 4.0`。由於第一層量化因子 $Q_1 = 127$，對應的整數權重最大絕對值限制為 $4.0 \times 127 = 508$。
+    *   由於一盤西洋棋最多只有 32 個棋子，即稀疏輸入特徵在任一局面下最多有 32 個激活值。在最極端的多子密集局面下，累加器單維最大可能值為 $32 \times 508 = 16,256$，這完全在 `int16` / `int32` 的數值安全範圍內，保證累加與前向傳播絕不溢出，大幅提升了數值穩定性。
 
 ---
 

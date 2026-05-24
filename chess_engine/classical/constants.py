@@ -679,6 +679,8 @@ RFP_BASE_MULT = 180           # Base margin multiplier per depth
 RFP_NO_TT_PENALTY = 40       # Extra margin multiplier if TT info is missing
 
 NMP_STATIC_MARGIN = 150
+NMP_MIN_SIDE_NON_PAWNS = 2
+LOW_MATERIAL_PRUNING_PIECE_COUNT = 7
 
 # Late Move Reductions (LMR)
 LMR_MIN_DEPTH = 3           # Minimum depth to apply LMR (H4: lowered from 4 to match Stockfish)

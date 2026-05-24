@@ -102,6 +102,9 @@
 # 經典/NNUE 引擎搜尋正確性測試
 python -m tests.test_search
 
+# NNUE 引擎 JIT、量化與數據管線安全性單元測試
+python -m unittest tests.test_nnue_validation
+
 # 經典評估版本戰術謎題測試
 python -m tests.test_puzzle
 
@@ -153,6 +156,7 @@ python -m tests.perft divide --depth 4
       * `inference.py`: 基於 Numba JIT 的前向推理引擎。
       * `weights/`: 儲存 `*.pth` 與 `*.npy` 權重檔案。
 * `tests/`: 單元測試與效能基準測試目錄。
+  * `test_nnue_validation.py`: NNUE JIT、量化與數據管線安全性單元測試。
   * `test_puzzle.py` & `test_puzzle_nn.py`: 戰術謎題測試。
   * `test_search.py`: 搜尋邏輯測試。
   * `perft.py`: 移動生成器性能與正確性測試。
@@ -182,6 +186,8 @@ python -m tests.perft divide --depth 4
   * 介紹 NNUE 模型特徵生成、離線數據清洗、PyTorch 模型訓練、權重量化導出與測試指標。
 * **[NNUE 可行性與評估報告](chess_engine/nnue/ml_eval/ml_eval_feasibility_report.md)**：
   * 分析機器學習 (CNN 與 NNUE 路線) 取代手工評估的可行性，並評估在消費級 GPU (如 RTX 4050) 下的訓練可行性。
+* **[NNUE 搜尋算法最佳化報告](chess_engine/nnue/SEARCH_ANALYSIS.md)**：
+  * 解析 NNUE 搜尋引擎的 PVS 搜尋結構、多重剪枝優化與基於 `SearchContext` 的動態 UCI 開關調參設計。
 
 ### 2. 經典 (Classical) 評估與搜尋演算法
 * **[搜尋算法最佳化報告](chess_engine/classical/SEARCH_ANALYSIS.md)**：

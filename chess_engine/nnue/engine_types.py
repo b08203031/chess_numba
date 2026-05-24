@@ -2,7 +2,12 @@
 import numba
 import numpy as np
 from chess_engine.nnue.transposition_table import numba_tt_entry_type
-from chess_engine.nnue.constants import MAX_PLY, CORRECTION_HISTORY_SIZE
+from chess_engine.nnue.constants import (
+    MAX_PLY, CORRECTION_HISTORY_SIZE,
+    ENABLE_NMP, ENABLE_RFP, ENABLE_RAZORING,
+    ENABLE_LMR, ENABLE_SHALLOW_SEE_PRUNING, ENABLE_LMP, ENABLE_FP,
+    ENABLE_PROBCUT, ENABLE_MULTICUT
+)
 
 """
 此模組定義了西洋棋引擎中使用的 Numba 類型和類別。
@@ -67,6 +72,15 @@ search_context_spec = [
     ('butterfly_history', numba.int32[:, :]),
     ('capture_history', numba.int32[:, :, :]),
     ('old_piece_bbs', numba.uint64[:, :]),  # Pre-allocated buffer — eliminates piece_bbs.copy() heap allocs
+    ('enable_nmp', numba.boolean),
+    ('enable_rfp', numba.boolean),
+    ('enable_razoring', numba.boolean),
+    ('enable_lmr', numba.boolean),
+    ('enable_see_pruning', numba.boolean),
+    ('enable_lmp', numba.boolean),
+    ('enable_fp', numba.boolean),
+    ('enable_probcut', numba.boolean),
+    ('enable_multicut', numba.boolean),
 ]
 
 @jitclass(search_context_spec)
@@ -161,6 +175,15 @@ class SearchContext:
         self.mp_quiets_end = np.zeros(MAX_PLY, dtype=np.int32)
         self.mp_bad_captures_count = np.zeros(MAX_PLY, dtype=np.int32)
         self.mp_bad_captures_idx = np.zeros(MAX_PLY, dtype=np.int32)
+        self.enable_nmp = ENABLE_NMP
+        self.enable_rfp = ENABLE_RFP
+        self.enable_razoring = ENABLE_RAZORING
+        self.enable_lmr = ENABLE_LMR
+        self.enable_see_pruning = ENABLE_SHALLOW_SEE_PRUNING
+        self.enable_lmp = ENABLE_LMP
+        self.enable_fp = ENABLE_FP
+        self.enable_probcut = ENABLE_PROBCUT
+        self.enable_multicut = ENABLE_MULTICUT
 
 
 

@@ -2,12 +2,12 @@
 convert_bullet_bin.py — 將 Primer 輸出的 Bullet .bin 檔案轉換為 NNUE 訓練器的 .npz 格式
 
 用法:
-    python tuner/nnue_pipeline/convert_bullet_bin.py input.bin [--output tuner/ultimate_halfka.npz] [--limit 40000000]
+    python tuner/nnue_pipeline/convert_bullet_bin.py input.bin [--output tuner/ultimate_halfka.npz] [--limit 32000000]
 
 Bullet .bin 格式 (32 bytes per struct, C++ 'ChessBoard'):
     uint64_t occupancy;      // 8 bytes (Pieces bitboard)
     uint8_t  pieces[16];     // 16 bytes (Piece types matching the set bits in occupancy)
-    int16_t  score;          // 2 bytes (cp score from stm perspective)
+    int16_t  score;          // 2 bytes (raw Stockfish Value from stm perspective)
     uint8_t  result;         // 1 byte (0=Black Win, 1=Draw, 2=White Win)
     uint8_t  king_square;    // 1 byte (stm king)
     uint8_t  opp_king_square;// 1 byte (nstm king)
@@ -26,11 +26,23 @@ import numba
 # ⚙️ 設定區
 # ==========================================
 DEFAULT_OUTPUT = "tuner/ultimate_halfka_farseerT75.npz"
-DEFAULT_LIMIT = 45_000_000
+DEFAULT_LIMIT = 32_000_000
 RECORD_SIZE = 32  # bytes per ChessBoard struct
+KING_BUCKET_STRIDE = 704
+BYTES_PER_SAMPLE_IN_RAM = 32 * 2 * 2 + 4 + 1  # stm/nstm uint16 features + target + piece_count
 
 # WDL Scale
 K = 0.0025
+# Stockfish stores training scores as raw Value. UCI cp display uses
+# cp = value * 100 / PawnValueEg; the bundled Stockfish source has PawnValueEg=208.
+STOCKFISH_PAWN_VALUE_EG = 208.0
+
+@numba.njit(cache=True, fastmath=True)
+def sf_hm_king_bucket(oriented_king_sq):
+    """Stockfish HalfKAv2_hm bucket after optional horizontal mirroring to files e-h."""
+    if (oriented_king_sq & 7) < 4:
+        oriented_king_sq ^= 7
+    return (7 - (oriented_king_sq >> 3)) * 4 + (7 - (oriented_king_sq & 7))
 
 # ==========================================
 # ♟️ Piece Mapping
@@ -55,7 +67,7 @@ K = 0.0025
 @numba.njit(cache=True, fastmath=True)
 def get_halfka_indices_bullet(occupancy, pieces, wk_sq, bk_sq):
     """
-    Extracts HalfKA features from Bullet format — STM perspective.
+    Extracts HalfKAv2_hm features from Bullet format — STM perspective.
     Bullet format guarantees the board is stored from STM perspective (STM is treated as White).
     wk_sq is STM king, bk_sq is NSTM king.
 
@@ -66,20 +78,16 @@ def get_halfka_indices_bullet(occupancy, pieces, wk_sq, bk_sq):
         6  = PS_W_ROOK   (own rook)      7  = PS_B_ROOK   (opp rook)
         8  = PS_W_QUEEN  (own queen)     9  = PS_B_QUEEN  (opp queen)
         10 = PS_KING     (merged: BOTH kings share this channel)
-    Feature index = bucket * 704 + mapped_type * 64 + mapped_sq
+    Feature index = bucket * 704 + mapped_type * 64 + mapped_sq, using the
+    Stockfish-compatible e-h orientation and vertically reversed king buckets.
     """
     indices = np.full(32, 22528, dtype=np.int32)
     idx_count = 0
 
     # In Bullet format, board is flipped if STM was Black.
     # Therefore, STM is ALWAYS White here.
-    flip_h = (wk_sq % 8) >= 4
-    if flip_h:
-        king_sq_mapped = wk_sq ^ 7
-    else:
-        king_sq_mapped = wk_sq
-
-    bucket = (king_sq_mapped // 8) * 4 + (king_sq_mapped % 8)
+    flip_h = (wk_sq & 7) < 4
+    bucket = sf_hm_king_bucket(wk_sq)
 
     # Loop through occupancy bits
     temp_occ = occupancy
@@ -132,7 +140,7 @@ def get_halfka_indices_bullet(occupancy, pieces, wk_sq, bk_sq):
                 mapped_sq ^= 7
 
             if idx_count < 32:
-                indices[idx_count] = bucket * 704 + mapped_type * 64 + mapped_sq
+                indices[idx_count] = bucket * KING_BUCKET_STRIDE + mapped_type * 64 + mapped_sq
                 idx_count += 1
 
         temp_occ &= temp_occ - numba.uint64(1)
@@ -142,7 +150,7 @@ def get_halfka_indices_bullet(occupancy, pieces, wk_sq, bk_sq):
 @numba.njit(cache=True, fastmath=True)
 def get_halfka_indices_bullet_nstm(occupancy, pieces, wk_sq, bk_sq):
     """
-    Extracts HalfKA features from Bullet format — NSTM perspective.
+    Extracts HalfKAv2_hm features from Bullet format — NSTM perspective.
     In Bullet format, NSTM is effectively Black.
     Primer already normalizes opp_king_square to NSTM's own perspective (verified:
     nnue_data_binpack_format.h:7577), so bk_sq does NOT need additional ^56.
@@ -164,13 +172,8 @@ def get_halfka_indices_bullet_nstm(occupancy, pieces, wk_sq, bk_sq):
     # NSTM is effectively Black. Primer already normalizes opp_king_square
     # to the NSTM's perspective — no additional ^56 needed.
     bk_sq_sym = bk_sq
-    flip_h = (bk_sq_sym % 8) >= 4
-    if flip_h:
-        king_sq_mapped = bk_sq_sym ^ 7
-    else:
-        king_sq_mapped = bk_sq_sym
-
-    bucket = (king_sq_mapped // 8) * 4 + (king_sq_mapped % 8)
+    flip_h = (bk_sq_sym & 7) < 4
+    bucket = sf_hm_king_bucket(bk_sq_sym)
 
     temp_occ = occupancy
     p_idx = 0
@@ -221,7 +224,7 @@ def get_halfka_indices_bullet_nstm(occupancy, pieces, wk_sq, bk_sq):
                 mapped_sq ^= 7
 
             if idx_count < 32:
-                indices[idx_count] = bucket * 704 + mapped_type * 64 + mapped_sq
+                indices[idx_count] = bucket * KING_BUCKET_STRIDE + mapped_type * 64 + mapped_sq
                 idx_count += 1
 
         temp_occ &= temp_occ - numba.uint64(1)
@@ -233,12 +236,15 @@ def cp_to_wdl(cp: int) -> float:
     wdl = 1.0 / (1.0 + math.exp(-K * cp))
     return max(0.001, min(0.999, wdl))
 
+def stockfish_value_to_cp(value: int) -> float:
+    return value * 100.0 / STOCKFISH_PAWN_VALUE_EG
+
 def main():
     import argparse
     parser = argparse.ArgumentParser(description="Bullet .bin (32 bytes ChessBoard) -> NPZ 訓練資料")
     parser.add_argument("input_bin", nargs="?", default="tuner/official_data_farseerT75.bin", help="輸入的 .bin 檔案路徑 (預設: tuner/official_data_farseerT75.bin)")
     parser.add_argument("--output", "-o", default=DEFAULT_OUTPUT, help=f"輸出的 .npz 檔案路徑")
-    parser.add_argument("--limit", "-n", type=int, default=DEFAULT_LIMIT, help=f"最大樣本數")
+    parser.add_argument("--limit", "-n", type=int, default=DEFAULT_LIMIT, help=f"最大樣本數 (預設: {DEFAULT_LIMIT:,})")
     args = parser.parse_args()
     
     input_path = args.input_bin
@@ -256,12 +262,16 @@ def main():
         
     total_records = file_size // RECORD_SIZE
     target = min(limit, total_records)
+    estimated_ram_gb = target * BYTES_PER_SAMPLE_IN_RAM / (1024 ** 3)
     
     print(f"解析真正 32-byte 的 ChessBoard Bullet 格式: {input_path}")
     print(f"   總記錄數: {total_records:,}")
     print(f"   目標樣本: {target:,}")
+    print(f"   預估未壓縮陣列 RAM: {estimated_ram_gb:.2f} GiB")
     
-    os.makedirs(os.path.dirname(output_path), exist_ok=True)
+    output_dir = os.path.dirname(output_path)
+    if output_dir:
+        os.makedirs(output_dir, exist_ok=True)
     all_features_stm  = np.zeros((target, 32), dtype=np.uint16)
     all_features_nstm = np.zeros((target, 32), dtype=np.uint16)
     all_targets       = np.zeros(target,       dtype=np.float32)
@@ -313,7 +323,7 @@ def main():
                     temp &= temp - 1
                     
                 all_piece_counts[count] = pc_count
-                all_targets[count] = cp_to_wdl(score)
+                all_targets[count] = cp_to_wdl(stockfish_value_to_cp(score))
                 all_features_stm[count] = get_halfka_indices_bullet(np.uint64(occupancy), pieces_arr, np.uint8(wk_sq), np.uint8(bk_sq))
                 all_features_nstm[count] = get_halfka_indices_bullet_nstm(np.uint64(occupancy), pieces_arr, np.uint8(wk_sq), np.uint8(bk_sq))
                 count += 1
@@ -331,12 +341,21 @@ def main():
     
     print(f"正在儲存至 {output_path}...")
     save_start = time.time()
+    import json
+    metadata = {
+        "feature_encoding_version": "halfkav2_hm_stockfish_official_v1",
+        "target_k": K,
+        "pawn_value_eg": STOCKFISH_PAWN_VALUE_EG,
+        "schema_version": "1.0.0"
+    }
+    metadata_json = json.dumps(metadata)
     np.savez_compressed(
         output_path,
         features_stm=all_features_stm[:count],
         features_nstm=all_features_nstm[:count],
         targets=all_targets[:count],
-        piece_counts=all_piece_counts[:count]
+        piece_counts=all_piece_counts[:count],
+        metadata_json=np.array(metadata_json)
     )
     print(f"存檔成功！耗時: {time.time()-save_start:.2f}s")
 

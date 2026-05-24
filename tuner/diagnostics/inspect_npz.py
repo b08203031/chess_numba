@@ -20,9 +20,13 @@ def print_record(features, targets, piece_counts, i):
     king_sq = -1
     
     # NNUE Feature -> Piece Mapping (STM perspective, board might be horizontally mirrored)
-    # 0:P, 1:N, 2:B, 3:R, 4:Q (White/STM)
-    # 5:p, 6:n, 7:b, 8:r, 9:q (Black/NSTM)
-    piece_chars = ['P', 'N', 'B', 'R', 'Q', 'p', 'n', 'b', 'r', 'q', 'k']
+    # 0:P (STM Pawn), 1:p (NSTM Pawn)
+    # 2:N (STM Knight), 3:n (NSTM Knight)
+    # 4:B (STM Bishop), 5:b (NSTM Bishop)
+    # 6:R (STM Rook), 7:r (NSTM Rook)
+    # 8:Q (STM Queen), 9:q (NSTM Queen)
+    # 10:k/K (Kings)
+    piece_chars = ['P', 'p', 'N', 'n', 'B', 'b', 'R', 'r', 'Q', 'q', 'k']
     
     for idx in f_stm:
         if idx == 22528: # Padding
@@ -34,14 +38,18 @@ def print_record(features, targets, piece_counts, i):
         mapped_sq = idx % 64
         
         # We only need to find the king square once from the bucket.
-        # bucket is 0-31 (left half of the board)
+        # bucket is 0-31
         if king_sq == -1:
-            # mirror mapping: (bucket // 4)*8 + (bucket % 4)
-            king_sq = (bucket // 4) * 8 + (bucket % 4)
-            board[king_sq] = 'K' # STM King is ALWAYS White 'K' here
+            # Stockfish reverse bucket mapping to retrieve oriented_king_sq
+            king_sq = (7 - (bucket // 4)) * 8 + (7 - (bucket % 4))
             
-        if mapped_type < 11:
+        if mapped_type < 10:
             board[mapped_sq] = piece_chars[mapped_type]
+        elif mapped_type == 10:
+            if mapped_sq == king_sq:
+                board[mapped_sq] = 'K'
+            else:
+                board[mapped_sq] = 'k'
             
     # We don't have the black king explicit from HalfKA STM features alone 
     # (unless we cross-reference NSTM, but let's just show what STM sees).

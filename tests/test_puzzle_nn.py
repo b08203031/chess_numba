@@ -43,7 +43,7 @@ from chess_engine.nnue.constants import MAX_PLY
 
 puzzles = [
         {
-            "name": "Â∞çÊ?chess.com 2900?ÇÈ??∞Á?ÔºåÂ??éÊ?Â∞ã‰??∞Ô?‰ΩÜ‰??úÂà∞Â∞±Áü•?ìÂ§ß??,
+            "name": "",
             "fen": "4rrk1/p2p1p1p/1p2p1p1/2nPq2P/2P5/4B3/PbB2PP1/1R1Q2KR w - - 2 20",
             "solution": ["b1b2", "h5g6"],
             "rating": "2400",
@@ -792,13 +792,13 @@ def run_puzzle_test():
             break
             
     if nnue_only:
-        print("?ïØÔ∏? Mode: [PURE NNUE ONLY] (Depth 1, no search)")
-        depth = 1
-        time_limit_ms = 999999 
+        print("?ÔøΩÔøΩÔøΩ? Mode: [PURE NNUE ONLY] (Depth 1, no search)")
+        depth = 40
+        time_limit_ms = 3000 
     else:
         print("?? Mode: [FULL SEARCH] (Depth 40, 3s limit)")
-        depth = 1
-        time_limit_ms = 300000
+        depth = 40
+        time_limit_ms = 3000
 
     if run_failed_only:
         try:

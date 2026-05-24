@@ -1,3 +1,9 @@
+# ==============================================================================
+# ⚠️ LEGACY SCRIPT / 遺留腳本警告
+# 此腳本為自 Hugging Face 下載並處理 FEN 資料集的遺留管線。
+# 目前專案優先推薦使用 convert_bullet_bin.py 來處理 Primer 生成的 Bullet 數據。
+# ==============================================================================
+
 import os
 import time
 import math
@@ -24,7 +30,7 @@ SKIP_SAMPLES = 1_000_000     # 跳過前 100 萬筆 (因為原資料集開頭的
 OUTPUT_FILE = "tuner/ultimate_dataset.npz"
 REPO_ID = "mateuszgrzyb/lichess-stockfish-normalized"
 
-K = 0.00368208
+K = 0.0025
 PIECE_MAP = {
     'P': 0, 'N': 1, 'B': 2, 'R': 3, 'Q': 4, 'K': 5,
     'p': 6, 'n': 7, 'b': 8, 'r': 9, 'q': 10, 'k': 11
@@ -72,6 +78,7 @@ def main():
     all_bbs = np.zeros((TARGET_SAMPLES, 12), dtype=np.uint64)
     all_stm = np.zeros((TARGET_SAMPLES, 1), dtype=np.uint8)
     all_results = np.zeros(TARGET_SAMPLES, dtype=np.float32)
+    all_piece_counts = np.zeros(TARGET_SAMPLES, dtype=np.int8)
     
     # 1. 直接取得資源庫裡所有 parquet 檔案的清單
     all_files = list_repo_files(repo_id=REPO_ID, repo_type="dataset")
@@ -170,10 +177,13 @@ def main():
                     
                 # 處理 FEN
                 bbs, stm = parse_fen_fast(fen_val)
+                # Compute piece count
+                pc_count = sum(bin(int(bbs[p])).count('1') for p in range(12))
                 
                 all_bbs[count] = bbs
                 all_stm[count, 0] = stm
                 all_results[count] = wdl
+                all_piece_counts[count] = pc_count
                 
                 count += 1
                 chunk_count += 1
@@ -205,19 +215,29 @@ def main():
     all_bbs[:count] = all_bbs[perm]
     all_stm[:count] = all_stm[perm]
     all_results[:count] = all_results[perm]
+    all_piece_counts[:count] = all_piece_counts[perm]
     
     print(f"✅ 洗牌完成！耗時: {time.time() - shuffle_start:.2f}s")
     # ==========================
+
+    import json
+    metadata = {
+        "feature_encoding_version": "halfkav2_hm_stockfish_official_v1",
+        "target_k": K,
+        "pawn_value_eg": 208.0,
+        "schema_version": "1.0.0"
+    }
+    metadata_json = json.dumps(metadata)
 
     print(f"\n開始壓縮並寫入硬碟...")
     np.savez_compressed(
         OUTPUT_FILE,
         piece_bbs=all_bbs[:count],
         game_states=all_stm[:count],
-        results=all_results[:count]
+        results=all_results[:count],
+        piece_counts=all_piece_counts[:count],
+        metadata_json=np.array(metadata_json)
     )
-    
-    
     print(f"🎉 儲存至 {OUTPUT_FILE}！")
 
 if __name__ == "__main__":

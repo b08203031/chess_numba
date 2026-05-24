@@ -16,7 +16,7 @@ from chess_engine.nnue.move_generator import (
 )
 from chess_engine.nnue.bitboard_utils import (
     get_lsb_index, WHITE_KING_ZONES, BLACK_KING_ZONES,
-    ROOK_RAYS, BISHOP_RAYS, SQUARES_BETWEEN
+    ROOK_RAYS, BISHOP_RAYS, SQUARES_BETWEEN, count_bits
 )
 from chess_engine.nnue.board_operations import make_move, unmake_move, make_null_move
 from chess_engine.nnue.move import (
@@ -39,9 +39,10 @@ from chess_engine.nnue.constants import (
     STOP_SEARCH_FLAG, MAX_HISTORY,
     SCORE_TT_MOVE, SCORE_GOOD_CAPTURE_BONUS, SCORE_KILLER_1,
     SCORE_KILLER_2, SCORE_COUNTER_MOVE, SCORE_BAD_CAPTURE_PENALTY, NMP_STATIC_MARGIN,
+    NMP_MIN_SIDE_NON_PAWNS, LOW_MATERIAL_PRUNING_PIECE_COUNT,
     ENABLE_SHALLOW_SEE_PRUNING, ENABLE_HISTORY_PRUNING, PRUNING_SHALLOW_DEPTH,
     PRUNING_CAPTURE_SEE_MARGIN, PRUNING_QUIET_SEE_MARGIN, PRUNING_HISTORY_THRESHOLD,
-    WHITE, BLACK, PAWN_KEY_INDEX, MINOR_KEY_INDEX, NON_PAWN_KEY_WHITE_INDEX, NON_PAWN_KEY_BLACK_INDEX, CORRECTION_HISTORY_SIZE, CORRECTION_HISTORY_MASK, CORRECTION_HISTORY_LIMIT, CORRECTION_HISTORY_DIVISOR, 
+    WHITE, BLACK, PAWN, KNIGHT, BISHOP, ROOK, QUEEN, PAWN_KEY_INDEX, MINOR_KEY_INDEX, NON_PAWN_KEY_WHITE_INDEX, NON_PAWN_KEY_BLACK_INDEX, CORRECTION_HISTORY_SIZE, CORRECTION_HISTORY_MASK, CORRECTION_HISTORY_LIMIT, CORRECTION_HISTORY_DIVISOR, 
     CORRECTION_HISTORY_PAWN_WEIGHT, CORRECTION_HISTORY_MINOR_WEIGHT, CORRECTION_HISTORY_NON_PAWN_WEIGHT, CORRECTION_HISTORY_UPDATE_DEPTH, SCORE_MIN, SCORE_MAX,
     CONTINUATION_HISTORY_FACTOR, HISTORY_MAX_CONTINUATION, HISTORY_MAX_PAWN, PAWN_HISTORY_MASK,
     GOOD_QUIET_THRESHOLD,
@@ -84,6 +85,9 @@ quiescence_search_return_type = numba.types.Tuple([
 def quiescence_search(piece_bbs, occupancy_bbs, game_state, alpha, beta, ply, search_context, q_ply):
     q_nodes = np.uint64(1)
     search_context.nodes_searched += 1
+    original_alpha = alpha
+    best_move = NO_MOVE
+    stand_pat = np.int32(32767)
 
 
 
@@ -102,6 +106,9 @@ def quiescence_search(piece_bbs, occupancy_bbs, game_state, alpha, beta, ply, se
 
     if ply >= MAX_PLY:
         return evaluate_position(piece_bbs, occupancy_bbs, game_state, search_context, ply, lazy=False), q_nodes
+
+    if not has_sufficient_material(piece_bbs):
+        return np.int32(0), q_nodes
 
     # M4: TT Probe in QSearch — avoids re-evaluating positions already in TT
     zobrist_key = game_state[4]
@@ -145,11 +152,19 @@ def quiescence_search(piece_bbs, occupancy_bbs, game_state, alpha, beta, ply, se
 
         stand_pat = evaluate_position(piece_bbs, occupancy_bbs, game_state, search_context, ply, lazy=False)
         if stand_pat >= beta:
+            tt_score = np.int32(beta)
+            if tt_score > MATE_IN_MAX_PLY: tt_score += ply
+            elif tt_score < -MATE_IN_MAX_PLY: tt_score -= ply
+            store_tt(search_context.transposition_table, tt_key, 0, tt_score, np.int16(stand_pat), TT_FLAG_BETA, NO_MOVE, search_context.tt_generation, False)
             return beta, q_nodes
         alpha = max(alpha, stand_pat)
 
         move_count = generate_pseudo_legal_captures_buffer(piece_bbs, occupancy_bbs, game_state, search_context.moves_buffer, ply)
         if move_count == 0:
+            tt_score = np.int32(stand_pat)
+            if tt_score > MATE_IN_MAX_PLY: tt_score += ply
+            elif tt_score < -MATE_IN_MAX_PLY: tt_score -= ply
+            store_tt(search_context.transposition_table, tt_key, 0, tt_score, np.int16(stand_pat), TT_FLAG_EXACT, NO_MOVE, search_context.tt_generation, False)
             return stand_pat, q_nodes
 
     # --- Sort moves in QSearch ---
@@ -195,11 +210,15 @@ def quiescence_search(piece_bbs, occupancy_bbs, game_state, alpha, beta, ply, se
         
         if not is_currently_in_check:
             if ENABLE_DELTA_PRUNING:
-                is_promotion = get_special_move_flag(move) == SPECIAL_MOVE_FLAG_PROMOTION
+                move_flag = get_special_move_flag(move)
+                is_promotion = move_flag == SPECIAL_MOVE_FLAG_PROMOTION
                 promotion_gain = MG_MATERIAL_VALUES[4] - MG_MATERIAL_VALUES[0] if is_promotion else 0
                 side_to_move = game_state[0]
-                victim_type = find_piece_type_on_square_side(piece_bbs, get_to_square(move), 1 - side_to_move)
-                victim_value = MG_MATERIAL_VALUES[victim_type % 6] if victim_type != -1 else 0
+                if move_flag == SPECIAL_MOVE_FLAG_EN_PASSANT:
+                    victim_value = MG_MATERIAL_VALUES[PAWN]
+                else:
+                    victim_type = find_piece_type_on_square_side(piece_bbs, get_to_square(move), 1 - side_to_move)
+                    victim_value = MG_MATERIAL_VALUES[victim_type % 6] if victim_type != -1 else 0
                 potential_gain = victim_value + promotion_gain
                 
                 if stand_pat + potential_gain + DELTA_PRUNING_MARGIN < alpha:
@@ -238,11 +257,29 @@ def quiescence_search(piece_bbs, occupancy_bbs, game_state, alpha, beta, ply, se
         score = -score
 
         if score >= beta:
+            tt_score = np.int32(beta)
+            if tt_score > MATE_IN_MAX_PLY: tt_score += ply
+            elif tt_score < -MATE_IN_MAX_PLY: tt_score -= ply
+            tt_static_eval_to_store = np.int16(32767)
+            if not is_currently_in_check and stand_pat != 32767:
+                tt_static_eval_to_store = np.int16(stand_pat)
+            store_tt(search_context.transposition_table, tt_key, 0, tt_score, tt_static_eval_to_store, TT_FLAG_BETA, move, search_context.tt_generation, False)
             return beta, q_nodes
-        alpha = max(alpha, score)
+        if score > alpha:
+            alpha = score
+            best_move = move
 
     if is_currently_in_check and legal_moves_tried == 0:
         return np.int32(-MATE_SCORE + ply), q_nodes
+
+    tt_flag = TT_FLAG_ALPHA if alpha <= original_alpha else TT_FLAG_EXACT
+    tt_score = np.int32(alpha)
+    if tt_score > MATE_IN_MAX_PLY: tt_score += ply
+    elif tt_score < -MATE_IN_MAX_PLY: tt_score -= ply
+    tt_static_eval_to_store = np.int16(32767)
+    if not is_currently_in_check and stand_pat != 32767:
+        tt_static_eval_to_store = np.int16(stand_pat)
+    store_tt(search_context.transposition_table, tt_key, 0, tt_score, tt_static_eval_to_store, tt_flag, best_move, search_context.tt_generation, False)
 
     return alpha, q_nodes
 
@@ -371,6 +408,7 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
 
     quiescence_nodes = np.uint64(0)
     tt_hits = np.uint64(0)
+    is_exclusion_search = excluded_move != NO_MOVE
 
     # Check for stop flag every 16384 nodes (at ~700k NPS this fires ~42x/sec)
     if (search_context.nodes_searched & 16383) == 0:
@@ -453,6 +491,10 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
     if ply > 0 and (repetition_count >= 1 or halfmove_clock >= FIFTY_MOVE_RULE_LIMIT):
         search_context.pv_table[ply, ply] = NO_MOVE
         return (np.int32(0), NO_MOVE, nodes_searched, quiescence_nodes, tt_hits)
+
+    if ply > 0 and not has_sufficient_material(piece_bbs):
+        search_context.pv_table[ply, ply] = NO_MOVE
+        return (np.int32(0), NO_MOVE, nodes_searched, quiescence_nodes, tt_hits)
     
     # M3: 50-move rule scale-down — gradually reduce eval towards draw as halfmove_clock approaches limit
     # This prevents the "cliff effect" where deep search sees halfmove_clock=limit at leaf nodes
@@ -497,7 +539,7 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
         #    e. We are NOT in a singular extension search (excluded_move == NO_MOVE)
         #       OR the TT move is NOT the excluded move.
         #    f. (P1) The halfmove clock is < 96 to avoid GHI pollution near the 50-move rule.
-        if ply > 0 and not is_pv and tt_entry['depth'] >= depth and (excluded_move == NO_MOVE or tt_move != excluded_move) and halfmove_clock < 96:
+        if ply > 0 and not is_pv and not is_exclusion_search and tt_entry['depth'] >= depth and halfmove_clock < 96:
             tt_hits += np.uint64(1)
             tt_score = np.int32(tt_entry['score'])
 
@@ -631,12 +673,27 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
             if abs(tt_score) < MATE_IN_MAX_PLY and abs(static_score) < MATE_IN_MAX_PLY:
                 dissonance = abs(tt_score - static_score)
 
+    total_piece_count = np.int32(0)
+    side_non_pawn_count = np.int32(0)
+    if not is_currently_in_check:
+        total_piece_count = count_bits(occupancy_bbs[WHITE] | occupancy_bbs[BLACK])
+
+        stm_piece_offset = 0 if game_state[0] == WHITE else 6
+        side_non_pawn_count = count_bits(
+            piece_bbs[stm_piece_offset + KNIGHT] |
+            piece_bbs[stm_piece_offset + BISHOP] |
+            piece_bbs[stm_piece_offset + ROOK] |
+            piece_bbs[stm_piece_offset + QUEEN]
+        )
+
+    low_material_pruning_guard = total_piece_count <= LOW_MATERIAL_PRUNING_PIECE_COUNT
+
     # =====================================================================
     # --- Node-Level Pruning (H3: ALL guarded by not is_currently_in_check) ---
     # =====================================================================
-    if not is_currently_in_check and not is_pv:
+    if not is_currently_in_check and not is_pv and not is_exclusion_search:
         # --- M5: Reverse Futility Pruning (returns static_score, not beta) ---
-        if ENABLE_RFP and depth <= RFP_MAX_DEPTH:
+        if search_context.enable_rfp and depth <= RFP_MAX_DEPTH and not low_material_pruning_guard:
             # V2 HCE-tuned dynamic margin calculation
             rfp_multiplier = RFP_BASE_MULT
             
@@ -654,15 +711,10 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                 return (np.int32(static_score), NO_MOVE, nodes_searched, quiescence_nodes, tt_hits)
 
     # --- Null Move Pruning (guarded by H3) ---
-    # M2: Check for non-pawn material (any N/B/R/Q) to avoid zugzwang in pawn endgames
-    has_non_pawn = False
-    if not is_currently_in_check:
-        stm = game_state[0]
-        if stm == 0:  # WHITE
-            has_non_pawn = (piece_bbs[1] | piece_bbs[2] | piece_bbs[3] | piece_bbs[4]) != 0
-        else:  # BLACK
-            has_non_pawn = (piece_bbs[7] | piece_bbs[8] | piece_bbs[9] | piece_bbs[10]) != 0
-    if ENABLE_NMP and depth >= 3 and not is_currently_in_check and has_non_pawn and static_score >= beta:
+    if (search_context.enable_nmp and not is_exclusion_search and depth >= 3 and not is_currently_in_check
+            and not low_material_pruning_guard
+            and side_non_pawn_count >= NMP_MIN_SIDE_NON_PAWNS
+            and static_score >= beta + NMP_STATIC_MARGIN):
         # Manual save of only the fields make_null_move modifies (avoids heap allocation)
         nmp_saved_side = game_state[0]
         nmp_saved_ep   = game_state[2]
@@ -714,7 +766,7 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
             return (np.int32(null_move_score), NO_MOVE, nodes_searched, quiescence_nodes, tt_hits)
 
     # --- ProbCut (must be before NMP, guarded by H3) ---
-    if depth >= 5 and abs(beta) < MATE_IN_MAX_PLY and not is_currently_in_check:
+    if search_context.enable_probcut and not is_exclusion_search and depth >= 5 and abs(beta) < MATE_IN_MAX_PLY and not is_currently_in_check:
         probcut_beta = beta + PROBCUT_MARGIN
         
         # --- NEW: ProbCut TT Defense ---
@@ -764,6 +816,8 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                 pc_scores[i], pc_scores[best_idx] = pc_scores[best_idx], pc_scores[i]
     
                 pc_move = pc_moves[i]
+                if pc_move == excluded_move:
+                    continue
                 pc_from = get_from_square(pc_move)
                 pc_to = get_to_square(pc_move)
     
@@ -814,8 +868,9 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                     return (np.int32(pc_score), pc_move, nodes_searched, quiescence_nodes, tt_hits)
 
     # --- Razoring (must be after NMP, guarded by H3) ---
-    if not is_currently_in_check and not is_pv and depth <= 7:
-        if ENABLE_RAZORING and static_score + RAZORING_MARGIN < alpha and dissonance < 250:
+    if not is_exclusion_search and not is_currently_in_check and not is_pv and depth <= 7:
+        if (search_context.enable_razoring and not low_material_pruning_guard
+                and static_score + RAZORING_MARGIN < alpha and dissonance < 250):
             razor_score, child_q_nodes = quiescence_search(piece_bbs, occupancy_bbs, game_state, alpha, alpha + 1, ply, search_context, 0)
             quiescence_nodes += child_q_nodes
             if razor_score + RAZORING_MARGIN < alpha:
@@ -823,7 +878,7 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
 
     # --- M1: IIR (Internal Iterative Reduction) replaces IID ---
     # Instead of doing a costly sub-search, just reduce depth for nodes without a TT move.
-    if tt_move == NO_MOVE and ENABLE_IIR and not is_currently_in_check:
+    if tt_move == NO_MOVE and ENABLE_IIR and not is_exclusion_search and not is_currently_in_check:
         if depth >= 8:
             depth -= 2
         elif depth >= 4:
@@ -882,6 +937,7 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
         searched_move_count += 1
         
         # --- Pre-move checks for extensions and move type ---
+        original_side = game_state[0]
         from_sq = get_from_square(move)
         to_sq = get_to_square(move)
         flag = get_special_move_flag(move)
@@ -890,34 +946,16 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
         is_pseudo_quiet = not is_capture and not is_promotion
         
         # --- NEW: Shallow Depth Pruning (Stockfish Step 14) ---
-        if ENABLE_SHALLOW_SEE_PRUNING and depth <= PRUNING_SHALLOW_DEPTH and not is_currently_in_check and not is_pv:
-             # Can't use is_giving_check_after_move here as it requires make_move.
-             side_to_move = game_state[0]
+        if (search_context.enable_see_pruning and not is_exclusion_search
+                and depth <= PRUNING_SHALLOW_DEPTH and not is_currently_in_check and not is_pv):
+            side_to_move = original_side
 
-             if is_capture:
-                 # Capture Pruning
-                 # Threshold: -200 * depth
-                 threshold = PRUNING_CAPTURE_SEE_MARGIN * depth
-                 if not see_ge(piece_bbs, occupancy_bbs, side_to_move, from_sq, to_sq, threshold, pinned_white, pinned_black):
-                     pruned_moves += 1
-                     continue
-             elif is_pseudo_quiet:
-                 # Quiet Move Pruning
-
-                 # History Pruning
-                 if ENABLE_HISTORY_PRUNING:
-                     aggressor_type = find_piece_type_on_square_side(piece_bbs, from_sq, side_to_move)
-                     history_score = search_context.history_table[aggressor_type, to_sq]
-                     if history_score < PRUNING_HISTORY_THRESHOLD * depth:
-                         pruned_moves += 1
-                         continue
-
-                 # Quiet SEE Pruning (e.g. moving into attack)
-                 # Threshold: -100 * depth * depth
-                 threshold = PRUNING_QUIET_SEE_MARGIN * depth * depth
-                 if not see_ge(piece_bbs, occupancy_bbs, side_to_move, from_sq, to_sq, threshold, pinned_white, pinned_black):
-                     pruned_moves += 1
-                     continue
+            if is_capture:
+                # Capture pruning can stay before make_move; quiet pruning waits for gives-check detection.
+                threshold = PRUNING_CAPTURE_SEE_MARGIN * depth
+                if not see_ge(piece_bbs, occupancy_bbs, side_to_move, from_sq, to_sq, threshold, pinned_white, pinned_black):
+                    pruned_moves += 1
+                    continue
                   
         # Removed unconditional pre_see_check_ok to prevent massive performance waste (Lazy Evaluation)
 
@@ -951,6 +989,34 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
         
         # Final determination of quiet move
         is_quiet_move = is_pseudo_quiet and not is_giving_check_after_move
+
+        if (search_context.enable_see_pruning and not is_exclusion_search
+                and depth <= PRUNING_SHALLOW_DEPTH and not is_currently_in_check and not is_pv
+                and is_quiet_move):
+            prune_quiet_move = False
+            if ENABLE_HISTORY_PRUNING and moved_piece_type != -1:
+                history_score = search_context.history_table[moved_piece_type, to_sq]
+                if history_score < PRUNING_HISTORY_THRESHOLD * depth:
+                    prune_quiet_move = True
+
+            if prune_quiet_move:
+                pruned_moves += 1
+                unmake_move(piece_bbs, occupancy_bbs, game_state, move, unmake_info)
+                continue
+
+            unmake_move(piece_bbs, occupancy_bbs, game_state, move, unmake_info)
+            threshold = PRUNING_QUIET_SEE_MARGIN * depth * depth
+            if not see_ge(piece_bbs, occupancy_bbs, original_side, from_sq, to_sq, threshold, pinned_white, pinned_black):
+                pruned_moves += 1
+                continue
+
+            search_context.old_piece_bbs[ply, :] = piece_bbs[:]
+            unmake_info = make_move(piece_bbs, occupancy_bbs, game_state, move)
+            added_features, removed_features = get_bb_differences(search_context.old_piece_bbs[ply], piece_bbs)
+            update_accumulator(piece_bbs, added_features, removed_features, ply + 1, search_context.accumulator_stack)
+            moved_piece_type = unmake_info[0]
+            search_context.move_stack[ply] = move
+            search_context.piece_stack[ply] = moved_piece_type
 
         # --- DTR-LMR: Strategic Move Properties ---
         is_king_penetration = False
@@ -999,7 +1065,7 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
             quiet_moves_tried_count += 1
             
             # Late Move Pruning (LMP) - Disabled in PV nodes
-            if ENABLE_LMP and not is_currently_in_check and not is_pv:
+            if search_context.enable_lmp and not is_exclusion_search and not is_currently_in_check and not is_pv:
                 limit = LMP_MOVE_COUNT[depth]
                 if not improving: limit = limit // 2
                 limit = max(limit, 2)
@@ -1009,7 +1075,9 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                     continue  # H7: was 'break', changed to 'continue' to not skip bad captures
 
         # Futility Pruning (FP) - Disabled in PV nodes
-        if ENABLE_FP and is_quiet_move and depth <= 8 and not is_currently_in_check and not is_pv and static_score != -INFINITY:
+        if (search_context.enable_fp and not is_exclusion_search and is_quiet_move and depth <= 8 and not is_currently_in_check
+                and not is_pv and not low_material_pruning_guard
+                and static_score != -INFINITY):
             # Dynamic Futility Margin: FP_BASE + FP_MULTIPLIER * depth
             margin = FP_BASE + FP_MULTIPLIER * depth
             # C1: Tighter margin when not improving
@@ -1032,7 +1100,7 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
         current_extension = check_extension
 
         # --- Singular Extension (inside loop, TT move only) ---
-        if ENABLE_SINGULAR_EXTENSIONS and move == tt_move and depth >= MIN_SINGULAR_DEPTH and not is_currently_in_check:
+        if ENABLE_SINGULAR_EXTENSIONS and excluded_move == NO_MOVE and move == tt_move and depth >= MIN_SINGULAR_DEPTH and not is_currently_in_check:
             if tt_entry['flag'] != TT_FLAG_NONE and (tt_entry['flag'] == TT_FLAG_EXACT or tt_entry['flag'] == TT_FLAG_BETA) and tt_entry['depth'] >= depth - 3:
                 se_tt_score = np.int32(tt_entry['score'])
                 exclusion_beta = se_tt_score - SINGULAR_EXTENSION_MARGIN
@@ -1066,6 +1134,9 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                 unmake_info = make_move(piece_bbs, occupancy_bbs, game_state, move)
                 added_features, removed_features = get_bb_differences(search_context.old_piece_bbs[ply], piece_bbs)
                 update_accumulator(piece_bbs, added_features, removed_features, ply + 1, search_context.accumulator_stack)
+                moved_piece_type = unmake_info[0]
+                search_context.move_stack[ply] = move
+                search_context.piece_stack[ply] = moved_piece_type
 
                 if search_context.stop_flag[0]:
                     unmake_move(piece_bbs, occupancy_bbs, game_state, move, unmake_info)
@@ -1076,7 +1147,7 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                     # Double extension for big margin
                     if depth >= 8 and exclusion_score < exclusion_beta - SINGULAR_EXTENSION_MARGIN:
                         current_extension = max(current_extension, 2)
-                elif exclusion_beta >= beta:
+                elif search_context.enable_multicut and exclusion_beta >= beta:
                     # --- MODERN MULTI-CUT PRUNING ---
                     # If the singular search fails high (exclusion_score >= exclusion_beta)
                     # AND the bounds at which it was searched are >= beta,
@@ -1097,9 +1168,9 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
         else:
             # Dynamic LMR Logic
             lmr = 0
-            if ENABLE_LMR and depth >= LMR_MIN_DEPTH and is_quiet_move and quiet_move_counter >= LMR_MIN_QUIET_MOVE_INDEX:
+            if search_context.enable_lmr and depth >= LMR_MIN_DEPTH and is_quiet_move and quiet_move_counter >= LMR_MIN_QUIET_MOVE_INDEX and moved_piece_type != -1:
                 # Get History Score for adjustment (V2-Tailored SNR weights)
-                aggressor_type = find_piece_type_on_square_side(piece_bbs, from_sq, game_state[0])
+                aggressor_type = moved_piece_type
                 history_score = search_context.history_table[aggressor_type, to_sq] * HISTORY_WEIGHT_MAIN
                 
                 # Add Multi-level Continuation History context to LMR
@@ -1130,17 +1201,17 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                     lmr += 1
 
                 # A2: Pawn push protection — don't reduce pawn pushes to 6th/7th rank
-                is_pawn = (aggressor_type == 0 or aggressor_type == 6)
+                is_pawn = (moved_piece_type % 6) == PAWN
                 if is_pawn:
                     to_rank = to_sq // 8
-                    if (game_state[0] == 0 and to_rank >= 5) or (game_state[0] == 1 and to_rank <= 2):
+                    if (original_side == WHITE and to_rank >= 5) or (original_side == BLACK and to_rank <= 2):
                         lmr = max(0, lmr - 2)
 
                 # Clamp LMR to avoid reducing below depth 1
                 lmr = max(0, min(lmr, search_depth - 1))
 
             # A3: LMR for bad captures (only reduce when it's a bad capture, not a good one)
-            elif ENABLE_LMR and depth >= LMR_MIN_DEPTH and is_capture and not is_promotion and legal_moves_tried > 1:
+            elif search_context.enable_lmr and depth >= LMR_MIN_DEPTH and is_capture and not is_promotion and legal_moves_tried > 1:
                 if search_context.mp_stage[ply] == STAGE_BAD_CAPTURES or search_context.mp_stage[ply] == STAGE_DONE:
                     lmr = 1 + depth // 6
                     lmr = max(0, min(lmr, search_depth - 1))
@@ -1197,15 +1268,14 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
             bonus = min(15 * depth, 300)
             malus = (bonus * 3) // 2
             
-            if is_capture:
+            if is_capture and moved_piece_type != -1:
                 # Update Capture History
                 victim_type = find_piece_type_on_square_side(piece_bbs, to_sq, 1 - game_state[0])
                 if victim_type != -1:
-                    aggressor_type = find_piece_type_on_square_side(piece_bbs, from_sq, game_state[0])
-                    update_capture_history(search_context.capture_history, aggressor_type, to_sq, victim_type, bonus)
+                    update_capture_history(search_context.capture_history, moved_piece_type, to_sq, victim_type, bonus)
             
-            if is_quiet_move:
-                aggressor_type = find_piece_type_on_square_side(piece_bbs, get_from_square(move), game_state[0])
+            if is_quiet_move and moved_piece_type != -1:
+                aggressor_type = moved_piece_type
                 to_sq = get_to_square(move)
                 
                 # Apply Gravity Bonus to the cutoff move
@@ -1246,6 +1316,8 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                     bad_from = get_from_square(bad_move)
                     bad_to = get_to_square(bad_move)
                     bad_aggressor = find_piece_type_on_square_side(piece_bbs, bad_from, game_state[0])
+                    if bad_aggressor == -1:
+                        continue
                     update_history(search_context.history_table, bad_aggressor, bad_to, -malus)
                     update_butterfly_history(search_context.butterfly_history, bad_from, bad_to, -malus)
                     update_pawn_history(search_context.pawn_history, pawn_key_idx, bad_aggressor, bad_to, -malus)
@@ -1286,9 +1358,14 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
         else:
             return (np.int32(0), NO_MOVE, nodes_searched, quiescence_nodes, tt_hits)
 
-    final_flag = TT_FLAG_ALPHA if max_eval <= original_alpha else (TT_FLAG_BETA if max_eval >= beta else TT_FLAG_EXACT)
     if max_eval == -INFINITY:
         max_eval = original_alpha
+
+    # M3: Apply 50-move scale-down to non-mate evaluations
+    if fifty_move_scale < FIFTY_MOVE_MAX_SCALE and abs(max_eval) < MATE_IN_MAX_PLY:
+        max_eval = max_eval * fifty_move_scale // FIFTY_MOVE_MAX_SCALE
+
+    final_flag = TT_FLAG_ALPHA if max_eval <= original_alpha else (TT_FLAG_BETA if max_eval >= beta else TT_FLAG_EXACT)
 
     # --- NEW: Opponent Move Bonus (Fail-Low / Alpha Flag Bonus) ---
     if final_flag == TT_FLAG_ALPHA and ply > 0 and legal_moves_tried > 4:
@@ -1315,9 +1392,6 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                     if our_prev_move != NO_MOVE and our_prev_piece != -1:
                         update_continuation_history(search_context, 0, our_prev_move, our_prev_piece, prev_move, prev_piece, sub_bonus)
 
-    # M3: Apply 50-move scale-down to non-mate evaluations
-    if fifty_move_scale < FIFTY_MOVE_MAX_SCALE and abs(max_eval) < MATE_IN_MAX_PLY:
-        max_eval = max_eval * fifty_move_scale // FIFTY_MOVE_MAX_SCALE
     if best_move == NO_MOVE and search_context.mp_captures_end[ply] + search_context.mp_quiets_end[ply] > 0:
         # Fallback to first move that is not excluded
         for i in range(search_context.mp_captures_end[ply] + search_context.mp_quiets_end[ply]):
@@ -1497,11 +1571,16 @@ def iterative_deepening_search(piece_bbs, occupancy_bbs, game_state, max_depth, 
         last_completed_depth = current_depth
         last_score = score
 
-        # GHI: use halfmove-aware key to match the key used inside the search
-        _id_tt_key = np.uint64(get_tt_key(game_state[4], int(game_state[3])))
-        tt_entry = probe_tt(transposition_table, _id_tt_key)
-        if tt_entry['flag'] != TT_FLAG_NONE and tt_entry['best_move'] != NO_MOVE:
-             best_move_from_last_depth = tt_entry['best_move']
+        if res[1] != NO_MOVE:
+            best_move_from_last_depth = res[1]
+        else:
+            # GHI: use halfmove-aware key to match the key used inside the search
+            _id_tt_key = np.uint64(get_tt_key(game_state[4], int(game_state[3])))
+            tt_entry = probe_tt(transposition_table, _id_tt_key)
+            if tt_entry['flag'] != TT_FLAG_NONE and tt_entry['best_move'] != NO_MOVE:
+                best_move_from_last_depth = tt_entry['best_move']
+            elif search_context.pv_table[0, 0] != NO_MOVE:
+                best_move_from_last_depth = search_context.pv_table[0, 0]
         
         elapsed_time_ms = (time.time() - start_time) * 1000
         

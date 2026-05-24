@@ -46,7 +46,13 @@ def inspect_bucket_loss_full_ram():
     
     bucket_sums = torch.zeros(8, device=device)
     bucket_counts = torch.zeros(8, device=device)
-    criterion = nn.BCEWithLogitsLoss(reduction='none')
+    loss_type = checkpoint.get('loss_type', 'BCE') if isinstance(checkpoint, dict) else 'BCE'
+    loss_exponent = checkpoint.get('loss_exponent', 2.0) if isinstance(checkpoint, dict) else 2.0
+    print(f"Detected checkpoint loss type: {loss_type} (exponent: {loss_exponent})")
+    if loss_type == 'MSE':
+        criterion = nn.MSELoss(reduction='none')
+    else:
+        criterion = nn.BCEWithLogitsLoss(reduction='none')
 
     # 3. 極速批次處理
     batch_size = 65536 # 既然數據都在 RAM，我們可以把 Batch 開到最大
@@ -67,7 +73,13 @@ def inspect_bucket_loss_full_ram():
             buckets_torch = torch.from_numpy(buckets).to(device)
             
             outputs = model(indices_stm, indices_nstm, buckets_torch)
-            loss_tensor = criterion(outputs, targets).squeeze()
+            if loss_type == 'MSE':
+                if loss_exponent == 2.0:
+                    loss_tensor = criterion(torch.sigmoid(outputs), targets).squeeze()
+                else:
+                    loss_tensor = (torch.abs(torch.sigmoid(outputs) - targets) ** loss_exponent).squeeze()
+            else:
+                loss_tensor = criterion(outputs, targets).squeeze()
 
             bucket_sums.scatter_add_(0, buckets_torch, loss_tensor)
             bucket_counts.scatter_add_(0, buckets_torch, torch.ones_like(loss_tensor))

@@ -848,16 +848,62 @@ def is_in_check(piece_bbs, occupancy_bbs, game_state):
     king_sq = get_lsb_index(king_bb)
     return is_square_attacked(piece_bbs, occupancy_bbs, king_sq, 1 - side_to_move)
 
-@numba.njit(numba.boolean(piece_bbs_signature, numba.uint8), cache=True, boundscheck=False, fastmath=True)
-def has_sufficient_material(piece_bbs, side_to_move):
+@numba.njit(numba.boolean(piece_bbs_signature), cache=True, boundscheck=False, fastmath=True)
+def has_sufficient_material(piece_bbs):
     """
-    Checks if the side to move has major pieces (Rook or Queen).
-    Used as a condition for Null Move Pruning.
+    Checks if either side has sufficient mating material.
+    If not, the position is a draw by insufficient material.
     """
-    if side_to_move == WHITE:
-        return (piece_bbs[3] | piece_bbs[4]) != 0
-    else: # BLACK
-        return (piece_bbs[9] | piece_bbs[10]) != 0
+    # Pawns, Rooks, Queens are sufficient material.
+    if (piece_bbs[0] | piece_bbs[3] | piece_bbs[4] |
+        piece_bbs[6] | piece_bbs[9] | piece_bbs[10]) != np.uint64(0):
+        return True
+
+    # Count minor pieces (Knights, Bishops)
+    w_knights = piece_bbs[1]
+    w_bishops = piece_bbs[2]
+    b_knights = piece_bbs[7]
+    b_bishops = piece_bbs[8]
+
+    wn_cnt = 0
+    temp = w_knights
+    while temp:
+        temp &= temp - np.uint64(1)
+        wn_cnt += 1
+
+    wb_cnt = 0
+    temp = w_bishops
+    while temp:
+        temp &= temp - np.uint64(1)
+        wb_cnt += 1
+
+    bn_cnt = 0
+    temp = b_knights
+    while temp:
+        temp &= temp - np.uint64(1)
+        bn_cnt += 1
+
+    bb_cnt = 0
+    temp = b_bishops
+    while temp:
+        temp &= temp - np.uint64(1)
+        bb_cnt += 1
+
+    # Either side has at least two minor pieces -> sufficient.
+    if (wn_cnt + wb_cnt > 1) or (bn_cnt + bb_cnt > 1):
+        return True
+
+    # One bishop each: opposite colors -> sufficient, same color -> insufficient.
+    if wb_cnt == 1 and bb_cnt == 1 and wn_cnt == 0 and bn_cnt == 0:
+        light_squares = np.uint64(0x55AA55AA55AA55AA)
+        w_light = (w_bishops & light_squares) != np.uint64(0)
+        b_light = (b_bishops & light_squares) != np.uint64(0)
+        if w_light == b_light:
+            return False  # Same color bishops
+        return True  # Opposite color bishops
+
+    # King + Bishop vs King, King + Knight vs King, King vs King -> insufficient.
+    return False
 
 
 @numba.njit(numba.int32(piece_bbs_signature, occupancy_bbs_signature, game_state_signature, numba.uint16[:, :], numba.int32, numba.int32), cache=True, boundscheck=False, fastmath=True)

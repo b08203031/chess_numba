@@ -51,6 +51,19 @@ def uci_loop():
     """
     global search_thread, global_search_context, global_tt_generation
 
+    current_options = {
+        "Enable NMP": True,
+        "Enable RFP": True,
+        "Enable Razoring": True,
+        "Enable LMR": True,
+        "Enable SEE Pruning": True,
+        "Enable Shallow SEE Pruning": True,
+        "Enable LMP": True,
+        "Enable FP": True,
+        "Enable ProbCut": True,
+        "Enable MultiCut": False,
+    }
+
     # Initialize engine components before the loop starts / 在循環開始前初始化引擎組件
     transposition_table = create_transposition_table(TT_SIZE_MB)
     
@@ -105,7 +118,34 @@ def uci_loop():
             if command == "uci":
                 print("id name MyChessEngine-NNUE")
                 print("id author YourName")
+                print("option name Enable NMP type check default true")
+                print("option name Enable RFP type check default true")
+                print("option name Enable Razoring type check default true")
+                print("option name Enable LMR type check default true")
+                print("option name Enable SEE Pruning type check default true")
+                print("option name Enable Shallow SEE Pruning type check default true")
+                print("option name Enable LMP type check default true")
+                print("option name Enable FP type check default true")
+                print("option name Enable ProbCut type check default true")
+                print("option name Enable MultiCut type check default false")
                 print("uciok", flush=True)
+            elif command == "setoption":
+                # Expected format: setoption name Enable NMP value false
+                try:
+                    name_idx = tokens.index("name")
+                    value_idx = tokens.index("value")
+                    name_tokens = tokens[name_idx + 1:value_idx]
+                    value_tokens = tokens[value_idx + 1:]
+                    opt_name = " ".join(name_tokens).strip()
+                    opt_val = " ".join(value_tokens).strip()
+                    
+                    for k in current_options:
+                        if k.lower() == opt_name.lower():
+                            current_options[k] = (opt_val.lower() == "true")
+                            log_info(f"Set option: {k} = {current_options[k]}")
+                            break
+                except ValueError:
+                    log_info(f"Invalid setoption command: {line}")
             elif command == "isready":
                 print("readyok", flush=True)
             elif command == "ucinewgame":
@@ -236,6 +276,15 @@ def uci_loop():
                     pawn_correction_history, minor_correction_history,
                     non_pawn_correction_history_white, non_pawn_correction_history_black
                 )
+                global_search_context.enable_nmp = current_options["Enable NMP"]
+                global_search_context.enable_rfp = current_options["Enable RFP"]
+                global_search_context.enable_razoring = current_options["Enable Razoring"]
+                global_search_context.enable_lmr = current_options["Enable LMR"]
+                global_search_context.enable_see_pruning = current_options["Enable SEE Pruning"] or current_options["Enable Shallow SEE Pruning"]
+                global_search_context.enable_lmp = current_options["Enable LMP"]
+                global_search_context.enable_fp = current_options["Enable FP"]
+                global_search_context.enable_probcut = current_options["Enable ProbCut"]
+                global_search_context.enable_multicut = current_options["Enable MultiCut"]
                 
                 # Update TT Generation
                 global_tt_generation = (global_tt_generation + 1) % 256

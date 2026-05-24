@@ -23,6 +23,7 @@ To maintain code cleanliness and documentation consistency across the project, a
 
 ---
 
-## 3. Testing Policy: User-Led Execution
+## 3. Testing Policy: Automated & User-Led Execution
 
-* **Strict Ban on Automatic Tests**: AI assistants are **strictly forbidden** from executing any test scripts, benchmarks, or commands in the terminal (such as perft tests, Elo matches, or unit tests) without explicit, real-time authorization from the user.
+* **Allowed Automated Light Tests**: AI assistants are allowed to automatically run light unit tests (e.g., `unittest`) that do not require heavy Numba compiling, in order to verify code correctness immediately.
+* **Heavy Tests Restrictions**: Heavy benchmarks, Elo matches, and deep performance profiling tests must not be run automatically and require explicit user instructions.
