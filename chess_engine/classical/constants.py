@@ -715,6 +715,7 @@ DELTA_PRUNING_MARGIN = 400
 
 # --- Static Exchange Evaluation (SEE) Threshold / SEE 閾值 ---
 SEE_THRESHOLD = 0  # centipawns (H6: tightened from -200, only search non-losing captures in QSearch)
+QS_SEE_THRESHOLD = -80  # Stockfish-style qsearch tolerance: keep slightly losing tactical captures
 ENABLE_SEE_IN_QUIESCENCE = True # Master switch to enable/disable SEE in quiescence search / 啟用/禁用靜態搜尋中 SEE 的總開關
 
 # =============================================================================

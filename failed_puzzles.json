@@ -6,16 +6,8 @@
             "b1b2",
             "h5g6"
         ],
-        "engine_move": "h1h3",
+        "engine_move": "e3h6",
         "rating": "2400",
         "theme": "sacrifice"
-    },
-    {
-        "name": "Lichess Puzzle 006of",
-        "fen": "r2qr2k/1pp2Qp1/1b4np/pP2P3/P4n2/B1N2N1P/5PP1/R3R1K1 b - - 0 20",
-        "solution": "d8d3",
-        "engine_move": "f4d3",
-        "rating": "2500",
-        "theme": "advantage kingsideAttack long middlegame"
     }
 ]

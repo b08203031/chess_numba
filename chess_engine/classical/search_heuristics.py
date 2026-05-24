@@ -5,7 +5,7 @@ from chess_engine.classical.move import (
     get_to_square, get_from_square, get_special_move_flag,
     SPECIAL_MOVE_FLAG_PROMOTION, SPECIAL_MOVE_FLAG_EN_PASSANT
 )
-from chess_engine.classical.constants import SCORE_GOOD_CAPTURE_BONUS, SCORE_BAD_CAPTURE_PENALTY, SCORE_KILLER_1, SCORE_KILLER_2, SCORE_COUNTER_MOVE, MAX_HISTORY, LMR_TABLE, MAX_PLY, SCORE_TT_MOVE, BB_SQUARES, NO_MOVE, HISTORY_MAX_MAIN, HISTORY_MAX_BUTTERFLY, HISTORY_MAX_CAPTURE, HISTORY_MAX_CONTINUATION, HISTORY_MAX_PAWN, LMR_HISTORY_DIVISOR, HISTORY_WEIGHT_MAIN, HISTORY_WEIGHT_CONT_1, HISTORY_WEIGHT_CONT_2, HISTORY_WEIGHT_CONT_4
+from chess_engine.classical.constants import SCORE_GOOD_CAPTURE_BONUS, SCORE_BAD_CAPTURE_PENALTY, SCORE_KILLER_1, SCORE_KILLER_2, SCORE_COUNTER_MOVE, MAX_HISTORY, LMR_TABLE, MAX_PLY, SCORE_TT_MOVE, BB_SQUARES, NO_MOVE, HISTORY_MAX_MAIN, HISTORY_MAX_BUTTERFLY, HISTORY_MAX_CAPTURE, HISTORY_MAX_CONTINUATION, HISTORY_MAX_PAWN, LMR_HISTORY_DIVISOR, HISTORY_WEIGHT_MAIN, HISTORY_WEIGHT_CONT_1, HISTORY_WEIGHT_CONT_2, HISTORY_WEIGHT_CONT_4, QS_SEE_THRESHOLD
 from chess_engine.classical.constants import MG_MATERIAL_VALUES
 from chess_engine.classical.see import see_ge
 from chess_engine.classical.bitboard_utils import find_piece_type_on_square, find_piece_type_on_square_side, get_lsb_index
@@ -200,12 +200,14 @@ def score_captures_with_tt(piece_bbs, occupancy_bbs, game_state, moves, scores, 
             if victim_type != -1:
                 mvv_lva = MG_MATERIAL_VALUES[victim_type % 6] - MG_MATERIAL_VALUES[aggressor_type % 6]
             
-            is_good_capture = see_ge(piece_bbs, occupancy_bbs, side_to_move, from_sq, to_square, 0, pinned_white, pinned_black, aggressor_type, victim_type)
+            is_good_capture = see_ge(piece_bbs, occupancy_bbs, side_to_move, from_sq, to_square, QS_SEE_THRESHOLD, pinned_white, pinned_black, aggressor_type, victim_type)
             
             if is_good_capture:
                 score = SCORE_GOOD_CAPTURE_BONUS + mvv_lva
                 if victim_type != -1:
                     score += search_context.capture_history[aggressor_type, to_square, victim_type]
+                if score < SCORE_GOOD_CAPTURE_BONUS:
+                    score = SCORE_GOOD_CAPTURE_BONUS
             else:
                 score = SCORE_BAD_CAPTURE_PENALTY + mvv_lva
                 if victim_type != -1:

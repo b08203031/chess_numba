@@ -802,7 +802,7 @@ def run_puzzle_test():
 
 
     depth = 40  # Set a high depth, will be stopped by time
-    time_limit_ms = 5000
+    time_limit_ms = 3000
 
     total_tests = len(puzzles)
     passed_tests = 0

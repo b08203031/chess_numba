@@ -879,6 +879,21 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                     unmake_move(piece_bbs, occupancy_bbs, game_state, pc_move, pc_unmake)
                     continue
     
+                pc_q_score, pc_q_nodes = quiescence_search(
+                    piece_bbs, occupancy_bbs, game_state,
+                    -probcut_beta, -probcut_beta + 1, ply + 1, search_context, 0
+                )
+                quiescence_nodes += pc_q_nodes
+                pc_q_score = -pc_q_score
+
+                if search_context.stop_flag[0]:
+                    unmake_move(piece_bbs, occupancy_bbs, game_state, pc_move, pc_unmake)
+                    return (np.int32(0), NO_MOVE, nodes_searched, quiescence_nodes, tt_hits)
+
+                if pc_q_score < probcut_beta:
+                    unmake_move(piece_bbs, occupancy_bbs, game_state, pc_move, pc_unmake)
+                    continue
+
                 saved_pc_stack_move = search_context.move_stack[ply]
                 saved_pc_stack_piece = search_context.piece_stack[ply]
                 search_context.move_stack[ply] = pc_move
@@ -904,12 +919,13 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                     return (np.int32(0), NO_MOVE, nodes_searched, quiescence_nodes, tt_hits)
     
                 if pc_score >= probcut_beta:
+                    probcut_return_score = pc_score - (probcut_beta - beta)
                     # Store in TT for future use
-                    tt_store_score_pc = pc_score
+                    tt_store_score_pc = probcut_return_score
                     if tt_store_score_pc > MATE_IN_MAX_PLY: tt_store_score_pc += ply
                     elif tt_store_score_pc < -MATE_IN_MAX_PLY: tt_store_score_pc -= ply
                     store_tt(search_context.transposition_table, tt_key, depth - 3, tt_store_score_pc, np.int16(32767), TT_FLAG_BETA, pc_move, search_context.tt_generation, False)
-                    return (np.int32(pc_score), pc_move, nodes_searched, quiescence_nodes, tt_hits)
+                    return (np.int32(probcut_return_score), pc_move, nodes_searched, quiescence_nodes, tt_hits)
 
     # --- Razoring (must be after NMP, guarded by H3) ---
     if not is_exclusion_search and not is_currently_in_check and not is_pv and depth <= 7:
@@ -1157,14 +1173,14 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
         
         # --- Determine total extension ---
         check_extension = 0
-        if is_giving_check_after_move and (is_pv or move == tt_move or depth <= 4):
+        if is_giving_check_after_move and (is_pv or move == tt_move or depth <= 3):
             check_extension = 1
         
         current_extension = check_extension
 
         # --- Singular Extension (inside loop, TT move only) ---
-        if ENABLE_SINGULAR_EXTENSIONS and excluded_move == NO_MOVE and move == tt_move and depth >= MIN_SINGULAR_DEPTH and not is_currently_in_check:
-            if tt_entry['flag'] != TT_FLAG_NONE and (tt_entry['flag'] == TT_FLAG_EXACT or tt_entry['flag'] == TT_FLAG_BETA) and tt_entry['depth'] >= depth - 3:
+        if ENABLE_SINGULAR_EXTENSIONS and ply > 0 and excluded_move == NO_MOVE and move == tt_move and depth >= MIN_SINGULAR_DEPTH and not is_currently_in_check:
+            if tt_entry['flag'] == TT_FLAG_BETA and tt_entry['depth'] >= depth - 3:
                 se_tt_score = np.int32(tt_entry['score'])
                 if se_tt_score > MATE_IN_MAX_PLY:
                     se_tt_score -= ply
