@@ -107,7 +107,7 @@ def probe_tt(tt, zobrist_key):
         return _EMPTY_TT_ENTRY
         
     num_buckets = len(tt) // 4
-    base_index = mul_hi64(zobrist_key, np.uint64(num_buckets)) * 4
+    base_index = np.int64(mul_hi64(zobrist_key, np.uint64(num_buckets)) * 4)
     
     key32 = np.uint32(zobrist_key)
     for i in range(4):
@@ -137,7 +137,7 @@ def store_tt(tt, zobrist_key, depth, score, static_eval, flag, best_move, curren
         return
         
     num_buckets = len(tt) // 4
-    base_index = mul_hi64(zobrist_key, np.uint64(num_buckets)) * 4
+    base_index = np.int64(mul_hi64(zobrist_key, np.uint64(num_buckets)) * 4)
     key32 = np.uint32(zobrist_key)
     
     # 1. 尋找完全相同的局面 (Exact Match)

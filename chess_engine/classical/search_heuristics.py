@@ -248,30 +248,6 @@ def score_quiets(piece_bbs, occupancy_bbs, game_state, moves, scores, start_idx,
             if is_check:
                 score += 15000
 
-        # Threat Avoidance (New)
-        opponent_side = 1 - side_to_move
-        opp_offset = 6 if opponent_side == 1 else 0
-        is_threatened_by_pawn = False
-        is_threatened_by_minor = False
-        
-        # Check if destination is attacked by opponent pawns
-        if PAWN_ATTACKS[opponent_side, to_square] & piece_bbs[opp_offset + 0]: 
-            is_threatened_by_pawn = True
-            
-        if not is_threatened_by_pawn:
-            # Check if destination is attacked by opponent minor pieces
-            if KNIGHT_ATTACKS[to_square] & piece_bbs[opp_offset + 1]: 
-                is_threatened_by_minor = True
-            elif get_bishop_attacks(to_square, occupancy_bbs[2]) & piece_bbs[opp_offset + 2]: 
-                is_threatened_by_minor = True
-                
-        # Only penalize if we are moving a piece into a lesser attacker
-        ptype = aggressor_type % 6
-        if is_threatened_by_pawn and ptype > 0: # Non-pawn threatened by pawn
-            score -= 10000
-        elif is_threatened_by_minor and ptype > 2: # Rook/Queen/King threatened by minor
-            score -= 10000
-
         if move == killer_1:
             score += 400000
         elif move == killer_2:

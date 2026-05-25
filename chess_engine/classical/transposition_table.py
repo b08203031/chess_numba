@@ -107,14 +107,17 @@ def probe_tt(tt, zobrist_key):
         return _EMPTY_TT_ENTRY
         
     num_buckets = len(tt) // 4
-    base_index = mul_hi64(zobrist_key, np.uint64(num_buckets)) * 4
+    # The TT is allocated as a power-of-two number of 4-entry buckets.
+    # Use the high 32 bits for the bucket and the low 32 bits as the lock key:
+    # this avoids the expensive 64x64 mul_hi index computation on every probe.
+    base_index = np.int64(((zobrist_key >> np.uint64(32)) & np.uint64(num_buckets - 1)) * np.uint64(4))
     
     key32 = np.uint32(zobrist_key)
     for i in range(4):
         entry = tt[base_index + i]
         if entry['key'] == key32:
             return entry
-            
+
     return _EMPTY_TT_ENTRY
 
 @nb.njit(cache=True)
@@ -137,7 +140,8 @@ def store_tt(tt, zobrist_key, depth, score, static_eval, flag, best_move, curren
         return
         
     num_buckets = len(tt) // 4
-    base_index = mul_hi64(zobrist_key, np.uint64(num_buckets)) * 4
+    # Match probe_tt(): power-of-two bucket mask using high key bits.
+    base_index = np.int64(((zobrist_key >> np.uint64(32)) & np.uint64(num_buckets - 1)) * np.uint64(4))
     key32 = np.uint32(zobrist_key)
     
     # 1. 尋找完全相同的局面 (Exact Match)

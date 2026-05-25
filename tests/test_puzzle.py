@@ -48,13 +48,6 @@ puzzles = [
             "theme": "sacrifice"
         },
         {
-            "name": "Lichess Puzzle 4P4j3",
-            "fen": "6k1/1B3p2/6p1/1N2R3/2P5/1P4pb/r6P/6K1 b - - 0 30",
-            "solution": "a2a1",
-            "rating": "917",
-            "theme": "endgame mate mateIn2 short"
-        },
-        {
             "name": "Lichess Puzzle 6ooAR",
             "fen": "8/1N2k3/PB1b3p/3p2nr/4p3/6P1/1P3P2/5RK1 b - - 3 35",
             "solution": "g5f3",
@@ -83,6 +76,13 @@ puzzles = [
             "theme": "endgame mate mateIn2 short"
         },
         {
+            "name": "Lichess Puzzle IeUqw",
+            "fen": "3k1r2/ppp3Qp/4R3/2brN2n/5P2/5K2/q5PP/4R3 w - - 3 30",
+            "solution": "e6d6",
+            "rating": "2731",
+            "theme": "interference mate mateIn2 middlegame short"
+        },
+        {
             "name": "Lichess Puzzle Dpv0F",
             "fen": "8/pp3r2/3P4/8/1Q6/P1n1P3/2k3P1/6K1 b - - 0 47",
             "solution": "c3e2",
@@ -104,6 +104,20 @@ puzzles = [
             "theme": "backRankMate deflection endgame long mate mateIn3"
         },
         {
+            "name": "Lichess Puzzle CBu8c",
+            "fen": "4Q3/3R1p2/5Pk1/6p1/8/pP6/1rr3PP/K3R3 b - - 3 38",
+            "solution": "b2a2",
+            "rating": "1478",
+            "theme": "endgame exposedKing long mate mateIn3 queenRookEndgame"
+        },
+        {
+            "name": "Lichess Puzzle CrgsU",
+            "fen": "4k3/1p2B2p/p7/7P/1KQ2P2/P4P2/4nq2/R7 b - - 1 32",
+            "solution": "f2b6",
+            "rating": "1618",
+            "theme": "endgame long mate mateIn3 sacrifice"
+        },
+        {
             "name": "Lichess Puzzle 7CORk",
             "fen": "4r1k1/5p1p/3Q4/p4B2/2P5/8/P1q2PPP/3R1K2 b - - 0 35",
             "solution": "c2e2",
@@ -115,6 +129,20 @@ puzzles = [
             "fen": "8/p2q1k1p/1p3ppQ/2p5/2Pr3P/1P4P1/2P1RP2/5K2 b - - 8 34",
             "solution": "d7h3",
             "rating": "1677",
+            "theme": "endgame long mate mateIn3"
+        },
+        {
+            "name": "Lichess Puzzle 81kU1",
+            "fen": "5k2/1q6/4Rp1p/1P3QpP/3P4/6PK/5P2/2r5 b - - 5 41",
+            "solution": "c1h1",
+            "rating": "1804",
+            "theme": "endgame long mate mateIn3 sacrifice"
+        },
+        {
+            "name": "Lichess Puzzle LtHov",
+            "fen": "3R2r1/5p1k/4pQ2/3p3P/3Pb3/2r5/5PP1/6K1 b - - 0 35",
+            "solution": "c3c1",
+            "rating": "1986",
             "theme": "endgame long mate mateIn3"
         },
         {
@@ -139,6 +167,13 @@ puzzles = [
             "theme": "attraction doubleCheck endgame fork long mate mateIn3 sacrifice"
         },
         {
+            "name": "Lichess Puzzle DzuQV",
+            "fen": "r1b3k1/pppp1Rpp/2n5/8/2B1r1Q1/2b1q3/P5PP/1N5K w - - 0 17",
+            "solution": "f7g7",
+            "rating": "2205",
+            "theme": "doubleCheck kingsideAttack long mate mateIn3 middlegame"
+        },
+        {
             "name": "Lichess Puzzle 8zhvd",
             "fen": "3rb1kr/2R5/p4R1p/2N3p1/6n1/8/PPP5/2K5 w - - 0 35",
             "solution": "f6f8",
@@ -153,53 +188,11 @@ puzzles = [
             "theme": "attackingF2F7 attraction deflection discoveredAttack long mate mateIn3 middlegame sacrifice"
         },
         {
-            "name": "Lichess Puzzle G9625",
-            "fen": "8/2RR3p/6pk/8/8/5N2/r4PPP/6K1 b - - 4 30",
-            "solution": "a2a1",
-            "rating": "615",
-            "theme": "backRankMate endgame mate mateIn4 veryLong"
-        },
-        {
-            "name": "Lichess Puzzle 1iNQO",
-            "fen": "2r2k2/1p2bp1p/p1r3p1/P2pP3/3R1B2/1P6/Q3RPPP/6K1 b - - 0 30",
-            "solution": "c6c1",
-            "rating": "638",
-            "theme": "backRankMate mate mateIn4 middlegame sacrifice veryLong"
-        },
-        {
-            "name": "Lichess Puzzle BSjIN",
-            "fen": "r5k1/5ppp/8/3R2B1/8/5N2/1PP2PPP/6K1 b - - 0 22",
-            "solution": "a8a1",
-            "rating": "653",
-            "theme": "backRankMate endgame mate mateIn4 veryLong"
-        },
-        {
             "name": "Lichess Puzzle 15zqy",
             "fen": "7k/pp3rrP/3pq3/2p1n3/4Pp1Q/2PP2p1/PP6/2K4R w - - 1 36",
             "solution": "h4d8",
             "rating": "744",
             "theme": "advancedPawn doubleCheck endgame exposedKing kingsideAttack mate mateIn4 promotion veryLong"
-        },
-        {
-            "name": "Lichess Puzzle 71BAC",
-            "fen": "7k/p5pp/8/1R1p1b2/8/K1B3PP/4rq2/3q4 w - - 0 47",
-            "solution": "b5b8",
-            "rating": "817",
-            "theme": "endgame mate mateIn4 veryLong"
-        },
-        {
-            "name": "Lichess Puzzle ACKdi",
-            "fen": "8/5pkp/R1n3p1/3p1PK1/8/4P1P1/2r3P1/3q4 w - - 0 38",
-            "solution": "f5f6",
-            "rating": "972",
-            "theme": "endgame mate mateIn4 veryLong"
-        },
-        {
-            "name": "Lichess Puzzle 0fZnA",
-            "fen": "2k1r3/1pp1rp1p/p2B1R2/7q/2QP2p1/2P3P1/PP3PKP/R7 b - - 0 21",
-            "solution": "h5h3",
-            "rating": "1096",
-            "theme": "mate mateIn4 middlegame veryLong"
         },
         {
             "name": "Lichess Puzzle KFx19",
@@ -221,48 +214,6 @@ puzzles = [
             "solution": "h4h5",
             "rating": "1251",
             "theme": "attraction exposedKing mate mateIn4 middlegame pin veryLong"
-        },
-        {
-            "name": "Lichess Puzzle 5IsxV",
-            "fen": "r1b4k/ppp4p/1q1p1rpR/8/4P3/5PK1/4N1P1/7R w - - 0 28",
-            "solution": "h6h7",
-            "rating": "1253",
-            "theme": "mate mateIn4 middlegame veryLong"
-        },
-        {
-            "name": "Lichess Puzzle 5ZHt9",
-            "fen": "4r3/4r2k/5R1p/1q6/3Pp1Q1/p1p1P1PP/2P4K/8 w - - 1 42",
-            "solution": "g4g6",
-            "rating": "1308",
-            "theme": "deflection endgame mate mateIn4 veryLong"
-        },
-        {
-            "name": "Lichess Puzzle Hr7G4",
-            "fen": "5r1k/1p3p1p/p5p1/5N2/5B2/5qP1/P6P/2R3K1 w - - 0 25",
-            "solution": "f4e5",
-            "rating": "1369",
-            "theme": "endgame mate mateIn4 sacrifice veryLong"
-        },
-        {
-            "name": "Lichess Puzzle 9Fli7",
-            "fen": "5rk1/5ppp/2q5/1p1Rp3/1P2P3/r6P/2P2QP1/2K2R2 w - - 0 27",
-            "solution": "f2f7",
-            "rating": "1386",
-            "theme": "endgame mate mateIn4 sacrifice veryLong"
-        },
-        {
-            "name": "Lichess Puzzle 0lYNX",
-            "fen": "5rk1/1p3p2/p6p/3p2p1/3P2Q1/3PR1R1/PP3qPK/2r5 w - - 0 30",
-            "solution": "g4g5",
-            "rating": "1394",
-            "theme": "endgame mate mateIn4 sacrifice veryLong"
-        },
-        {
-            "name": "Lichess Puzzle 8ouys",
-            "fen": "3r1r1k/p5pp/8/1p2Pq2/1Q4R1/8/1B3PPP/5RK1 b - - 1 31",
-            "solution": "f5f2",
-            "rating": "1399",
-            "theme": "mate mateIn4 middlegame sacrifice veryLong"
         },
         {
             "name": "Lichess Puzzle 5mApw",
@@ -293,55 +244,6 @@ puzzles = [
             "theme": "endgame exposedKing mate mateIn4 veryLong"
         },
         {
-            "name": "Lichess Puzzle GV2Fi",
-            "fen": "6k1/p2N1pp1/4p1r1/2Qp4/4b1Pp/P1P2q1P/P4P1R/R5K1 b - - 2 25",
-            "solution": "g6g4",
-            "rating": "1584",
-            "theme": "kingsideAttack mate mateIn4 middlegame sacrifice veryLong"
-        },
-        {
-            "name": "Lichess Puzzle DK9kL",
-            "fen": "3r1rk1/p6p/2p2ppQ/1pP1R3/6N1/2q5/b4PPP/4R1K1 w - - 2 39",
-            "solution": "g4f6",
-            "rating": "1612",
-            "theme": "kingsideAttack mate mateIn4 middlegame sacrifice veryLong"
-        },
-        {
-            "name": "Lichess Puzzle 1NnFF",
-            "fen": "r4k2/ppp2prp/2q2Q2/4R3/2p5/2N5/P1n2PPP/4R1K1 w - - 8 22",
-            "solution": "f6e7",
-            "rating": "1616",
-            "theme": "backRankMate mate mateIn4 middlegame sacrifice veryLong"
-        },
-        {
-            "name": "Lichess Puzzle Nwrft",
-            "fen": "5r1k/6p1/4PbRp/4p3/2q1P3/r1p4Q/2P4P/1K2R3 w - - 0 36",
-            "solution": "g6h6",
-            "rating": "1662",
-            "theme": "fork mate mateIn4 middlegame sacrifice veryLong"
-        },
-        {
-            "name": "Lichess Puzzle IGcH0",
-            "fen": "2r5/R4R1p/5p2/1p6/1P1P2P1/1P3kB1/1r5P/3n2K1 b - - 1 34",
-            "solution": "b2g2",
-            "rating": "1669",
-            "theme": "endgame mate mateIn4 sacrifice veryLong"
-        },
-        {
-            "name": "Lichess Puzzle 0Mspr",
-            "fen": "8/5ppp/R7/4p1k1/1r1p4/1n2PPP1/2r1NK1P/3R4 w - - 0 33",
-            "solution": "h2h4",
-            "rating": "1675",
-            "theme": "endgame mate mateIn4 veryLong"
-        },
-        {
-            "name": "Lichess Puzzle 4K7D7",
-            "fen": "k6r/ppQ4p/2n2R2/2b5/3p4/3q2B1/P6P/5R1K w - - 0 35",
-            "solution": "f6f8",
-            "rating": "1675",
-            "theme": "fork mate mateIn4 middlegame sacrifice veryLong"
-        },
-        {
             "name": "Lichess Puzzle OTb60",
             "fen": "r3k1r1/1p4Pp/pqb1ppnB/3Q4/6P1/2PP4/P6P/4RR1K w q - 1 23",
             "solution": "e1e6",
@@ -356,13 +258,6 @@ puzzles = [
             "theme": "exposedKing mate mateIn4 middlegame veryLong"
         },
         {
-            "name": "Lichess Puzzle Io1xI",
-            "fen": "7k/2r5/4PK2/6P1/8/3R4/8/2q5 w - - 0 53",
-            "solution": "d3d8",
-            "rating": "1697",
-            "theme": "endgame exposedKing mate mateIn4 queenRookEndgame veryLong"
-        },
-        {
             "name": "Lichess Puzzle OboU3",
             "fen": "5k2/5P2/1p2P3/1P3NK1/8/8/7p/7r w - - 2 61",
             "solution": "g5f6",
@@ -370,32 +265,11 @@ puzzles = [
             "theme": "advancedPawn endgame exposedKing mate mateIn4 veryLong"
         },
         {
-            "name": "Lichess Puzzle CgCEJ",
-            "fen": "6k1/p4p2/1p3Ppp/2p1K3/4P1Q1/1P4P1/P1P2r1R/4qb2 w - - 0 29",
-            "solution": "g4c8",
-            "rating": "1723",
-            "theme": "attraction endgame mate mateIn4 sacrifice veryLong"
-        },
-        {
             "name": "Lichess Puzzle KKdBA",
             "fen": "5rk1/ppQ2ppp/2p5/8/8/7P/P1q1r1P1/3R1R1K w - - 2 23",
             "solution": "c7f7",
             "rating": "1800",
             "theme": "endgame mate mateIn4 sacrifice veryLong"
-        },
-        {
-            "name": "Lichess Puzzle J8i0D",
-            "fen": "4Q3/1kp2p2/p2p4/1p1P4/4P3/1NPK4/PP3q2/6q1 w - - 0 38",
-            "solution": "b3a5",
-            "rating": "1839",
-            "theme": "deflection endgame mate mateIn4 sacrifice veryLong"
-        },
-        {
-            "name": "Lichess Puzzle DlVo6",
-            "fen": "5r1k/pQ4pp/5r2/2p5/4p3/1NP1P1Pb/PP2q1NP/R5RK b - - 6 24",
-            "solution": "h3g2",
-            "rating": "1868",
-            "theme": "kingsideAttack mate mateIn4 middlegame veryLong"
         },
         {
             "name": "Lichess Puzzle 39YwP",
@@ -410,20 +284,6 @@ puzzles = [
             "solution": "h4h7",
             "rating": "1910",
             "theme": "attraction kingsideAttack mate mateIn4 middlegame sacrifice veryLong"
-        },
-        {
-            "name": "Lichess Puzzle KXfz5",
-            "fen": "2r2rk1/1b1n2p1/p2qp2p/1p1pN3/3P4/P2B3P/1P2N1P1/1Q3RK1 w - - 4 26",
-            "solution": "d3h7",
-            "rating": "1922",
-            "theme": "doubleCheck fork mate mateIn4 middlegame veryLong"
-        },
-        {
-            "name": "Lichess Puzzle JOkhp",
-            "fen": "k1r5/1R3R2/2r3p1/p4p1p/5Q2/1P6/PKP2PPP/5q2 b - - 2 30",
-            "solution": "c6c2",
-            "rating": "1927",
-            "theme": "attraction endgame mate mateIn4 sacrifice veryLong"
         },
         {
             "name": "Lichess Puzzle 901sw",
@@ -454,74 +314,11 @@ puzzles = [
             "theme": "exposedKing mate mateIn4 middlegame sacrifice veryLong xRayAttack"
         },
         {
-            "name": "Lichess Puzzle 2bNAx",
-            "fen": "5r1r/1R3pbp/B1Qp1kp1/3P4/4P3/5P1P/q7/6K1 w - - 5 33",
-            "solution": "c6d6",
-            "rating": "2035",
-            "theme": "mate mateIn4 middlegame veryLong"
-        },
-        {
-            "name": "Lichess Puzzle MBxmQ",
-            "fen": "2rq1r1k/pp1bbp1B/8/4N3/8/7P/P1QN1P2/K2n2R1 w - - 0 23",
-            "solution": "g1g8",
-            "rating": "2109",
-            "theme": "deflection exposedKing fork mate mateIn4 middlegame sacrifice veryLong"
-        },
-        {
-            "name": "Lichess Puzzle 0ARwj",
-            "fen": "r7/p3pp1N/1pn3k1/2p2b1R/8/1P3KP1/P1P1r3/R7 w - - 0 25",
-            "solution": "h5g5",
-            "rating": "2124",
-            "theme": "exposedKing mate mateIn4 middlegame sacrifice veryLong"
-        },
-        {
-            "name": "Lichess Puzzle DVKOM",
-            "fen": "7k/2p2KpP/1p3pP1/8/2rp4/8/8/4B3 w - - 0 45",
-            "solution": "e1d2",
-            "rating": "2140",
-            "theme": "advancedPawn endgame mate mateIn4 promotion quietMove sacrifice veryLong"
-        },
-        {
-            "name": "Lichess Puzzle A42vy",
-            "fen": "2N2rk1/5p2/1p2pp1p/8/q3b3/P1n1P3/4BPPP/Q2R1RK1 b - - 0 27",
-            "solution": "c3e2",
-            "rating": "2167",
-            "theme": "attraction hangingPiece kingsideAttack mate mateIn4 middlegame veryLong"
-        },
-        {
-            "name": "Lichess Puzzle Emtuz",
-            "fen": "8/p6p/2p1pr2/p1Pk1p2/P2P4/1P2KP1b/7P/4R3 w - - 3 33",
-            "solution": "e3d3",
-            "rating": "2209",
-            "theme": "defensiveMove endgame mate mateIn4 veryLong"
-        },
-        {
             "name": "Lichess Puzzle OkYL2",
             "fen": "3Q4/5p2/4kn2/P2p2R1/4q1P1/4P2K/5P2/8 b - - 0 48",
             "solution": "e4h1",
             "rating": "2230",
             "theme": "endgame fork mate mateIn4 veryLong"
-        },
-        {
-            "name": "Lichess Puzzle 7Q6Dd",
-            "fen": "1k3r2/pp4p1/3pQ1p1/4P3/3P2P1/2P5/P1P1qBKb/1R3R2 b - - 4 26",
-            "solution": "e2f3",
-            "rating": "2236",
-            "theme": "exposedKing mate mateIn4 middlegame sacrifice veryLong"
-        },
-        {
-            "name": "Lichess Puzzle 65dC0",
-            "fen": "r3k2r/p2qbp2/Bpbp1P2/6p1/1P6/P1N3p1/4NPPP/R2Q1RK1 b kq - 0 21",
-            "solution": "g3h2",
-            "rating": "2279",
-            "theme": "advancedPawn attraction kingsideAttack mate mateIn4 middlegame veryLong"
-        },
-        {
-            "name": "Lichess Puzzle JP7iI",
-            "fen": "6r1/p2p1k2/Qp6/2bq4/5p2/6P1/P4P1P/3R1RK1 b - - 3 30",
-            "solution": "f4g3",
-            "rating": "2280",
-            "theme": "advancedPawn doubleCheck endgame mate mateIn4 promotion sacrifice veryLong"
         },
         {
             "name": "Lichess Puzzle 06LQW",
@@ -538,32 +335,11 @@ puzzles = [
             "theme": "exposedKing mate mateIn4 middlegame queensideAttack veryLong"
         },
         {
-            "name": "Lichess Puzzle 5pxQY",
-            "fen": "6r1/1p5Q/p3kP2/P2p4/3Pb1r1/8/4R1PP/5RK1 b - - 3 31",
-            "solution": "g4g2",
-            "rating": "2306",
-            "theme": "discoveredAttack endgame mate mateIn4 veryLong"
-        },
-        {
-            "name": "Lichess Puzzle NbsAo",
-            "fen": "4R3/6pk/8/p2Q1prp/P7/7P/5qPK/8 w - - 0 46",
-            "solution": "d5g8",
-            "rating": "2322",
-            "theme": "endgame mate mateIn4 veryLong"
-        },
-        {
             "name": "Lichess Puzzle 9UdY7",
             "fen": "1k2q1r1/ppp4p/5RnQ/8/2NP4/2P5/PP4KP/5R2 b - - 0 22",
             "solution": "g6f4",
             "rating": "2337",
             "theme": "doubleCheck fork mate mateIn4 middlegame sacrifice veryLong"
-        },
-        {
-            "name": "Lichess Puzzle CZ7lM",
-            "fen": "1r1q2k1/p3R2p/3p2p1/2pn1p2/7N/4Q2P/P4PP1/6K1 w - - 0 27",
-            "solution": "e3e6",
-            "rating": "2351",
-            "theme": "attraction endgame fork mate mateIn4 sacrifice veryLong"
         },
         {
             "name": "Lichess Puzzle 6TFPU",
@@ -573,25 +349,11 @@ puzzles = [
             "theme": "endgame mate mateIn4 rookEndgame veryLong"
         },
         {
-            "name": "Lichess Puzzle NBJY1",
-            "fen": "rn1Q4/6pR/2p2qk1/1p2p1p1/1P2Pr2/3P4/1PP2P2/2K4R w - - 1 31",
-            "solution": "d8e8",
-            "rating": "2606",
-            "theme": "attraction mate mateIn4 middlegame pin sacrifice veryLong"
-        },
-        {
             "name": "Lichess Puzzle 0KfyN",
             "fen": "k2r1r2/p5p1/BpR5/3p1qn1/N2P2b1/P3P1B1/1P5P/2Q3K1 w - - 7 30",
             "solution": "a6b7",
             "rating": "2637",
             "theme": "attraction clearance mate mateIn4 middlegame queensideAttack sacrifice veryLong"
-        },
-        {
-            "name": "Lichess Puzzle 7KTfW",
-            "fen": "3r1b1r/pp4pp/2b1kp2/4p2B/1B2N3/6Q1/q4PPP/3R2K1 w - - 2 27",
-            "solution": "g3g4",
-            "rating": "2656",
-            "theme": "clearance mate mateIn4 middlegame sacrifice veryLong"
         },
         {
             "name": "Lichess Puzzle IS3Ja",
@@ -601,11 +363,249 @@ puzzles = [
             "theme": "attraction exposedKing hookMate mate mateIn4 middlegame veryLong"
         },
         {
-            "name": "Lichess Puzzle 1EyJ6",
-            "fen": "8/Q3Bppk/2p4p/8/5PKP/2q5/7P/8 b - - 2 42",
-            "solution": "f7f5",
-            "rating": "2700",
-            "theme": "attraction endgame mate mateIn4 sacrifice veryLong"
+            "name": "Lichess Puzzle 4vuBr",
+            "fen": "3R2k1/pQp2pp1/6p1/6B1/8/7P/PP2rq2/7K b - - 4 31",
+            "solution": "g8h7",
+            "rating": "998",
+            "theme": "endgame mate mateIn5 veryLong"
+        },
+        {
+            "name": "Lichess Puzzle F2th0",
+            "fen": "r2q3r/ppp3k1/5pn1/2Q2p2/3P4/2N3p1/PP1BBPP1/R4RK1 b - - 0 23",
+            "solution": "h8h1",
+            "rating": "1123",
+            "theme": "attraction kingsideAttack mate mateIn5 middlegame sacrifice veryLong"
+        },
+        {
+            "name": "Lichess Puzzle OxaTE",
+            "fen": "8/1R1Q2bk/1pr2q1p/4p3/1B1p3N/3P3P/1P3PP1/6K1 b - - 0 34",
+            "solution": "c6c1",
+            "rating": "1175",
+            "theme": "fork mate mateIn5 middlegame veryLong"
+        },
+        {
+            "name": "Lichess Puzzle 6gs6q",
+            "fen": "8/1b4pk/3Q3p/2P1pp2/6P1/7P/4rP2/6K1 b - - 0 31",
+            "solution": "e2e1",
+            "rating": "1223",
+            "theme": "deflection endgame mate mateIn5 veryLong"
+        },
+        {
+            "name": "Lichess Puzzle OtlTI",
+            "fen": "2k2b1N/ppp3p1/4Pq1p/8/4Q3/8/PPPr1PPP/5RK1 b - - 2 21",
+            "solution": "f6f2",
+            "rating": "1342",
+            "theme": "backRankMate endgame mate mateIn5 sacrifice veryLong"
+        },
+        {
+            "name": "Lichess Puzzle CUzdk",
+            "fen": "1k4r1/1bpR2Bp/p7/np6/5Q2/8/q1P2P1P/2K5 w - - 5 28",
+            "solution": "f4c7",
+            "rating": "1443",
+            "theme": "mate mateIn5 middlegame veryLong"
+        },
+        {
+            "name": "Lichess Puzzle MDpf8",
+            "fen": "5q1k/4b1pp/8/8/4P1Q1/1P1PB3/1Pr3PP/RN4K1 b - - 0 21",
+            "solution": "c2c1",
+            "rating": "1450",
+            "theme": "mate mateIn5 middlegame sacrifice veryLong"
+        },
+        {
+            "name": "Lichess Puzzle MS1UE",
+            "fen": "r6r/p1pq1pk1/1bppb3/4P1BQ/3PnP2/7P/PP4P1/RN3RK1 w - - 3 19",
+            "solution": "g5f6",
+            "rating": "1530",
+            "theme": "fork mate mateIn5 middlegame veryLong"
+        },
+        {
+            "name": "Lichess Puzzle Dp7NN",
+            "fen": "4q1rr/p1p1kp2/B1p1Pn2/2Np2p1/3P4/2P3p1/PP4P1/R2Q1RK1 b - - 0 21",
+            "solution": "h8h1",
+            "rating": "1584",
+            "theme": "attraction kingsideAttack mate mateIn5 middlegame sacrifice veryLong"
+        },
+        {
+            "name": "Lichess Puzzle 3CXjK",
+            "fen": "5k2/1Bp1p3/p5r1/1P6/P7/r4N2/1RPP1P2/4KR2 b - - 2 34",
+            "solution": "g6e6",
+            "rating": "1589",
+            "theme": "endgame mate mateIn5 veryLong"
+        },
+        {
+            "name": "Lichess Puzzle 7aboE",
+            "fen": "7r/pp3R2/1kpp4/2n1q3/6Q1/1B5P/P1P5/7K w - - 3 27",
+            "solution": "g4b4",
+            "rating": "1659",
+            "theme": "endgame mate mateIn5 pin veryLong"
+        },
+        {
+            "name": "Lichess Puzzle 55Uom",
+            "fen": "2r3k1/1pr3p1/p3p1B1/1b1pP3/7Q/5N1P/P5PK/2q5 w - - 14 31",
+            "solution": "h4h7",
+            "rating": "1747",
+            "theme": "deflection interference mate mateIn5 middlegame veryLong"
+        },
+        {
+            "name": "Lichess Puzzle 8dLuK",
+            "fen": "3R4/R4p1k/4p1p1/3bP2p/3Q3P/1r6/1P3PPK/2q5 b - - 9 32",
+            "solution": "b3h3",
+            "rating": "1781",
+            "theme": "attraction endgame master mate mateIn5 sacrifice veryLong"
+        },
+        {
+            "name": "Lichess Puzzle 69SgL",
+            "fen": "2rR4/pR4pQ/4p2p/4k1q1/4B3/7P/P5P1/7K b - - 0 31",
+            "solution": "c8c1",
+            "rating": "1782",
+            "theme": "endgame mate mateIn5 veryLong"
+        },
+        {
+            "name": "Lichess Puzzle LDyIe",
+            "fen": "8/p5kp/3Q1pp1/2pP4/2P2P2/7P/rq4P1/4R1K1 w - - 2 31",
+            "solution": "d6e7",
+            "rating": "1960",
+            "theme": "endgame mate mateIn5 veryLong"
+        },
+        {
+            "name": "Lichess Puzzle 1fetJ",
+            "fen": "1r4kb/p2QBp1p/2p3pP/3pP1N1/3P4/3R1R2/1rPK1PP1/5q2 b - - 4 24",
+            "solution": "b2c2",
+            "rating": "2007",
+            "theme": "attraction mate mateIn5 middlegame sacrifice veryLong"
+        },
+        {
+            "name": "Lichess Puzzle 7Px9Z",
+            "fen": "2r4k/1b3ppP/p4B2/4p2P/q3P3/1pP2PQ1/1P6/1K1R2R1 b - - 0 29",
+            "solution": "a4a2",
+            "rating": "2021",
+            "theme": "deflection mate mateIn5 middlegame queensideAttack veryLong"
+        },
+        {
+            "name": "Lichess Puzzle AZ4F7",
+            "fen": "4r1k1/pp4n1/2p2pK1/3qb3/6P1/1Q6/PP6/7R w - - 2 36",
+            "solution": "h1h8",
+            "rating": "2026",
+            "theme": "attraction endgame exposedKing mate mateIn5 sacrifice veryLong"
+        },
+        {
+            "name": "Lichess Puzzle 2pjFS",
+            "fen": "1r1q1rk1/3p2pp/p3P3/n3N2P/5P2/b1pB4/PPQ2P2/1K4Rb w - - 0 22",
+            "solution": "d3h7",
+            "rating": "2055",
+            "theme": "doubleCheck fork mate mateIn5 middlegame veryLong"
+        },
+        {
+            "name": "Lichess Puzzle Dk4aO",
+            "fen": "4r1k1/2Q2pp1/8/7p/1p2P3/3P1P2/Pqn1K1PP/2R2R2 b - - 0 24",
+            "solution": "c2d4",
+            "rating": "2091",
+            "theme": "doubleCheck endgame mate mateIn5 pin sacrifice veryLong"
+        },
+        {
+            "name": "Lichess Puzzle 6DY3a",
+            "fen": "Q7/p1pp4/1pn1k1p1/4P3/3p2K1/2N1q3/PPP4P/5R2 b - - 0 31",
+            "solution": "c6e5",
+            "rating": "2102",
+            "theme": "endgame fork mate mateIn5 veryLong"
+        },
+        {
+            "name": "Lichess Puzzle 66EDQ",
+            "fen": "r1bq1rk1/pp1nb1p1/2n1p3/2ppP1P1/3P4/2P5/PP1NQPP1/R1B1K2R w KQ - 1 13",
+            "solution": "h1h8",
+            "rating": "2109",
+            "theme": "attraction kingsideAttack mate mateIn5 opening sacrifice veryLong"
+        },
+        {
+            "name": "Lichess Puzzle D1YZz",
+            "fen": "1Q6/3R1pk1/4p1pp/P3N3/5P2/P5PK/4bq2/8 b - - 6 39",
+            "solution": "e2f1",
+            "rating": "2119",
+            "theme": "deflection endgame mate mateIn5 veryLong"
+        },
+        {
+            "name": "Lichess Puzzle 67eP6",
+            "fen": "5Bk1/3b2p1/p5K1/1p1P2P1/2p1P3/P1N4r/1P6/1B2R3 b - - 2 38",
+            "solution": "h3f3",
+            "rating": "2242",
+            "theme": "discoveredAttack endgame mate mateIn5 quietMove veryLong"
+        },
+        {
+            "name": "Lichess Puzzle AyNaC",
+            "fen": "1k2r3/1Pq2np1/Q3p3/p3np2/P2P4/B6r/5P1N/R4RK1 b - - 2 25",
+            "solution": "e5f3",
+            "rating": "2247",
+            "theme": "attraction discoveredAttack kingsideAttack mate mateIn5 middlegame sacrifice veryLong"
+        },
+        {
+            "name": "Lichess Puzzle DX0K6",
+            "fen": "r2q1r2/1b1pb1pk/p1n1p3/1p1nP1p1/2pP3P/2P3B1/PP1N1PP1/R2QK2R w KQ - 0 15",
+            "solution": "h4g5",
+            "rating": "2249",
+            "theme": "attraction discoveredAttack mate mateIn5 middlegame sacrifice veryLong"
+        },
+        {
+            "name": "Lichess Puzzle 74zO6",
+            "fen": "r5k1/ppp2p1p/8/3P2p1/2Bp1b2/1P6/P2N1P1q/R2QRK2 b - - 7 28",
+            "solution": "h2h3",
+            "rating": "2285",
+            "theme": "discoveredAttack mate mateIn5 middlegame veryLong"
+        },
+        {
+            "name": "Lichess Puzzle 0UlS3",
+            "fen": "q4r2/4bpkp/p1p4N/3p1Qp1/3P4/7P/2n3R1/6K1 w - - 0 31",
+            "solution": "g2g5",
+            "rating": "2322",
+            "theme": "fork mate mateIn5 middlegame veryLong"
+        },
+        {
+            "name": "Lichess Puzzle 5z1PF",
+            "fen": "r5rk/ppb2R1p/2p5/8/6Q1/7P/PqP3P1/3R3K w - - 4 25",
+            "solution": "f7h7",
+            "rating": "2363",
+            "theme": "attraction fork mate mateIn5 middlegame sacrifice veryLong"
+        },
+        {
+            "name": "Lichess Puzzle HApyl",
+            "fen": "8/3bqk2/4p1pK/1p1pP2p/pP1P1P1P/P1QB4/8/8 b - - 7 37",
+            "solution": "e7f8",
+            "rating": "2585",
+            "theme": "endgame mate mateIn5 veryLong"
+        },
+        {
+            "name": "Lichess Puzzle MZG6H",
+            "fen": "1r4k1/p1p2pp1/2p2Pq1/1r1p4/3P4/bPP1P3/P1Q5/3KR2R w - - 3 30",
+            "solution": "h1h8",
+            "rating": "2643",
+            "theme": "advancedPawn kingsideAttack mate mateIn5 middlegame sacrifice veryLong"
+        },
+        {
+            "name": "Lichess Puzzle 8QYsV",
+            "fen": "1nN4R/5kr1/2p1pp2/p5p1/8/p2Q4/1P4q1/1K6 w - - 6 36",
+            "solution": "c8d6",
+            "rating": "2652",
+            "theme": "clearance endgame fork mate mateIn5 sacrifice veryLong"
+        },
+        {
+            "name": "Lichess Puzzle PNMjr",
+            "fen": "5qk1/8/8/P1NpP3/3P2p1/3K2P1/3Q4/RR1b3r b - - 1 45",
+            "solution": "f8f3",
+            "rating": "2672",
+            "theme": "mate mateIn5 middlegame sacrifice veryLong"
+        },
+        {
+            "name": "Lichess Puzzle Bx8w7",
+            "fen": "8/ppR3p1/4R3/1k1p4/8/1P3q2/PKP2n2/8 w - - 0 33",
+            "solution": "c2c4",
+            "rating": "2759",
+            "theme": "endgame mate mateIn5 veryLong"
+        },
+        {
+            "name": "Lichess Puzzle IAynU",
+            "fen": "8/7p/4Q3/3p2pk/p3p3/PqP3P1/5PK1/8 w - - 4 38",
+            "solution": "g3g4",
+            "rating": "2767",
+            "theme": "endgame mate mateIn5 queenEndgame veryLong"
         },
         {
             "name": "Lichess Puzzle 5lCCC",
@@ -629,27 +629,6 @@ puzzles = [
             "theme": "crushing fork middlegame short"
         },
         {
-            "name": "Lichess Puzzle JpSgR",
-            "fen": "3qk2r/3n1pp1/B3b2p/2b1p3/Pp2r3/4PNN1/1PPQ2PP/R4RK1 b k - 4 19",
-            "solution": "c5e3",
-            "rating": "834",
-            "theme": "crushing fork middlegame short"
-        },
-        {
-            "name": "Lichess Puzzle LW5w5",
-            "fen": "r2qrk2/pp3pp1/2p4p/3p3Q/8/4R3/P1P2PPP/4R1K1 w - - 0 24",
-            "solution": "e3e8",
-            "rating": "839",
-            "theme": "advantage endgame fork short"
-        },
-        {
-            "name": "Lichess Puzzle 7ml2i",
-            "fen": "8/2p1R2p/1p3Bp1/p4kP1/2q1p3/P1N5/1P6/2K5 w - - 8 35",
-            "solution": "e7e5",
-            "rating": "986",
-            "theme": "crushing endgame fork long"
-        },
-        {
             "name": "Lichess Puzzle FZE8A",
             "fen": "6k1/1p1r3p/3B4/1N3R1p/P5nP/1P4P1/5bK1/8 b - - 0 32",
             "solution": "g4e3",
@@ -664,25 +643,11 @@ puzzles = [
             "theme": "crushing endgame fork short"
         },
         {
-            "name": "Lichess Puzzle 5enZ1",
-            "fen": "1k3r2/1pp3p1/p1n5/2N4p/3P1q1P/2P5/PP2Q3/1K2R3 w - - 1 32",
-            "solution": "c5d7",
-            "rating": "1148",
-            "theme": "crushing endgame fork master short"
-        },
-        {
             "name": "Lichess Puzzle 0rFTe",
             "fen": "8/1p1nrk2/p1p3p1/3p1p1p/1P1P3P/1PnN1P2/2PB1KP1/2R5 b - - 6 28",
             "solution": "e7e2",
             "rating": "1163",
             "theme": "crushing endgame fork short"
-        },
-        {
-            "name": "Lichess Puzzle NyUBp",
-            "fen": "2rr2k1/5pp1/b3pn1p/Q1n4q/3P4/PBB1RN1P/1P3PP1/R5K1 b - - 0 21",
-            "solution": "c5b3",
-            "rating": "1163",
-            "theme": "crushing fork hangingPiece middlegame short"
         },
         {
             "name": "Lichess Puzzle MX8wh",
@@ -818,6 +783,13 @@ puzzles = [
             "theme": "advantage fork long middlegame"
         },
         {
+            "name": "Lichess Puzzle EdcX2",
+            "fen": "3r1rk1/ppR3pp/3N1p2/4P3/3Q1n2/5N1P/q4BP1/5RK1 b - - 1 24",
+            "solution": "f4e2",
+            "rating": "1644",
+            "theme": "equality fork middlegame short"
+        },
+        {
             "name": "Lichess Puzzle 0XEKo",
             "fen": "8/8/pB1Qqk2/1p4p1/5pp1/RPr4P/1r3PK1/8 w - - 1 41",
             "solution": "b6d4",
@@ -895,6 +867,13 @@ puzzles = [
             "theme": "crushing defensiveMove endgame exposedKing fork quietMove veryLong"
         },
         {
+            "name": "Lichess Puzzle 5TeaR",
+            "fen": "2br1rk1/p1qn1Rbp/1p4p1/2p1p1N1/2P1P3/1P1P2P1/PB2Q1BP/6K1 w - - 1 22",
+            "solution": "f7g7",
+            "rating": "2047",
+            "theme": "attraction crushing fork long middlegame sacrifice"
+        },
+        {
             "name": "Lichess Puzzle 984dD",
             "fen": "r2qk2r/pp2bppp/2n2n2/1BP1p1B1/3pN3/P4P2/1PP2PPP/R2QK2R b KQkq - 3 10",
             "solution": "d8a5",
@@ -965,6 +944,13 @@ puzzles = [
             "theme": "crushing fork long middlegame xRayAttack"
         },
         {
+            "name": "Lichess Puzzle EDgd8",
+            "fen": "2R5/p3k1p1/5p2/4q3/7Q/1p4PP/3r1P2/6K1 w - - 0 36",
+            "solution": "h4b4",
+            "rating": "2300",
+            "theme": "crushing endgame fork skewer veryLong"
+        },
+        {
             "name": "Lichess Puzzle 2iWRI",
             "fen": "3r2k1/p2r1pbp/1qp3p1/1p2P3/3PNQ2/7P/P5P1/3RR2K w - - 5 27",
             "solution": "e4f6",
@@ -1005,6 +991,13 @@ puzzles = [
             "solution": "f4e2",
             "rating": "2454",
             "theme": "crushing endgame fork master veryLong"
+        },
+        {
+            "name": "Lichess Puzzle 3kF4W",
+            "fen": "r2k3r/pp3Bbp/4Q1pn/2qNp1N1/3nP3/8/PP3PPP/3R2K1 w - - 6 22",
+            "solution": "b2b4",
+            "rating": "2467",
+            "theme": "advantage exposedKing fork long middlegame sacrifice"
         },
         {
             "name": "Lichess Puzzle M5EWK",
@@ -1049,6 +1042,13 @@ puzzles = [
             "theme": "advancedPawn advantage endgame exposedKing fork veryLong"
         },
         {
+            "name": "Lichess Puzzle IGdCm",
+            "fen": "3r1q1k/1pp3pp/p7/P3p1N1/1n6/3r3P/4QPP1/R2R2K1 w - - 0 27",
+            "solution": "d1d3",
+            "rating": "2684",
+            "theme": "advantage fork middlegame veryLong"
+        },
+        {
             "name": "Lichess Puzzle IGgNX",
             "fen": "2q5/Q2R1pbk/3p3p/p2N1p1P/4r1p1/8/PP4P1/1K3R2 b - - 0 28",
             "solution": "c8c4",
@@ -1077,38 +1077,10 @@ puzzles = [
             "theme": "crushing endgame pin short"
         },
         {
-            "name": "Lichess Puzzle 2slGm",
-            "fen": "2r2kr1/1p3ppp/3p4/p4b2/3P1N1P/BP1n4/P1P2P2/2K1R1R1 w - - 1 24",
-            "solution": "f4d3",
-            "rating": "912",
-            "theme": "crushing middlegame oneMove pin"
-        },
-        {
-            "name": "Lichess Puzzle ML749",
-            "fen": "r5k1/ppbq1ppp/2p5/8/4N2r/2PP1pRP/PPQ2P1K/6R1 w - - 0 23",
-            "solution": "e4f6",
-            "rating": "937",
-            "theme": "crushing middlegame pin short"
-        },
-        {
             "name": "Lichess Puzzle HVqhL",
             "fen": "6k1/7p/8/1r1p4/n1pPp1P1/P1P1P3/4N2K/R7 b - - 2 33",
             "solution": "b5b2",
             "rating": "939",
-            "theme": "crushing endgame pin short"
-        },
-        {
-            "name": "Lichess Puzzle EcB8e",
-            "fen": "1r3r2/p4pkp/4p1p1/q2pP3/2bP4/P1R2N1P/5PP1/1RQ3K1 b - - 3 26",
-            "solution": "b8b1",
-            "rating": "976",
-            "theme": "crushing middlegame pin short"
-        },
-        {
-            "name": "Lichess Puzzle ILtWM",
-            "fen": "8/5k2/8/4B2K/r5PP/8/8/8 b - - 2 40",
-            "solution": "a4a5",
-            "rating": "980",
             "theme": "crushing endgame pin short"
         },
         {
@@ -1117,13 +1089,6 @@ puzzles = [
             "solution": "e1c1",
             "rating": "1021",
             "theme": "advantage endgame pin short"
-        },
-        {
-            "name": "Lichess Puzzle HQ6a1",
-            "fen": "6k1/R4p1p/2p2rp1/2Pp2qn/6B1/2N1P2P/4QP2/5K2 b - - 6 26",
-            "solution": "h5g3",
-            "rating": "1078",
-            "theme": "crushing middlegame pin short"
         },
         {
             "name": "Lichess Puzzle HqmRH",
@@ -1166,13 +1131,6 @@ puzzles = [
             "solution": "d8h8",
             "rating": "1390",
             "theme": "crushing endgame pin short"
-        },
-        {
-            "name": "Lichess Puzzle Cvr2V",
-            "fen": "3r1q1k/5bp1/6Qp/1p3p2/2p1pP1P/2P3R1/6PK/rB1R4 w - - 1 40",
-            "solution": "d1d8",
-            "rating": "1398",
-            "theme": "crushing kingsideAttack middlegame pin short"
         },
         {
             "name": "Lichess Puzzle 5mBZJ",
@@ -1238,6 +1196,13 @@ puzzles = [
             "theme": "advantage long middlegame pin"
         },
         {
+            "name": "Lichess Puzzle 6MiNu",
+            "fen": "r2qk2r/1b1nbppp/p7/2N1p1P1/8/1N2QP2/1PP4P/2KR1B1R b kq - 0 18",
+            "solution": "e7g5",
+            "rating": "1625",
+            "theme": "advantage long middlegame pin"
+        },
+        {
             "name": "Lichess Puzzle DxwLP",
             "fen": "2r3k1/pp2qpp1/7p/3BbP2/4P1Q1/P5P1/1r5P/3R1RK1 w - - 0 25",
             "solution": "f5f6",
@@ -1257,6 +1222,13 @@ puzzles = [
             "solution": "f6f3",
             "rating": "1788",
             "theme": "crushing endgame pin short"
+        },
+        {
+            "name": "Lichess Puzzle B4zGN",
+            "fen": "q5k1/5pp1/2p2n1p/8/pPQ1N3/P5PP/3r1PK1/2R5 b - - 4 32",
+            "solution": "c6c5",
+            "rating": "1816",
+            "theme": "crushing endgame long pin"
         },
         {
             "name": "Lichess Puzzle LR7Pf",
@@ -1343,6 +1315,13 @@ puzzles = [
             "theme": "crushing middlegame pin queensideAttack short"
         },
         {
+            "name": "Lichess Puzzle 6XMrS",
+            "fen": "3r3k/pb4pp/1pR5/3B1p2/1P6/P3B2P/1q3PQ1/6K1 b - - 1 30",
+            "solution": "b7c6",
+            "rating": "2164",
+            "theme": "crushing middlegame pin veryLong"
+        },
+        {
             "name": "Lichess Puzzle OOSNG",
             "fen": "1Qb2k2/2P1b3/p4p1q/4pP2/4P2p/P5r1/2R4K/4R3 w - - 3 42",
             "solution": "b8c8",
@@ -1362,6 +1341,13 @@ puzzles = [
             "solution": "a1b1",
             "rating": "2228",
             "theme": "advantage middlegame pin short"
+        },
+        {
+            "name": "Lichess Puzzle 6GE7I",
+            "fen": "r2qr1k1/2p2p2/pn1b3p/1p6/3P4/1BP2P2/P2Q1P1P/4RRK1 w - - 0 18",
+            "solution": "d2h6",
+            "rating": "2284",
+            "theme": "crushing kingsideAttack master middlegame pin sacrifice short"
         },
         {
             "name": "Lichess Puzzle 8lLYy",
@@ -1390,6 +1376,13 @@ puzzles = [
             "solution": "b3b2",
             "rating": "2324",
             "theme": "advancedPawn crushing endgame long pin rookEndgame"
+        },
+        {
+            "name": "Lichess Puzzle 3NSL6",
+            "fen": "r4rk1/5p2/p1b2ppb/1p6/2B3Q1/q4N2/6PP/3R1R1K w - - 0 26",
+            "solution": "g4g6",
+            "rating": "2399",
+            "theme": "crushing discoveredAttack long middlegame pin"
         },
         {
             "name": "Lichess Puzzle 8hLrF",
@@ -1434,6 +1427,13 @@ puzzles = [
             "theme": "advancedPawn crushing endgame interference pawnEndgame pin promotion quietMove veryLong"
         },
         {
+            "name": "Lichess Puzzle 1EuxB",
+            "fen": "r2q1r2/pp4pk/5pnp/2p5/3p1R2/1B5P/PPQ2PP1/3R2K1 w - - 0 22",
+            "solution": "c2f5",
+            "rating": "2692",
+            "theme": "advantage long middlegame pin"
+        },
+        {
             "name": "Lichess Puzzle FeTT7",
             "fen": "6k1/5pp1/1p3q1p/p1b5/2R5/1P2r1PP/P2Q1P2/3R1K2 b - - 1 32",
             "solution": "f6f3",
@@ -1448,13 +1448,6 @@ puzzles = [
             "theme": "crushing defensiveMove exposedKing kingsideAttack long middlegame pin"
         },
         {
-            "name": "Lichess Puzzle 7Kvhu",
-            "fen": "2k1r3/3r1p2/Rpb2pp1/2p4p/2P5/4N2P/1P3PP1/R5K1 w - - 6 27",
-            "solution": "a6a8",
-            "rating": "790",
-            "theme": "advantage endgame exposedKing long queensideAttack sacrifice skewer"
-        },
-        {
             "name": "Lichess Puzzle BjUNX",
             "fen": "3r2k1/3r2pp/p1p2pq1/PpP5/1P1PpPPP/4P3/3K4/R2Q3R b - - 0 22",
             "solution": "d7d4",
@@ -1462,25 +1455,11 @@ puzzles = [
             "theme": "advantage endgame sacrifice short"
         },
         {
-            "name": "Lichess Puzzle PBe0Z",
-            "fen": "2kr3r/1p3p2/1np5/p1Np4/Pq1P4/3BP2b/1PQ2P2/R4K1R w - - 0 24",
-            "solution": "h1h3",
-            "rating": "889",
-            "theme": "advantage master middlegame sacrifice short"
-        },
-        {
             "name": "Lichess Puzzle IvRvH",
             "fen": "7k/1p4bp/pq4p1/4n3/3rQ3/1B6/PPP3PP/5R1K w - - 1 36",
             "solution": "f1f8",
             "rating": "918",
             "theme": "crushing deflection long middlegame sacrifice"
-        },
-        {
-            "name": "Lichess Puzzle IGhzo",
-            "fen": "5rk1/pQ3pp1/4p1qp/3n2r1/P7/2N3PP/1P3P2/3RR1K1 b - - 0 25",
-            "solution": "g5g3",
-            "rating": "990",
-            "theme": "advantage kingsideAttack middlegame sacrifice short"
         },
         {
             "name": "Lichess Puzzle DU8Tr",
@@ -1516,20 +1495,6 @@ puzzles = [
             "solution": "e8c7",
             "rating": "1271",
             "theme": "advantage defensiveMove endgame master sacrifice short"
-        },
-        {
-            "name": "Lichess Puzzle DnuuA",
-            "fen": "8/8/7p/1P4p1/1Nkp2P1/P1p3P1/1nK5/8 w - - 3 49",
-            "solution": "b5b6",
-            "rating": "1320",
-            "theme": "advancedPawn crushing endgame knightEndgame long sacrifice"
-        },
-        {
-            "name": "Lichess Puzzle Jc6Ha",
-            "fen": "8/4p1k1/R7/3P4/5P2/4K2p/p3B2r/8 b - - 1 48",
-            "solution": "h2e2",
-            "rating": "1324",
-            "theme": "advancedPawn advantage endgame long promotion sacrifice"
         },
         {
             "name": "Lichess Puzzle Gt0b3",
@@ -1609,6 +1574,13 @@ puzzles = [
             "theme": "clearance crushing kingsideAttack middlegame sacrifice veryLong"
         },
         {
+            "name": "Lichess Puzzle PC3Tu",
+            "fen": "8/1k6/7p/1N1p1Pp1/1r4P1/6PK/8/8 w - - 14 53",
+            "solution": "f5f6",
+            "rating": "1735",
+            "theme": "advancedPawn advantage endgame long promotion sacrifice"
+        },
+        {
             "name": "Lichess Puzzle DlcIm",
             "fen": "r2r1qk1/1b3ppp/p1npp3/1pbN3Q/4P3/P3B1P1/1PP2PBP/3RR1K1 w - - 6 17",
             "solution": "d5f6",
@@ -1656,6 +1628,20 @@ puzzles = [
             "solution": "b5d3",
             "rating": "1888",
             "theme": "advantage defensiveMove discoveredAttack endgame sacrifice veryLong"
+        },
+        {
+            "name": "Lichess Puzzle OrHZ5",
+            "fen": "8/8/4b3/2p1k3/2P4P/Pr1B4/1p1K4/1R6 b - - 2 52",
+            "solution": "b3d3",
+            "rating": "1909",
+            "theme": "attraction crushing endgame exposedKing long sacrifice skewer"
+        },
+        {
+            "name": "Lichess Puzzle 3GO12",
+            "fen": "8/2qQ1pk1/p1n1p1p1/1pp5/6P1/2P5/PP3P2/3R2K1 b - - 2 30",
+            "solution": "c7f4",
+            "rating": "1956",
+            "theme": "advantage endgame sacrifice short"
         },
         {
             "name": "Lichess Puzzle FzmPM",
@@ -1749,6 +1735,13 @@ puzzles = [
             "theme": "crushing exposedKing kingsideAttack long middlegame sacrifice"
         },
         {
+            "name": "Lichess Puzzle 2mDy3",
+            "fen": "r5r1/p2np1k1/5np1/1p1Nq2p/8/P1R5/1PPQ2PP/5RK1 w - - 3 24",
+            "solution": "c3e3",
+            "rating": "2410",
+            "theme": "advantage long master middlegame sacrifice"
+        },
+        {
             "name": "Lichess Puzzle 3yR9L",
             "fen": "2rr3k/1q3p2/p3pN1p/1p2P1p1/2bN2R1/4Q2P/6P1/6K1 w - - 2 37",
             "solution": "g4g5",
@@ -1791,6 +1784,13 @@ puzzles = [
             "theme": "advantage endgame long sacrifice"
         },
         {
+            "name": "Lichess Puzzle 8Ez7T",
+            "fen": "5rk1/pR4pp/1b1p1p2/3p4/3N2q1/1P2QNP1/Pr5P/R5K1 b - - 0 22",
+            "solution": "g4h3",
+            "rating": "2724",
+            "theme": "advantage deflection intermezzo middlegame sacrifice veryLong"
+        },
+        {
             "name": "Lichess Puzzle KAk6d",
             "fen": "4Rbk1/3q2r1/p6Q/1p5P/5p2/1PrP1R2/P4PP1/6K1 w - - 1 37",
             "solution": "e8f8",
@@ -1798,32 +1798,11 @@ puzzles = [
             "theme": "attraction crushing exposedKing middlegame sacrifice veryLong"
         },
         {
-            "name": "Lichess Puzzle F27pP",
-            "fen": "2r5/8/8/4Rkpp/3K4/5P2/7P/8 b - - 3 64",
-            "solution": "f5f4",
-            "rating": "789",
-            "theme": "crushing defensiveMove endgame rookEndgame short"
-        },
-        {
-            "name": "Lichess Puzzle 3uVrn",
-            "fen": "8/1p3p2/p1p1k3/P1Pp2Kp/1P1N4/8/8/8 b - - 2 52",
-            "solution": "e6e5",
-            "rating": "849",
-            "theme": "crushing defensiveMove endgame knightEndgame short"
-        },
-        {
             "name": "Lichess Puzzle Mg4ba",
             "fen": "8/5p2/p7/1p2k2b/1P5P/P1K1R3/5Br1/8 b - - 12 42",
             "solution": "e5f4",
             "rating": "920",
             "theme": "crushing defensiveMove endgame short"
-        },
-        {
-            "name": "Lichess Puzzle MhGOm",
-            "fen": "r4rk1/ppqb2pB/4pb2/8/2pP4/2P1PR2/PP1B2PP/R2Q2K1 b - - 0 17",
-            "solution": "g8h7",
-            "rating": "942",
-            "theme": "advantage defensiveMove hangingPiece middlegame short"
         },
         {
             "name": "Lichess Puzzle F0k3J",
@@ -1845,13 +1824,6 @@ puzzles = [
             "solution": "d4d3",
             "rating": "1080",
             "theme": "crushing defensiveMove endgame oneMove pawnEndgame"
-        },
-        {
-            "name": "Lichess Puzzle 4xEm1",
-            "fen": "B7/8/p7/Pp6/8/1Pbk2RP/4p1K1/8 b - - 1 44",
-            "solution": "d3d2",
-            "rating": "1094",
-            "theme": "advancedPawn crushing defensiveMove endgame promotion short"
         },
         {
             "name": "Lichess Puzzle BPuW6",
@@ -1882,13 +1854,6 @@ puzzles = [
             "theme": "crushing defensiveMove endgame long pawnEndgame"
         },
         {
-            "name": "Lichess Puzzle AGHZC",
-            "fen": "6k1/pp4p1/5b2/5K1p/1B1p4/P5P1/5r2/4R3 w - - 2 34",
-            "solution": "f5g6",
-            "rating": "1308",
-            "theme": "advantage defensiveMove endgame short"
-        },
-        {
             "name": "Lichess Puzzle DL4u5",
             "fen": "6k1/5pp1/7p/2Q5/1B2b1q1/3N2P1/5P1P/2R3K1 b - - 2 38",
             "solution": "g4f3",
@@ -1908,6 +1873,13 @@ puzzles = [
             "solution": "g7g8",
             "rating": "1474",
             "theme": "advantage defensiveMove endgame short"
+        },
+        {
+            "name": "Lichess Puzzle 3GTfY",
+            "fen": "8/p7/1p1k3p/2p5/PPPK2pP/6P1/8/8 w - - 0 36",
+            "solution": "b4c5",
+            "rating": "1480",
+            "theme": "crushing defensiveMove endgame pawnEndgame short"
         },
         {
             "name": "Lichess Puzzle IsCZw",
@@ -1987,6 +1959,13 @@ puzzles = [
             "theme": "crushing defensiveMove endgame hangingPiece short"
         },
         {
+            "name": "Lichess Puzzle DyNCf",
+            "fen": "4r1k1/p4ppp/1pp2q2/8/1P1NrP1n/P2QP1RP/6P1/4R1K1 b - - 1 26",
+            "solution": "e4d4",
+            "rating": "1870",
+            "theme": "advantage defensiveMove middlegame short"
+        },
+        {
             "name": "Lichess Puzzle JQv1p",
             "fen": "8/5p2/3kpp2/7p/4K1PP/4P3/5P2/8 b - - 0 40",
             "solution": "h5g4",
@@ -2057,11 +2036,25 @@ puzzles = [
             "theme": "crushing defensiveMove long middlegame"
         },
         {
+            "name": "Lichess Puzzle 51ULj",
+            "fen": "8/1p4p1/p7/k7/3KP2P/8/7P/8 b - - 1 41",
+            "solution": "b7b5",
+            "rating": "2184",
+            "theme": "crushing defensiveMove endgame long pawnEndgame quietMove"
+        },
+        {
             "name": "Lichess Puzzle 3xFI7",
             "fen": "1k6/1p4QN/q3p2p/1p1pP3/3n4/1P5P/2P2PP1/6K1 b - - 0 29",
             "solution": "a6a1",
             "rating": "2206",
             "theme": "crushing defensiveMove endgame quietMove veryLong"
+        },
+        {
+            "name": "Lichess Puzzle 2lBRO",
+            "fen": "1q6/pk3P1R/4P3/1p1pK3/2pP4/2P5/PP3b2/8 w - - 3 50",
+            "solution": "e5f5",
+            "rating": "2353",
+            "theme": "crushing defensiveMove endgame long"
         },
         {
             "name": "Lichess Puzzle Kt0v8",
@@ -2127,6 +2120,13 @@ puzzles = [
             "theme": "crushing defensiveMove endgame rookEndgame veryLong"
         },
         {
+            "name": "Lichess Puzzle 8oW1H",
+            "fen": "1r3R2/4n1P1/6K1/8/6kP/8/8/8 w - - 11 55",
+            "solution": "g6f7",
+            "rating": "2625",
+            "theme": "clearance crushing defensiveMove endgame long"
+        },
+        {
             "name": "Lichess Puzzle 4acOZ",
             "fen": "8/1p6/p1p2qkp/P1PpQ1p1/3P4/4P1KP/6P1/8 w - - 9 49",
             "solution": "e5e8",
@@ -2148,11 +2148,11 @@ puzzles = [
             "theme": "advancedPawn crushing defensiveMove endgame rookEndgame veryLong"
         },
         {
-            "name": "Lichess Puzzle MrYjB",
-            "fen": "4r1k1/prBn3p/3P2p1/2p2p2/2PbN3/1P5P/4RPK1/1R6 w - - 0 36",
-            "solution": "e4f6",
-            "rating": "649",
-            "theme": "crushing discoveredAttack kingsideAttack middlegame short"
+            "name": "Lichess Puzzle Ck6DJ",
+            "fen": "2r2rk1/pp3p2/4pBB1/n2qP2p/8/P5Q1/1P3PbP/R3R1K1 w - - 5 23",
+            "solution": "g6b1",
+            "rating": "1702",
+            "theme": "discoveredAttack mate mateIn1 middlegame oneMove"
         },
         {
             "name": "Lichess Puzzle 3rQvw",
@@ -2169,13 +2169,6 @@ puzzles = [
             "theme": "bishopEndgame crushing discoveredAttack endgame short"
         },
         {
-            "name": "Lichess Puzzle 4uaif",
-            "fen": "r3r1k1/6qp/6p1/p1Ppnp2/3Q4/P3B2R/5PPP/4R1K1 b - - 1 29",
-            "solution": "e5f3",
-            "rating": "927",
-            "theme": "crushing discoveredAttack kingsideAttack long middlegame"
-        },
-        {
             "name": "Lichess Puzzle NZq9k",
             "fen": "r2q1rk1/pp1nbppp/2p1pn2/6B1/4N3/3P1B1P/PPPQ1PP1/R4RK1 b - - 7 12",
             "solution": "f6e4",
@@ -2190,25 +2183,11 @@ puzzles = [
             "theme": "crushing discoveredAttack middlegame short"
         },
         {
-            "name": "Lichess Puzzle 1RtOW",
-            "fen": "6k1/2q2p1p/2p1pp2/8/2PP4/4P1P1/5P1P/rBQ3K1 w - - 1 30",
-            "solution": "b1h7",
-            "rating": "1157",
-            "theme": "crushing discoveredAttack endgame short"
-        },
-        {
             "name": "Lichess Puzzle 3S86v",
             "fen": "r4rk1/2Q3pp/p4n2/1pb3N1/2q5/1P6/P4PPP/R1B2RK1 b - - 0 21",
             "solution": "c5f2",
             "rating": "1174",
             "theme": "crushing discoveredAttack middlegame short"
-        },
-        {
-            "name": "Lichess Puzzle 7OVAF",
-            "fen": "6k1/1pp3pp/1P1p4/p2P1p2/P1Pp4/2r5/5P1P/1R3K2 w - - 1 28",
-            "solution": "b6c7",
-            "rating": "1195",
-            "theme": "advancedPawn crushing discoveredAttack endgame long rookEndgame"
         },
         {
             "name": "Lichess Puzzle GbJ67",
@@ -2302,6 +2281,13 @@ puzzles = [
             "theme": "advantage discoveredAttack long master middlegame xRayAttack"
         },
         {
+            "name": "Lichess Puzzle PFrGV",
+            "fen": "5r1r/1p1q1k1p/2p2ppP/4Q3/4P1P1/1P1Pb3/2P3KR/5R2 w - - 0 33",
+            "solution": "f1f6",
+            "rating": "1837",
+            "theme": "attraction crushing discoveredAttack long master middlegame"
+        },
+        {
             "name": "Lichess Puzzle 2pu0H",
             "fen": "3B4/2R5/1kpp4/4p3/1P2P1B1/K1Pn1P2/1r6/2b5 b - - 0 43",
             "solution": "b2b4",
@@ -2379,6 +2365,13 @@ puzzles = [
             "theme": "crushing discoveredAttack endgame master short"
         },
         {
+            "name": "Lichess Puzzle Lm4Tq",
+            "fen": "1kB1r3/p4R1p/1p6/1Q1p4/1b6/1q3P2/1B1P1P1P/2KR4 b - - 0 24",
+            "solution": "b4d2",
+            "rating": "2223",
+            "theme": "crushing discoveredAttack middlegame queensideAttack short"
+        },
+        {
             "name": "Lichess Puzzle DrUd2",
             "fen": "rn1r2k1/3q3p/1ppB1bp1/2Pb1pN1/1p5P/P4NP1/4PPB1/3Q1RK1 w - - 0 19",
             "solution": "f3e5",
@@ -2398,6 +2391,13 @@ puzzles = [
             "solution": "d6c7",
             "rating": "2270",
             "theme": "advantage discoveredAttack middlegame veryLong"
+        },
+        {
+            "name": "Lichess Puzzle Bxh2b",
+            "fen": "7k/1p2r1p1/p1b1p1B1/5nN1/5Pn1/8/1P5P/3R2K1 w - - 2 31",
+            "solution": "d1d8",
+            "rating": "2291",
+            "theme": "crushing discoveredAttack middlegame veryLong"
         },
         {
             "name": "Lichess Puzzle JHTVQ",
@@ -2463,27 +2463,6 @@ puzzles = [
             "theme": "crushing discoveredAttack middlegame quietMove veryLong"
         },
         {
-            "name": "Lichess Puzzle 9fbc3",
-            "fen": "8/1rk2r1p/2P5/3p4/4p1P1/8/6K1/1R6 w - - 0 47",
-            "solution": "b1b7",
-            "rating": "843",
-            "theme": "crushing endgame rookEndgame short skewer"
-        },
-        {
-            "name": "Lichess Puzzle JK8n2",
-            "fen": "4k2r/r7/2p1pp2/8/4P2p/pP3P2/K1PR4/3R4 w k - 2 27",
-            "solution": "d2d8",
-            "rating": "845",
-            "theme": "crushing endgame rookEndgame short skewer"
-        },
-        {
-            "name": "Lichess Puzzle Mbdl4",
-            "fen": "8/p1k2p2/7p/2p5/P1p1b3/2P5/4K2P/5R2 b - - 4 30",
-            "solution": "e4d3",
-            "rating": "935",
-            "theme": "crushing endgame short skewer"
-        },
-        {
             "name": "Lichess Puzzle 0csd3",
             "fen": "8/8/8/r7/6Pk/p4K2/R7/8 w - - 5 63",
             "solution": "a2h2",
@@ -2505,25 +2484,11 @@ puzzles = [
             "theme": "crushing endgame short skewer"
         },
         {
-            "name": "Lichess Puzzle Fw3ep",
-            "fen": "6k1/4Bp1p/6pb/8/2r5/8/5PPP/3R2K1 w - - 2 27",
-            "solution": "d1d8",
-            "rating": "1285",
-            "theme": "advantage deflection endgame long skewer"
-        },
-        {
             "name": "Lichess Puzzle JdoJe",
             "fen": "3rr1k1/p1p2ppp/5n2/n7/q2P4/1pPQB2P/3N1PP1/1R2R1K1 w - - 0 23",
             "solution": "b1a1",
             "rating": "1286",
             "theme": "advantage middlegame short skewer"
-        },
-        {
-            "name": "Lichess Puzzle 7uG4t",
-            "fen": "2k5/pp2b1p1/4n3/6r1/P1Pp1p2/1N1P1PB1/4PK2/R7 w - - 0 30",
-            "solution": "g3h4",
-            "rating": "1387",
-            "theme": "crushing endgame short skewer"
         },
         {
             "name": "Lichess Puzzle 5BvES",
@@ -2568,6 +2533,13 @@ puzzles = [
             "theme": "crushing deflection endgame short skewer"
         },
         {
+            "name": "Lichess Puzzle 5c1I7",
+            "fen": "5rk1/3bp1Bp/3p1np1/8/1p1NP1P1/qP3P2/2PQ4/1K1R3R b - - 0 23",
+            "solution": "f8a8",
+            "rating": "1728",
+            "theme": "crushing middlegame queensideAttack quietMove skewer veryLong"
+        },
+        {
             "name": "Lichess Puzzle Ad67J",
             "fen": "1r2r3/6kp/1p4p1/p3pp2/n7/q1P2P2/2RN2PP/1R3Q1K w - - 0 32",
             "solution": "b1a1",
@@ -2600,6 +2572,13 @@ puzzles = [
             "fen": "3q1r1b/r3k3/p5QP/1p2P1N1/2p2n2/2P5/PP3P2/2K3RR w - - 3 28",
             "solution": "g6h7",
             "rating": "1957",
+            "theme": "crushing middlegame skewer veryLong"
+        },
+        {
+            "name": "Lichess Puzzle DgWvu",
+            "fen": "2k4r/1ppnp1q1/pr6/4p3/6Q1/2PP1P2/PP1RK1P1/4R1B1 b - - 1 30",
+            "solution": "b6g6",
+            "rating": "1966",
             "theme": "crushing middlegame skewer veryLong"
         },
         {
@@ -2652,6 +2631,13 @@ puzzles = [
             "theme": "crushing exposedKing long middlegame skewer"
         },
         {
+            "name": "Lichess Puzzle 0C3qv",
+            "fen": "3r1rk1/ppNR1pp1/2p4p/q3p3/4P1Q1/2P1P3/1P4PP/2K2R2 b - - 2 20",
+            "solution": "d8d7",
+            "rating": "2211",
+            "theme": "crushing long middlegame skewer"
+        },
+        {
             "name": "Lichess Puzzle 1mIKo",
             "fen": "6k1/1pp3p1/p2pprrp/4p3/PP1PP2q/2P1R2P/3N1PQK/5RN1 b - - 0 28",
             "solution": "g6g2",
@@ -2687,6 +2673,13 @@ puzzles = [
             "theme": "crushing exposedKing kingsideAttack master middlegame skewer veryLong"
         },
         {
+            "name": "Lichess Puzzle 6S20x",
+            "fen": "r3k1r1/pp3p1p/2p1p3/6Qn/3PpP2/2P1P3/P1P4q/R3BK2 w q - 0 19",
+            "solution": "g5g8",
+            "rating": "2545",
+            "theme": "advantage middlegame quietMove skewer veryLong"
+        },
+        {
             "name": "Lichess Puzzle 8xqqV",
             "fen": "6r1/8/3N2k1/1Pp1p3/p1P5/P1b1K3/5RP1/8 b - - 0 46",
             "solution": "c3d4",
@@ -2701,6 +2694,13 @@ puzzles = [
             "theme": "advantage capturingDefender middlegame skewer veryLong"
         },
         {
+            "name": "Lichess Puzzle 7ZIwM",
+            "fen": "r7/ppp1kpb1/3p4/4pBPr/1NP1Pp1q/3P1P2/PP3R1Q/R5K1 b - - 4 24",
+            "solution": "a8h8",
+            "rating": "2684",
+            "theme": "advantage exposedKing middlegame quietMove skewer veryLong"
+        },
+        {
             "name": "Lichess Puzzle NSxfP",
             "fen": "r6r/p4pp1/4p1k1/2Q1B2p/4R1n1/3P2Pq/PPP2P2/RN4K1 b - - 4 20",
             "solution": "a8c8",
@@ -2708,32 +2708,11 @@ puzzles = [
             "theme": "advantage long middlegame skewer"
         },
         {
-            "name": "Lichess Puzzle 7R9hj",
-            "fen": "8/8/K7/5p2/1P4k1/8/8/8 b - - 1 57",
-            "solution": "f5f4",
-            "rating": "600",
-            "theme": "advancedPawn crushing endgame pawnEndgame promotion quietMove veryLong"
-        },
-        {
-            "name": "Lichess Puzzle 201l3",
-            "fen": "8/8/8/p7/1k1KP3/3P4/5P2/8 b - - 0 48",
-            "solution": "a5a4",
-            "rating": "653",
-            "theme": "advancedPawn crushing endgame pawnEndgame promotion quietMove veryLong"
-        },
-        {
             "name": "Lichess Puzzle 0iODu",
             "fen": "8/8/8/2Kp4/P2P4/1k2n3/8/8 w - - 2 57",
             "solution": "a4a5",
             "rating": "800",
             "theme": "crushing endgame knightEndgame quietMove short"
-        },
-        {
-            "name": "Lichess Puzzle F7CCO",
-            "fen": "q5k1/5pp1/8/pQ6/8/4P1P1/5P1P/6K1 b - - 1 31",
-            "solution": "a5a4",
-            "rating": "1164",
-            "theme": "advantage endgame queenEndgame quietMove short"
         },
         {
             "name": "Lichess Puzzle 1v1Rl",
@@ -2771,6 +2750,13 @@ puzzles = [
             "theme": "crushing endgame quietMove short"
         },
         {
+            "name": "Lichess Puzzle G971e",
+            "fen": "3r1rk1/4ppb1/pp4p1/2pq2N1/P4Q2/2P3N1/1P4PP/5R1K w - - 2 23",
+            "solution": "f4h4",
+            "rating": "1614",
+            "theme": "advantage middlegame quietMove short"
+        },
+        {
             "name": "Lichess Puzzle DOuva",
             "fen": "8/8/2p1kp2/p2p2p1/1P1P2Pp/2P2P1P/2b1B1KB/8 b - - 0 38",
             "solution": "a5a4",
@@ -2797,6 +2783,13 @@ puzzles = [
             "solution": "f4h6",
             "rating": "1751",
             "theme": "clearance crushing long middlegame quietMove"
+        },
+        {
+            "name": "Lichess Puzzle 6DMSG",
+            "fen": "r7/p2k3p/1q1b2b1/2p5/2N5/8/PP1R1PPP/4R1K1 w - - 2 28",
+            "solution": "c4b6",
+            "rating": "1862",
+            "theme": "advantage long middlegame quietMove"
         },
         {
             "name": "Lichess Puzzle 3KKcX",
@@ -2848,6 +2841,13 @@ puzzles = [
             "theme": "crushing endgame long quietMove"
         },
         {
+            "name": "Lichess Puzzle 7IYSi",
+            "fen": "5rk1/pp1b1p2/3p1RpQ/8/8/8/Pqr1B1PP/R6K w - - 0 22",
+            "solution": "a1f1",
+            "rating": "2345",
+            "theme": "advantage middlegame quietMove veryLong"
+        },
+        {
             "name": "Lichess Puzzle 7qjgF",
             "fen": "2r3k1/Q2n2p1/1pq1p2p/5p2/3PpP1P/1N1bP1R1/PP4P1/R5K1 b - - 0 22",
             "solution": "c8a8",
@@ -2883,13 +2883,6 @@ puzzles = [
             "theme": "crushing endgame long pawnEndgame quietMove"
         },
         {
-            "name": "Lichess Puzzle 7mcLc",
-            "fen": "8/6p1/7p/1PK1k3/p2p4/8/8/8 w - - 0 38",
-            "solution": "b5b6",
-            "rating": "600",
-            "theme": "advancedPawn crushing endgame long pawnEndgame promotion"
-        },
-        {
             "name": "Lichess Puzzle DBPvQ",
             "fen": "8/8/3K1k2/1b1P4/8/P1p2N2/8/8 b - - 1 65",
             "solution": "c3c2",
@@ -2901,13 +2894,6 @@ puzzles = [
             "fen": "8/8/1K6/P3p3/3p4/3Pk3/8/8 w - - 2 65",
             "solution": "a5a6",
             "rating": "1062",
-            "theme": "advancedPawn crushing endgame long pawnEndgame promotion"
-        },
-        {
-            "name": "Lichess Puzzle HKVdf",
-            "fen": "8/8/6K1/5p1P/kp2p1p1/4P1P1/8/8 w - - 0 54",
-            "solution": "h5h6",
-            "rating": "1156",
             "theme": "advancedPawn crushing endgame long pawnEndgame promotion"
         },
         {
@@ -2965,6 +2951,13 @@ puzzles = [
             "solution": "h2g3",
             "rating": "1740",
             "theme": "advancedPawn crushing endgame hangingPiece long promotion"
+        },
+        {
+            "name": "Lichess Puzzle JY2jM",
+            "fen": "8/7p/p2P2p1/bpP5/3k4/7P/6K1/8 w - - 0 38",
+            "solution": "c5c6",
+            "rating": "1812",
+            "theme": "advancedPawn advantage bishopEndgame endgame long promotion"
         },
         {
             "name": "Lichess Puzzle EkU6K",
@@ -3030,6 +3023,13 @@ puzzles = [
             "theme": "advancedPawn crushing endgame promotion veryLong"
         },
         {
+            "name": "Lichess Puzzle OIypM",
+            "fen": "5k2/8/7R/P1pB1Pp1/P5K1/2B2P2/4r2p/5b2 b - - 1 45",
+            "solution": "e2g2",
+            "rating": "2282",
+            "theme": "advancedPawn crushing endgame promotion veryLong"
+        },
+        {
             "name": "Lichess Puzzle NQVpp",
             "fen": "8/2B2k1p/4pP2/1P1p2P1/p1nP1P2/3KP3/8/8 b - - 0 50",
             "solution": "a4a3",
@@ -3053,7 +3053,7 @@ puzzles = [
         {
             "name": "Lichess Puzzle 89zlD",
             "fen": "1q4rk/1p2R2p/6r1/p1Pp1pbQ/3P3P/2P5/8/6K1 w - - 0 48",
-            "solution": ["h5h7","e7h7"],
+            "solution": ["h5h7", "e7h7"],
             "rating": "852",
             "theme": "endgame mate mateIn1 oneMove"
         },
@@ -3063,13 +3063,6 @@ puzzles = [
             "solution": "c6c1",
             "rating": "875",
             "theme": "endgame mate mateIn1 oneMove"
-        },
-        {
-            "name": "Lichess Puzzle LY01A",
-            "fen": "3rr1k1/5p2/6p1/8/8/8/PPP2PPQ/2K5 b - - 2 29",
-            "solution": "e8e1",
-            "rating": "877",
-            "theme": "endgame mate mateIn1 oneMove queenRookEndgame"
         },
         {
             "name": "Lichess Puzzle 0WPrD",
@@ -3086,46 +3079,11 @@ puzzles = [
             "theme": "endgame mate mateIn1 oneMove"
         },
         {
-            "name": "Lichess Puzzle Ap7bn",
-            "fen": "8/6p1/5p2/1R3Ppr/2pkp3/8/2PK4/8 w - - 0 52",
-            "solution": "c2c3",
-            "rating": "1278",
-            "theme": "endgame mate mateIn1 oneMove rookEndgame"
-        },
-        {
-            "name": "Lichess Puzzle 8PAZF",
-            "fen": "4k3/6p1/5p1p/4p3/pB4P1/1bK1nP2/6P1/6R1 b - - 3 43",
-            "solution": "e3d5",
-            "rating": "903",
-            "theme": "crushing deflection endgame master short"
-        },
-        {
-            "name": "Lichess Puzzle MWD5q",
-            "fen": "8/5pk1/4pQpp/3pP3/1p1P4/8/5qPP/6NK b - - 1 39",
-            "solution": "f2f6",
-            "rating": "948",
-            "theme": "crushing endgame short"
-        },
-        {
-            "name": "Lichess Puzzle 1VfHw",
-            "fen": "8/8/p1P1k3/6p1/4K3/P7/8/8 b - - 0 39",
-            "solution": "e6d6",
-            "rating": "983",
-            "theme": "crushing endgame master pawnEndgame short"
-        },
-        {
             "name": "Lichess Puzzle 4wAxS",
             "fen": "4rk2/1p3ppp/p1pp2q1/8/1PP4r/P2QPPP1/7P/R4RK1 w - - 1 24",
             "solution": "d3g6",
             "rating": "1036",
             "theme": "crushing endgame short"
-        },
-        {
-            "name": "Lichess Puzzle 6Vmda",
-            "fen": "rn4k1/pp1bB2p/3P2p1/1Np5/2P5/P7/5PpP/3R2K1 w - - 3 24",
-            "solution": "b5c7",
-            "rating": "1045",
-            "theme": "crushing endgame short trappedPiece"
         },
         {
             "name": "Lichess Puzzle 534EQ",
@@ -3161,13 +3119,6 @@ puzzles = [
             "solution": "f3f6",
             "rating": "1258",
             "theme": "crushing endgame rookEndgame short"
-        },
-        {
-            "name": "Lichess Puzzle 9y8DO",
-            "fen": "5rk1/2qQ1ppp/4n3/p7/1pBp3P/1P4P1/P5K1/5R2 w - - 1 36",
-            "solution": "c4e6",
-            "rating": "1298",
-            "theme": "advantage endgame short"
         },
         {
             "name": "Lichess Puzzle 4UAuy",
@@ -3223,6 +3174,13 @@ puzzles = [
             "fen": "8/3R3p/6pk/1p3pn1/p3b3/P1P4P/1P1Q2PK/5q2 w - - 9 49",
             "solution": "h3h4",
             "rating": "1534",
+            "theme": "advantage endgame short"
+        },
+        {
+            "name": "Lichess Puzzle 9GR8X",
+            "fen": "8/7k/5p2/p3pPr1/1p1p1q2/1P1P2NP/1P3QRK/5r2 w - - 11 46",
+            "solution": "f2f1",
+            "rating": "1539",
             "theme": "advantage endgame short"
         },
         {
@@ -3324,6 +3282,13 @@ puzzles = [
             "theme": "crushing endgame long"
         },
         {
+            "name": "Lichess Puzzle 16IIY",
+            "fen": "8/7p/1p4p1/1Kn5/P2N2P1/k6P/8/8 w - - 10 48",
+            "solution": "a4a5",
+            "rating": "1910",
+            "theme": "advantage deflection endgame knightEndgame short"
+        },
+        {
             "name": "Lichess Puzzle IRBXX",
             "fen": "8/p5p1/5p2/kpp1pP2/2P1P1Kp/2P1P2P/P5P1/8 b - - 1 36",
             "solution": "b5b4",
@@ -3364,6 +3329,13 @@ puzzles = [
             "solution": "c1c3",
             "rating": "1991",
             "theme": "crushing endgame long rookEndgame"
+        },
+        {
+            "name": "Lichess Puzzle JKukc",
+            "fen": "1Q1b4/1p1r1pkp/3np1p1/3p4/P2P1PP1/1P1BP3/4K2P/8 b - - 0 31",
+            "solution": "d8b6",
+            "rating": "2031",
+            "theme": "clearance crushing endgame long master trappedPiece"
         },
         {
             "name": "Lichess Puzzle 4AIL6",
@@ -3457,6 +3429,13 @@ puzzles = [
             "theme": "crushing endgame long trappedPiece"
         },
         {
+            "name": "Lichess Puzzle P3hJA",
+            "fen": "8/6R1/3kp2p/2pb4/1r1n4/2NK2P1/7P/R7 b - - 4 54",
+            "solution": "d5c4",
+            "rating": "2281",
+            "theme": "advantage endgame long master"
+        },
+        {
             "name": "Lichess Puzzle JOOYp",
             "fen": "4r1k1/p5p1/1p2P3/1q4p1/3Q2P1/6P1/r7/2R1R1K1 w - - 0 35",
             "solution": "d4d7",
@@ -3490,6 +3469,13 @@ puzzles = [
             "solution": "d3d2",
             "rating": "2407",
             "theme": "advancedPawn crushing endgame knightEndgame long"
+        },
+        {
+            "name": "Lichess Puzzle 2MTqq",
+            "fen": "r6k/p6P/4p1p1/q2pPp2/1p2r3/5QP1/5PK1/1R5R w - f6 0 28",
+            "solution": "e5f6",
+            "rating": "2415",
+            "theme": "crushing enPassant endgame veryLong"
         },
         {
             "name": "Lichess Puzzle GNuB5",
@@ -3527,6 +3513,13 @@ puzzles = [
             "theme": "advantage endgame long"
         },
         {
+            "name": "Lichess Puzzle 2Dh1k",
+            "fen": "2rq4/6p1/p3p3/1p1pkn2/8/2NQ4/PPP2P2/2K3R1 w - - 0 28",
+            "solution": "g1g6",
+            "rating": "2684",
+            "theme": "advantage attraction endgame veryLong"
+        },
+        {
             "name": "Lichess Puzzle B5wzH",
             "fen": "8/p7/8/6p1/3Rn1Nk/Pp5P/1r4P1/6K1 b - - 1 33",
             "solution": "b2e2",
@@ -3539,6 +3532,13 @@ puzzles = [
             "solution": "d3e4",
             "rating": "2760",
             "theme": "crushing endgame long"
+        },
+        {
+            "name": "Lichess Puzzle 3f4EN",
+            "fen": "8/8/8/8/6pk/2r5/4KR1P/8 b - - 5 57",
+            "solution": "h4h3",
+            "rating": "2799",
+            "theme": "crushing endgame exposedKing rookEndgame veryLong"
         },
     ]
 

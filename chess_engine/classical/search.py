@@ -14,10 +14,7 @@ from chess_engine.classical.move_generator import (
     generate_pseudo_legal_quiets_buffer,
     is_square_attacked, is_move_pseudo_legal
 )
-from chess_engine.classical.bitboard_utils import (
-    get_lsb_index, WHITE_KING_ZONES, BLACK_KING_ZONES,
-    ROOK_RAYS, BISHOP_RAYS, SQUARES_BETWEEN, count_bits
-)
+from chess_engine.classical.bitboard_utils import get_lsb_index, count_bits
 from chess_engine.classical.board_operations import make_move, unmake_move, make_null_move
 from chess_engine.classical.move import (
     get_to_square, get_from_square, get_special_move_flag,
@@ -532,13 +529,6 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
     # Initialize PV for this ply to avoid ghost moves from previous searches
     search_context.pv_table[ply, ply] = NO_MOVE
 
-    # --- DTR-LMR: Strategic Bitmask (lazily initialised — computed on first quiet move) ---
-    # Note: storing side_to_move here because at make_move time it will have flipped
-    side_to_move = game_state[0]
-    enemy_king_zone = np.uint64(0)
-    friendly_danger_rays = np.uint64(0)
-    dtr_lmr_computed = False
-
     original_alpha = alpha
     
     # --- Initialization ---
@@ -811,9 +801,7 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
             if tt_score_pc > MATE_IN_MAX_PLY: tt_score_pc -= ply
             elif tt_score_pc < -MATE_IN_MAX_PLY: tt_score_pc += ply
             
-            if tt_entry['flag'] == TT_FLAG_ALPHA and tt_score_pc < probcut_beta:
-                skip_probcut = True
-            elif tt_entry['flag'] == TT_FLAG_EXACT and tt_score_pc < probcut_beta:
+            if tt_score_pc < probcut_beta:
                 skip_probcut = True
                 
         if not skip_probcut:
@@ -854,6 +842,7 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                 if not see_ge(piece_bbs, occupancy_bbs, game_state[0], pc_from, pc_to, see_threshold_pc, pc_pinned_w, pc_pinned_b):
                     continue
     
+                pc_original_side = game_state[0]
                 pc_unmake = make_move(piece_bbs, occupancy_bbs, game_state, pc_move)
     
                 # Legality check
@@ -880,8 +869,11 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
 
                 saved_pc_stack_move = search_context.move_stack[ply]
                 saved_pc_stack_piece = search_context.piece_stack[ply]
+                pc_moved_piece_type = pc_unmake[0]
+                if pc_moved_piece_type != -1 and pc_original_side == BLACK:
+                    pc_moved_piece_type += 6
                 search_context.move_stack[ply] = pc_move
-                search_context.piece_stack[ply] = pc_unmake[0]
+                search_context.piece_stack[ply] = pc_moved_piece_type
                 res_pc = _search(
                     piece_bbs, occupancy_bbs, game_state, depth - PROBCUT_R,
                     -probcut_beta, -probcut_beta + 1, search_context, ply + 1, NO_MOVE, False, not cut_node
@@ -957,6 +949,7 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
     best_move, max_eval = NO_MOVE, -INFINITY
     quiet_move_counter, searched_move_count = 0, 0
     legal_moves_tried = 0
+    searched_legal_moves = 0
     pruned_moves = 0
     
     # Track tried quiet moves for history malus
@@ -1010,6 +1003,8 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
         # --- Make the move ---
         unmake_info = make_move(piece_bbs, occupancy_bbs, game_state, move)
         moved_piece_type = unmake_info[0]
+        if moved_piece_type != -1 and original_side == BLACK:
+            moved_piece_type += 6
         
         # --- Integrated Legality & Check Detection (R3) ---
         # 1. Determine if the move was legal (our king is not left in check)
@@ -1038,7 +1033,7 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
 
         if (search_context.enable_see_pruning and not is_exclusion_search
                 and depth <= PRUNING_SHALLOW_DEPTH and not is_currently_in_check and not is_pv
-                and can_prune_quiet):
+                and can_prune_quiet and not low_material_pruning_guard):
             prune_quiet_move = False
             if ENABLE_HISTORY_PRUNING and moved_piece_type != -1:
                 history_score = get_quiet_stat_score(search_context, ply, from_sq, to_sq, moved_piece_type, pawn_key_idx)
@@ -1059,54 +1054,17 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
 
             unmake_info = make_move(piece_bbs, occupancy_bbs, game_state, move)
             moved_piece_type = unmake_info[0]
+            if moved_piece_type != -1 and original_side == BLACK:
+                moved_piece_type += 6
             search_context.move_stack[ply] = move
             search_context.piece_stack[ply] = moved_piece_type
-
-        # --- DTR-LMR: Strategic Move Properties ---
-        is_king_penetration = False
-        is_proactive_masking = False
-        if is_quiet_move:
-            # B1: Lazy DTR-LMR — compute bitmasks only when first quiet move is reached
-            if not dtr_lmr_computed:
-                friendly_king_bb = piece_bbs[5] if side_to_move == WHITE else piece_bbs[11]
-                enemy_king_bb = piece_bbs[11] if side_to_move == WHITE else piece_bbs[5]
-
-                if enemy_king_bb:
-                    enemy_king_sq = get_lsb_index(enemy_king_bb)
-                    enemy_king_zone = BLACK_KING_ZONES[enemy_king_sq] if side_to_move == WHITE else WHITE_KING_ZONES[enemy_king_sq]
-
-                if friendly_king_bb:
-                    friendly_king_sq = get_lsb_index(friendly_king_bb)
-                    enemy_offset = 6 if side_to_move == WHITE else 0
-                    enemy_rooks = piece_bbs[3 + enemy_offset] | piece_bbs[4 + enemy_offset]
-                    enemy_bishops = piece_bbs[2 + enemy_offset] | piece_bbs[4 + enemy_offset]
-                    # Orthogonal danger rays
-                    temp_rays = ROOK_RAYS[friendly_king_sq] & enemy_rooks
-                    while temp_rays:
-                        pinner_sq = get_lsb_index(temp_rays)
-                        friendly_danger_rays |= SQUARES_BETWEEN[friendly_king_sq, pinner_sq]
-                        temp_rays &= temp_rays - np.uint64(1)
-                    # Diagonal danger rays
-                    temp_rays = BISHOP_RAYS[friendly_king_sq] & enemy_bishops
-                    while temp_rays:
-                        pinner_sq = get_lsb_index(temp_rays)
-                        friendly_danger_rays |= SQUARES_BETWEEN[friendly_king_sq, pinner_sq]
-                        temp_rays &= temp_rays - np.uint64(1)
-                dtr_lmr_computed = True
-
-            # Check for King Zone Penetration
-            if BB_SQUARES[to_sq] & enemy_king_zone:
-                is_king_penetration = True
-            
-            # Check for Proactive Masking (blocking an enemy ray to our king)
-            if BB_SQUARES[to_sq] & friendly_danger_rays:
-                is_proactive_masking = True
 
         if is_quiet_move:
             quiet_move_counter += 1
             
             # Late Move Pruning (LMP) - Disabled in PV nodes
-            if can_prune_quiet and search_context.enable_lmp and not is_exclusion_search and not is_currently_in_check and not is_pv:
+            if (can_prune_quiet and search_context.enable_lmp and not is_exclusion_search
+                    and not is_currently_in_check and not is_pv and not low_material_pruning_guard):
                 limit = LMP_MOVE_COUNT[min(depth, MAX_PLY - 1)]
                 if not improving: limit = limit // 2
                 limit = max(limit, 2)
@@ -1143,6 +1101,8 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                         continue
                     unmake_info = make_move(piece_bbs, occupancy_bbs, game_state, move)
                     moved_piece_type = unmake_info[0]
+                    if moved_piece_type != -1 and original_side == BLACK:
+                        moved_piece_type += 6
                     search_context.move_stack[ply] = move
                     search_context.piece_stack[ply] = moved_piece_type
                 else:
@@ -1198,6 +1158,8 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                     # Re-make the move
                     unmake_info = make_move(piece_bbs, occupancy_bbs, game_state, move)
                     moved_piece_type = unmake_info[0]
+                    if moved_piece_type != -1 and original_side == BLACK:
+                        moved_piece_type += 6
                     search_context.move_stack[ply] = move
                     search_context.piece_stack[ply] = moved_piece_type
 
@@ -1221,12 +1183,14 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                             return (np.int32(exclusion_beta), NO_MOVE, nodes_searched, quiescence_nodes, tt_hits)
         search_depth = depth - 1 + current_extension
 
+        searched_legal_moves += 1
+
         if is_quiet_move:
             quiet_moves_tried[quiet_moves_tried_count] = move
             quiet_moves_tried_count += 1
 
         evaluation = 0
-        if legal_moves_tried == 1:
+        if searched_legal_moves == 1:
             res = _search(
                 piece_bbs, occupancy_bbs, game_state, search_depth, -beta, -alpha, search_context, ply + 1, NO_MOVE, is_pv, False)
             evaluation = -res[0]
@@ -1234,11 +1198,11 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
         else:
             # Dynamic LMR Logic
             lmr = 0
-            if search_context.enable_lmr and depth >= LMR_MIN_DEPTH and is_quiet_move and quiet_move_counter >= LMR_MIN_QUIET_MOVE_INDEX and moved_piece_type != -1:
+            if search_context.enable_lmr and depth >= LMR_MIN_DEPTH and is_quiet_move and quiet_move_counter >= LMR_MIN_QUIET_MOVE_INDEX and searched_legal_moves >= LMR_MIN_QUIET_MOVE_INDEX and moved_piece_type != -1:
                 aggressor_type = moved_piece_type
                 history_score = get_quiet_stat_score(search_context, ply, from_sq, to_sq, aggressor_type, pawn_key_idx)
 
-                lmr = get_lmr_reduction(depth, legal_moves_tried, history_score, improving, is_pv)
+                lmr = get_lmr_reduction(depth, searched_legal_moves, history_score, improving, is_pv)
 
                 # CUT-node bonus: more aggressive reduction in expected CUT nodes
                 if cut_node:
@@ -1261,7 +1225,7 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                 lmr = max(0, min(lmr, search_depth - 1))
 
             # A3: LMR for bad captures (only reduce when it's a bad capture, not a good one)
-            elif search_context.enable_lmr and depth >= LMR_MIN_DEPTH and is_capture and not is_promotion and legal_moves_tried > 1:
+            elif search_context.enable_lmr and depth >= LMR_MIN_DEPTH and is_capture and not is_promotion and searched_legal_moves > 1:
                 if search_context.mp_stage[ply] == STAGE_BAD_CAPTURES or search_context.mp_stage[ply] == STAGE_DONE:
                     lmr = 1 + depth // 6
                     lmr = max(0, min(lmr, search_depth - 1))
@@ -1516,16 +1480,13 @@ def iterative_deepening_search(piece_bbs, occupancy_bbs, game_state, max_depth, 
     # Fix H8: Use truncation towards zero instead of floor division.
     # Python's // 2 is floor division: -1 // 2 = -1 (sticks forever).
     # np.sign * (abs // 2) truncates towards zero: -1 → 0, -3 → -1, etc.
-    h = search_context.history_table
-    search_context.history_table[:] = np.sign(h) * (np.abs(h) // 2)
-    b = search_context.butterfly_history
-    search_context.butterfly_history[:] = np.sign(b) * (np.abs(b) // 2)
-    c = search_context.capture_history
-    search_context.capture_history[:] = np.sign(c) * (np.abs(c) // 2)
-    ph = search_context.pawn_history
-    search_context.pawn_history[:] = np.sign(ph) * (np.abs(ph) // 2)
-    ch = search_context.continuation_history
-    search_context.continuation_history[:] = np.sign(ch) * (np.abs(ch) // 2)
+    # np.divide(..., out=..., casting='unsafe') keeps the same truncation-towards-zero
+    # semantics as sign(abs(x)//2), but avoids allocating large temporary arrays.
+    np.divide(search_context.history_table, 2, out=search_context.history_table, casting='unsafe')
+    np.divide(search_context.butterfly_history, 2, out=search_context.butterfly_history, casting='unsafe')
+    np.divide(search_context.capture_history, 2, out=search_context.capture_history, casting='unsafe')
+    np.divide(search_context.pawn_history, 2, out=search_context.pawn_history, casting='unsafe')
+    np.divide(search_context.continuation_history, 2, out=search_context.continuation_history, casting='unsafe')
 
     # --- Setup Game History ---
     if game_history_list is not None:
@@ -1653,7 +1614,7 @@ def iterative_deepening_search(piece_bbs, occupancy_bbs, game_state, max_depth, 
                 if verbose:
                     log_info(f"Optimum time reached at depth {current_depth}. Stopping.")
                 break
-            if elapsed_time_ms * 2.5 > maximum_time_ms:
+            if elapsed_time_ms * 2.0 > maximum_time_ms:
                 if verbose:
                     log_info(f"Predictive termination at depth {current_depth} to avoid timeout.")
                 break
