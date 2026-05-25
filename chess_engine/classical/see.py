@@ -6,7 +6,9 @@ from chess_engine.classical.constants import (
     WHITE, BLACK, PAWN, KNIGHT, BISHOP, ROOK, QUEEN, KING,
     MG_MATERIAL_VALUES
 )
-from chess_engine.classical.engine_types import piece_bbs_signature, occupancy_bbs_signature
+from chess_engine.classical.engine_types import (
+    piece_bbs_signature, occupancy_bbs_signature
+)
 from chess_engine.classical.bitboard_utils import find_piece_type_on_square, find_piece_type_on_square_side, SQUARES_BETWEEN, ROOK_RAYS, BISHOP_RAYS
 import numba.types as nbt
 # Import Magic Bitboard functions
@@ -65,7 +67,7 @@ def get_attackers_for_see(square, occupied, piece_bbs, side_mask):
     # 3. Sliders
     # We use the current 'occupied' which has holes where pieces were captured!
     # This allows X-Ray attacks to be found "through" the captured square.
-
+ 
     # Performance optimization: Use ray pre-filters to avoid expensive Magic Bitboard lookups
     # when no sliding pieces of the given side are on the relevant rays.
 
@@ -100,7 +102,7 @@ def get_lva_and_remove(attackers, piece_bbs, side_mask):
     return 0, np.uint64(0), -1
 
 @numba.njit(cache=True)
-def see(piece_bbs, occupancy_bbs, side_to_move, from_sq, to_sq, pinned_white, pinned_black, attacker_type=-1, victim_type=-1):
+def _see_jit(piece_bbs, occupancy_bbs, side_to_move, from_sq, to_sq, pinned_white, pinned_black, attacker_type=-1, victim_type=-1):
     """
     Static Exchange Evaluation (SEE).
     Mimics Stockfish's logic:
@@ -243,7 +245,7 @@ def see(piece_bbs, occupancy_bbs, side_to_move, from_sq, to_sq, pinned_white, pi
 
 
 @numba.njit(cache=True)
-def see_ge(piece_bbs, occupancy_bbs, side_to_move, from_sq, to_sq, threshold, pinned_white, pinned_black, attacker_type=-1, victim_type=-1):
+def _see_ge_jit(piece_bbs, occupancy_bbs, side_to_move, from_sq, to_sq, threshold, pinned_white, pinned_black, attacker_type=-1, victim_type=-1):
     """
     SEE >= Threshold (Stockfish-style).
     Uses res ^= 1 toggle + swap variable for efficient early exit.
@@ -354,3 +356,11 @@ def see_ge(piece_bbs, occupancy_bbs, side_to_move, from_sq, to_sq, threshold, pi
                  attackers |= (get_sliding_attacks(to_sq, occupied, False) & sliders_orth)
 
     return bool(res)
+
+
+def see(piece_bbs, occupancy_bbs, side_to_move, from_sq, to_sq, pinned_white, pinned_black, attacker_type=-1, victim_type=-1):
+    return _see_jit(piece_bbs, occupancy_bbs, side_to_move, from_sq, to_sq, pinned_white, pinned_black, attacker_type, victim_type)
+
+
+def see_ge(piece_bbs, occupancy_bbs, side_to_move, from_sq, to_sq, threshold, pinned_white, pinned_black, attacker_type=-1, victim_type=-1):
+    return _see_ge_jit(piece_bbs, occupancy_bbs, side_to_move, from_sq, to_sq, threshold, pinned_white, pinned_black, attacker_type, victim_type)

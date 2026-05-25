@@ -1,6 +1,7 @@
 # chess_engine/engine_types.py
 import numba
 import numpy as np
+from numba.experimental import jitclass
 from chess_engine.classical.transposition_table import numba_tt_entry_type
 from chess_engine.classical.constants import (
     MAX_PLY, CORRECTION_HISTORY_SIZE,
@@ -33,8 +34,6 @@ unmake_info_signature = numba.types.Tuple([
 ])
 
 # --- Search Context / 搜尋上下文 ---
-from numba.experimental import jitclass
-
 search_context_spec = [
     ('transposition_table', numba.types.Array(numba_tt_entry_type, 1, 'C')),
     ('killer_moves', numba.uint16[::1]),
@@ -83,7 +82,7 @@ search_context_spec = [
 ]
 
 @jitclass(search_context_spec)
-class SearchContext:
+class _SearchContextJIT:
     """
     用於在遞歸搜尋函數之間傳遞共享數據和狀態的上下文類別。
     
@@ -183,4 +182,17 @@ class SearchContext:
 
 
 
-search_context_type = SearchContext.class_type.instance_type
+search_context_type = _SearchContextJIT.class_type.instance_type
+
+
+def SearchContext(
+    transposition_table, killer_moves, pv_table, history_table, butterfly_history,
+    continuation_history, capture_history, pawn_history, pawn_correction_history,
+    minor_correction_history, non_pawn_correction_history_white, non_pawn_correction_history_black
+):
+    return _SearchContextJIT(
+        transposition_table, killer_moves, pv_table, history_table,
+        butterfly_history, continuation_history, capture_history, pawn_history,
+        pawn_correction_history, minor_correction_history,
+        non_pawn_correction_history_white, non_pawn_correction_history_black
+    )

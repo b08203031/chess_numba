@@ -1,32 +1,28 @@
-
 import numba
 import numpy as np
 
 from .board_operations import make_move, unmake_move
-from .move_generator import generate_legal_moves, is_square_attacked
+from .move_generator import generate_legal_moves_buffer, is_square_attacked
 from .engine_types import piece_bbs_signature, occupancy_bbs_signature, game_state_signature
 import numba.types as nbt
 from .zobrist import get_lsb_index
 
-@numba.njit(numba.boolean(piece_bbs_signature, occupancy_bbs_signature, game_state_signature), cache=True)
-def is_king_in_check(piece_bbs, occupancy_bbs, game_state):
+@numba.njit(cache=True)
+def _is_king_in_check_jit(piece_bbs, occupancy_bbs, game_state):
     """
     檢查當前行棋方的王是否處於被將軍狀態。
-
-    Args:
-        piece_bbs (np.ndarray): 12 個棋子的位元棋盤。
-        occupancy_bbs (np.ndarray): 佔用位元棋盤。
-        game_state (np.ndarray): 遊戲狀態陣列。
-
-    Returns:
-        bool: 如果王被將軍則返回 True，否則返回 False。
     """
     side_to_move = game_state[0]
     king_bb_index = 5 if side_to_move == 0 else 11
     king_sq = get_lsb_index(piece_bbs[king_bb_index])
 
-    # Check if the king's square is attacked by the opponent / 檢查王的方格是否被對手攻擊
+    # Check if the king's square is attacked by the opponent
     return is_square_attacked(piece_bbs, occupancy_bbs, king_sq, 1 - side_to_move)
+
+
+def is_king_in_check(piece_bbs, occupancy_bbs, game_state):
+    return _is_king_in_check_jit(piece_bbs, occupancy_bbs, game_state)
+
 
 PERFT_RESULTS = {
     "startpos": {
@@ -54,65 +50,56 @@ SQUARE_TO_ALGEBRAIC = {i: f"{chr(ord('a') + i % 8)}{i // 8 + 1}" for i in range(
 將方格索引映射到代數記號的字典。
 """
 
-@numba.jit(nbt.uint64(piece_bbs_signature, occupancy_bbs_signature, game_state_signature, nbt.intc), nopython=True, cache=True)
-def perft(piece_bbs, occupancy_bbs, game_state, depth: int):
+@numba.njit(cache=True, boundscheck=False, fastmath=True)
+def _perft_jit(piece_bbs, occupancy_bbs, game_state, depth: int):
     """
-    核心遞歸 Perft 函數，重構為 Make-Unmake 模式。
-    計算給定深度下的節點總數（走法總數）。
-
-    Args:
-        piece_bbs (np.ndarray): 棋子位元棋盤。
-        occupancy_bbs (np.ndarray): 佔用位元棋盤。
-        game_state (np.ndarray): 遊戲狀態陣列。
-        depth (int): 剩餘深度。
-
-    Returns:
-        np.uint64: 節點總數。
+    核心遞歸 Perft 函數，使用 preallocated 緩衝區。
     """
     if depth == 0:
         return np.uint64(1)
 
-    nodes = np.uint64(0)
-    moves = generate_legal_moves(piece_bbs, occupancy_bbs, game_state)
+    moves = np.zeros((1, 256), dtype=np.uint16)
+    count = generate_legal_moves_buffer(piece_bbs, occupancy_bbs, game_state, moves, 0)
 
     if depth == 1:
-        return np.uint64(len(moves))
+        return np.uint64(count)
 
-    for i in range(len(moves)):
-        move = moves[i]
+    nodes = np.uint64(0)
+    for i in range(count):
+        move = moves[0, i]
         unmake_info = make_move(piece_bbs, occupancy_bbs, game_state, move)
-        nodes += perft(piece_bbs, occupancy_bbs, game_state, depth - 1)
+        nodes += _perft_jit(piece_bbs, occupancy_bbs, game_state, depth - 1)
         unmake_move(piece_bbs, occupancy_bbs, game_state, move, unmake_info)
     return nodes
 
-@numba.jit(nbt.types.Array(nbt.uint64, 2, "C")(piece_bbs_signature, occupancy_bbs_signature, game_state_signature, nbt.intc), nopython=True, cache=True)
-def _jit_perft_divide(piece_bbs, occupancy_bbs, game_state, depth: int):
+
+def perft(piece_bbs, occupancy_bbs, game_state, depth: int):
+    return _perft_jit(piece_bbs, occupancy_bbs, game_state, depth)
+
+
+@numba.njit(cache=True, boundscheck=False, fastmath=True)
+def _perft_divide_jit(piece_bbs, occupancy_bbs, game_state, depth: int):
     """
-    JIT 編譯的核心 Perft Divide 邏輯，重構為 Make-Unmake 模式。
-    計算第一步每個合法走法的子節點數。
-
-    Args:
-        piece_bbs (np.ndarray): 棋子位元棋盤。
-        occupancy_bbs (np.ndarray): 佔用位元棋盤。
-        game_state (np.ndarray): 遊戲狀態陣列。
-        depth (int): 搜尋深度。
-
-    Returns:
-        np.ndarray: 形狀為 (N, 2) 的二維陣列，每行包含 [移動, 節點數]。
+    JIT 編編的核心 Perft Divide 邏輯。
     """
     if depth == 0:
         return np.zeros((0, 2), dtype=np.uint64)
 
-    moves = generate_legal_moves(piece_bbs, occupancy_bbs, game_state)
+    moves = np.zeros((1, 256), dtype=np.uint16)
+    count = generate_legal_moves_buffer(piece_bbs, occupancy_bbs, game_state, moves, 0)
 
-    results = np.zeros((len(moves), 2), dtype=np.uint64)
-    for i in range(len(moves)):
-        move = moves[i]
+    results = np.zeros((count, 2), dtype=np.uint64)
+    for i in range(count):
+        move = moves[0, i]
         unmake_info = make_move(piece_bbs, occupancy_bbs, game_state, move)
-        nodes = perft(piece_bbs, occupancy_bbs, game_state, depth - 1)
+        nodes = _perft_jit(piece_bbs, occupancy_bbs, game_state, depth - 1)
         unmake_move(piece_bbs, occupancy_bbs, game_state, move, unmake_info)
 
         results[i, 0] = move
         results[i, 1] = nodes
 
     return results
+
+
+def _jit_perft_divide(piece_bbs, occupancy_bbs, game_state, depth: int):
+    return _perft_divide_jit(piece_bbs, occupancy_bbs, game_state, depth)

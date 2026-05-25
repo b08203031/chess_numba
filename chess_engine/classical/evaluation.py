@@ -6,7 +6,9 @@ import numpy as np
 from chess_engine.classical.constants import *
 
 from chess_engine.classical.bitboard_utils import get_lsb_index, get_msb_index, count_bits, WHITE_KING_ZONES, BLACK_KING_ZONES, FILE_MASKS, find_piece_type_on_square_side, SQUARES_BETWEEN
-from chess_engine.classical.engine_types import piece_bbs_signature, occupancy_bbs_signature, game_state_signature, piece_counts_signature
+from chess_engine.classical.engine_types import (
+    piece_bbs_signature, occupancy_bbs_signature, game_state_signature, piece_counts_signature
+)
 from chess_engine.classical.move_generator import (
     get_bishop_attacks, get_rook_attacks, get_queen_attacks, KNIGHT_ATTACKS, PAWN_ATTACKS, KING_ATTACKS,
     get_pinned_pieces
@@ -531,7 +533,7 @@ def _evaluate_pawn_shield_for_color(king_sq, friendly_pawns, enemy_pawns, color)
 
     return score
 
-@numba.njit(numba.int32(numba.int32, numba.int32, piece_bbs_signature, occupancy_bbs_signature, numba.uint64, numba.uint64, numba.uint64), cache=True, boundscheck=False, fastmath=True)
+@numba.njit(cache=True, boundscheck=False, fastmath=True)
 def _evaluate_king_attackers(king_sq, color, piece_bbs, occupancy_bbs, enemy_attacks_bb, friendly_attacks_bb, king_zone):
     """
     Calculates king danger using a multi-indicator linear formula inspired by SF11,
@@ -700,7 +702,7 @@ def _evaluate_king_attackers(king_sq, color, piece_bbs, occupancy_bbs, enemy_att
     else:
         return np.int32(0)
 
-@numba.njit(numba.types.UniTuple(numba.int32, 2)(piece_bbs_signature, occupancy_bbs_signature, numba.uint64, numba.uint64, numba.int32, numba.int32, numba.int32, numba.int32, piece_counts_signature, numba.uint64, numba.uint64, numba.uint64, numba.uint64), cache=True, boundscheck=False, fastmath=True)
+@numba.njit(cache=True, boundscheck=False, fastmath=True)
 def evaluate_king_safety(piece_bbs, occupancy_bbs, white_attacks, black_attacks, white_tropism, black_tropism, white_pawn_storm_score, black_pawn_storm_score, piece_counts, white_attacks2, black_attacks2, pinned_white, pinned_black):
     """
     King Safety evaluation. Combines pawn shield, king attackers, tropism, and pawn storm.
@@ -754,7 +756,7 @@ def evaluate_king_safety(piece_bbs, occupancy_bbs, white_attacks, black_attacks,
     return mg_safety_score, eg_safety_score
 
 
-@numba.njit(numba.types.Tuple((numba.uint64, numba.uint64, numba.uint64, numba.uint64, numba.uint64, numba.uint64, numba.uint64, numba.uint64, numba.int32, numba.int32, numba.int32, numba.int32, numba.int32, numba.int32, numba.int32, numba.int32))(piece_bbs_signature, occupancy_bbs_signature), cache=True, boundscheck=False, fastmath=True)
+@numba.njit(cache=True, boundscheck=False, fastmath=True)
 def evaluate_attacks_mobility_threats(piece_bbs, occupancy_bbs):
     (wp_bb, wn_bb, wb_bb, wr_bb, wq_bb, wk_bb,
      bp_bb, bn_bb, bb_bb, br_bb, bq_bb, bk_bb) = piece_bbs
@@ -1334,8 +1336,8 @@ def _process_piece_score_and_count(piece_type, bb, is_white):
         
     return mg, eg, count
 
-@numba.njit(numba.int32(piece_bbs_signature, occupancy_bbs_signature, game_state_signature, numba.boolean), cache=True, boundscheck=False, fastmath=True)
-def evaluate_position(piece_bbs, occupancy_bbs, game_state, lazy: bool = False):
+@numba.njit(cache=True, boundscheck=False, fastmath=True)
+def _evaluate_position_jit(piece_bbs, occupancy_bbs, game_state, lazy: bool):
     """
     使用 Tapered Evaluation (加權評估) 模型評估目前局面，並從當前執棋方的角度返回分數。
     評估包括：材質、PST、國王安全、兵形結構、棋子協同性和機動性。
@@ -1477,3 +1479,9 @@ def evaluate_position(piece_bbs, occupancy_bbs, game_state, lazy: bool = False):
         return np.int32(final_score)
     else:  # 黑方回合
         return np.int32(-final_score)
+
+def evaluate_position(piece_bbs, occupancy_bbs, game_state, lazy: bool = False):
+    """
+    使用 Tapered Evaluation (加權評估) 模型評估目前局面，並從當前執棋方的角度返回分數。
+    """
+    return _evaluate_position_jit(piece_bbs, occupancy_bbs, game_state, lazy)

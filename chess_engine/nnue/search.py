@@ -96,14 +96,6 @@ def quiescence_search(piece_bbs, occupancy_bbs, game_state, alpha, beta, ply, se
         if search_context.stop_flag[0]:
             return np.int32(0), q_nodes
 
-        if search_context.end_time > 0.0:
-            current_time = 0.0
-            with numba.objmode(current_time='float64'):
-                current_time = time.time()
-            if current_time >= search_context.end_time:
-                search_context.stop_flag[0] = True
-                return np.int32(0), q_nodes
-
     if ply >= MAX_PLY:
         return evaluate_position(piece_bbs, occupancy_bbs, game_state, search_context, ply, lazy=False), q_nodes
 
@@ -414,14 +406,6 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
     if (search_context.nodes_searched & 16383) == 0:
         if search_context.stop_flag[0]:
             return (np.int32(0), NO_MOVE, nodes_searched, quiescence_nodes, tt_hits)
-
-        if search_context.end_time > 0.0:
-            current_time = 0.0
-            with numba.objmode(current_time='float64'):
-                current_time = time.time()
-            if current_time >= search_context.end_time:
-                search_context.stop_flag[0] = True
-                return (np.int32(0), NO_MOVE, nodes_searched, quiescence_nodes, tt_hits)
 
     if ply >= MAX_PLY:
         return (evaluate_position(piece_bbs, occupancy_bbs, game_state, search_context, ply, lazy=False), NO_MOVE, nodes_searched, quiescence_nodes, tt_hits)
@@ -1502,6 +1486,21 @@ def iterative_deepening_search(piece_bbs, occupancy_bbs, game_state, max_depth, 
         search_context.end_time = 0.0
     
     search_context.stop_flag[0] = False
+
+    # Spawn timer thread if search is time-limited
+    timer_thread = None
+    if search_context.end_time > 0.0:
+        duration = search_context.end_time - start_time
+        if duration > 0.0:
+            def timer_worker():
+                while time.time() < search_context.end_time:
+                    if search_context.stop_flag[0]:
+                        return
+                    time.sleep(0.005)
+                search_context.stop_flag[0] = True
+            
+            timer_thread = threading.Thread(target=timer_worker, daemon=True)
+            timer_thread.start()
     
     last_score, best_move_total = 0, NO_MOVE
     total_nodes, total_q_nodes, total_tt_hits = (np.uint64(v) for v in [0]*3)
@@ -1608,6 +1607,11 @@ def iterative_deepening_search(piece_bbs, occupancy_bbs, game_state, max_depth, 
                 if verbose:
                     log_info(f"Predictive termination at depth {current_depth} to avoid timeout.")
                 break
+
+    # Signal timer thread to stop and clean up
+    search_context.stop_flag[0] = True
+    if timer_thread is not None:
+        timer_thread.join()
 
     final_best_move = best_move_from_last_depth
     return (final_best_move, last_score, total_nodes, total_q_nodes, total_tt_hits, last_completed_depth)

@@ -11,9 +11,9 @@ from pathlib import Path
 from chess_engine.classical.engine_types import SearchContext
 from chess_engine.classical.transposition_table import TT_SIZE_MB, create_transposition_table, clear_transposition_table
 
-# --- Transposition Table Setup / 置�?表設�?---
+# --- Transposition Table Setup / ç½®æ?è¡¨è¨­ç½?---
 transposition_table = create_transposition_table(TT_SIZE_MB)
-# Create SearchContext needed for search / ?�建?��??�?�?��?下�?
+# Create SearchContext needed for search / ?µå»º?å????ä?ä¸æ?
 killer_moves = np.zeros(128, dtype=np.uint16) # Adjusted for potential array size mismatch if not using constant
 # Wait, killer moves is defined as MAX_PLY * 2 in main.py. MAX_PLY is 128 in search.py but 64 in main.py.
 # Let's use the constant from constants.py
@@ -40,7 +40,7 @@ from chess_engine.classical.debug_utils import log_info
 def clear_numba_cache():
     """
     Finds and removes all __pycache__ directories in the project.
-    ?�找並刪?��??�中?��???__pycache__ ?��???
+    ?¥æ¾ä¸¦åª?¤é??®ä¸­?æ???__pycache__ ?®é???
     """
     project_root = Path(__file__).parent
     cache_dirs = list(project_root.rglob("__pycache__"))
@@ -58,9 +58,9 @@ from chess_engine.classical.move import move_to_uci
 def run_benchmark_for_fen(fen, depth, name):
     """
     Runs a search benchmark for a given FEN string to a fixed depth.
-    ?�給定�? FEN 字串?��??�固定深度�??��??��?測試??
+    ?ºçµ¦å®ç? FEN å­ä¸²?è??°åºå®æ·±åº¦ç??å??ºæ?æ¸¬è©¦??
     """
-    # No time limit, run to completion for the given depth / ?��??��??��??��??��??�給定深�?
+    # No time limit, run to completion for the given depth / ?¡æ??é??¶ï??è??°å??çµ¦å®æ·±åº?
     time_config = {'optimum_time': 0, 'maximum_time': 0}
 
     log_info(f"--- Starting Benchmark for: {name} ---")
@@ -70,10 +70,10 @@ def run_benchmark_for_fen(fen, depth, name):
 
     piece_bbs, occupancy_bbs, game_state = parse_fen(fen)
 
-    # Clear TT before search / ?��??��??�置?�表
+    # Clear TT before search / ?å??æ??¤ç½®?è¡¨
     clear_transposition_table(transposition_table)
     
-    # Reset search context stats / ?�置?��?上�??�統計數??
+    # Reset search context stats / ?ç½®?å?ä¸ä??çµ±è¨æ¸??
     search_context.nodes_searched = np.uint64(0)
     search_context.killer_moves.fill(0)
     search_context.history_table.fill(0)
@@ -101,7 +101,7 @@ def run_benchmark_for_fen(fen, depth, name):
     log_info("----------------------------------------\n")
 
 def run_all_benchmarks():
-    """Runs all benchmark tests. / ?��??�?�基準測試�?""
+    """Runs all benchmark tests."""
 
     # Warm up: Standard starting position
     startpos_fen = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"

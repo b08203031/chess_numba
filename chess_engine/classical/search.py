@@ -5,10 +5,10 @@ import math
 import numpy as np
 import threading
 
-from chess_engine.classical.evaluation import evaluate_position
+from chess_engine.classical.evaluation import evaluate_position, _evaluate_position_jit
 
 from chess_engine.classical.move_generator import (
-    generate_legal_moves, is_in_check, has_sufficient_material, generate_captures,
+    generate_legal_moves, is_in_check, _is_in_check_jit, has_sufficient_material, generate_captures,
     generate_legal_moves_buffer, generate_captures_buffer,
     generate_pseudo_legal_moves_buffer, generate_pseudo_legal_captures_buffer,
     generate_pseudo_legal_quiets_buffer,
@@ -51,7 +51,7 @@ from chess_engine.classical.constants import (
 from chess_engine.classical.bitboard_utils import find_piece_type_on_square, find_piece_type_on_square_side
 from chess_engine.classical.board_operations import find_piece_type_for_square
 from chess_engine.classical.debug_utils import log_info
-from chess_engine.classical.see import see, see_ge, get_pinned_pieces
+from chess_engine.classical.see import _see_ge_jit, get_pinned_pieces
 from chess_engine.classical.transposition_table import (
     probe_tt, store_tt, numba_tt_entry_type,
     TT_FLAG_NONE, TT_FLAG_EXACT, TT_FLAG_ALPHA, TT_FLAG_BETA
@@ -75,7 +75,7 @@ quiescence_search_return_type = numba.types.Tuple([
     numba.int32, numba.uint64
 ])
 
-@numba.njit(numba.int32(game_state_signature, search_context_type, numba.int32), cache=True)
+@numba.njit(numba.int32(game_state_signature, search_context_type, numba.int32), cache=True, nogil=True)
 def apply_correction_history_score(game_state, search_context, raw_static_eval):
     pawn_key = game_state[PAWN_KEY_INDEX]
     minor_key = game_state[MINOR_KEY_INDEX]
@@ -100,9 +100,9 @@ def apply_correction_history_score(game_state, search_context, raw_static_eval):
 
 full_static_eval_return_type = numba.types.Tuple((numba.int32, numba.int32, numba.boolean))
 
-@numba.njit(full_static_eval_return_type(piece_bbs_signature, occupancy_bbs_signature, game_state_signature, search_context_type, numba.int32), cache=True)
+@numba.njit(full_static_eval_return_type(piece_bbs_signature, occupancy_bbs_signature, game_state_signature, search_context_type, numba.int32), cache=True, nogil=True)
 def compute_full_corrected_static_eval(piece_bbs, occupancy_bbs, game_state, search_context, ply):
-    raw_eval = evaluate_position(piece_bbs, occupancy_bbs, game_state, lazy=False)
+    raw_eval = _evaluate_position_jit(piece_bbs, occupancy_bbs, game_state, False)
     corrected_eval = apply_correction_history_score(game_state, search_context, raw_eval)
     search_context.static_eval_stack[ply] = corrected_eval
 
@@ -116,7 +116,7 @@ def compute_full_corrected_static_eval(piece_bbs, occupancy_bbs, game_state, sea
 #     piece_bbs_signature, occupancy_bbs_signature, game_state_signature,
 #     numba.int32, numba.int32, numba.int32, search_context_type
 # ), cache=True)
-@numba.njit(quiescence_search_return_type(piece_bbs_signature, occupancy_bbs_signature, game_state_signature, numba.int32, numba.int32, numba.int32, search_context_type, numba.int32), cache=True)
+@numba.njit(quiescence_search_return_type(piece_bbs_signature, occupancy_bbs_signature, game_state_signature, numba.int32, numba.int32, numba.int32, search_context_type, numba.int32), cache=True, nogil=True)
 def quiescence_search(piece_bbs, occupancy_bbs, game_state, alpha, beta, ply, search_context, q_ply):
     q_nodes = np.uint64(1)
     search_context.nodes_searched += 1
@@ -126,21 +126,13 @@ def quiescence_search(piece_bbs, occupancy_bbs, game_state, alpha, beta, ply, se
 
 
 
-    # Check for stop flag every 16384 nodes (at ~700k NPS this fires ~42x/sec)
-    if (search_context.nodes_searched & 16383) == 0:
+    # Check for stop flag every 32768 nodes (at ~950k NPS this fires ~29x/sec)
+    if (search_context.nodes_searched & 32767) == 0:
         if search_context.stop_flag[0]:
             return np.int32(0), q_nodes
 
-        if search_context.end_time > 0.0:
-            current_time = 0.0
-            with numba.objmode(current_time='float64'):
-                current_time = time.time()
-            if current_time >= search_context.end_time:
-                search_context.stop_flag[0] = True
-                return np.int32(0), q_nodes
-
     if ply >= MAX_PLY:
-        return evaluate_position(piece_bbs, occupancy_bbs, game_state, lazy=False), q_nodes
+        return _evaluate_position_jit(piece_bbs, occupancy_bbs, game_state, False), q_nodes
 
     if not has_sufficient_material(piece_bbs):
         return np.int32(0), q_nodes
@@ -164,7 +156,7 @@ def quiescence_search(piece_bbs, occupancy_bbs, game_state, alpha, beta, ply, se
         if should_cutoff:
             return qs_tt_score, q_nodes
 
-    is_currently_in_check = is_in_check(piece_bbs, occupancy_bbs, game_state)
+    is_currently_in_check = _is_in_check_jit(piece_bbs, occupancy_bbs, game_state)
 
     move_count = 0
     if is_currently_in_check:
@@ -173,7 +165,7 @@ def quiescence_search(piece_bbs, occupancy_bbs, game_state, alpha, beta, ply, se
         # Check evasions are very forcing, so we allow them to go deeper than normal QSearch.
         # (e.g., 2x MAX_QUIESCENCE_DEPTH)
         if q_ply >= MAX_QUIESCENCE_DEPTH * 2:
-            return evaluate_position(piece_bbs, occupancy_bbs, game_state, lazy=False), q_nodes
+            return _evaluate_position_jit(piece_bbs, occupancy_bbs, game_state, False), q_nodes
 
         # We must generate ALL legal moves (evasions).
         move_count = generate_pseudo_legal_moves_buffer(piece_bbs, occupancy_bbs, game_state, search_context.moves_buffer, ply)
@@ -183,9 +175,9 @@ def quiescence_search(piece_bbs, occupancy_bbs, game_state, alpha, beta, ply, se
     else:
         # If not in check, we can stand pat (static evaluation)
         if q_ply >= MAX_QUIESCENCE_DEPTH:
-            return evaluate_position(piece_bbs, occupancy_bbs, game_state, lazy=False), q_nodes
+            return _evaluate_position_jit(piece_bbs, occupancy_bbs, game_state, False), q_nodes
 
-        stand_pat = evaluate_position(piece_bbs, occupancy_bbs, game_state, lazy=False)
+        stand_pat = _evaluate_position_jit(piece_bbs, occupancy_bbs, game_state, False)
         if stand_pat >= beta:
             tt_score = np.int32(beta)
             if tt_score > MATE_IN_MAX_PLY: tt_score += ply
@@ -311,7 +303,7 @@ def quiescence_search(piece_bbs, occupancy_bbs, game_state, alpha, beta, ply, se
 
 get_next_move_return_type = numba.uint16
 
-@numba.njit(get_next_move_return_type(piece_bbs_signature, occupancy_bbs_signature, game_state_signature, search_context_type, numba.int32, numba.uint16, numba.uint16, numba.uint16, numba.uint16, numba.uint16, numba.uint64, numba.uint64, numba.uint64), cache=True)
+@numba.njit(get_next_move_return_type(piece_bbs_signature, occupancy_bbs_signature, game_state_signature, search_context_type, numba.int32, numba.uint16, numba.uint16, numba.uint16, numba.uint16, numba.uint16, numba.uint64, numba.uint64, numba.uint64), cache=True, nogil=True)
 def get_next_move(piece_bbs, occupancy_bbs, game_state, search_context, ply, tt_move, excluded_move, killer_1, killer_2, counter_move, pinned_white, pinned_black, pawn_key_idx):
     moves = search_context.moves_buffer[ply]
     scores = search_context.move_scores[ply]
@@ -421,7 +413,7 @@ search_return_type = numba.types.Tuple([
     numba.int32, numba.uint16, numba.uint64, numba.uint64, numba.uint64
 ])
 
-@numba.njit(search_return_type(piece_bbs_signature, occupancy_bbs_signature, game_state_signature, numba.int32, numba.int32, numba.int32, search_context_type, numba.int32, numba.uint16, numba.boolean, numba.boolean), cache=True)
+@numba.njit(search_return_type(piece_bbs_signature, occupancy_bbs_signature, game_state_signature, numba.int32, numba.int32, numba.int32, search_context_type, numba.int32, numba.uint16, numba.boolean, numba.boolean), cache=True, nogil=True)
 def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_context, ply, excluded_move: np.uint16 = NO_MOVE, is_pv: bool = True, cut_node: bool = False):
     # ==========================================
     # PHASE 1: Initialize and Base Cases
@@ -433,21 +425,13 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
     tt_hits = np.uint64(0)
     is_exclusion_search = excluded_move != NO_MOVE
 
-    # Check for stop flag every 16384 nodes (at ~700k NPS this fires ~42x/sec)
-    if (search_context.nodes_searched & 16383) == 0:
+    # Check for stop flag every 32768 nodes (at ~950k NPS this fires ~29x/sec)
+    if (search_context.nodes_searched & 32767) == 0:
         if search_context.stop_flag[0]:
             return (np.int32(0), NO_MOVE, nodes_searched, quiescence_nodes, tt_hits)
 
-        if search_context.end_time > 0.0:
-            current_time = 0.0
-            with numba.objmode(current_time='float64'):
-                current_time = time.time()
-            if current_time >= search_context.end_time:
-                search_context.stop_flag[0] = True
-                return (np.int32(0), NO_MOVE, nodes_searched, quiescence_nodes, tt_hits)
-
     if ply >= MAX_PLY:
-        return (evaluate_position(piece_bbs, occupancy_bbs, game_state, lazy=False), NO_MOVE, nodes_searched, quiescence_nodes, tt_hits)
+        return (_evaluate_position_jit(piece_bbs, occupancy_bbs, game_state, False), NO_MOVE, nodes_searched, quiescence_nodes, tt_hits)
 
     # --- Mate Distance Pruning ---
     if ENABLE_MATE_DISTANCE_PRUNING:
@@ -601,7 +585,7 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
     # PHASE 3: Static Evaluation and Pre-Search Pruning
     # ==========================================
     # --- H1: is_in_check MUST be computed before any node-level pruning/sub-searches ---
-    is_currently_in_check = is_in_check(piece_bbs, occupancy_bbs, game_state)
+    is_currently_in_check = _is_in_check_jit(piece_bbs, occupancy_bbs, game_state)
 
     # --- Depth 0: drop into Quiescence Search ---
     if depth <= 0:
@@ -621,7 +605,7 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
         if tt_entry['flag'] != TT_FLAG_NONE and tt_entry['static_eval'] != 32767:
             raw_static_eval = np.int32(tt_entry['static_eval'])
         else:
-            raw_static_eval = evaluate_position(piece_bbs, occupancy_bbs, game_state, lazy=True)
+            raw_static_eval = _evaluate_position_jit(piece_bbs, occupancy_bbs, game_state, True)
 
         static_score = apply_correction_history_score(game_state, search_context, raw_static_eval)
         
@@ -839,7 +823,7 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
     
                 # SEE filter: only try captures whose SEE >= probcut_beta - static_eval
                 see_threshold_pc = probcut_beta - static_score if static_score != -INFINITY else 0
-                if not see_ge(piece_bbs, occupancy_bbs, game_state[0], pc_from, pc_to, see_threshold_pc, pc_pinned_w, pc_pinned_b):
+                if not _see_ge_jit(piece_bbs, occupancy_bbs, game_state[0], pc_from, pc_to, see_threshold_pc, pc_pinned_w, pc_pinned_b):
                     continue
     
                 pc_original_side = game_state[0]
@@ -994,7 +978,7 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
             if is_capture:
                 # Capture pruning can stay before make_move; quiet pruning waits for gives-check detection.
                 threshold = PRUNING_CAPTURE_SEE_MARGIN * depth
-                if not see_ge(piece_bbs, occupancy_bbs, side_to_move, from_sq, to_sq, threshold, pinned_white, pinned_black):
+                if not _see_ge_jit(piece_bbs, occupancy_bbs, side_to_move, from_sq, to_sq, threshold, pinned_white, pinned_black):
                     pruned_moves += 1
                     continue
                   
@@ -1048,7 +1032,7 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
 
             unmake_move(piece_bbs, occupancy_bbs, game_state, move, unmake_info)
             threshold = PRUNING_QUIET_SEE_MARGIN * depth * depth
-            if not see_ge(piece_bbs, occupancy_bbs, original_side, from_sq, to_sq, threshold, pinned_white, pinned_black):
+            if not _see_ge_jit(piece_bbs, occupancy_bbs, original_side, from_sq, to_sq, threshold, pinned_white, pinned_black):
                 pruned_moves += 1
                 continue
 
@@ -1512,6 +1496,21 @@ def iterative_deepening_search(piece_bbs, occupancy_bbs, game_state, max_depth, 
         search_context.end_time = 0.0
     
     search_context.stop_flag[0] = False
+
+    # Spawn timer thread if search is time-limited
+    timer_thread = None
+    if search_context.end_time > 0.0:
+        duration = search_context.end_time - start_time
+        if duration > 0.0:
+            def timer_worker():
+                while time.time() < search_context.end_time:
+                    if search_context.stop_flag[0]:
+                        return
+                    time.sleep(0.005)
+                search_context.stop_flag[0] = True
+            
+            timer_thread = threading.Thread(target=timer_worker, daemon=True)
+            timer_thread.start()
     
     last_score, best_move_total = 0, NO_MOVE
     total_nodes, total_q_nodes, total_tt_hits = (np.uint64(v) for v in [0]*3)
@@ -1618,6 +1617,11 @@ def iterative_deepening_search(piece_bbs, occupancy_bbs, game_state, max_depth, 
                 if verbose:
                     log_info(f"Predictive termination at depth {current_depth} to avoid timeout.")
                 break
+
+    # Signal timer thread to stop and clean up
+    search_context.stop_flag[0] = True
+    if timer_thread is not None:
+        timer_thread.join()
 
     final_best_move = best_move_from_last_depth
     return (final_best_move, last_score, total_nodes, total_q_nodes, total_tt_hits, last_completed_depth)

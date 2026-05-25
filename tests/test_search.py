@@ -30,7 +30,7 @@ def clear_numba_cache():
     log_info("--- Cache Cleared ---")
 
 # Clear cache before importing the engine to avoid stale cache issues
-clear_numba_cache()
+# clear_numba_cache()
 
 from chess_engine.classical.fen_parser import parse_fen
 from chess_engine.classical.search import iterative_deepening_search
@@ -49,11 +49,20 @@ def run_search_test():
     killer_moves = np.zeros(256, dtype=np.uint16)
     history_table = np.zeros((12, 64), dtype=np.int32)
     butterfly_history = np.zeros((64, 64), dtype=np.int32)
-    continuation_history = np.zeros((12, 64, 12, 64), dtype=np.int16)
+    continuation_history = np.zeros((3, 12, 64, 12, 64), dtype=np.int16)
     capture_history = np.zeros((12, 64, 12), dtype=np.int32)
+    pawn_history = np.full((8192, 12, 64), -1238, dtype=np.int16)
     pawn_correction_history = np.zeros(16384, dtype=np.int16)
+    minor_correction_history = np.zeros(16384, dtype=np.int16)
+    non_pawn_correction_history_white = np.zeros(16384, dtype=np.int16)
+    non_pawn_correction_history_black = np.zeros(16384, dtype=np.int16)
     pv_table = np.zeros((128, 128), dtype=np.uint16)
-    ctx = SearchContext(tt, killer_moves, pv_table, history_table, butterfly_history, continuation_history, capture_history, pawn_correction_history)
+    ctx = SearchContext(
+        tt, killer_moves, pv_table, history_table,
+        butterfly_history, continuation_history, capture_history, pawn_history,
+        pawn_correction_history, minor_correction_history,
+        non_pawn_correction_history_white, non_pawn_correction_history_black
+    )
     
     # Run a quick search
     iterative_deepening_search(p_bbs, o_bbs, g_state, 2, {'optimum_time': 0, 'maximum_time': 0}, ctx)
@@ -92,13 +101,19 @@ def run_search_test():
     pv_table = np.zeros((MAX_PLY, MAX_PLY), dtype=np.uint16)
     history_table = np.zeros((12, 64), dtype=np.int32)
     butterfly_history = np.zeros((64, 64), dtype=np.int32)
-    continuation_history = np.zeros((12, 64, 12, 64), dtype=np.int16)
+    continuation_history = np.zeros((3, 12, 64, 12, 64), dtype=np.int16)
     capture_history = np.zeros((12, 64, 12), dtype=np.int32)
+    pawn_history = np.full((8192, 12, 64), -1238, dtype=np.int16)
     pawn_correction_history = np.zeros(16384, dtype=np.int16)
+    minor_correction_history = np.zeros(16384, dtype=np.int16)
+    non_pawn_correction_history_white = np.zeros(16384, dtype=np.int16)
+    non_pawn_correction_history_black = np.zeros(16384, dtype=np.int16)
     
     search_context = SearchContext(
         transposition_table, killer_moves, pv_table, history_table,
-        butterfly_history, continuation_history, capture_history, pawn_correction_history
+        butterfly_history, continuation_history, capture_history, pawn_history,
+        pawn_correction_history, minor_correction_history,
+        non_pawn_correction_history_white, non_pawn_correction_history_black
     )
 
     (best_move, best_eval, nodes_searched, quiescence_nodes, tt_hits, last_completed_depth) = iterative_deepening_search(

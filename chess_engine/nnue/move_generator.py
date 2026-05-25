@@ -150,7 +150,11 @@ def init_sliders_attacks():
             rook_attacks[sq, magic_index] = rook_attacks_on_the_fly(sq, occ)
     return bishop_attacks, rook_attacks
 
-BISHOP_ATTACKS, ROOK_ATTACKS = init_sliders_attacks()
+BISHOP_ATTACKS, _rook_attacks_temp = init_sliders_attacks()
+ROOK_ATTACKS_1 = np.ascontiguousarray(_rook_attacks_temp[:16])
+ROOK_ATTACKS_2 = np.ascontiguousarray(_rook_attacks_temp[16:32])
+ROOK_ATTACKS_3 = np.ascontiguousarray(_rook_attacks_temp[32:48])
+ROOK_ATTACKS_4 = np.ascontiguousarray(_rook_attacks_temp[48:])
 # BISHOP_ATTACKS = np.empty((64, 512), dtype=np.uint64)
 # ROOK_ATTACKS = np.empty((64, 4096), dtype=np.uint64)
 
@@ -173,7 +177,14 @@ def get_rook_attacks(sq, occ):
     occ &= ROOK_MASKS[sq]
     occ *= ROOK_MAGIC_NUMBERS[sq]
     occ >>= np.uint64(64-ROOK_RELEVANT_BITS[sq])
-    return ROOK_ATTACKS[sq, occ]
+    if sq < 16:
+        return ROOK_ATTACKS_1[sq, occ]
+    elif sq < 32:
+        return ROOK_ATTACKS_2[sq - 16, occ]
+    elif sq < 48:
+        return ROOK_ATTACKS_3[sq - 32, occ]
+    else:
+        return ROOK_ATTACKS_4[sq - 48, occ]
     # return rook_attacks_on_the_fly(sq, occ)
 
 @numba.njit(numba.uint64(numba.uint8, numba.uint64), cache=True, boundscheck=False, fastmath=True)

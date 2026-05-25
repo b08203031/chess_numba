@@ -7,11 +7,11 @@ from chess_engine.classical.move import (
 )
 from chess_engine.classical.constants import SCORE_GOOD_CAPTURE_BONUS, SCORE_BAD_CAPTURE_PENALTY, SCORE_KILLER_1, SCORE_KILLER_2, SCORE_COUNTER_MOVE, MAX_HISTORY, LMR_TABLE, MAX_PLY, SCORE_TT_MOVE, BB_SQUARES, NO_MOVE, HISTORY_MAX_MAIN, HISTORY_MAX_BUTTERFLY, HISTORY_MAX_CAPTURE, HISTORY_MAX_CONTINUATION, HISTORY_MAX_PAWN, LMR_HISTORY_DIVISOR, HISTORY_WEIGHT_MAIN, HISTORY_WEIGHT_CONT_1, HISTORY_WEIGHT_CONT_2, HISTORY_WEIGHT_CONT_4, QS_SEE_THRESHOLD
 from chess_engine.classical.constants import MG_MATERIAL_VALUES
-from chess_engine.classical.see import see_ge
+from chess_engine.classical.see import _see_ge_jit
 from chess_engine.classical.bitboard_utils import find_piece_type_on_square, find_piece_type_on_square_side, get_lsb_index
 from chess_engine.classical.board_operations import find_piece_type_for_square
 from chess_engine.classical.move_generator import (
-    KNIGHT_ATTACKS, get_bishop_attacks, get_rook_attacks, get_queen_attacks, PAWN_ATTACKS
+    KNIGHT_ATTACKS, get_bishop_attacks, get_rook_attacks, get_queen_attacks, PAWN_ATTACKS, KING_ATTACKS
 )
 from chess_engine.classical.engine_types import (
     piece_bbs_signature, occupancy_bbs_signature, game_state_signature,
@@ -162,7 +162,7 @@ def score_captures(piece_bbs, occupancy_bbs, game_state, moves, scores, start_id
         
         # Identify good vs bad capture using SEE right here (R1 Optimization)
         # Using threshold 0 to divide good/bad captures
-        is_good_capture = see_ge(piece_bbs, occupancy_bbs, side_to_move, from_sq, to_square, 0, pinned_white, pinned_black, aggressor_type, victim_type)
+        is_good_capture = _see_ge_jit(piece_bbs, occupancy_bbs, side_to_move, from_sq, to_square, 0, pinned_white, pinned_black, aggressor_type, victim_type)
         
         score = 0
         if is_good_capture:
@@ -200,7 +200,7 @@ def score_captures_with_tt(piece_bbs, occupancy_bbs, game_state, moves, scores, 
             if victim_type != -1:
                 mvv_lva = MG_MATERIAL_VALUES[victim_type % 6] - MG_MATERIAL_VALUES[aggressor_type % 6]
             
-            is_good_capture = see_ge(piece_bbs, occupancy_bbs, side_to_move, from_sq, to_square, QS_SEE_THRESHOLD, pinned_white, pinned_black, aggressor_type, victim_type)
+            is_good_capture = _see_ge_jit(piece_bbs, occupancy_bbs, side_to_move, from_sq, to_square, QS_SEE_THRESHOLD, pinned_white, pinned_black, aggressor_type, victim_type)
             
             if is_good_capture:
                 score = SCORE_GOOD_CAPTURE_BONUS + mvv_lva
@@ -331,7 +331,7 @@ def score_moves(piece_bbs, occupancy_bbs, game_state, moves, scores, move_count,
                     victim_type = 0 # Pawn
 
                 # Optimization: Use see_ge(0) instead of full see()
-                is_good_capture = see_ge(piece_bbs, occupancy_bbs, side_to_move, from_sq, to_square, 0, pinned_white, pinned_black, aggressor_type, victim_type)
+                is_good_capture = _see_ge_jit(piece_bbs, occupancy_bbs, side_to_move, from_sq, to_square, 0, pinned_white, pinned_black, aggressor_type, victim_type)
                 
                 mvv_lva = 0
                 if victim_type != -1:
