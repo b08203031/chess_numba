@@ -1359,7 +1359,8 @@ def _evaluate_position_jit(piece_bbs, occupancy_bbs, game_state, lazy: bool):
     )
     if all_pieces_except_pawns_and_kings == 0:
         score = _evaluate_king_pawn_endgame(piece_bbs, game_state[0])
-        return score if game_state[0] == 0 else -score
+        val = np.int32(score) if game_state[0] == 0 else np.int32(-score)
+        return val, np.uint64(0), np.uint64(0)
     side_to_move = game_state[0]
 
     # --- 1. & 2. Phase, Material, and PST (Unrolled & Fused) ---
@@ -1394,7 +1395,8 @@ def _evaluate_position_jit(piece_bbs, occupancy_bbs, game_state, lazy: bool):
     # --- Lazy Evaluation Checkpoint / 懶惰評估檢查點 ---
     if lazy:
         final_score = (mg_score * phase + eg_score * (MAX_PHASE - phase)) // MAX_PHASE
-        return np.int32(final_score) if side_to_move == 0 else np.int32(-final_score)
+        val = np.int32(final_score) if side_to_move == 0 else np.int32(-final_score)
+        return val, np.uint64(0), np.uint64(0)
 
     # --- Compute Attacks, Mobility, Threats (Optimized Single Pass) ---
     (white_attacks, black_attacks, white_pawn_attacks, black_pawn_attacks,
@@ -1476,9 +1478,9 @@ def _evaluate_position_jit(piece_bbs, occupancy_bbs, game_state, lazy: bool):
 
     # --- 11. 從當前執棋方的角度返回最終分數 ---
     if side_to_move == 0:  # 白方回合
-        return np.int32(final_score)
+        return np.int32(final_score), pinned_white, pinned_black
     else:  # 黑方回合
-        return np.int32(-final_score)
+        return np.int32(-final_score), pinned_white, pinned_black
 
 def evaluate_position(piece_bbs, occupancy_bbs, game_state, lazy: bool = False):
     """

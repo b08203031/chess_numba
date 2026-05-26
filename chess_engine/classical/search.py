@@ -98,11 +98,11 @@ def apply_correction_history_score(game_state, search_context, raw_static_eval):
     corrected = np.int32(raw_static_eval) + np.int32(correction_sum // CORRECTION_HISTORY_DIVISOR)
     return np.int32(min(max(corrected, SCORE_MIN), SCORE_MAX))
 
-full_static_eval_return_type = numba.types.Tuple((numba.int32, numba.int32, numba.boolean))
+full_static_eval_return_type = numba.types.Tuple((numba.int32, numba.int32, numba.boolean, numba.uint64, numba.uint64))
 
 @numba.njit(full_static_eval_return_type(piece_bbs_signature, occupancy_bbs_signature, game_state_signature, search_context_type, numba.int32), cache=True, nogil=True)
 def compute_full_corrected_static_eval(piece_bbs, occupancy_bbs, game_state, search_context, ply):
-    raw_eval = _evaluate_position_jit(piece_bbs, occupancy_bbs, game_state, False)
+    raw_eval, pinned_white, pinned_black = _evaluate_position_jit(piece_bbs, occupancy_bbs, game_state, False)
     corrected_eval = apply_correction_history_score(game_state, search_context, raw_eval)
     search_context.static_eval_stack[ply] = corrected_eval
 
@@ -110,7 +110,7 @@ def compute_full_corrected_static_eval(piece_bbs, occupancy_bbs, game_state, sea
     if ply >= 2 and corrected_eval > search_context.static_eval_stack[ply - 2]:
         improving = True
 
-    return raw_eval, corrected_eval, improving
+    return raw_eval, corrected_eval, improving, pinned_white, pinned_black
 
 # @numba.njit(quiescence_search_return_type(
 #     piece_bbs_signature, occupancy_bbs_signature, game_state_signature,
@@ -132,7 +132,8 @@ def quiescence_search(piece_bbs, occupancy_bbs, game_state, alpha, beta, ply, se
             return np.int32(0), q_nodes
 
     if ply >= MAX_PLY:
-        return _evaluate_position_jit(piece_bbs, occupancy_bbs, game_state, False), q_nodes
+        eval_score, _, _ = _evaluate_position_jit(piece_bbs, occupancy_bbs, game_state, False)
+        return eval_score, q_nodes
 
     if not has_sufficient_material(piece_bbs):
         return np.int32(0), q_nodes
@@ -165,7 +166,8 @@ def quiescence_search(piece_bbs, occupancy_bbs, game_state, alpha, beta, ply, se
         # Check evasions are very forcing, so we allow them to go deeper than normal QSearch.
         # (e.g., 2x MAX_QUIESCENCE_DEPTH)
         if q_ply >= MAX_QUIESCENCE_DEPTH * 2:
-            return _evaluate_position_jit(piece_bbs, occupancy_bbs, game_state, False), q_nodes
+            eval_score, _, _ = _evaluate_position_jit(piece_bbs, occupancy_bbs, game_state, False)
+            return eval_score, q_nodes
 
         # We must generate ALL legal moves (evasions).
         move_count = generate_pseudo_legal_moves_buffer(piece_bbs, occupancy_bbs, game_state, search_context.moves_buffer, ply)
@@ -175,9 +177,10 @@ def quiescence_search(piece_bbs, occupancy_bbs, game_state, alpha, beta, ply, se
     else:
         # If not in check, we can stand pat (static evaluation)
         if q_ply >= MAX_QUIESCENCE_DEPTH:
-            return _evaluate_position_jit(piece_bbs, occupancy_bbs, game_state, False), q_nodes
+            eval_score, _, _ = _evaluate_position_jit(piece_bbs, occupancy_bbs, game_state, False)
+            return eval_score, q_nodes
 
-        stand_pat = _evaluate_position_jit(piece_bbs, occupancy_bbs, game_state, False)
+        stand_pat, _, _ = _evaluate_position_jit(piece_bbs, occupancy_bbs, game_state, False)
         if stand_pat >= beta:
             tt_score = np.int32(beta)
             if tt_score > MATE_IN_MAX_PLY: tt_score += ply
@@ -435,7 +438,8 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
             return (np.int32(0), NO_MOVE, nodes_searched, quiescence_nodes, tt_hits)
 
     if ply >= MAX_PLY:
-        return (_evaluate_position_jit(piece_bbs, occupancy_bbs, game_state, False), NO_MOVE, nodes_searched, quiescence_nodes, tt_hits)
+        eval_score, _, _ = _evaluate_position_jit(piece_bbs, occupancy_bbs, game_state, False)
+        return (eval_score, NO_MOVE, nodes_searched, quiescence_nodes, tt_hits)
 
     # --- Mate Distance Pruning ---
     if ENABLE_MATE_DISTANCE_PRUNING:
@@ -604,12 +608,14 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
     # Correction History Adjustment
     raw_static_eval = -INFINITY
     static_eval_is_full = False
+    cached_pinned_white = np.uint64(0)
+    cached_pinned_black = np.uint64(0)
 
     if not is_currently_in_check:
         if tt_entry['flag'] != TT_FLAG_NONE and tt_entry['static_eval'] != 32767:
             raw_static_eval = np.int32(tt_entry['static_eval'])
         else:
-            raw_static_eval = _evaluate_position_jit(piece_bbs, occupancy_bbs, game_state, True)
+            raw_static_eval, _, _ = _evaluate_position_jit(piece_bbs, occupancy_bbs, game_state, True)
 
         static_score = apply_correction_history_score(game_state, search_context, raw_static_eval)
         
@@ -689,7 +695,7 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                 
             if static_score - rfp_margin >= beta:
                 if not static_eval_is_full:
-                    raw_static_eval, static_score, improving = compute_full_corrected_static_eval(piece_bbs, occupancy_bbs, game_state, search_context, ply)
+                    raw_static_eval, static_score, improving, cached_pinned_white, cached_pinned_black = compute_full_corrected_static_eval(piece_bbs, occupancy_bbs, game_state, search_context, ply)
                     static_eval_is_full = True
                     rfp_margin = rfp_multiplier * depth
                     if not improving:
@@ -704,7 +710,7 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
             and side_non_pawn_count >= NMP_MIN_SIDE_NON_PAWNS):
         if static_score >= beta + NMP_STATIC_MARGIN:
             if not static_eval_is_full:
-                raw_static_eval, static_score, improving = compute_full_corrected_static_eval(piece_bbs, occupancy_bbs, game_state, search_context, ply)
+                raw_static_eval, static_score, improving, cached_pinned_white, cached_pinned_black = compute_full_corrected_static_eval(piece_bbs, occupancy_bbs, game_state, search_context, ply)
                 static_eval_is_full = True
 
         if static_score >= beta + NMP_STATIC_MARGIN:
@@ -796,8 +802,12 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
             # We must only try captures.
             pc_move_count = generate_pseudo_legal_captures_buffer(piece_bbs, occupancy_bbs, game_state, search_context.moves_buffer, ply)
             
-            pc_pinned_w = get_pinned_pieces(piece_bbs, occupancy_bbs, WHITE)
-            pc_pinned_b = get_pinned_pieces(piece_bbs, occupancy_bbs, BLACK)
+            if static_eval_is_full:
+                pc_pinned_w = cached_pinned_white
+                pc_pinned_b = cached_pinned_black
+            else:
+                pc_pinned_w = get_pinned_pieces(piece_bbs, occupancy_bbs, WHITE)
+                pc_pinned_b = get_pinned_pieces(piece_bbs, occupancy_bbs, BLACK)
 
             score_captures(
                 piece_bbs, occupancy_bbs, game_state,
@@ -896,7 +906,7 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
         if (search_context.enable_razoring and not low_material_pruning_guard
                 and static_score + RAZORING_MARGIN < alpha and dissonance < 250):
             if not static_eval_is_full:
-                raw_static_eval, static_score, improving = compute_full_corrected_static_eval(piece_bbs, occupancy_bbs, game_state, search_context, ply)
+                raw_static_eval, static_score, improving, cached_pinned_white, cached_pinned_black = compute_full_corrected_static_eval(piece_bbs, occupancy_bbs, game_state, search_context, ply)
                 static_eval_is_full = True
             if static_score + RAZORING_MARGIN < alpha:
                 razor_score, child_q_nodes = quiescence_search(piece_bbs, occupancy_bbs, game_state, alpha, alpha + 1, ply, search_context, 0)
@@ -930,9 +940,13 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
     killer_1 = search_context.killer_moves[safe_ply*2]
     killer_2 = search_context.killer_moves[safe_ply*2+1]
 
-    # Optimization: Calculate pinned pieces once for shallow pruning logic and score_moves
-    pinned_white = get_pinned_pieces(piece_bbs, occupancy_bbs, WHITE)
-    pinned_black = get_pinned_pieces(piece_bbs, occupancy_bbs, BLACK)
+    # Optimization: Reuse pinned pieces from full evaluation if available
+    if static_eval_is_full:
+        pinned_white = cached_pinned_white
+        pinned_black = cached_pinned_black
+    else:
+        pinned_white = get_pinned_pieces(piece_bbs, occupancy_bbs, WHITE)
+        pinned_black = get_pinned_pieces(piece_bbs, occupancy_bbs, BLACK)
 
     best_move, max_eval = NO_MOVE, -INFINITY
     quiet_move_counter, searched_move_count = 0, 0
@@ -942,6 +956,7 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
     
     # Track tried quiet moves for history malus
     quiet_moves_tried = search_context.quiet_moves_tried[ply]
+    quiet_pieces_tried = search_context.quiet_pieces_tried[ply]
     quiet_moves_tried_count = 0
 
     # Staged Move Generation State Init
@@ -1078,7 +1093,7 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
             if margin > 0 and static_score + margin < alpha:
                 if not static_eval_is_full:
                     unmake_move(piece_bbs, occupancy_bbs, game_state, move, unmake_info)
-                    raw_static_eval, static_score, improving = compute_full_corrected_static_eval(piece_bbs, occupancy_bbs, game_state, search_context, ply)
+                    raw_static_eval, static_score, improving, cached_pinned_white, cached_pinned_black = compute_full_corrected_static_eval(piece_bbs, occupancy_bbs, game_state, search_context, ply)
                     static_eval_is_full = True
                     margin = FP_BASE + FP_MULTIPLIER * depth
                     if not improving:
@@ -1175,6 +1190,7 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
 
         if is_quiet_move:
             quiet_moves_tried[quiet_moves_tried_count] = move
+            quiet_pieces_tried[quiet_moves_tried_count] = moved_piece_type
             quiet_moves_tried_count += 1
 
         evaluation = 0
@@ -1317,7 +1333,7 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                     bad_move = quiet_moves_tried[q_idx]
                     bad_from = get_from_square(bad_move)
                     bad_to = get_to_square(bad_move)
-                    bad_aggressor = find_piece_type_on_square_side(piece_bbs, bad_from, game_state[0])
+                    bad_aggressor = quiet_pieces_tried[q_idx]
                     if bad_aggressor == -1:
                         continue
                     update_history(search_context.history_table, bad_aggressor, bad_to, -malus)

@@ -227,27 +227,6 @@ def score_quiets(piece_bbs, occupancy_bbs, game_state, moves, scores, start_idx,
         aggressor_type = find_piece_type_on_square_side(piece_bbs, from_sq, side_to_move)
         score = get_quiet_stat_score(search_context, ply, from_sq, to_square, aggressor_type, pawn_key_idx)
 
-        # Static Check Bonus
-        opponent_king_bb = piece_bbs[11] if side_to_move == 0 else piece_bbs[5]
-        if opponent_king_bb != 0:
-            opp_king_sq = get_lsb_index(opponent_king_bb)
-            all_pieces_bb = occupancy_bbs[2]
-            is_check = False
-            
-            if aggressor_type == 0 or aggressor_type == 6: # PAWN
-                if PAWN_ATTACKS[side_to_move, opp_king_sq] & BB_SQUARES[to_square]: is_check = True
-            elif aggressor_type == 1 or aggressor_type == 7: # KNIGHT
-                if KNIGHT_ATTACKS[opp_king_sq] & BB_SQUARES[to_square]: is_check = True
-            elif aggressor_type == 2 or aggressor_type == 8: # BISHOP
-                if get_bishop_attacks(opp_king_sq, all_pieces_bb) & BB_SQUARES[to_square]: is_check = True
-            elif aggressor_type == 3 or aggressor_type == 9: # ROOK
-                if get_rook_attacks(opp_king_sq, all_pieces_bb) & BB_SQUARES[to_square]: is_check = True
-            elif aggressor_type == 4 or aggressor_type == 10: # QUEEN
-                if get_queen_attacks(opp_king_sq, all_pieces_bb) & BB_SQUARES[to_square]: is_check = True
-
-            if is_check:
-                score += 15000
-
         if move == killer_1:
             score += 400000
         elif move == killer_2:

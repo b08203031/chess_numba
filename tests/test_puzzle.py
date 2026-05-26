@@ -29,7 +29,7 @@ def clear_numba_cache():
 from chess_engine.classical.debug_utils import log_info
 
 # Clear cache before importing the engine to avoid stale cache issues
-# clear_numba_cache()
+clear_numba_cache()
 
 from chess_engine.classical.fen_parser import parse_fen
 from chess_engine.classical.search import iterative_deepening_search

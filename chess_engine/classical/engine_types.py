@@ -55,6 +55,7 @@ search_context_spec = [
     ('move_scores', numba.int32[:, :]),
     ('moves_buffer', numba.uint16[:, :]),
     ('quiet_moves_tried', numba.uint16[:, :]),
+    ('quiet_pieces_tried', numba.int8[:, :]),
     ('bad_captures', numba.uint16[:, :]),
     ('mp_stage', numba.int32[::1]),
     ('mp_current_idx', numba.int32[::1]),
@@ -161,6 +162,7 @@ class _SearchContextJIT:
         self.move_scores = np.zeros((MAX_PLY, 256), dtype=np.int32)
         self.moves_buffer = np.zeros((MAX_PLY, 256), dtype=np.uint16)
         self.quiet_moves_tried = np.zeros((MAX_PLY, 256), dtype=np.uint16)
+        self.quiet_pieces_tried = np.zeros((MAX_PLY, 256), dtype=np.int8)
         self.bad_captures = np.zeros((MAX_PLY, 256), dtype=np.uint16)
         # Move Picker state arrays
         self.mp_stage = np.zeros(MAX_PLY, dtype=np.int32)
