@@ -863,6 +863,17 @@ def _is_in_check_jit(piece_bbs, occupancy_bbs, game_state):
 def is_in_check(piece_bbs, occupancy_bbs, game_state):
     return _is_in_check_jit(piece_bbs, occupancy_bbs, game_state)
 
+@numba.njit(numba.int32(numba.uint64), cache=True, inline='always')
+def count_bits_local(bb: np.uint64) -> numba.int32:
+    # Standard software popcount that compiles to the hardware popcnt instruction in LLVM
+    bb = bb - ((bb >> np.uint64(1)) & np.uint64(0x5555555555555555))
+    bb = (bb & np.uint64(0x3333333333333333)) + ((bb >> np.uint64(2)) & np.uint64(0x3333333333333333))
+    bb = (bb + (bb >> np.uint64(4))) & np.uint64(0x0F0F0F0F0F0F0F0F)
+    bb = bb + (bb >> np.uint64(8))
+    bb = bb + (bb >> np.uint64(16))
+    bb = bb + (bb >> np.uint64(32))
+    return numba.int32(bb & np.uint64(0x7F))
+
 @numba.njit(numba.boolean(piece_bbs_signature), cache=True, boundscheck=False, fastmath=True)
 def has_sufficient_material(piece_bbs):
     """
@@ -874,35 +885,16 @@ def has_sufficient_material(piece_bbs):
         piece_bbs[6] | piece_bbs[9] | piece_bbs[10]) != np.uint64(0):
         return True
 
-    # Count minor pieces (Knights, Bishops)
+    # Count minor pieces (Knights, Bishops) using hardware-accelerated local popcount
     w_knights = piece_bbs[1]
     w_bishops = piece_bbs[2]
     b_knights = piece_bbs[7]
     b_bishops = piece_bbs[8]
 
-    wn_cnt = 0
-    temp = w_knights
-    while temp:
-        temp &= temp - np.uint64(1)
-        wn_cnt += 1
-
-    wb_cnt = 0
-    temp = w_bishops
-    while temp:
-        temp &= temp - np.uint64(1)
-        wb_cnt += 1
-
-    bn_cnt = 0
-    temp = b_knights
-    while temp:
-        temp &= temp - np.uint64(1)
-        bn_cnt += 1
-
-    bb_cnt = 0
-    temp = b_bishops
-    while temp:
-        temp &= temp - np.uint64(1)
-        bb_cnt += 1
+    wn_cnt = count_bits_local(w_knights)
+    wb_cnt = count_bits_local(w_bishops)
+    bn_cnt = count_bits_local(b_knights)
+    bb_cnt = count_bits_local(b_bishops)
 
     # Either side has at least two minor pieces -> sufficient.
     if (wn_cnt + wb_cnt > 1) or (bn_cnt + bb_cnt > 1):

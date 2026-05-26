@@ -198,11 +198,15 @@ def quiescence_search(piece_bbs, occupancy_bbs, game_state, alpha, beta, ply, se
     moves = search_context.moves_buffer[ply]
     scores = search_context.move_scores[ply]
 
-    pinned_white = get_pinned_pieces(piece_bbs, occupancy_bbs, WHITE)
-    pinned_black = get_pinned_pieces(piece_bbs, occupancy_bbs, BLACK)
-
     # B1: Use TT best move for QSearch ordering (since we already probe TT above)
     qs_tt_move = tt_entry['best_move'] if tt_entry['flag'] != TT_FLAG_NONE else NO_MOVE
+
+    # Delay and conditionally compute pinned pieces (only if we have moves that need SEE scoring)
+    pinned_white = np.uint64(0)
+    pinned_black = np.uint64(0)
+    if move_count > 1 or (move_count == 1 and moves[0] != qs_tt_move):
+        pinned_white = get_pinned_pieces(piece_bbs, occupancy_bbs, WHITE)
+        pinned_black = get_pinned_pieces(piece_bbs, occupancy_bbs, BLACK)
 
     score_captures_with_tt(
         piece_bbs, occupancy_bbs, game_state,
