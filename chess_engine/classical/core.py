@@ -2,7 +2,7 @@ import numba
 import numpy as np
 
 from .board_operations import make_move, unmake_move
-from .move_generator import generate_legal_moves_buffer, is_square_attacked
+from .move_generator import generate_legal_moves_buffer, is_square_attacked, generate_legal_moves
 from .engine_types import piece_bbs_signature, occupancy_bbs_signature, game_state_signature
 import numba.types as nbt
 from .zobrist import get_lsb_index

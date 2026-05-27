@@ -180,7 +180,13 @@ def quiescence_search(piece_bbs, occupancy_bbs, game_state, alpha, beta, ply, se
             eval_score, _, _ = _evaluate_position_jit(piece_bbs, occupancy_bbs, game_state, False)
             return eval_score, q_nodes
 
-        stand_pat, _, _ = _evaluate_position_jit(piece_bbs, occupancy_bbs, game_state, False)
+        # --- QSearch TT static_eval probe ---
+        if tt_entry['flag'] != TT_FLAG_NONE and tt_entry['static_eval'] != 32767:
+            stand_pat = np.int32(tt_entry['static_eval'])
+        else:
+            stand_pat_val, _, _ = _evaluate_position_jit(piece_bbs, occupancy_bbs, game_state, False)
+            stand_pat = np.int32(stand_pat_val)
+
         if stand_pat >= beta:
             tt_score = np.int32(beta)
             if tt_score > MATE_IN_MAX_PLY: tt_score += ply
@@ -997,8 +1003,12 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
             side_to_move = original_side
 
             if is_capture:
-                # Capture pruning can stay before make_move; quiet pruning waits for gives-check detection.
                 threshold = PRUNING_CAPTURE_SEE_MARGIN * depth
+                if not _see_ge_jit(piece_bbs, occupancy_bbs, side_to_move, from_sq, to_sq, threshold, pinned_white, pinned_black):
+                    pruned_moves += 1
+                    continue
+            elif is_pseudo_quiet and not low_material_pruning_guard:
+                threshold = PRUNING_QUIET_SEE_MARGIN * depth * depth
                 if not _see_ge_jit(piece_bbs, occupancy_bbs, side_to_move, from_sq, to_sq, threshold, pinned_white, pinned_black):
                     pruned_moves += 1
                     continue
@@ -1036,6 +1046,7 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
         is_quiet_move = is_pseudo_quiet
         can_prune_quiet = is_quiet_move and not is_giving_check_after_move
 
+        # History Pruning
         if (search_context.enable_see_pruning and not is_exclusion_search
                 and depth <= PRUNING_SHALLOW_DEPTH and not is_currently_in_check and not is_pv
                 and can_prune_quiet and not low_material_pruning_guard):
@@ -1050,19 +1061,6 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                 pruned_moves += 1
                 unmake_move(piece_bbs, occupancy_bbs, game_state, move, unmake_info)
                 continue
-
-            unmake_move(piece_bbs, occupancy_bbs, game_state, move, unmake_info)
-            threshold = PRUNING_QUIET_SEE_MARGIN * depth * depth
-            if not _see_ge_jit(piece_bbs, occupancy_bbs, original_side, from_sq, to_sq, threshold, pinned_white, pinned_black):
-                pruned_moves += 1
-                continue
-
-            unmake_info = make_move(piece_bbs, occupancy_bbs, game_state, move)
-            moved_piece_type = unmake_info[0]
-            if moved_piece_type != -1 and original_side == BLACK:
-                moved_piece_type += 6
-            search_context.move_stack[ply] = move
-            search_context.piece_stack[ply] = moved_piece_type
 
         if is_quiet_move:
             quiet_move_counter += 1
