@@ -142,7 +142,7 @@ def get_quiet_stat_score(search_context, ply, from_sq, to_sq, aggressor_type, pa
     return score
 
 @numba.njit(cache=True, boundscheck=False, fastmath=True)
-def score_captures(piece_bbs, occupancy_bbs, game_state, moves, scores, start_idx, end_idx, search_context, pinned_white, pinned_black):
+def score_captures(piece_bbs, occupancy_bbs, game_state, moves, scores, start_idx, end_idx, search_context, pinned_white, pinned_black, ply):
     side_to_move = game_state[0]
     
     for i in range(start_idx, end_idx):
@@ -156,6 +156,9 @@ def score_captures(piece_bbs, occupancy_bbs, game_state, moves, scores, start_id
         if victim_type == -1 and get_special_move_flag(move) == SPECIAL_MOVE_FLAG_EN_PASSANT:
             victim_type = 0 # Pawn value for En Passant
             
+        search_context.aggressor_cache[ply, move] = aggressor_type
+        search_context.victim_cache[ply, move] = victim_type
+
         mvv_lva = 0
         if victim_type != -1:
             mvv_lva = MG_MATERIAL_VALUES[victim_type % 6] - MG_MATERIAL_VALUES[aggressor_type % 6]
@@ -177,7 +180,7 @@ def score_captures(piece_bbs, occupancy_bbs, game_state, moves, scores, start_id
         scores[i] = score
 
 @numba.njit(cache=True, boundscheck=False, fastmath=True)
-def score_captures_with_tt(piece_bbs, occupancy_bbs, game_state, moves, scores, move_count, tt_move, pinned_white, pinned_black, search_context):
+def score_captures_with_tt(piece_bbs, occupancy_bbs, game_state, moves, scores, move_count, tt_move, pinned_white, pinned_black, search_context, ply):
     side_to_move = game_state[0]
     
     for i in range(move_count):
@@ -196,6 +199,9 @@ def score_captures_with_tt(piece_bbs, occupancy_bbs, game_state, moves, scores, 
             if victim_type == -1 and get_special_move_flag(move) == SPECIAL_MOVE_FLAG_EN_PASSANT:
                 victim_type = 0 # Pawn value for En Passant
                 
+            search_context.aggressor_cache[ply, move] = aggressor_type
+            search_context.victim_cache[ply, move] = victim_type
+
             mvv_lva = 0
             if victim_type != -1:
                 mvv_lva = MG_MATERIAL_VALUES[victim_type % 6] - MG_MATERIAL_VALUES[aggressor_type % 6]
@@ -225,6 +231,8 @@ def score_quiets(piece_bbs, occupancy_bbs, game_state, moves, scores, start_idx,
         from_sq = get_from_square(move)
         
         aggressor_type = find_piece_type_on_square_side(piece_bbs, from_sq, side_to_move)
+        search_context.aggressor_cache[ply, move] = aggressor_type
+        
         score = get_quiet_stat_score(search_context, ply, from_sq, to_square, aggressor_type, pawn_key_idx)
 
         if move == killer_1:
@@ -309,6 +317,9 @@ def score_moves(piece_bbs, occupancy_bbs, game_state, moves, scores, move_count,
                 if victim_type == -1 and get_special_move_flag(move) == SPECIAL_MOVE_FLAG_EN_PASSANT:
                     victim_type = 0 # Pawn
 
+                search_context.aggressor_cache[ply, move] = aggressor_type
+                search_context.victim_cache[ply, move] = victim_type
+
                 # Optimization: Use see_ge(0) instead of full see()
                 is_good_capture = _see_ge_jit(piece_bbs, occupancy_bbs, side_to_move, from_sq, to_square, 0, pinned_white, pinned_black, aggressor_type, victim_type)
                 
@@ -329,6 +340,10 @@ def score_moves(piece_bbs, occupancy_bbs, game_state, moves, scores, move_count,
                     if victim_type != -1:
                         score += search_context.capture_history[aggressor_type, to_square, victim_type]
             else:
+                from_sq = get_from_square(move)
+                aggressor_type = find_piece_type_on_square_side(piece_bbs, from_sq, side_to_move)
+                search_context.aggressor_cache[ply, move] = aggressor_type
+
                 if move == killer_moves_at_ply[0]:
                     score = SCORE_KILLER_1
                 elif move == killer_moves_at_ply[1]:
@@ -336,8 +351,6 @@ def score_moves(piece_bbs, occupancy_bbs, game_state, moves, scores, move_count,
                 elif move == counter_move:
                     score = SCORE_COUNTER_MOVE
                 else:
-                    from_sq = get_from_square(move)
-                    aggressor_type = find_piece_type_on_square_side(piece_bbs, from_sq, side_to_move)
                     score = history_table[aggressor_type, to_square]
                     
                     # Pawn History

@@ -178,6 +178,7 @@ python -m tests.perft divide --depth 4
 為了確保專案結構清晰，所有的技術設計、演算法研析報告與配置指南均已模組化並放置於對應的子目錄下。以下為專案中所有的 Markdown 文件的完整索引與作用說明：
 
 ### 1. 引擎整體與神經網路 (NNUE) 架構
+
 * **[引擎核心架構說明書](chess_engine/README.md)**：
   * 介紹引擎整體各個模組（UCI、搜尋、評估、移動生成、棋盤表示）的設計理念與檔案功能說明。
 * **[NNUE V2 架構設計說明](chess_engine/nnue/ARCHITECTURE.md)**：
@@ -190,6 +191,7 @@ python -m tests.perft divide --depth 4
   * 解析 NNUE 搜尋引擎的 PVS 搜尋結構、多重剪枝優化與基於 `SearchContext` 的動態 UCI 開關調參設計。
 
 ### 2. 經典 (Classical) 評估與搜尋演算法
+
 * **[搜尋算法最佳化報告](chess_engine/classical/SEARCH_ANALYSIS.md)**：
   * 深入解析主要變例搜尋 (PVS)、各種剪枝技術（Null Move, Futility, LMP, Singular Extensions）以及歷史啟發（History Heuristics）等核心搜尋機制的設計細節。
 * **[靜態交換評估 (SEE) 專題報告](chess_engine/classical/SEE_ANALYSIS.md)**：
@@ -202,6 +204,7 @@ python -m tests.perft divide --depth 4
   * 深度對比 Stockfish 11 評估架構（包含材質不平衡矩陣、非線性機動性表、kingDanger 系統、空間評估與主動權修正）與本引擎經典評估函數的對照分析。
 
 ### 3. 對戰、聯賽與調參工具 (Tuner)
+
 * **[引擎對戰測試指南](tools/TOURNAMENT_TUTORIAL.md)**：
   * 使用 `tools/tournament.py` 運行引擎版本聯賽、自我對局、Elo 估算與 95% 信賴區間計算的操作與配置指南。
 * **[SPSA 參數調參與 NNUE 數據管線說明](tuner/README.md)**：
@@ -210,7 +213,6 @@ python -m tests.perft divide --depth 4
   * 詳述如何利用自我對弈 (Match Playing) 和進程重用、智能暖機技術來優化引擎搜尋參數。
 * **[歷史診斷與訓練分析 (Legacy)](tuner/archive_old_scripts/training_analysis.md)** 與 **[失誤分析報告 (Legacy)](tuner/archive_old_scripts/blunder_summary.md)**：
   * 記錄了早期調參訓練分析與特定盲點對局的失誤排除日誌。
-
 
 ## 開發者注意事項
 

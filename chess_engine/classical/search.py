@@ -219,7 +219,8 @@ def quiescence_search(piece_bbs, occupancy_bbs, game_state, alpha, beta, ply, se
         qs_tt_move,
         pinned_white,
         pinned_black,
-        search_context
+        search_context,
+        ply
     )
 
     legal_moves_tried = 0
@@ -246,7 +247,7 @@ def quiescence_search(piece_bbs, occupancy_bbs, game_state, alpha, beta, ply, se
                 if move_flag == SPECIAL_MOVE_FLAG_EN_PASSANT:
                     victim_value = MG_MATERIAL_VALUES[PAWN]
                 else:
-                    victim_type = find_piece_type_on_square_side(piece_bbs, get_to_square(move), 1 - side_to_move)
+                    victim_type = search_context.victim_cache[ply, move]
                     victim_value = MG_MATERIAL_VALUES[victim_type % 6] if victim_type != -1 else 0
                 potential_gain = victim_value + promotion_gain
                 
@@ -330,7 +331,7 @@ def get_next_move(piece_bbs, occupancy_bbs, game_state, search_context, ply, tt_
             
         elif mp_stage == STAGE_GEN_CAPTURES:
             search_context.mp_captures_end[ply] = generate_pseudo_legal_captures_buffer(piece_bbs, occupancy_bbs, game_state, search_context.moves_buffer, ply)
-            score_captures(piece_bbs, occupancy_bbs, game_state, moves, scores, 0, search_context.mp_captures_end[ply], search_context, pinned_white, pinned_black)
+            score_captures(piece_bbs, occupancy_bbs, game_state, moves, scores, 0, search_context.mp_captures_end[ply], search_context, pinned_white, pinned_black, ply)
             partial_insertion_sort_moves(moves, scores, 0, search_context.mp_captures_end[ply], -1000000)
             search_context.mp_current_idx[ply] = 0
             search_context.mp_stage[ply] = STAGE_GOOD_CAPTURES
@@ -814,7 +815,8 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                 search_context.moves_buffer[ply],
                 search_context.move_scores[ply],
                 0, pc_move_count, search_context,
-                pc_pinned_w, pc_pinned_b
+                pc_pinned_w, pc_pinned_b,
+                ply
             )
 
             pc_moves = search_context.moves_buffer[ply]
@@ -1288,8 +1290,11 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
             
             if is_capture and moved_piece_type != -1:
                 # Update Capture History
-                victim_type = find_piece_type_on_square_side(piece_bbs, to_sq, 1 - game_state[0])
+                victim_type = unmake_info[1]
                 if victim_type != -1:
+                    # Convert relative victim piece type (0-5) to absolute piece type (0-11)
+                    enemy_side = 1 - original_side
+                    victim_type += enemy_side * 6
                     update_capture_history(search_context.capture_history, moved_piece_type, to_sq, victim_type, bonus)
             
             if is_quiet_move and moved_piece_type != -1:
