@@ -710,85 +710,6 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                 if static_score - rfp_margin >= beta:
                     return (np.int32(static_score), NO_MOVE, nodes_searched, quiescence_nodes, tt_hits)
 
-    # --- Null Move Pruning (guarded by H3) ---
-    if (search_context.enable_nmp and not is_exclusion_search and depth >= 3 and not is_currently_in_check
-            and not (ply > 0 and search_context.move_stack[ply - 1] == NO_MOVE)
-            and not low_material_pruning_guard
-            and side_non_pawn_count >= NMP_MIN_SIDE_NON_PAWNS):
-        if static_score >= beta + NMP_STATIC_MARGIN:
-            if not static_eval_is_full:
-                raw_static_eval, static_score, improving, cached_pinned_white, cached_pinned_black = compute_full_corrected_static_eval(piece_bbs, occupancy_bbs, game_state, search_context, ply)
-                static_eval_is_full = True
-
-        if static_score >= beta + NMP_STATIC_MARGIN:
-            nmp_saved_side = game_state[0]
-            nmp_saved_ep   = game_state[2]
-            nmp_saved_hmc  = game_state[3]
-            nmp_saved_key  = game_state[4]
-
-            search_context.move_stack[ply] = NO_MOVE
-            search_context.piece_stack[ply] = -1
-
-            make_null_move(game_state)
-
-            nmp_reduction = 4 + depth // 3 + min(3, (static_score - beta) // 190)
-
-            if not improving:
-                nmp_reduction += 1
-            search_depth = max(0, depth - nmp_reduction)
-
-            res_nm = _search(
-                piece_bbs, occupancy_bbs, game_state, search_depth,
-                -beta, -beta + 1, search_context, ply + 1, NO_MOVE, False, not cut_node
-            )
-            null_move_score = res_nm[0]
-            child_nodes = res_nm[2]
-            child_q_nodes = res_nm[3]
-            child_tt_hits = res_nm[4]
-
-            game_state[0] = nmp_saved_side
-            game_state[2] = nmp_saved_ep
-            game_state[3] = nmp_saved_hmc
-            game_state[4] = nmp_saved_key
-            null_move_score = -null_move_score
-
-            if search_context.stop_flag[0]:
-                return (np.int32(0), NO_MOVE, nodes_searched, quiescence_nodes, tt_hits)
-
-            nodes_searched += child_nodes; quiescence_nodes += child_q_nodes; tt_hits += child_tt_hits
-
-            if null_move_score >= beta:
-                if null_move_score >= MATE_IN_MAX_PLY:
-                    null_move_score = beta
-                null_cutoff_verified = True
-
-                if depth >= NMP_VERIFICATION_DEPTH and abs(null_move_score) < MATE_IN_MAX_PLY:
-                    nmp_was_enabled = search_context.enable_nmp
-                    search_context.enable_nmp = False
-                    verification_depth = max(1, depth - nmp_reduction)
-                    res_verify = _search(
-                        piece_bbs, occupancy_bbs, game_state, verification_depth,
-                        beta - 1, beta, search_context, ply, NO_MOVE, False, cut_node
-                    )
-                    search_context.enable_nmp = nmp_was_enabled
-
-                    verify_score = res_verify[0]
-                    nodes_searched += res_verify[2]
-                    quiescence_nodes += res_verify[3]
-                    tt_hits += res_verify[4]
-
-                    if search_context.stop_flag[0]:
-                        return (np.int32(0), NO_MOVE, nodes_searched, quiescence_nodes, tt_hits)
-
-                    if verify_score < beta:
-                        null_cutoff_verified = False
-                    else:
-                        null_move_score = verify_score
-
-                if null_cutoff_verified:
-                    search_context.pv_table[ply, ply] = NO_MOVE
-                    return (np.int32(null_move_score), NO_MOVE, nodes_searched, quiescence_nodes, tt_hits)
-
     # --- ProbCut (must be before NMP, guarded by H3) ---
     if search_context.enable_probcut and not is_exclusion_search and depth >= 5 and abs(beta) < MATE_IN_MAX_PLY and not is_currently_in_check:
         probcut_beta = beta + PROBCUT_MARGIN
@@ -909,6 +830,85 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                     store_tt(search_context.transposition_table, tt_key, depth - 3, tt_store_score_pc, np.int16(32767), TT_FLAG_BETA, pc_move, search_context.tt_generation, False)
                     return (np.int32(probcut_return_score), pc_move, nodes_searched, quiescence_nodes, tt_hits)
 
+    # --- Null Move Pruning (guarded by H3) ---
+    if (search_context.enable_nmp and not is_exclusion_search and depth >= 3 and not is_currently_in_check
+            and not (ply > 0 and search_context.move_stack[ply - 1] == NO_MOVE)
+            and not low_material_pruning_guard
+            and side_non_pawn_count >= NMP_MIN_SIDE_NON_PAWNS):
+        if static_score >= beta + NMP_STATIC_MARGIN:
+            if not static_eval_is_full:
+                raw_static_eval, static_score, improving, cached_pinned_white, cached_pinned_black = compute_full_corrected_static_eval(piece_bbs, occupancy_bbs, game_state, search_context, ply)
+                static_eval_is_full = True
+
+        if static_score >= beta + NMP_STATIC_MARGIN:
+            nmp_saved_side = game_state[0]
+            nmp_saved_ep   = game_state[2]
+            nmp_saved_hmc  = game_state[3]
+            nmp_saved_key  = game_state[4]
+
+            search_context.move_stack[ply] = NO_MOVE
+            search_context.piece_stack[ply] = -1
+
+            make_null_move(game_state)
+
+            nmp_reduction = 4 + depth // 3 + min(3, (static_score - beta) // 190)
+
+            if not improving:
+                nmp_reduction += 1
+            search_depth = max(0, depth - nmp_reduction)
+
+            res_nm = _search(
+                piece_bbs, occupancy_bbs, game_state, search_depth,
+                -beta, -beta + 1, search_context, ply + 1, NO_MOVE, False, not cut_node
+            )
+            null_move_score = res_nm[0]
+            child_nodes = res_nm[2]
+            child_q_nodes = res_nm[3]
+            child_tt_hits = res_nm[4]
+
+            game_state[0] = nmp_saved_side
+            game_state[2] = nmp_saved_ep
+            game_state[3] = nmp_saved_hmc
+            game_state[4] = nmp_saved_key
+            null_move_score = -null_move_score
+
+            if search_context.stop_flag[0]:
+                return (np.int32(0), NO_MOVE, nodes_searched, quiescence_nodes, tt_hits)
+
+            nodes_searched += child_nodes; quiescence_nodes += child_q_nodes; tt_hits += child_tt_hits
+
+            if null_move_score >= beta:
+                if null_move_score >= MATE_IN_MAX_PLY:
+                    null_move_score = beta
+                null_cutoff_verified = True
+
+                if depth >= NMP_VERIFICATION_DEPTH and abs(null_move_score) < MATE_IN_MAX_PLY:
+                    nmp_was_enabled = search_context.enable_nmp
+                    search_context.enable_nmp = False
+                    verification_depth = max(1, depth - nmp_reduction)
+                    res_verify = _search(
+                        piece_bbs, occupancy_bbs, game_state, verification_depth,
+                        beta - 1, beta, search_context, ply, NO_MOVE, False, cut_node
+                    )
+                    search_context.enable_nmp = nmp_was_enabled
+
+                    verify_score = res_verify[0]
+                    nodes_searched += res_verify[2]
+                    quiescence_nodes += res_verify[3]
+                    tt_hits += res_verify[4]
+
+                    if search_context.stop_flag[0]:
+                        return (np.int32(0), NO_MOVE, nodes_searched, quiescence_nodes, tt_hits)
+
+                    if verify_score < beta:
+                        null_cutoff_verified = False
+                    else:
+                        null_move_score = verify_score
+
+                if null_cutoff_verified:
+                    search_context.pv_table[ply, ply] = NO_MOVE
+                    return (np.int32(null_move_score), NO_MOVE, nodes_searched, quiescence_nodes, tt_hits)
+
     # --- Razoring (must be after NMP, guarded by H3) ---
     if not is_exclusion_search and not is_currently_in_check and not is_pv and depth <= 7:
         if (search_context.enable_razoring and not low_material_pruning_guard
@@ -996,6 +996,10 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
         is_capture = ((opponent_pieces_bb & BB_SQUARES[to_sq]) != 0) or (flag == SPECIAL_MOVE_FLAG_EN_PASSANT)
         is_promotion = flag == SPECIAL_MOVE_FLAG_PROMOTION
         is_pseudo_quiet = not is_capture and not is_promotion
+        
+        is_bad_capture = False
+        if is_capture and not is_promotion:
+            is_bad_capture = not _see_ge_jit(piece_bbs, occupancy_bbs, original_side, from_sq, to_sq, 0, pinned_white, pinned_black)
         
         # --- NEW: Shallow Depth Pruning (Stockfish Step 14) ---
         if (search_context.enable_see_pruning and not is_exclusion_search
@@ -1230,7 +1234,7 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
 
             # A3: LMR for bad captures (only reduce when it's a bad capture, not a good one)
             elif search_context.enable_lmr and depth >= LMR_MIN_DEPTH and is_capture and not is_promotion and searched_legal_moves > 1:
-                if search_context.mp_stage[ply] == STAGE_BAD_CAPTURES or search_context.mp_stage[ply] == STAGE_DONE:
+                if is_bad_capture:
                     lmr = 1 + depth // 6
                     lmr = max(0, min(lmr, search_depth - 1))
 
