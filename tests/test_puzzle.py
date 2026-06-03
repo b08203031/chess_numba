@@ -14,17 +14,15 @@ transposition_table = create_transposition_table(TT_SIZE_MB)
 
 def clear_numba_cache():
     """
-    Finds and removes all __pycache__ directories in the project.
+    Finds and removes all __pycache__ directories under chess_engine/classical/
+    to avoid stale Numba JIT cache issues.
     """
-    # log_info("--- Clearing Numba Cache ---")
-    project_root = Path(__file__).parent
-    cache_dirs = list(project_root.rglob("__pycache__"))
+    classical_dir = Path(__file__).parent.parent / "chess_engine" / "classical"
+    cache_dirs = list(classical_dir.rglob("__pycache__"))
 
     for cache_dir in cache_dirs:
         if cache_dir.is_dir():
-            # log_info(f"Removing cache directory: {cache_dir}")
             shutil.rmtree(cache_dir)
-    # log_info("--- Cache Cleared ---")
 
 from chess_engine.classical.debug_utils import log_info
 

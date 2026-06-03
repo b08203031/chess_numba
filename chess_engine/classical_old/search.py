@@ -5,22 +5,22 @@ import math
 import numpy as np
 import threading
 
-from chess_engine.classical.evaluation import evaluate_position, _evaluate_position_jit
+from chess_engine.classical_old.evaluation import evaluate_position, _evaluate_position_jit
 
-from chess_engine.classical.move_generator import (
+from chess_engine.classical_old.move_generator import (
     generate_legal_moves, is_in_check, _is_in_check_jit, has_sufficient_material, generate_captures,
     generate_legal_moves_buffer, generate_captures_buffer,
     generate_pseudo_legal_moves_buffer, generate_pseudo_legal_captures_buffer,
     generate_pseudo_legal_quiets_buffer,
     is_square_attacked, is_move_pseudo_legal
 )
-from chess_engine.classical.bitboard_utils import get_lsb_index, count_bits
-from chess_engine.classical.board_operations import make_move, unmake_move, make_null_move
-from chess_engine.classical.move import (
+from chess_engine.classical_old.bitboard_utils import get_lsb_index, count_bits
+from chess_engine.classical_old.board_operations import make_move, unmake_move, make_null_move
+from chess_engine.classical_old.move import (
     get_to_square, get_from_square, get_special_move_flag,
     SPECIAL_MOVE_FLAG_PROMOTION, SPECIAL_MOVE_FLAG_EN_PASSANT
 )
-from chess_engine.classical.constants import (
+from chess_engine.classical_old.constants import (
     BB_SQUARES, MG_MATERIAL_VALUES, INFINITY, MAX_QUIESCENCE_DEPTH, ASPIRATION_WINDOW_SIZE,
     NULL_MOVE_REDUCTION, MAX_PLY, LMR_MIN_DEPTH, LMR_MIN_QUIET_MOVE_INDEX, LMR_REDUCTION, SEE_THRESHOLD,
     ENABLE_SEE_IN_QUIESCENCE, MATE_SCORE, MATE_IN_MAX_PLY, NO_MOVE,
@@ -46,25 +46,24 @@ from chess_engine.classical.constants import (
     FIFTY_MOVE_RULE_LIMIT, FIFTY_MOVE_SCALE_THRESHOLD, FIFTY_MOVE_MAX_SCALE,
     SEE_HISTORY_DIVISOR,
     HISTORY_WEIGHT_MAIN, HISTORY_WEIGHT_CONT_1, HISTORY_WEIGHT_CONT_2, HISTORY_WEIGHT_CONT_4,
-    LMR_TABLE, ENABLE_MATE_DISTANCE_PRUNING,
-    LMR_HISTORY_DIVISOR
+    LMR_TABLE, ENABLE_MATE_DISTANCE_PRUNING
 )
-from chess_engine.classical.bitboard_utils import find_piece_type_on_square, find_piece_type_on_square_side
-from chess_engine.classical.board_operations import find_piece_type_for_square
-from chess_engine.classical.debug_utils import log_info
-from chess_engine.classical.see import _see_ge_jit, get_pinned_pieces
-from chess_engine.classical.transposition_table import (
+from chess_engine.classical_old.bitboard_utils import find_piece_type_on_square, find_piece_type_on_square_side
+from chess_engine.classical_old.board_operations import find_piece_type_for_square
+from chess_engine.classical_old.debug_utils import log_info
+from chess_engine.classical_old.see import _see_ge_jit, get_pinned_pieces
+from chess_engine.classical_old.transposition_table import (
     probe_tt, store_tt, numba_tt_entry_type,
     TT_FLAG_NONE, TT_FLAG_EXACT, TT_FLAG_ALPHA, TT_FLAG_BETA
 )
-from chess_engine.classical.zobrist import get_tt_key  # GHI protection: halfmove-aware TT key
-from chess_engine.classical.engine_types import (
+from chess_engine.classical_old.zobrist import get_tt_key  # GHI protection: halfmove-aware TT key
+from chess_engine.classical_old.engine_types import (
     piece_bbs_signature, occupancy_bbs_signature, game_state_signature,
     SearchContext, search_context_type
 )
-from chess_engine.classical.move import move_to_uci
+from chess_engine.classical_old.move import move_to_uci
 
-from chess_engine.classical.search_heuristics import (
+from chess_engine.classical_old.search_heuristics import (
     update_history, update_butterfly_history, update_capture_history,
     update_continuation_history, update_pawn_history, score_captures, score_captures_with_tt,
     score_quiets, update_quiet_stats_on_tt_hit, get_lmr_reduction, partial_insertion_sort_moves,
@@ -1233,35 +1232,11 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                 # Clamp LMR to avoid reducing below depth 1
                 lmr = max(0, min(lmr, search_depth - 1))
 
-            # A3: Dynamic LMR for bad captures (Stockfish-inspired over Linear Base)
-            # Base = 1 + depth // 6, then dynamically adjusted by node type, improving status,
-            # capture history, and check-giving status.
+            # A3: LMR for bad captures (only reduce when it's a bad capture, not a good one)
             elif search_context.enable_lmr and depth >= LMR_MIN_DEPTH and is_capture and not is_promotion and searched_legal_moves > 1:
                 if is_bad_capture:
-                    base_lmr = 1 + depth // 6
-
-                    # Node-type and improving adjustments
-                    if is_pv:
-                        base_lmr -= 1
-                    if improving:
-                        base_lmr -= 1
-                    if cut_node:
-                        base_lmr += 1
-
-                    # Capture history adjustment: good history -> less reduction, bad history -> more reduction
-                    victim_type_lmr = unmake_info[1]
-                    if victim_type_lmr >= 0:
-                        enemy_side_lmr = 1 - original_side
-                        victim_type_lmr_abs = victim_type_lmr + enemy_side_lmr * 6
-                        cap_hist = search_context.capture_history[moved_piece_type, to_sq, victim_type_lmr_abs]
-                        base_lmr -= cap_hist // 8192
-
-                    # Check-giving protection
-                    if is_giving_check_after_move:
-                        base_lmr -= 1
-
-                    lmr = max(0, base_lmr)
-                    lmr = min(lmr, search_depth - 1)
+                    lmr = 1 + depth // 6
+                    lmr = max(0, min(lmr, search_depth - 1))
 
             res = _search(
                 piece_bbs, occupancy_bbs, game_state, search_depth - lmr, -alpha - 1, -alpha, search_context, ply + 1, NO_MOVE, False, True)

@@ -6,20 +6,20 @@ import random
 import threading
 import time
 
-from chess_engine.classical.board_operations import make_move
-from chess_engine.classical.core import generate_legal_moves
-from chess_engine.classical.debug_utils import log_info
-from chess_engine.classical.fen_parser import parse_fen
-from chess_engine.classical.move import move_to_uci
-from chess_engine.classical.search import iterative_deepening_search
-from chess_engine.classical.time_manager import calculate_search_time
-from chess_engine.classical.transposition_table import (
+from chess_engine.classical_old.board_operations import make_move
+from chess_engine.classical_old.core import generate_legal_moves
+from chess_engine.classical_old.debug_utils import log_info
+from chess_engine.classical_old.fen_parser import parse_fen
+from chess_engine.classical_old.move import move_to_uci
+from chess_engine.classical_old.search import iterative_deepening_search
+from chess_engine.classical_old.time_manager import calculate_search_time
+from chess_engine.classical_old.transposition_table import (
     create_transposition_table,
     clear_transposition_table,
     TT_SIZE_MB,
 )
-from chess_engine.classical.opening_book import OpeningBook
-from chess_engine.classical.engine_types import SearchContext
+from chess_engine.classical_old.opening_book import OpeningBook
+from chess_engine.classical_old.engine_types import SearchContext
 
 # Maximum search depth (Ply) for arrays like killer moves
 # 殺手步等陣列的最大搜尋深度（層數）
@@ -104,7 +104,7 @@ def uci_loop():
             command = tokens[0]
 
             if command == "uci":
-                print("id name MyChessEngine")
+                print("id name MyChessEngineOld")
                 print("id author YourName")
                 print("option name OwnBook type check default true")
                 print("uciok", flush=True)

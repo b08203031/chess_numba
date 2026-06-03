@@ -87,7 +87,7 @@ class Engine:
             if line.startswith("bestmove"):
                 break
 
-    def get_move(self, moves_history, time_limit_ms, start_fen=None):
+    def get_move(self, moves_history, time_limit_ms, start_fen=None, depth=None):
         if start_fen:
             cmd = f"position fen {start_fen}"
         else:
@@ -97,7 +97,10 @@ class Engine:
             cmd += " moves " + " ".join(moves_history)
 
         self.send_command(cmd)
-        self.send_command(f"go movetime {time_limit_ms}")
+        if depth is not None:
+            self.send_command(f"go depth {depth}")
+        else:
+            self.send_command(f"go movetime {time_limit_ms}")
 
         best_move = None
         while True:
@@ -162,7 +165,7 @@ class SPRTTest:
         else:
             return "Continue", llr
 
-def play_game(white_engine, black_engine, time_limit_ms, game_number, start_fen=None):
+def play_game(white_engine, black_engine, time_limit_ms, game_number, start_fen=None, depth=None):
     if start_fen:
         board = chess.Board(start_fen)
     else:
@@ -198,7 +201,7 @@ def play_game(white_engine, black_engine, time_limit_ms, game_number, start_fen=
 
         try:
             moves_history = [m.uci() for m in board.move_stack]
-            move = mover.get_move(moves_history, time_limit_ms, start_fen)
+            move = mover.get_move(moves_history, time_limit_ms, start_fen, depth=depth)
         except Exception as e:
             print(f"Error getting move from {mover.name}: {e}")
             break
@@ -267,7 +270,7 @@ def count_result(result_str, is_white):
     if result_str == "0-1": return 0.0 if is_white else 1.0
     return 0.5 
 
-def run_tournament(engine1_path, engine2_path, games_count, time_ms, engine1_name="Engine_A", engine2_name="Engine_B"):
+def run_tournament(engine1_path, engine2_path, games_count, time_ms, engine1_name="Engine_A", engine2_name="Engine_B", depth=None):
 
     e1 = Engine(engine1_name, engine1_path)
     e2 = Engine(engine2_name, engine2_path)
@@ -312,12 +315,12 @@ def run_tournament(engine1_path, engine2_path, games_count, time_ms, engine1_nam
             opening_fen = openings[(pair_i - 1) % len(openings)]
             
             # Game A: Engine 1 plays White
-            res_a, pgn_a = play_game(e1, e2, time_ms, game_num, opening_fen)
+            res_a, pgn_a = play_game(e1, e2, time_ms, game_num, opening_fen, depth=depth)
             score_a_for_e1 = count_result(res_a, is_white=True)
             game_num += 1
             
             # Game B: Engine 1 plays Black
-            res_b, pgn_b = play_game(e2, e1, time_ms, game_num, opening_fen)
+            res_b, pgn_b = play_game(e2, e1, time_ms, game_num, opening_fen, depth=depth)
             score_b_for_e1 = count_result(res_b, is_white=False)
             game_num += 1
             
@@ -372,13 +375,15 @@ def run_tournament(engine1_path, engine2_path, games_count, time_ms, engine1_nam
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Run a tournament between two versions of the engine.")
     root_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    default_engine = os.path.join(root_dir, "main.py")
-    parser.add_argument("--engine1", default=default_engine, help="Path to the first engine's main.py")
-    parser.add_argument("--engine2", default=default_engine, help="Path to the second engine's main.py")
-    parser.add_argument("--name1", default="Engine_A", help="Name of the first engine")
-    parser.add_argument("--name2", default="Engine_B", help="Name of the second engine")
-    parser.add_argument("--games", type=int, default=700, help="Number of games to play (default: 500)")
-    parser.add_argument("--time", type=int, default=1000, help="Time per move in ms (default: 500)")
+    default_engine1 = os.path.join(root_dir, "main.py")
+    default_engine2 = os.path.join(root_dir, "main_old.py")
+    parser.add_argument("--engine1", default=default_engine1, help="Path to the first engine's main.py")
+    parser.add_argument("--engine2", default=default_engine2, help="Path to the second engine's main.py")
+    parser.add_argument("--name1", default="DynamicLMR", help="Name of the first engine")
+    parser.add_argument("--name2", default="StaticLMR", help="Name of the second engine")
+    parser.add_argument("--games", type=int, default=100, help="Number of games to play (default: 100)")
+    parser.add_argument("--time", type=int, default=1000, help="Time per move in ms (default: 1000)")
+    parser.add_argument("--depth", type=int, default=None, help="Fixed search depth per move (overrides --time if set)")
 
     args = parser.parse_args()
 
@@ -389,4 +394,9 @@ if __name__ == "__main__":
         print(f"Error: Engine 2 path not found: {args.engine2}")
         sys.exit(1)
 
-    run_tournament(args.engine1, args.engine2, args.games, args.time, args.name1, args.name2)
+    if args.depth is not None:
+        print(f"Mode: Fixed Depth = {args.depth}")
+    else:
+        print(f"Mode: Fixed Time = {args.time} ms/move")
+
+    run_tournament(args.engine1, args.engine2, args.games, args.time, args.name1, args.name2, depth=args.depth)
