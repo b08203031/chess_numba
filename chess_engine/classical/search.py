@@ -108,8 +108,13 @@ def compute_full_corrected_static_eval(piece_bbs, occupancy_bbs, game_state, sea
     search_context.static_eval_stack[ply] = corrected_eval
 
     improving = False
-    if ply >= 2 and corrected_eval > search_context.static_eval_stack[ply - 2]:
-        improving = True
+    if ply >= 2:
+        ref_eval = search_context.static_eval_stack[ply - 2]
+        # V3 3.5: Fallback to ply-4 when ply-2 was null move (static_eval = -INFINITY)
+        if ref_eval == -INFINITY and ply >= 4:
+            ref_eval = search_context.static_eval_stack[ply - 4]
+        if ref_eval != -INFINITY and corrected_eval > ref_eval:
+            improving = True
 
     return raw_eval, corrected_eval, improving, pinned_white, pinned_black
 
@@ -254,7 +259,7 @@ def quiescence_search(piece_bbs, occupancy_bbs, game_state, alpha, beta, ply, se
                 if move_flag == SPECIAL_MOVE_FLAG_EN_PASSANT:
                     victim_value = MG_MATERIAL_VALUES[PAWN]
                 else:
-                    victim_type = search_context.victim_cache[ply, move]
+                    victim_type = find_piece_type_on_square_side(piece_bbs, get_to_square(move), 1 - side_to_move)
                     victim_value = MG_MATERIAL_VALUES[victim_type % 6] if victim_type != -1 else 0
                 potential_gain = victim_value + promotion_gain
                 
@@ -591,7 +596,7 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                     if not tt_is_capture and not tt_is_promotion:
                         tt_aggressor = find_piece_type_on_square_side(piece_bbs, tt_from, our_side)
                         if tt_aggressor != -1 and ((occupancy_bbs[our_side] & BB_SQUARES[tt_to]) == 0):
-                            tt_bonus = min(15 * depth, 300) 
+                            tt_bonus = min(15 * depth, 300)
                             update_quiet_stats_on_tt_hit(search_context, tt_move, tt_aggressor, tt_to, pawn_key_idx, tt_bonus, ply)
 
                 search_context.pv_table[ply, ply] = NO_MOVE
@@ -652,8 +657,13 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
         
         search_context.static_eval_stack[ply] = static_score
 
-        if ply >= 2 and static_score > search_context.static_eval_stack[ply - 2]:
-            improving = True
+        # V3 3.5: Improved improving calculation — fallback to ply-4 when ply-2 was null move
+        if ply >= 2:
+            ref_eval = search_context.static_eval_stack[ply - 2]
+            if ref_eval == -INFINITY and ply >= 4:
+                ref_eval = search_context.static_eval_stack[ply - 4]
+            if ref_eval != -INFINITY and static_score > ref_eval:
+                improving = True
     else:
         search_context.static_eval_stack[ply] = -INFINITY
 
@@ -852,7 +862,11 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
 
             make_null_move(game_state)
 
-            nmp_reduction = 4 + depth // 3 + min(3, (static_score - beta) // 190)
+            # V3 3.3: Improved NMP reduction — increased cap and tighter divisor
+            nmp_reduction = 4 + depth // 3 + min(4, (static_score - beta) // 160)
+            # V3 3.3: Material-based adjustment — more aggressive when side has many pieces
+            if side_non_pawn_count >= 3:
+                nmp_reduction += 1
 
             if not improving:
                 nmp_reduction += 1
@@ -1180,15 +1194,17 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                         # Double extension for big margin
                         if depth >= 8 and exclusion_score < exclusion_beta - SINGULAR_EXTENSION_MARGIN:
                             current_extension = max(current_extension, 2)
-                    elif search_context.enable_multicut and exclusion_beta >= beta:
+                    elif exclusion_score >= exclusion_beta:
+                        # --- V3 3.1: Negative Extension ---
+                        # When singular search fails high, this move is NOT singular.
+                        # If additionally the exclusion_beta >= beta, multiple moves fail high.
+                        if not is_pv and exclusion_score >= beta:
+                            current_extension = -1  # Reduce depth by 1
                         # --- MODERN MULTI-CUT PRUNING ---
-                        # If the singular search fails high (exclusion_score >= exclusion_beta)
-                        # AND the bounds at which it was searched are >= beta,
-                        # it means multiple moves (TT move + another move) fail high.
-                        # Conservative check: Never prune if we see a mate score!
-                        if abs(exclusion_score) < MATE_IN_MAX_PLY:
-                            unmake_move(piece_bbs, occupancy_bbs, game_state, move, unmake_info)
-                            return (np.int32(exclusion_beta), NO_MOVE, nodes_searched, quiescence_nodes, tt_hits)
+                        if search_context.enable_multicut and exclusion_beta >= beta:
+                            if abs(exclusion_score) < MATE_IN_MAX_PLY:
+                                unmake_move(piece_bbs, occupancy_bbs, game_state, move, unmake_info)
+                                return (np.int32(exclusion_beta), NO_MOVE, nodes_searched, quiescence_nodes, tt_hits)
         search_depth = depth - 1 + current_extension
 
         searched_legal_moves += 1
@@ -1222,6 +1238,7 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                     lmr += 1
                 if is_giving_check_after_move:
                     lmr = max(0, lmr - 1)
+
 
                 # A2: Pawn push protection — don't reduce pawn pushes to 6th/7th rank
                 is_pawn = (moved_piece_type % 6) == PAWN

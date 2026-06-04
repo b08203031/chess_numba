@@ -409,7 +409,7 @@ if __name__ == "__main__":
     # 確保當前目錄存在 tournament_results.pgn 檔案
     target_file = "tournament_analysis/tournament_results.pgn"
     try:
-        analyzer = ChessEngineAnalyzer(target_engine="DynamicLMR")
+        analyzer = ChessEngineAnalyzer(target_engine="New")
         analyzer.parse_pgn(target_file)
         analyzer.generate_report()
     except FileNotFoundError:

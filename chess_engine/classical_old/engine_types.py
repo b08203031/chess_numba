@@ -40,7 +40,6 @@ search_context_spec = [
     ('pv_table', numba.uint16[:, :]),
     ('history_table', numba.int32[:, :]),
     ('nodes_searched', numba.uint64),
-    ('accumulator_stack', numba.int32[:, :, :]),
     ('end_time', numba.float64),
     ('stop_flag', numba.boolean[:]),
     ('game_history', numba.uint64[::1]),  # Array of Zobrist keys for game history
@@ -89,6 +88,10 @@ class _SearchContextJIT:
     """
     用於在遞歸搜尋函數之間傳遞共享數據和狀態的上下文類別。
     
+    Note: accumulator_stack removed (unused in Classical engine).
+    Note: aggressor_cache/victim_cache shrunk from 65536 to 256 columns
+          (indexed by move position in buffer, not move encoding).
+
     Attributes:
         transposition_table (numba.types.Array): 置換表陣列。
         killer_moves (numba.uint16[::1]): 殺手步表。
@@ -143,7 +146,7 @@ class _SearchContextJIT:
         self.minor_correction_history = minor_correction_history
         self.non_pawn_correction_history_white = non_pawn_correction_history_white
         self.non_pawn_correction_history_black = non_pawn_correction_history_black
-        self.accumulator_stack = np.zeros((MAX_PLY + 20, 2, 512), dtype=np.int32)
+        # accumulator_stack removed — not used in Classical engine
         self.nodes_searched = np.uint64(0)
         self.end_time = 0.0
         # 使用陣列來包裝布林值，以便可以作為引用傳遞並在外部修改
@@ -165,8 +168,8 @@ class _SearchContextJIT:
         self.moves_buffer = np.zeros((MAX_PLY, 256), dtype=np.uint16)
         self.quiet_moves_tried = np.zeros((MAX_PLY, 256), dtype=np.uint16)
         self.quiet_pieces_tried = np.zeros((MAX_PLY, 256), dtype=np.int8)
-        self.aggressor_cache = np.zeros((MAX_PLY, 65536), dtype=np.int8)
-        self.victim_cache = np.zeros((MAX_PLY, 65536), dtype=np.int8)
+        self.aggressor_cache = np.zeros((MAX_PLY, 256), dtype=np.int8)
+        self.victim_cache = np.zeros((MAX_PLY, 256), dtype=np.int8)
         self.bad_captures = np.zeros((MAX_PLY, 256), dtype=np.uint16)
         # Move Picker state arrays
         self.mp_stage = np.zeros(MAX_PLY, dtype=np.int32)

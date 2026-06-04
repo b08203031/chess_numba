@@ -5,7 +5,7 @@ import numpy as np
 
 from chess_engine.classical_old.constants import *
 
-from chess_engine.classical_old.bitboard_utils import get_lsb_index, get_msb_index, count_bits, WHITE_KING_ZONES, BLACK_KING_ZONES, FILE_MASKS, find_piece_type_on_square_side, SQUARES_BETWEEN
+from chess_engine.classical_old.bitboard_utils import get_lsb_index, get_msb_index, count_bits, WHITE_KING_ZONES, BLACK_KING_ZONES, FILE_MASKS, SQUARES_BETWEEN
 from chess_engine.classical_old.engine_types import (
     piece_bbs_signature, occupancy_bbs_signature, game_state_signature, piece_counts_signature
 )
@@ -1120,52 +1120,37 @@ def evaluate_attacks_mobility_threats(piece_bbs, occupancy_bbs):
 
     # --- 2. ThreatByMinor: minor (N/B) attacks weak enemy pieces, per type ---
     w_minor_threatens = (white_knight_attacks | white_bishop_attacks) & all_black_pieces & ~black_strongly_protected
-    tmp = w_minor_threatens
-    while tmp:
-        tsq = get_lsb_index(tmp)
-        ptype = find_piece_type_on_square_side(piece_bbs, np.uint8(tsq), np.uint8(1))  # 1 = BLACK
-        if ptype >= 6:  # offset to 0-5
-            pt = ptype - 6
-        else:
-            pt = ptype
-        if 0 <= pt <= 5:
-            mg_threats += THREAT_BY_MINOR[pt, 0]
-            eg_threats += THREAT_BY_MINOR[pt, 1]
-        tmp &= tmp - np.uint64(1)
+    for pt in range(6):
+        intersection = w_minor_threatens & piece_bbs[6 + pt]
+        if intersection:
+            count = count_bits(intersection)
+            mg_threats += THREAT_BY_MINOR[pt, 0] * count
+            eg_threats += THREAT_BY_MINOR[pt, 1] * count
 
     b_minor_threatens = (black_knight_attacks | black_bishop_attacks) & all_white_pieces & ~white_strongly_protected
-    tmp = b_minor_threatens
-    while tmp:
-        tsq = get_lsb_index(tmp)
-        ptype = find_piece_type_on_square_side(piece_bbs, np.uint8(tsq), np.uint8(0))  # 0 = WHITE
-        pt = ptype  # white pieces are 0-5
-        if 0 <= pt <= 5:
-            mg_threats -= THREAT_BY_MINOR[pt, 0]
-            eg_threats -= THREAT_BY_MINOR[pt, 1]
-        tmp &= tmp - np.uint64(1)
+    for pt in range(6):
+        intersection = b_minor_threatens & piece_bbs[pt]
+        if intersection:
+            count = count_bits(intersection)
+            mg_threats -= THREAT_BY_MINOR[pt, 0] * count
+            eg_threats -= THREAT_BY_MINOR[pt, 1] * count
 
     # --- 3. ThreatByRook: rook attacks weak enemy pieces, per type ---
     w_rook_threatens = white_rook_attacks & black_weak
-    tmp = w_rook_threatens
-    while tmp:
-        tsq = get_lsb_index(tmp)
-        ptype = find_piece_type_on_square_side(piece_bbs, np.uint8(tsq), np.uint8(1))
-        pt = ptype - 6 if ptype >= 6 else ptype
-        if 0 <= pt <= 5:
-            mg_threats += THREAT_BY_ROOK[pt, 0]
-            eg_threats += THREAT_BY_ROOK[pt, 1]
-        tmp &= tmp - np.uint64(1)
+    for pt in range(6):
+        intersection = w_rook_threatens & piece_bbs[6 + pt]
+        if intersection:
+            count = count_bits(intersection)
+            mg_threats += THREAT_BY_ROOK[pt, 0] * count
+            eg_threats += THREAT_BY_ROOK[pt, 1] * count
 
     b_rook_threatens = black_rook_attacks & white_weak
-    tmp = b_rook_threatens
-    while tmp:
-        tsq = get_lsb_index(tmp)
-        ptype = find_piece_type_on_square_side(piece_bbs, np.uint8(tsq), np.uint8(0))
-        pt = ptype
-        if 0 <= pt <= 5:
-            mg_threats -= THREAT_BY_ROOK[pt, 0]
-            eg_threats -= THREAT_BY_ROOK[pt, 1]
-        tmp &= tmp - np.uint64(1)
+    for pt in range(6):
+        intersection = b_rook_threatens & piece_bbs[pt]
+        if intersection:
+            count = count_bits(intersection)
+            mg_threats -= THREAT_BY_ROOK[pt, 0] * count
+            eg_threats -= THREAT_BY_ROOK[pt, 1] * count
 
     # --- 4. ThreatByKing: king attacks weak enemy pieces ---
     w_king_threatens = KING_ATTACKS[white_king_sq] & black_weak

@@ -156,8 +156,8 @@ def score_captures(piece_bbs, occupancy_bbs, game_state, moves, scores, start_id
         if victim_type == -1 and get_special_move_flag(move) == SPECIAL_MOVE_FLAG_EN_PASSANT:
             victim_type = 0 # Pawn value for En Passant
             
-        search_context.aggressor_cache[ply, move] = aggressor_type
-        search_context.victim_cache[ply, move] = victim_type
+        search_context.aggressor_cache[ply, i] = aggressor_type
+        search_context.victim_cache[ply, i] = victim_type
 
         mvv_lva = 0
         if victim_type != -1:
@@ -199,8 +199,8 @@ def score_captures_with_tt(piece_bbs, occupancy_bbs, game_state, moves, scores, 
             if victim_type == -1 and get_special_move_flag(move) == SPECIAL_MOVE_FLAG_EN_PASSANT:
                 victim_type = 0 # Pawn value for En Passant
                 
-            search_context.aggressor_cache[ply, move] = aggressor_type
-            search_context.victim_cache[ply, move] = victim_type
+            search_context.aggressor_cache[ply, i] = aggressor_type
+            search_context.victim_cache[ply, i] = victim_type
 
             mvv_lva = 0
             if victim_type != -1:
@@ -231,7 +231,7 @@ def score_quiets(piece_bbs, occupancy_bbs, game_state, moves, scores, start_idx,
         from_sq = get_from_square(move)
         
         aggressor_type = find_piece_type_on_square_side(piece_bbs, from_sq, side_to_move)
-        search_context.aggressor_cache[ply, move] = aggressor_type
+        search_context.aggressor_cache[ply, i] = aggressor_type
         
         score = get_quiet_stat_score(search_context, ply, from_sq, to_square, aggressor_type, pawn_key_idx)
 
@@ -317,8 +317,8 @@ def score_moves(piece_bbs, occupancy_bbs, game_state, moves, scores, move_count,
                 if victim_type == -1 and get_special_move_flag(move) == SPECIAL_MOVE_FLAG_EN_PASSANT:
                     victim_type = 0 # Pawn
 
-                search_context.aggressor_cache[ply, move] = aggressor_type
-                search_context.victim_cache[ply, move] = victim_type
+                search_context.aggressor_cache[ply, i] = aggressor_type
+                search_context.victim_cache[ply, i] = victim_type
 
                 # Optimization: Use see_ge(0) instead of full see()
                 is_good_capture = _see_ge_jit(piece_bbs, occupancy_bbs, side_to_move, from_sq, to_square, 0, pinned_white, pinned_black, aggressor_type, victim_type)
@@ -342,7 +342,7 @@ def score_moves(piece_bbs, occupancy_bbs, game_state, moves, scores, move_count,
             else:
                 from_sq = get_from_square(move)
                 aggressor_type = find_piece_type_on_square_side(piece_bbs, from_sq, side_to_move)
-                search_context.aggressor_cache[ply, move] = aggressor_type
+                search_context.aggressor_cache[ply, i] = aggressor_type
 
                 if move == killer_moves_at_ply[0]:
                     score = SCORE_KILLER_1

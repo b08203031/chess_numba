@@ -77,7 +77,7 @@ class Engine:
         print(f"[{self.name}] Warming up...")
         self.send_command("setoption name OwnBook value false")
         self.send_command("position kiwipete")
-        self.send_command("go depth 2")
+        self.send_command("go depth 10")
         while True:
             line = self.read_line()
             if line is None:
@@ -372,15 +372,28 @@ def run_tournament(engine1_path, engine2_path, games_count, time_ms, engine1_nam
         e1.terminate()
         e2.terminate()
 
+def clear_numba_cache(root_dir):
+    import shutil
+    from pathlib import Path
+    print("Clearing Numba __pycache__ directories...")
+    p = Path(root_dir)
+    for cache_dir in p.rglob("__pycache__"):
+        if cache_dir.is_dir():
+            try:
+                shutil.rmtree(cache_dir)
+            except Exception:
+                pass
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Run a tournament between two versions of the engine.")
     root_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    clear_numba_cache(root_dir)
     default_engine1 = os.path.join(root_dir, "main.py")
     default_engine2 = os.path.join(root_dir, "main_old.py")
     parser.add_argument("--engine1", default=default_engine1, help="Path to the first engine's main.py")
     parser.add_argument("--engine2", default=default_engine2, help="Path to the second engine's main.py")
-    parser.add_argument("--name1", default="DynamicLMR", help="Name of the first engine")
-    parser.add_argument("--name2", default="StaticLMR", help="Name of the second engine")
+    parser.add_argument("--name1", default="New", help="Name of the first engine")
+    parser.add_argument("--name2", default="Old", help="Name of the second engine")
     parser.add_argument("--games", type=int, default=100, help="Number of games to play (default: 100)")
     parser.add_argument("--time", type=int, default=1000, help="Time per move in ms (default: 1000)")
     parser.add_argument("--depth", type=int, default=None, help="Fixed search depth per move (overrides --time if set)")
