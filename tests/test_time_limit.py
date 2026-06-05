@@ -21,13 +21,19 @@ def test_search_time_limit():
     pv_table = np.zeros((MAX_PLY, MAX_PLY), dtype=np.uint16)
     history_table = np.zeros((12, 64), dtype=np.int32)
     butterfly_history = np.zeros((64, 64), dtype=np.int32)
-    continuation_history = np.zeros((12, 64, 12, 64), dtype=np.int16)
+    continuation_history = np.zeros((4, 12, 64, 12, 64), dtype=np.int16)
     capture_history = np.zeros((12, 64, 12), dtype=np.int32)
+    pawn_history = np.full((8192, 12, 64), -1238, dtype=np.int16)
     pawn_correction_history = np.zeros(16384, dtype=np.int16)
+    minor_correction_history = np.zeros(16384, dtype=np.int16)
+    non_pawn_correction_history_white = np.zeros(16384, dtype=np.int16)
+    non_pawn_correction_history_black = np.zeros(16384, dtype=np.int16)
 
     search_context = SearchContext(
         transposition_table, killer_moves, pv_table, history_table,
-        butterfly_history, continuation_history, capture_history, pawn_correction_history
+        butterfly_history, continuation_history, capture_history, pawn_history,
+        pawn_correction_history, minor_correction_history,
+        non_pawn_correction_history_white, non_pawn_correction_history_black
     )
     
     # Warm-up JIT

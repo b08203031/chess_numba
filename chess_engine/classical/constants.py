@@ -546,6 +546,13 @@ SCALE_FACTOR_DRAW = 0
 SCALE_FACTOR_OCB_ONE_PAWN = 16
 SCALE_FACTOR_OCB_TWO_PAWNS = 32
 SCALE_FACTOR_OCB_MULTIPLE_PAWNS = 48
+SCALE_FACTOR_KXK = 64
+SCALE_FACTOR_KBNK = 64
+SCALE_FACTOR_KBPSK_FORTRESS = 8
+SCALE_FACTOR_KRPKR_FORTRESS = 8
+SCALE_FACTOR_KQKR_FORTRESS = 64
+SCALE_FACTOR_KQKRPs_FORTRESS = 8
+
 
 # =============================================================================
 # --- Search Constants / 搜尋常量 ---
@@ -600,6 +607,7 @@ LMR_HISTORY_DIVISOR = 10240
 HISTORY_WEIGHT_MAIN = 2
 HISTORY_WEIGHT_CONT_1 = 4
 HISTORY_WEIGHT_CONT_2 = 2
+HISTORY_WEIGHT_CONT_3 = 1
 HISTORY_WEIGHT_CONT_4 = 2
 
 CORRECTION_HISTORY_SIZE = 16384
@@ -643,8 +651,9 @@ MULTICUT_C = 6          # Number of moves to probe
 
 
 # IID and Singular Extension Parameters
-MIN_SINGULAR_DEPTH = 6
-SINGULAR_EXTENSION_MARGIN = 150 # centipawns
+MIN_SINGULAR_DEPTH = 7
+SINGULAR_MARGIN_MULTIPLIER = 2          # Margin = 2 * depth
+SINGULAR_DOUBLE_EXT_MULTIPLIER = 2     # Double margin = 2 * depth (total offset 4 * depth for double ext check)
 
 # NEW: Pruning Switches (based on Stockfish Analysis)
 ENABLE_SHALLOW_SEE_PRUNING = True  # Enable SEE pruning for captures/quiets at shallow depth

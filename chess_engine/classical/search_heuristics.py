@@ -5,7 +5,7 @@ from chess_engine.classical.move import (
     get_to_square, get_from_square, get_special_move_flag,
     SPECIAL_MOVE_FLAG_PROMOTION, SPECIAL_MOVE_FLAG_EN_PASSANT
 )
-from chess_engine.classical.constants import SCORE_GOOD_CAPTURE_BONUS, SCORE_BAD_CAPTURE_PENALTY, SCORE_KILLER_1, SCORE_KILLER_2, SCORE_COUNTER_MOVE, MAX_HISTORY, LMR_TABLE, MAX_PLY, SCORE_TT_MOVE, BB_SQUARES, NO_MOVE, HISTORY_MAX_MAIN, HISTORY_MAX_BUTTERFLY, HISTORY_MAX_CAPTURE, HISTORY_MAX_CONTINUATION, HISTORY_MAX_PAWN, LMR_HISTORY_DIVISOR, HISTORY_WEIGHT_MAIN, HISTORY_WEIGHT_CONT_1, HISTORY_WEIGHT_CONT_2, HISTORY_WEIGHT_CONT_4, QS_SEE_THRESHOLD
+from chess_engine.classical.constants import SCORE_GOOD_CAPTURE_BONUS, SCORE_BAD_CAPTURE_PENALTY, SCORE_KILLER_1, SCORE_KILLER_2, SCORE_COUNTER_MOVE, MAX_HISTORY, LMR_TABLE, MAX_PLY, SCORE_TT_MOVE, BB_SQUARES, NO_MOVE, HISTORY_MAX_MAIN, HISTORY_MAX_BUTTERFLY, HISTORY_MAX_CAPTURE, HISTORY_MAX_CONTINUATION, HISTORY_MAX_PAWN, LMR_HISTORY_DIVISOR, HISTORY_WEIGHT_MAIN, HISTORY_WEIGHT_CONT_1, HISTORY_WEIGHT_CONT_2, HISTORY_WEIGHT_CONT_3, HISTORY_WEIGHT_CONT_4, QS_SEE_THRESHOLD
 from chess_engine.classical.constants import MG_MATERIAL_VALUES
 from chess_engine.classical.see import _see_ge_jit
 from chess_engine.classical.bitboard_utils import find_piece_type_on_square, find_piece_type_on_square_side, get_lsb_index
@@ -109,11 +109,16 @@ def update_quiet_stats_on_tt_hit(search_context, tt_move, tt_aggressor, tt_to, p
         prev_piece = search_context.piece_stack[ply - 2]
         if prev_move != NO_MOVE and prev_piece != -1:
             update_continuation_history(search_context, 1, prev_move, prev_piece, tt_move, tt_aggressor, tt_bonus)
+    if ply > 2:
+        prev_move = search_context.move_stack[ply - 3]
+        prev_piece = search_context.piece_stack[ply - 3]
+        if prev_move != NO_MOVE and prev_piece != -1:
+            update_continuation_history(search_context, 2, prev_move, prev_piece, tt_move, tt_aggressor, tt_bonus)
     if ply > 3:
         prev_move = search_context.move_stack[ply - 4]
         prev_piece = search_context.piece_stack[ply - 4]
         if prev_move != NO_MOVE and prev_piece != -1:
-            update_continuation_history(search_context, 2, prev_move, prev_piece, tt_move, tt_aggressor, tt_bonus)
+            update_continuation_history(search_context, 3, prev_move, prev_piece, tt_move, tt_aggressor, tt_bonus)
 
 @numba.njit(cache=True, boundscheck=False, fastmath=True)
 def get_quiet_stat_score(search_context, ply, from_sq, to_sq, aggressor_type, pawn_key_idx):
@@ -133,11 +138,17 @@ def get_quiet_stat_score(search_context, ply, from_sq, to_sq, aggressor_type, pa
         if prev_move != NO_MOVE and prev_piece != -1:
             score += search_context.continuation_history[1, prev_piece, get_to_square(prev_move), aggressor_type, to_sq] * HISTORY_WEIGHT_CONT_2
 
+    if ply > 2:
+        prev_move = search_context.move_stack[ply - 3]
+        prev_piece = search_context.piece_stack[ply - 3]
+        if prev_move != NO_MOVE and prev_piece != -1:
+            score += search_context.continuation_history[2, prev_piece, get_to_square(prev_move), aggressor_type, to_sq] * HISTORY_WEIGHT_CONT_3
+
     if ply > 3:
         prev_move = search_context.move_stack[ply - 4]
         prev_piece = search_context.piece_stack[ply - 4]
         if prev_move != NO_MOVE and prev_piece != -1:
-            score += search_context.continuation_history[2, prev_piece, get_to_square(prev_move), aggressor_type, to_sq] * HISTORY_WEIGHT_CONT_4
+            score += search_context.continuation_history[3, prev_piece, get_to_square(prev_move), aggressor_type, to_sq] * HISTORY_WEIGHT_CONT_4
 
     return score
 
@@ -283,6 +294,8 @@ def score_moves(piece_bbs, occupancy_bbs, game_state, moves, scores, move_count,
     prev_piece_1 = -1
     prev_move_2 = NO_MOVE
     prev_piece_2 = -1
+    prev_move_3 = NO_MOVE
+    prev_piece_3 = -1
     prev_move_4 = NO_MOVE
     prev_piece_4 = -1
     
@@ -293,6 +306,10 @@ def score_moves(piece_bbs, occupancy_bbs, game_state, moves, scores, move_count,
     if ply > 1:
         prev_move_2 = search_context.move_stack[ply-2]
         prev_piece_2 = search_context.piece_stack[ply-2]
+        
+    if ply > 2:
+        prev_move_3 = search_context.move_stack[ply-3]
+        prev_piece_3 = search_context.piece_stack[ply-3]
         
     if ply > 3:
         prev_move_4 = search_context.move_stack[ply-4]
@@ -370,8 +387,13 @@ def score_moves(piece_bbs, occupancy_bbs, game_state, moves, scores, move_count,
                         if cont_score != 0:
                             score += cont_score
 
+                    if prev_move_3 != NO_MOVE and prev_piece_3 != -1:
+                        cont_score = search_context.continuation_history[2, prev_piece_3, get_to_square(prev_move_3), aggressor_type, to_square]
+                        if cont_score != 0:
+                            score += cont_score
+
                     if prev_move_4 != NO_MOVE and prev_piece_4 != -1:
-                        cont_score = search_context.continuation_history[2, prev_piece_4, get_to_square(prev_move_4), aggressor_type, to_square]
+                        cont_score = search_context.continuation_history[3, prev_piece_4, get_to_square(prev_move_4), aggressor_type, to_square]
                         if cont_score != 0:
                             score += cont_score
 

@@ -143,8 +143,9 @@ def main():
     killer_moves = np.zeros(256, dtype=np.uint16)
     history_table = np.zeros((12, 64), dtype=np.int32)
     butterfly_history = np.zeros((64, 64), dtype=np.int32)
-    continuation_history = np.zeros((3, 12, 64, 12, 64), dtype=np.int16)
+    continuation_history = np.zeros((4, 12, 64, 12, 64), dtype=np.int16)
     capture_history = np.zeros((12, 64, 12), dtype=np.int32)
+    pawn_history = np.full((8192, 12, 64), -1238, dtype=np.int16)
     p_corr = np.zeros(16384, dtype=np.int16)
     m_corr = np.zeros(16384, dtype=np.int16)
     np_corr_w = np.zeros(16384, dtype=np.int16)
@@ -176,7 +177,7 @@ def main():
             # 建立搜尋上下文
             search_context = SearchContext(
                 tt, killer_moves, pv_table, history_table,
-                butterfly_history, continuation_history, capture_history,
+                butterfly_history, continuation_history, capture_history, pawn_history,
                 p_corr, m_corr, np_corr_w, np_corr_b
             )
             search_context.stop_flag[0] = False

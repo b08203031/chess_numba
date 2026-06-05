@@ -59,7 +59,7 @@ def uci_loop():
     killer_moves = np.zeros(MAX_PLY * 2, dtype=np.uint16)
     history_table = np.zeros((12, 64), dtype=np.int32)
     butterfly_history = np.zeros((64, 64), dtype=np.int32)
-    continuation_history = np.zeros((3, 12, 64, 12, 64), dtype=np.int16)
+    continuation_history = np.zeros((4, 12, 64, 12, 64), dtype=np.int16)
     capture_history = np.zeros((12, 64, 12), dtype=np.int32)
     pawn_history = np.full((8192, 12, 64), -1238, dtype=np.int16)
     pawn_correction_history = np.zeros(16384, dtype=np.int16) # CORRECTION_HISTORY_SIZE

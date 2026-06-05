@@ -31,7 +31,7 @@ from chess_engine.classical_old.constants import (
     STAGE_TT_MOVE, STAGE_GEN_CAPTURES, STAGE_GOOD_CAPTURES,
     STAGE_GEN_QUIETS, STAGE_GOOD_QUIETS, STAGE_BAD_CAPTURES,
     STAGE_BAD_QUIETS, STAGE_DONE,
-    ENABLE_SINGULAR_EXTENSIONS, MIN_SINGULAR_DEPTH, SINGULAR_EXTENSION_MARGIN,
+    ENABLE_SINGULAR_EXTENSIONS, MIN_SINGULAR_DEPTH, SINGULAR_MARGIN_MULTIPLIER, SINGULAR_DOUBLE_EXT_MULTIPLIER,
     ENABLE_MULTICUT, MULTICUT_MIN_DEPTH, MULTICUT_M, MULTICUT_C,
     STOP_SEARCH_FLAG, MAX_HISTORY,
     SCORE_TT_MOVE, SCORE_GOOD_CAPTURE_BONUS, SCORE_KILLER_1,
@@ -45,7 +45,7 @@ from chess_engine.classical_old.constants import (
     GOOD_QUIET_THRESHOLD,
     FIFTY_MOVE_RULE_LIMIT, FIFTY_MOVE_SCALE_THRESHOLD, FIFTY_MOVE_MAX_SCALE,
     SEE_HISTORY_DIVISOR,
-    HISTORY_WEIGHT_MAIN, HISTORY_WEIGHT_CONT_1, HISTORY_WEIGHT_CONT_2, HISTORY_WEIGHT_CONT_4,
+    HISTORY_WEIGHT_MAIN, HISTORY_WEIGHT_CONT_1, HISTORY_WEIGHT_CONT_2, HISTORY_WEIGHT_CONT_3, HISTORY_WEIGHT_CONT_4,
     LMR_TABLE, ENABLE_MATE_DISTANCE_PRUNING,
     LMR_HISTORY_DIVISOR
 )
@@ -596,7 +596,7 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                     if not tt_is_capture and not tt_is_promotion:
                         tt_aggressor = find_piece_type_on_square_side(piece_bbs, tt_from, our_side)
                         if tt_aggressor != -1 and ((occupancy_bbs[our_side] & BB_SQUARES[tt_to]) == 0):
-                            tt_bonus = min(15 * depth, 300)
+                            tt_bonus = min(depth * depth + 120 * depth - 100, 1600)
                             update_quiet_stats_on_tt_hit(search_context, tt_move, tt_aggressor, tt_to, pawn_key_idx, tt_bonus, ply)
 
                 search_context.pv_table[ply, ply] = NO_MOVE
@@ -1133,8 +1133,17 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
         
         # --- Determine total extension ---
         check_extension = 0
-        if is_giving_check_after_move and (is_pv or move == tt_move or depth <= 3):
-            check_extension = 1
+        if is_giving_check_after_move:
+            if is_pv or move == tt_move or depth <= 5:
+                check_extension = 1
+            else:
+                # Temporarily unmake the move to check SEE on the parent state
+                unmake_move(piece_bbs, occupancy_bbs, game_state, move, unmake_info)
+                see_ok = _see_ge_jit(piece_bbs, occupancy_bbs, original_side, from_sq, to_sq, 0, pinned_white, pinned_black)
+                # Remake the move
+                unmake_info = make_move(piece_bbs, occupancy_bbs, game_state, move)
+                if see_ok:
+                    check_extension = 1
         
         current_extension = check_extension
 
@@ -1150,7 +1159,8 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                 if abs(se_tt_score) >= MATE_IN_MAX_PLY:
                     current_extension = max(current_extension, 0)
                 else:
-                    exclusion_beta = se_tt_score - SINGULAR_EXTENSION_MARGIN
+                    singular_margin = SINGULAR_MARGIN_MULTIPLIER * depth
+                    exclusion_beta = se_tt_score - singular_margin
 
                     # Save MovePicker State to prevent Singular Extension from clobbering the parent
                     saved_mp_stage = search_context.mp_stage[ply]
@@ -1192,14 +1202,16 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                     if exclusion_score < exclusion_beta:
                         current_extension = max(current_extension, 1)
                         # Double extension for big margin
-                        if depth >= 8 and exclusion_score < exclusion_beta - SINGULAR_EXTENSION_MARGIN:
+                        double_margin = SINGULAR_DOUBLE_EXT_MULTIPLIER * depth
+                        if depth >= 10 and exclusion_score < exclusion_beta - double_margin:
                             current_extension = max(current_extension, 2)
                     elif exclusion_score >= exclusion_beta:
-                        # --- V3 3.1: Negative Extension ---
-                        # When singular search fails high, this move is NOT singular.
-                        # If additionally the exclusion_beta >= beta, multiple moves fail high.
-                        if not is_pv and exclusion_score >= beta:
-                            current_extension = -1  # Reduce depth by 1
+                        # V5: negative extension on non-PV node: -2 if >= beta, otherwise -1 if cut_node
+                        if not is_pv:
+                            if exclusion_score >= beta:
+                                current_extension = -2
+                            elif cut_node:
+                                current_extension = -1
                         # --- MODERN MULTI-CUT PRUNING ---
                         if search_context.enable_multicut and exclusion_beta >= beta:
                             if abs(exclusion_score) < MATE_IN_MAX_PLY:
@@ -1246,6 +1258,12 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                     to_rank = to_sq // 8
                     if (original_side == WHITE and to_rank >= 5) or (original_side == BLACK and to_rank <= 2):
                         lmr = max(0, lmr - 2)
+
+                # Stockfish-inspired: Extra LMR adjustments
+                if static_score != -INFINITY and static_score > alpha + 200:
+                    lmr += 1
+                if searched_legal_moves >= 12:
+                    lmr += 1
 
                 # Clamp LMR to avoid reducing below depth 1
                 lmr = max(0, min(lmr, search_depth - 1))
@@ -1329,8 +1347,8 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
 
         alpha = max(alpha, evaluation)
         if alpha >= beta:
-            bonus = min(15 * depth, 300)
-            malus = (bonus * 3) // 2
+            bonus = min(depth * depth + 120 * depth - 100, 1600)
+            malus = min(depth * depth + 100 * depth - 50, 1400)
             
             if is_capture and moved_piece_type != -1:
                 # Update Capture History
@@ -1349,26 +1367,32 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                 update_history(search_context.history_table, aggressor_type, to_sq, bonus)
                 update_butterfly_history(search_context.butterfly_history, get_from_square(move), to_sq, bonus)
                 update_pawn_history(search_context.pawn_history, pawn_key_idx, aggressor_type, to_sq, bonus)
-
+ 
                 # --- Continuation History Update (Bonus) ---
                 if ply > 0:
                     prev_move_played = search_context.move_stack[ply - 1]
                     prev_piece_played = search_context.piece_stack[ply - 1]
                     if prev_move_played != NO_MOVE and prev_piece_played != -1:
                         update_continuation_history(search_context, 0, prev_move_played, prev_piece_played, move, aggressor_type, bonus)
-
+ 
                 if ply > 1:
                     prev_move_played = search_context.move_stack[ply - 2]
                     prev_piece_played = search_context.piece_stack[ply - 2]
                     if prev_move_played != NO_MOVE and prev_piece_played != -1:
                         update_continuation_history(search_context, 1, prev_move_played, prev_piece_played, move, aggressor_type, bonus)
-
+ 
+                if ply > 2:
+                    prev_move_played = search_context.move_stack[ply - 3]
+                    prev_piece_played = search_context.piece_stack[ply - 3]
+                    if prev_move_played != NO_MOVE and prev_piece_played != -1:
+                        update_continuation_history(search_context, 2, prev_move_played, prev_piece_played, move, aggressor_type, bonus)
+ 
                 if ply > 3:
                     prev_move_played = search_context.move_stack[ply - 4]
                     prev_piece_played = search_context.piece_stack[ply - 4]
                     if prev_move_played != NO_MOVE and prev_piece_played != -1:
-                        update_continuation_history(search_context, 2, prev_move_played, prev_piece_played, move, aggressor_type, bonus)
-
+                        update_continuation_history(search_context, 3, prev_move_played, prev_piece_played, move, aggressor_type, bonus)
+ 
                 # --- Update Counter Move ---
                 if ply > 0:
                     prev_move_played = search_context.move_stack[ply - 1]
@@ -1395,19 +1419,25 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                         prev_piece_played = search_context.piece_stack[ply - 1]
                         if prev_move_played != NO_MOVE and prev_piece_played != -1:
                             update_continuation_history(search_context, 0, prev_move_played, prev_piece_played, bad_move, bad_aggressor, -malus)
-
+ 
                     if ply > 1:
                         prev_move_played = search_context.move_stack[ply - 2]
                         prev_piece_played = search_context.piece_stack[ply - 2]
                         if prev_move_played != NO_MOVE and prev_piece_played != -1:
                             update_continuation_history(search_context, 1, prev_move_played, prev_piece_played, bad_move, bad_aggressor, -malus)
-
+ 
+                    if ply > 2:
+                        prev_move_played = search_context.move_stack[ply - 3]
+                        prev_piece_played = search_context.piece_stack[ply - 3]
+                        if prev_move_played != NO_MOVE and prev_piece_played != -1:
+                            update_continuation_history(search_context, 2, prev_move_played, prev_piece_played, bad_move, bad_aggressor, -malus)
+ 
                     if ply > 3:
                         prev_move_played = search_context.move_stack[ply - 4]
                         prev_piece_played = search_context.piece_stack[ply - 4]
                         if prev_move_played != NO_MOVE and prev_piece_played != -1:
-                            update_continuation_history(search_context, 2, prev_move_played, prev_piece_played, bad_move, bad_aggressor, -malus)
-
+                            update_continuation_history(search_context, 3, prev_move_played, prev_piece_played, bad_move, bad_aggressor, -malus)
+ 
                 if move != search_context.killer_moves[ply * 2]:
                     search_context.killer_moves[ply * 2 + 1] = search_context.killer_moves[ply * 2]
                     search_context.killer_moves[ply * 2] = move
@@ -1446,7 +1476,7 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                 prev_from = get_from_square(prev_move)
                 pawn_key_idx = game_state[PAWN_KEY_INDEX] & PAWN_HISTORY_MASK
                 
-                base_bonus = min(15 * depth, 300)
+                base_bonus = min(depth * depth + 120 * depth - 100, 1600)
                 sub_bonus = base_bonus // 4
                 
                 update_pawn_history(search_context.pawn_history, pawn_key_idx, prev_piece, prev_to, sub_bonus)
@@ -1458,6 +1488,24 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                     our_prev_piece = search_context.piece_stack[ply - 2]
                     if our_prev_move != NO_MOVE and our_prev_piece != -1:
                         update_continuation_history(search_context, 0, our_prev_move, our_prev_piece, prev_move, prev_piece, sub_bonus)
+
+                if ply > 2:
+                    opp_prev_move = search_context.move_stack[ply - 3]
+                    opp_prev_piece = search_context.piece_stack[ply - 3]
+                    if opp_prev_move != NO_MOVE and opp_prev_piece != -1:
+                        update_continuation_history(search_context, 1, opp_prev_move, opp_prev_piece, prev_move, prev_piece, sub_bonus)
+
+                if ply > 3:
+                    our_prev_move_2 = search_context.move_stack[ply - 4]
+                    our_prev_piece_2 = search_context.piece_stack[ply - 4]
+                    if our_prev_move_2 != NO_MOVE and our_prev_piece_2 != -1:
+                        update_continuation_history(search_context, 2, our_prev_move_2, our_prev_piece_2, prev_move, prev_piece, sub_bonus)
+
+                if ply > 4:
+                    opp_prev_move_2 = search_context.move_stack[ply - 5]
+                    opp_prev_piece_2 = search_context.piece_stack[ply - 5]
+                    if opp_prev_move_2 != NO_MOVE and opp_prev_piece_2 != -1:
+                        update_continuation_history(search_context, 3, opp_prev_move_2, opp_prev_piece_2, prev_move, prev_piece, sub_bonus)
 
     if best_move == NO_MOVE and search_context.mp_captures_end[ply] + search_context.mp_quiets_end[ply] > 0:
         # Fallback to first move that is not excluded
