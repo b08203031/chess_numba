@@ -81,6 +81,8 @@ search_context_spec = [
     ('enable_fp', numba.boolean),
     ('enable_probcut', numba.boolean),
     ('enable_multicut', numba.boolean),
+    ('cutoff_cnt', numba.int32[::1]),
+    ('reduction_stack', numba.int32[::1]),
 ]
 
 @jitclass(search_context_spec)
@@ -187,6 +189,9 @@ class _SearchContextJIT:
         self.enable_fp = ENABLE_FP
         self.enable_probcut = ENABLE_PROBCUT
         self.enable_multicut = ENABLE_MULTICUT
+        
+        self.cutoff_cnt = np.zeros(MAX_PLY, dtype=np.int32)
+        self.reduction_stack = np.zeros(MAX_PLY, dtype=np.int32)
 
 
 

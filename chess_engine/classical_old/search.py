@@ -445,6 +445,13 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
     tt_hits = np.uint64(0)
     is_exclusion_search = excluded_move != NO_MOVE
 
+    if ply == 0:
+        search_context.cutoff_cnt[0] = 0
+        search_context.cutoff_cnt[1] = 0
+
+    if ply + 2 < MAX_PLY:
+        search_context.cutoff_cnt[ply + 2] = 0
+
     # Check for stop flag every 32768 nodes (at ~950k NPS this fires ~29x/sec)
     if (search_context.nodes_searched & 32767) == 0:
         if search_context.stop_flag[0]:
@@ -667,6 +674,25 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
     else:
         search_context.static_eval_stack[ply] = -INFINITY
 
+    # --- opponentWorsening & Hindsight Depth Adjustment ---
+    opponent_worsening = False
+    if not is_currently_in_check and ply > 0:
+        parent_eval = search_context.static_eval_stack[ply - 1]
+        if static_score != -INFINITY and parent_eval != -INFINITY:
+            opponent_worsening = static_score > -parent_eval
+            
+            prior_reduction = search_context.reduction_stack[ply]
+            if prior_reduction >= 3 and not opponent_worsening:
+                depth += 1
+            if prior_reduction >= 2 and depth >= 2:
+                if static_score + parent_eval > 173:
+                    depth -= 1
+
+    if depth <= 0:
+        search_context.pv_table[ply, ply] = NO_MOVE
+        eval_score, q_nodes = quiescence_search(piece_bbs, occupancy_bbs, game_state, alpha, beta, ply, search_context, 0)
+        return (eval_score, NO_MOVE, nodes_searched, q_nodes, tt_hits)
+
     # --- Dissonance Calculation (DGP Algorithm) ---
     dissonance = 0
     if tt_entry['flag'] != TT_FLAG_NONE and not is_currently_in_check and static_score != -INFINITY:
@@ -812,6 +838,7 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                     pc_moved_piece_type += 6
                 search_context.move_stack[ply] = pc_move
                 search_context.piece_stack[ply] = pc_moved_piece_type
+                search_context.reduction_stack[ply + 1] = 0
                 res_pc = _search(
                     piece_bbs, occupancy_bbs, game_state, depth - PROBCUT_R,
                     -probcut_beta, -probcut_beta + 1, search_context, ply + 1, NO_MOVE, False, not cut_node
@@ -871,7 +898,7 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
             if not improving:
                 nmp_reduction += 1
             search_depth = max(0, depth - nmp_reduction)
-
+            search_context.reduction_stack[ply + 1] = nmp_reduction
             res_nm = _search(
                 piece_bbs, occupancy_bbs, game_state, search_depth,
                 -beta, -beta + 1, search_context, ply + 1, NO_MOVE, False, not cut_node
@@ -901,6 +928,7 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                     nmp_was_enabled = search_context.enable_nmp
                     search_context.enable_nmp = False
                     verification_depth = max(1, depth - nmp_reduction)
+                    search_context.reduction_stack[ply] = 0
                     res_verify = _search(
                         piece_bbs, occupancy_bbs, game_state, verification_depth,
                         beta - 1, beta, search_context, ply, NO_MOVE, False, cut_node
@@ -940,9 +968,7 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
     # --- M1: IIR (Internal Iterative Reduction) replaces IID ---
     # Instead of doing a costly sub-search, just reduce depth for nodes without a TT move.
     if tt_move == NO_MOVE and ENABLE_IIR and not is_exclusion_search and not is_currently_in_check:
-        if depth >= 8:
-            depth -= 2
-        elif depth >= 4:
+        if depth >= 4:
             depth -= 1
 
     # --- Move Ordering ---
@@ -1149,7 +1175,7 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
 
         # --- Singular Extension (inside loop, TT move only) ---
         if ENABLE_SINGULAR_EXTENSIONS and ply > 0 and excluded_move == NO_MOVE and move == tt_move and depth >= MIN_SINGULAR_DEPTH and not is_currently_in_check:
-            if tt_entry['flag'] == TT_FLAG_BETA and tt_entry['depth'] >= depth - 3:
+            if (tt_entry['flag'] == TT_FLAG_BETA or tt_entry['flag'] == TT_FLAG_EXACT) and tt_entry['depth'] >= depth - 3:
                 se_tt_score = np.int32(tt_entry['score'])
                 if se_tt_score > MATE_IN_MAX_PLY:
                     se_tt_score -= ply
@@ -1172,6 +1198,7 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
 
                     # Unmake to search position without this move
                     unmake_move(piece_bbs, occupancy_bbs, game_state, move, unmake_info)
+                    search_context.reduction_stack[ply] = 0
                     res_ex = _search(
                         piece_bbs, occupancy_bbs, game_state, (depth - 1) // 2, exclusion_beta - 1, exclusion_beta, search_context, ply, tt_move, False, cut_node)
                     exclusion_score = res_ex[0]
@@ -1228,6 +1255,7 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
 
         evaluation = 0
         if searched_legal_moves == 1:
+            search_context.reduction_stack[ply + 1] = 0
             res = _search(
                 piece_bbs, occupancy_bbs, game_state, search_depth, -beta, -alpha, search_context, ply + 1, NO_MOVE, is_pv, False)
             evaluation = -res[0]
@@ -1240,6 +1268,11 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                 history_score = get_quiet_stat_score(search_context, ply, from_sq, to_sq, aggressor_type, pawn_key_idx)
 
                 lmr = get_lmr_reduction(depth, searched_legal_moves, history_score, improving, is_pv)
+                child_cutoff_cnt = search_context.cutoff_cnt[ply + 1]
+                if child_cutoff_cnt > 1:
+                    lmr += 1
+                    if child_cutoff_cnt > 2:
+                        lmr += 1
 
                 # CUT-node bonus: more aggressive reduction in expected CUT nodes
                 if cut_node:
@@ -1298,6 +1331,7 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                     lmr = max(0, base_lmr)
                     lmr = min(lmr, search_depth - 1)
 
+            search_context.reduction_stack[ply + 1] = lmr
             res = _search(
                 piece_bbs, occupancy_bbs, game_state, search_depth - lmr, -alpha - 1, -alpha, search_context, ply + 1, NO_MOVE, False, True)
             evaluation = -res[0]
@@ -1305,11 +1339,20 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
 
             if evaluation > alpha:
                 do_full_pv_search = is_pv and evaluation < beta
+                adjusted_depth = search_depth
                 
                 if lmr > 0:
-                    # LMR failed high on zero window. Verify at full depth with zero window.
+                    # LMR failed high on zero window. Verify with adjusted depth and zero window.
+                    lmr_depth = search_depth - lmr
+                    do_deeper = (lmr_depth < search_depth) and (evaluation > max_eval + 52)
+                    do_shallower = (evaluation < max_eval + 9)
+                    adjusted_depth = search_depth + (1 if do_deeper else 0) - (1 if do_shallower else 0)
+                    
+                    if adjusted_depth > lmr_depth:
+                        # 只有在調整後深度大於先前已搜尋的 LMR 深度時，才進行重新搜尋
+                        search_context.reduction_stack[ply + 1] = 0
                     res = _search(
-                        piece_bbs, occupancy_bbs, game_state, search_depth, -alpha - 1, -alpha, search_context, ply + 1, NO_MOVE, False, not cut_node)
+                            piece_bbs, occupancy_bbs, game_state, adjusted_depth, -alpha - 1, -alpha, search_context, ply + 1, NO_MOVE, False, not cut_node)
                     evaluation = -res[0]
                     child_nodes += res[2]; child_q_nodes += res[3]; child_tt_hits += res[4]
                     
@@ -1320,8 +1363,9 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                 
                 if do_full_pv_search:
                     # Re-search with full window
+                    search_context.reduction_stack[ply + 1] = 0
                     res = _search(
-                        piece_bbs, occupancy_bbs, game_state, search_depth, -beta, -alpha, search_context, ply + 1, NO_MOVE, is_pv, False)
+                        piece_bbs, occupancy_bbs, game_state, adjusted_depth, -beta, -alpha, search_context, ply + 1, NO_MOVE, is_pv, False)
                     evaluation = -res[0]
                     child_nodes += res[2]; child_q_nodes += res[3]; child_tt_hits += res[4]
 
@@ -1347,6 +1391,7 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
 
         alpha = max(alpha, evaluation)
         if alpha >= beta:
+            search_context.cutoff_cnt[ply] += 1
             bonus = min(depth * depth + 120 * depth - 100, 1600)
             malus = min(depth * depth + 100 * depth - 50, 1400)
             
@@ -1656,6 +1701,7 @@ def iterative_deepening_search(piece_bbs, occupancy_bbs, game_state, max_depth, 
         search_context.nodes_searched = np.uint64(0)
         
         while True:
+            search_context.reduction_stack[0] = 0
             res = _search(piece_bbs, occupancy_bbs, game_state, current_depth, alpha, beta, search_context, 0, NO_MOVE, True, False)
             score = res[0]
             
