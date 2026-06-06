@@ -35,7 +35,7 @@ from chess_engine.classical_old.constants import (
     ENABLE_MULTICUT, MULTICUT_MIN_DEPTH, MULTICUT_M, MULTICUT_C,
     STOP_SEARCH_FLAG, MAX_HISTORY,
     SCORE_TT_MOVE, SCORE_GOOD_CAPTURE_BONUS, SCORE_KILLER_1,
-    SCORE_KILLER_2, SCORE_COUNTER_MOVE, SCORE_BAD_CAPTURE_PENALTY, NMP_STATIC_MARGIN,
+    SCORE_KILLER_2, SCORE_COUNTER_MOVE, SCORE_BAD_CAPTURE_PENALTY,
     NMP_MIN_SIDE_NON_PAWNS, NMP_VERIFICATION_DEPTH, LOW_MATERIAL_PRUNING_PIECE_COUNT,
     ENABLE_SHALLOW_SEE_PRUNING, ENABLE_HISTORY_PRUNING, PRUNING_SHALLOW_DEPTH,
     PRUNING_CAPTURE_SEE_MARGIN, PRUNING_QUIET_SEE_MARGIN, PRUNING_HISTORY_THRESHOLD,
@@ -555,6 +555,13 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
     tt_key = get_tt_key(zobrist_key, halfmove_clock)  # GHI: halfmove-aware key for TT
     tt_entry = probe_tt(search_context.transposition_table, tt_key)
 
+    # Initialize tt_pv flag (TT-PV Memory Heuristic)
+    if is_exclusion_search:
+        tt_pv = search_context.tt_pv_stack[ply]
+    else:
+        tt_pv = is_pv or (tt_entry['flag'] != TT_FLAG_NONE and tt_entry['is_pv'])
+    search_context.tt_pv_stack[ply] = tt_pv
+
     # 1. ALWAYS retrieve the best move if available (Critical for Move Ordering)
     if tt_entry['flag'] != TT_FLAG_NONE:
         tt_move = tt_entry['best_move']
@@ -733,6 +740,12 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                 
             rfp_margin = rfp_multiplier * depth
             
+            # TT-PV Dual Strategy
+            if tt_pv:
+                rfp_margin += 85 * depth
+            else:
+                rfp_margin = rfp_margin * 7 // 8
+            
             # C1: Tighter margin when not improving
             if not improving:
                 rfp_margin = rfp_margin * 3 // 4  # 25% tighter when not improving
@@ -742,6 +755,10 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                     raw_static_eval, static_score, improving, cached_pinned_white, cached_pinned_black = compute_full_corrected_static_eval(piece_bbs, occupancy_bbs, game_state, search_context, ply)
                     static_eval_is_full = True
                     rfp_margin = rfp_multiplier * depth
+                    if tt_pv:
+                        rfp_margin += 85 * depth
+                    else:
+                        rfp_margin = rfp_margin * 7 // 8
                     if not improving:
                         rfp_margin = rfp_margin * 3 // 4
                 if static_score - rfp_margin >= beta:
@@ -865,20 +882,22 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                     tt_store_score_pc = probcut_return_score
                     if tt_store_score_pc > MATE_IN_MAX_PLY: tt_store_score_pc += ply
                     elif tt_store_score_pc < -MATE_IN_MAX_PLY: tt_store_score_pc -= ply
-                    store_tt(search_context.transposition_table, tt_key, depth - 3, tt_store_score_pc, np.int16(32767), TT_FLAG_BETA, pc_move, search_context.tt_generation, False)
+                    store_tt(search_context.transposition_table, tt_key, depth - 3, tt_store_score_pc, np.int16(32767), TT_FLAG_BETA, pc_move, search_context.tt_generation, tt_pv)
                     return (np.int32(probcut_return_score), pc_move, nodes_searched, quiescence_nodes, tt_hits)
 
     # --- Null Move Pruning (guarded by H3) ---
-    if (search_context.enable_nmp and not is_exclusion_search and depth >= 3 and not is_currently_in_check
+    if (search_context.enable_nmp and cut_node and not is_exclusion_search and depth >= 3 and not is_currently_in_check
             and not (ply > 0 and search_context.move_stack[ply - 1] == NO_MOVE)
-            and not low_material_pruning_guard
             and side_non_pawn_count >= NMP_MIN_SIDE_NON_PAWNS):
-        if static_score >= beta + NMP_STATIC_MARGIN:
+        
+        nmp_threshold = beta - 14 * depth - 45 * (1 if improving else 0) + 190
+        if static_score >= nmp_threshold:
             if not static_eval_is_full:
                 raw_static_eval, static_score, improving, cached_pinned_white, cached_pinned_black = compute_full_corrected_static_eval(piece_bbs, occupancy_bbs, game_state, search_context, ply)
                 static_eval_is_full = True
+                nmp_threshold = beta - 14 * depth - 45 * (1 if improving else 0) + 190
 
-        if static_score >= beta + NMP_STATIC_MARGIN:
+        if static_score >= nmp_threshold:
             nmp_saved_side = game_state[0]
             nmp_saved_ep   = game_state[2]
             nmp_saved_hmc  = game_state[3]
@@ -889,14 +908,7 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
 
             make_null_move(game_state)
 
-            # V3 3.3: Improved NMP reduction — increased cap and tighter divisor
-            nmp_reduction = 4 + depth // 3 + min(4, (static_score - beta) // 160)
-            # V3 3.3: Material-based adjustment — more aggressive when side has many pieces
-            if side_non_pawn_count >= 3:
-                nmp_reduction += 1
-
-            if not improving:
-                nmp_reduction += 1
+            nmp_reduction = 7 + depth // 3 
             search_depth = max(0, depth - nmp_reduction)
             search_context.reduction_stack[ply + 1] = nmp_reduction
             res_nm = _search(
@@ -1174,7 +1186,7 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
         current_extension = check_extension
 
         # --- Singular Extension (inside loop, TT move only) ---
-        if ENABLE_SINGULAR_EXTENSIONS and ply > 0 and excluded_move == NO_MOVE and move == tt_move and depth >= MIN_SINGULAR_DEPTH and not is_currently_in_check:
+        if ENABLE_SINGULAR_EXTENSIONS and ply > 0 and excluded_move == NO_MOVE and move == tt_move and depth >= MIN_SINGULAR_DEPTH + (1 if tt_pv else 0) and not is_currently_in_check:
             if (tt_entry['flag'] == TT_FLAG_BETA or tt_entry['flag'] == TT_FLAG_EXACT) and tt_entry['depth'] >= depth - 3:
                 se_tt_score = np.int32(tt_entry['score'])
                 if se_tt_score > MATE_IN_MAX_PLY:
@@ -1185,7 +1197,8 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                 if abs(se_tt_score) >= MATE_IN_MAX_PLY:
                     current_extension = max(current_extension, 0)
                 else:
-                    singular_margin = SINGULAR_MARGIN_MULTIPLIER * depth
+                    se_tt_pv_bonus = 70 if (tt_pv and not is_pv) else 0
+                    singular_margin = (60 + se_tt_pv_bonus) * depth // 59
                     exclusion_beta = se_tt_score - singular_margin
 
                     # Save MovePicker State to prevent Singular Extension from clobbering the parent
@@ -1298,6 +1311,15 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                 if searched_legal_moves >= 12:
                     lmr += 1
 
+                # ttPv reduction protection (Stockfish-inspired)
+                if tt_pv:
+                    if is_pv:
+                        lmr = max(0, lmr - 2)
+                    else:
+                        lmr = max(0, lmr - 1)
+                elif cut_node:
+                    lmr += 1
+
                 # Clamp LMR to avoid reducing below depth 1
                 lmr = max(0, min(lmr, search_depth - 1))
 
@@ -1329,6 +1351,16 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                         base_lmr -= 1
 
                     lmr = max(0, base_lmr)
+                    
+                    # ttPv reduction protection (Stockfish-inspired)
+                    if tt_pv:
+                        if is_pv:
+                            lmr = max(0, lmr - 2)
+                        else:
+                            lmr = max(0, lmr - 1)
+                    elif cut_node:
+                        lmr += 1
+
                     lmr = min(lmr, search_depth - 1)
 
             search_context.reduction_stack[ply + 1] = lmr
@@ -1614,7 +1646,12 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
     if raw_static_eval != -INFINITY and abs(raw_static_eval) < MATE_SCORE - MAX_PLY:
         tt_static_eval_to_store = np.int16(raw_static_eval)
 
-    store_tt(search_context.transposition_table, tt_key, depth, tt_score, tt_static_eval_to_store, final_flag, best_move, search_context.tt_generation, is_pv)
+    # Propagate ttPv on fail-low (Alpha Flag)
+    if final_flag == TT_FLAG_ALPHA and ply > 0:
+        tt_pv = tt_pv or search_context.tt_pv_stack[ply - 1]
+        search_context.tt_pv_stack[ply] = tt_pv
+
+    store_tt(search_context.transposition_table, tt_key, depth, tt_score, tt_static_eval_to_store, final_flag, best_move, search_context.tt_generation, tt_pv)
 
     return (max_eval, best_move, nodes_searched, quiescence_nodes, tt_hits)
 
