@@ -13,6 +13,8 @@ __pycache__/
 *.binpack
 *.npz
 *.jsonl
+*.log
+*.png
 
 # Model weights
 *.pth
@@ -29,3 +31,4 @@ __pycache__/
 
 # IDE
 .vscode/
+

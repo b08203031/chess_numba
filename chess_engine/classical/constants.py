@@ -661,7 +661,7 @@ ENABLE_HISTORY_PRUNING = True      # Enable pruning based on History Score
 
 # NEW: Pruning Parameters (Tightened for Performance/Strength Balance)
 PRUNING_SHALLOW_DEPTH = 12         # Prune moves only if depth is below this (was 8)
-PRUNING_CAPTURE_SEE_MARGIN = -185 # Stockfish dynamic margin: -185 * depth
+PRUNING_CAPTURE_SEE_MARGIN = -100 # Stockfish dynamic margin: -100 * depth
 PRUNING_QUIET_SEE_MARGIN = -25    # Stockfish dynamic margin: -25 * depth^2
 PRUNING_HISTORY_THRESHOLD = -4000 # Adjusted from -1000 to match V2 linear history scale
 
@@ -683,7 +683,7 @@ FP_BASE = 150      # Reduced base
 FP_MULTIPLIER = 180 # Reduced multiplier
 
 # Reverse Futility Pruning
-RFP_MAX_DEPTH = 9            # V3: Extended from 8 to 9 with more conservative margin
+RFP_MAX_DEPTH = 12           # V4: Extended from 9 to 12 based on parameter analysis
 RFP_BASE_MULT = 170           # V3: Reduced from 180 to 170 for deeper RFP reach
 RFP_NO_TT_PENALTY = 40       # Extra margin multiplier if TT info is missing
 
@@ -694,7 +694,7 @@ LOW_MATERIAL_PRUNING_PIECE_COUNT = 7
 
 # Late Move Reductions (LMR)
 LMR_MIN_DEPTH = 3           # Minimum depth to apply LMR (H4: lowered from 4 to match Stockfish)
-LMR_MIN_QUIET_MOVE_INDEX = 3 # Minimum number of quiet moves before LMR (H4: lowered from 4)
+LMR_MIN_QUIET_MOVE_INDEX = 3 # Minimum number of quiet moves before LMR (Lowered to 2 for aggressive LMR)
 LMR_REDUCTION = 1           # Depth reduction for LMR / LMR 的深度減少值
 
 # Late Move Pruning (LMP) - Prune moves after a certain number of quiet moves have been searched
@@ -713,6 +713,30 @@ for d in range(MAX_PLY):
             LMR_TABLE[d, mc] = 0
         else:
             LMR_TABLE[d, mc] = int(0.77 + math.log(d) * math.log(mc) / 2.0)
+
+# --- 1024-scale LMR (Phase B) ---
+REDUCTIONS = np.zeros(256, dtype=np.int32)
+for i in range(1, 256):
+    REDUCTIONS[i] = int(20.0 * math.log(i))
+
+LMR_BASE_OFFSET = 512          # r += 512
+LMR_TTPV_INCREASE = 768        # r += 768 (ttPv nodes)
+LMR_TTPV_DECREASE_BASE = 2048  # r -= 2048 (ttPv decrease)
+LMR_TTPV_PV_BONUS = 768        # r -= PvNode * 768
+LMR_CUTNODE_BONUS = 1024       # r += 1024 * cutNode
+LMR_TTCAPTURE_BONUS = 768      # r += 768 * ttCapture
+LMR_MOVECOUNT_FACTOR = 40      # r -= moveCount * 40
+LMR_HISTORY_SCALE = 150        # r -= statScore * 150 / 4096
+LMR_CUTOFF_CNT_BASE = 128      # r += 128
+LMR_CUTOFF_CNT_EXTRA = 512     # r += 512 * (cutoffCnt > 2)
+LMR_ALLNODE_EXTRA = 512        # r += 512 * allNode
+LMR_TTMOVE_REDUCTION = 1024    # r -= 1024 for ttMove
+LMR_NO_TTMOVE_BONUS = 512      # r += 512 * !ttMove (cutNode)
+LMR_CORRECTION_DIVISOR = 32768 # r -= abs(correctionValue) / 32768
+
+LMR_ALLNODE_SCALE_NUM = 150    # r += r * 150 / (256*depth + 285)
+LMR_ALLNODE_SCALE_DENOM_BASE = 256
+LMR_ALLNODE_SCALE_DENOM_OFFSET = 285
 
 
 # ProbCut
