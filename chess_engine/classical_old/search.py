@@ -47,7 +47,12 @@ from chess_engine.classical_old.constants import (
     SEE_HISTORY_DIVISOR,
     HISTORY_WEIGHT_MAIN, HISTORY_WEIGHT_CONT_1, HISTORY_WEIGHT_CONT_2, HISTORY_WEIGHT_CONT_3, HISTORY_WEIGHT_CONT_4,
     LMR_TABLE, ENABLE_MATE_DISTANCE_PRUNING,
-    LMR_HISTORY_DIVISOR
+    LMR_HISTORY_DIVISOR,
+    REDUCTIONS, LMR_BASE_OFFSET, LMR_TTPV_INCREASE, LMR_TTPV_DECREASE_BASE, LMR_TTPV_PV_BONUS,
+    LMR_CUTNODE_BONUS, LMR_TTCAPTURE_BONUS, LMR_MOVECOUNT_FACTOR, LMR_HISTORY_SCALE,
+    LMR_CUTOFF_CNT_BASE, LMR_CUTOFF_CNT_EXTRA, LMR_ALLNODE_EXTRA, LMR_TTMOVE_REDUCTION,
+    LMR_NO_TTMOVE_BONUS, LMR_CORRECTION_DIVISOR, LMR_ALLNODE_SCALE_NUM, LMR_ALLNODE_SCALE_DENOM_BASE,
+    LMR_ALLNODE_SCALE_DENOM_OFFSET
 )
 from chess_engine.classical_old.bitboard_utils import find_piece_type_on_square, find_piece_type_on_square_side
 from chess_engine.classical_old.board_operations import find_piece_type_for_square
@@ -68,13 +73,17 @@ from chess_engine.classical_old.search_heuristics import (
     update_history, update_butterfly_history, update_capture_history,
     update_continuation_history, update_pawn_history, score_captures, score_captures_with_tt,
     score_quiets, update_quiet_stats_on_tt_hit, get_lmr_reduction, partial_insertion_sort_moves,
-    get_quiet_stat_score
+    get_quiet_stat_score, compute_lmr_reduction_1024, get_lmr_stat_score
 )
 
 
 quiescence_search_return_type = numba.types.Tuple([
     numba.int32, numba.uint64
 ])
+
+@numba.njit(inline='always')
+def trunc_div(n, d):
+    return n // d if n >= 0 else -(-n // d)
 
 @numba.njit(numba.int32(game_state_signature, search_context_type, numba.int32), cache=True, nogil=True)
 def apply_correction_history_score(game_state, search_context, raw_static_eval):
@@ -563,8 +572,14 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
     search_context.tt_pv_stack[ply] = tt_pv
 
     # 1. ALWAYS retrieve the best move if available (Critical for Move Ordering)
+    tt_capture = False
     if tt_entry['flag'] != TT_FLAG_NONE:
         tt_move = tt_entry['best_move']
+        if tt_move != NO_MOVE:
+            tt_to = get_to_square(tt_move)
+            tt_flag_special = get_special_move_flag(tt_move)
+            enemy_side = 1 - game_state[0]
+            tt_capture = ((occupancy_bbs[enemy_side] & BB_SQUARES[tt_to]) != 0) or (tt_flag_special == SPECIAL_MOVE_FLAG_EN_PASSANT)
 
         # 2. ONLY perform a Score Cutoff (Return) if:
         #    a. We are NOT at the Root Node (ply > 0)
@@ -692,7 +707,7 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
             if prior_reduction >= 3 and not opponent_worsening:
                 depth += 1
             if prior_reduction >= 2 and depth >= 2:
-                if static_score + parent_eval > 173:
+                if static_score + parent_eval > 200:
                     depth -= 1
 
     if depth <= 0:
@@ -745,7 +760,7 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                 rfp_margin += 85 * depth
             else:
                 rfp_margin = rfp_margin * 7 // 8
-            
+                
             # C1: Tighter margin when not improving
             if not improving:
                 rfp_margin = rfp_margin * 3 // 4  # 25% tighter when not improving
@@ -890,12 +905,12 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
             and not (ply > 0 and search_context.move_stack[ply - 1] == NO_MOVE)
             and side_non_pawn_count >= NMP_MIN_SIDE_NON_PAWNS):
         
-        nmp_threshold = beta - 14 * depth - 45 * (1 if improving else 0) + 190
+        nmp_threshold = beta - 14 * depth - 45 * (1 if improving else 0) + 200
         if static_score >= nmp_threshold:
             if not static_eval_is_full:
                 raw_static_eval, static_score, improving, cached_pinned_white, cached_pinned_black = compute_full_corrected_static_eval(piece_bbs, occupancy_bbs, game_state, search_context, ply)
                 static_eval_is_full = True
-                nmp_threshold = beta - 14 * depth - 45 * (1 if improving else 0) + 190
+                nmp_threshold = beta - 14 * depth - 45 * (1 if improving else 0) + 200
 
         if static_score >= nmp_threshold:
             nmp_saved_side = game_state[0]
@@ -908,7 +923,12 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
 
             make_null_move(game_state)
 
-            nmp_reduction = 7 + depth // 3 
+            eval_margin = (static_score - beta) // 200
+            if eval_margin < 0:
+                eval_margin = 0
+            elif eval_margin > 3:
+                eval_margin = 3
+            nmp_reduction = 7 + depth // 3 + eval_margin
             search_depth = max(0, depth - nmp_reduction)
             search_context.reduction_stack[ply + 1] = nmp_reduction
             res_nm = _search(
@@ -981,7 +1001,7 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
     # Instead of doing a costly sub-search, just reduce depth for nodes without a TT move.
     if tt_move == NO_MOVE and ENABLE_IIR and not is_exclusion_search and not is_currently_in_check:
         if depth >= 4:
-            depth -= 1
+            depth -= 1  
 
     # --- Move Ordering ---
     # Retrieve Counter Move if available
@@ -1051,7 +1071,7 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
         is_pseudo_quiet = not is_capture and not is_promotion
         
         is_bad_capture = False
-        if is_capture and not is_promotion:
+        if is_capture:
             is_bad_capture = not _see_ge_jit(piece_bbs, occupancy_bbs, original_side, from_sq, to_sq, 0, pinned_white, pinned_black)
         
         # --- NEW: Shallow Depth Pruning (Stockfish Step 14) ---
@@ -1274,94 +1294,111 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
             evaluation = -res[0]
             child_nodes = res[2]; child_q_nodes = res[3]; child_tt_hits = res[4]
         else:
-            # Dynamic LMR Logic
+            # --- 1024-scale LMR (Phase B) ---
             lmr = 0
-            if search_context.enable_lmr and depth >= LMR_MIN_DEPTH and is_quiet_move and quiet_move_counter >= LMR_MIN_QUIET_MOVE_INDEX and searched_legal_moves >= LMR_MIN_QUIET_MOVE_INDEX and moved_piece_type != -1:
-                aggressor_type = moved_piece_type
-                history_score = get_quiet_stat_score(search_context, ply, from_sq, to_sq, aggressor_type, pawn_key_idx)
+            if search_context.enable_lmr and depth >= LMR_MIN_DEPTH:
+                is_eligible = False
+                if is_quiet_move and quiet_move_counter >= LMR_MIN_QUIET_MOVE_INDEX and moved_piece_type != -1:
+                    is_eligible = True
+                elif is_capture:
+                    is_eligible = True
 
-                lmr = get_lmr_reduction(depth, searched_legal_moves, history_score, improving, is_pv)
-                child_cutoff_cnt = search_context.cutoff_cnt[ply + 1]
-                if child_cutoff_cnt > 1:
-                    lmr += 1
-                    if child_cutoff_cnt > 2:
-                        lmr += 1
+                if is_eligible:
+                    # 1. Base LMR 1024-scale calculation:
+                    r = compute_lmr_reduction_1024(depth, searched_legal_moves, improving)
 
-                # CUT-node bonus: more aggressive reduction in expected CUT nodes
-                if cut_node:
-                    lmr += 1
-
-                # No TT move bonus
-                if tt_move == NO_MOVE:
-                    lmr += 1
-                if is_giving_check_after_move:
-                    lmr = max(0, lmr - 1)
-
-
-                # A2: Pawn push protection — don't reduce pawn pushes to 6th/7th rank
-                is_pawn = (moved_piece_type % 6) == PAWN
-                if is_pawn:
-                    to_rank = to_sq // 8
-                    if (original_side == WHITE and to_rank >= 5) or (original_side == BLACK and to_rank <= 2):
-                        lmr = max(0, lmr - 2)
-
-                # Stockfish-inspired: Extra LMR adjustments
-                if static_score != -INFINITY and static_score > alpha + 200:
-                    lmr += 1
-                if searched_legal_moves >= 12:
-                    lmr += 1
-
-                # ttPv reduction protection (Stockfish-inspired)
-                if tt_pv:
-                    if is_pv:
-                        lmr = max(0, lmr - 2)
-                    else:
-                        lmr = max(0, lmr - 1)
-                elif cut_node:
-                    lmr += 1
-
-                # Clamp LMR to avoid reducing below depth 1
-                lmr = max(0, min(lmr, search_depth - 1))
-
-            # A3: Dynamic LMR for bad captures (Stockfish-inspired over Linear Base)
-            # Base = 1 + depth // 6, then dynamically adjusted by node type, improving status,
-            # capture history, and check-giving status.
-            elif search_context.enable_lmr and depth >= LMR_MIN_DEPTH and is_capture and not is_promotion and searched_legal_moves > 1:
-                if is_bad_capture:
-                    base_lmr = 1 + depth // 6
-
-                    # Node-type and improving adjustments
-                    if is_pv:
-                        base_lmr -= 1
-                    if improving:
-                        base_lmr -= 1
-                    if cut_node:
-                        base_lmr += 1
-
-                    # Capture history adjustment: good history -> less reduction, bad history -> more reduction
-                    victim_type_lmr = unmake_info[1]
-                    if victim_type_lmr >= 0:
-                        enemy_side_lmr = 1 - original_side
-                        victim_type_lmr_abs = victim_type_lmr + enemy_side_lmr * 6
-                        cap_hist = search_context.capture_history[moved_piece_type, to_sq, victim_type_lmr_abs]
-                        base_lmr -= cap_hist // 8192
-
-                    # Check-giving protection
-                    if is_giving_check_after_move:
-                        base_lmr -= 1
-
-                    lmr = max(0, base_lmr)
-                    
-                    # ttPv reduction protection (Stockfish-inspired)
                     if tt_pv:
+                        r += LMR_TTPV_INCREASE  # TT PV node increase (SF: 1006)
+                        r -= LMR_TTPV_DECREASE_BASE  # TT PV decrease base (SF: 2766)
                         if is_pv:
-                            lmr = max(0, lmr - 2)
-                        else:
-                            lmr = max(0, lmr - 1)
-                    elif cut_node:
-                        lmr += 1
+                            r -= LMR_TTPV_PV_BONUS  # PV node bonus (SF: 1017)
+                        if tt_entry['flag'] != TT_FLAG_NONE:
+                            tt_score = np.int32(tt_entry['score'])
+                            if tt_score > MATE_IN_MAX_PLY: tt_score -= ply
+                            elif tt_score < -MATE_IN_MAX_PLY: tt_score += ply
+                            if tt_score > alpha:
+                                r -= 838  # TT score > alpha bonus (SF: 838)
+                            if tt_entry['depth'] >= depth:
+                                r -= (923 + (955 if cut_node else 0))  # TT depth >= depth bonus (SF: 923 / 955)
 
-                    lmr = min(lmr, search_depth - 1)
+                    r += LMR_BASE_OFFSET  # Base offset (SF: 714)
+                    r -= searched_legal_moves * LMR_MOVECOUNT_FACTOR  # Linear damping to log scale LMR growth (SF: -mc*62)
+
+                    # Scale centipawn difference back to raw correction scale before dividing by LMR_CORRECTION_DIVISOR
+                    correction_mag = abs(static_score - raw_static_eval)
+                    r -= (correction_mag * 131072) // LMR_CORRECTION_DIVISOR
+
+                    if cut_node:
+                        r += LMR_CUTNODE_BONUS  # Cut node bonus (SF: 3995)
+                        if tt_move == NO_MOVE:
+                            r += LMR_NO_TTMOVE_BONUS  # No TT move bonus (SF: 1059)
+
+                    if tt_capture:
+                        r += LMR_TTCAPTURE_BONUS  # TT capture bonus (SF: 1039)
+
+                    if is_capture:
+                        if not is_bad_capture:
+                            r -= 1024  # 好吃子：歸約減少 1 ply，但依然參與歸約機制
+                        else:
+                            r += 1024  # 壞吃子：大刀闊斧砍掉 (增加 1 ply 歸約)
+
+                    is_pawn = (moved_piece_type % 6) == PAWN
+                    if is_pawn:
+                        to_rank = to_sq // 8
+                        if (original_side == WHITE and to_rank >= 5) or (original_side == BLACK and to_rank <= 2):
+                            r -= 1536  # 通路兵安全網：減少 1.5 ply 歸約
+
+                    if move == killer_1 or move == killer_2 or move == counter_move:
+                        r -= 1024  # 殺手步與反擊步安全網：減少 1 ply 歸約
+
+                    child_cutoff_cnt = search_context.cutoff_cnt[ply + 1]
+                    if child_cutoff_cnt > 1:
+                        r += LMR_CUTOFF_CNT_BASE  # Cutoff count base (SF: 236)
+                        if child_cutoff_cnt > 2:
+                            r += LMR_CUTOFF_CNT_EXTRA  # Cutoff count extra (SF: 1079)
+                        all_node = not is_pv and not cut_node
+                        if all_node:
+                            r += LMR_ALLNODE_EXTRA  # All-node extra (SF: 1143)
+                    elif move == tt_move:
+                        r = max(-10, r - LMR_TTMOVE_REDUCTION + 150 * (1 if cut_node else 0))
+
+                    # History adjustment
+                    if is_quiet_move:
+                        lmr_stat_score = get_lmr_stat_score(search_context, ply, from_sq, to_sq, moved_piece_type)
+                    else:
+                        victim_type_lmr = unmake_info[1]
+                        if victim_type_lmr >= 0:
+                            enemy_side_lmr = 1 - original_side
+                            victim_type_lmr_abs = victim_type_lmr + enemy_side_lmr * 6
+                            cap_hist = search_context.capture_history[moved_piece_type, to_sq, victim_type_lmr_abs]
+                        else:
+                            cap_hist = 0
+                        
+                        victim_idx = victim_type_lmr % 6 if victim_type_lmr >= 0 else 0
+                        victim_piece_val = 100
+                        if victim_idx == 1: victim_piece_val = 320
+                        elif victim_idx == 2: victim_piece_val = 330
+                        elif victim_idx == 3: victim_piece_val = 500
+                        elif victim_idx == 4: victim_piece_val = 900
+                        
+                        lmr_stat_score = 809 * victim_piece_val // 128 + cap_hist
+
+                    r -= trunc_div(lmr_stat_score * LMR_HISTORY_SCALE, 4096)
+
+                    # Scale up reductions for expected ALL nodes
+                    all_node = not is_pv and not cut_node
+                    if all_node:
+                        r += trunc_div(r * LMR_ALLNODE_SCALE_NUM, LMR_ALLNODE_SCALE_DENOM_BASE * depth + LMR_ALLNODE_SCALE_DENOM_OFFSET)
+
+                    # Convert 1024-scale to integer ply
+                    d = max(1, min(search_depth - trunc_div(r, 1024), search_depth + 2))
+                    lmr = search_depth - d
+
+                    # Clamping & Safeguards
+                    if is_giving_check_after_move:
+                        lmr = max(0, lmr - 1)
+
+                    lmr = max(0, min(lmr, search_depth - 1))
 
             search_context.reduction_stack[ply + 1] = lmr
             res = _search(
@@ -1376,17 +1413,18 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                 if lmr > 0:
                     # LMR failed high on zero window. Verify with adjusted depth and zero window.
                     lmr_depth = search_depth - lmr
-                    do_deeper = (lmr_depth < search_depth) and (evaluation > max_eval + 52)
-                    do_shallower = (evaluation < max_eval + 9)
+                    do_deeper = (lmr_depth < search_depth) and (evaluation > max_eval + 32)
+                    do_shallower = (evaluation < max_eval + 15)
                     adjusted_depth = search_depth + (1 if do_deeper else 0) - (1 if do_shallower else 0)
+                    adjusted_depth = max(1, min(adjusted_depth, search_depth + 1))
                     
                     if adjusted_depth > lmr_depth:
                         # 只有在調整後深度大於先前已搜尋的 LMR 深度時，才進行重新搜尋
                         search_context.reduction_stack[ply + 1] = 0
-                    res = _search(
+                        res = _search(
                             piece_bbs, occupancy_bbs, game_state, adjusted_depth, -alpha - 1, -alpha, search_context, ply + 1, NO_MOVE, False, not cut_node)
-                    evaluation = -res[0]
-                    child_nodes += res[2]; child_q_nodes += res[3]; child_tt_hits += res[4]
+                        evaluation = -res[0]
+                        child_nodes += res[2]; child_q_nodes += res[3]; child_tt_hits += res[4]
                     
                     if is_pv and evaluation > alpha and evaluation < beta:
                         do_full_pv_search = True

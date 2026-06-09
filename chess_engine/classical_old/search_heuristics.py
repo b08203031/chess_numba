@@ -5,7 +5,7 @@ from chess_engine.classical_old.move import (
     get_to_square, get_from_square, get_special_move_flag,
     SPECIAL_MOVE_FLAG_PROMOTION, SPECIAL_MOVE_FLAG_EN_PASSANT
 )
-from chess_engine.classical_old.constants import SCORE_GOOD_CAPTURE_BONUS, SCORE_BAD_CAPTURE_PENALTY, SCORE_KILLER_1, SCORE_KILLER_2, SCORE_COUNTER_MOVE, MAX_HISTORY, LMR_TABLE, MAX_PLY, SCORE_TT_MOVE, BB_SQUARES, NO_MOVE, HISTORY_MAX_MAIN, HISTORY_MAX_BUTTERFLY, HISTORY_MAX_CAPTURE, HISTORY_MAX_CONTINUATION, HISTORY_MAX_PAWN, LMR_HISTORY_DIVISOR, HISTORY_WEIGHT_MAIN, HISTORY_WEIGHT_CONT_1, HISTORY_WEIGHT_CONT_2, HISTORY_WEIGHT_CONT_3, HISTORY_WEIGHT_CONT_4, QS_SEE_THRESHOLD
+from chess_engine.classical_old.constants import SCORE_GOOD_CAPTURE_BONUS, SCORE_BAD_CAPTURE_PENALTY, SCORE_KILLER_1, SCORE_KILLER_2, SCORE_COUNTER_MOVE, MAX_HISTORY, LMR_TABLE, MAX_PLY, SCORE_TT_MOVE, BB_SQUARES, NO_MOVE, HISTORY_MAX_MAIN, HISTORY_MAX_BUTTERFLY, HISTORY_MAX_CAPTURE, HISTORY_MAX_CONTINUATION, HISTORY_MAX_PAWN, LMR_HISTORY_DIVISOR, HISTORY_WEIGHT_MAIN, HISTORY_WEIGHT_CONT_1, HISTORY_WEIGHT_CONT_2, HISTORY_WEIGHT_CONT_3, HISTORY_WEIGHT_CONT_4, QS_SEE_THRESHOLD, REDUCTIONS
 from chess_engine.classical_old.constants import MG_MATERIAL_VALUES
 from chess_engine.classical_old.see import _see_ge_jit
 from chess_engine.classical_old.bitboard_utils import find_piece_type_on_square, find_piece_type_on_square_side, get_lsb_index
@@ -254,6 +254,45 @@ def score_quiets(piece_bbs, occupancy_bbs, game_state, moves, scores, start_idx,
             score += 300000
 
         scores[i] = score
+
+@numba.njit(cache=True, boundscheck=False, fastmath=True)
+def compute_lmr_reduction_1024(depth, move_count, improving):
+    """
+    Computes 1024-scale base reduction with improving flag.
+    SF: reductionScale = reductions[d] * reductions[mn]
+    r = reductionScale + !improving * reductionScale * 194 / 512 + 1027
+    """
+    d = min(depth, 255)
+    mc = min(move_count, 255)
+    if d < 1 or mc < 1:
+        return 0
+    reduction_scale = REDUCTIONS[d] * REDUCTIONS[mc]
+    r = reduction_scale + 1027
+    if not improving:
+        r += reduction_scale * 194 // 512
+    return r
+
+@numba.njit(cache=True, boundscheck=False, fastmath=True)
+def get_lmr_stat_score(search_context, ply, from_sq, to_sq, aggressor_type):
+    """
+    Computes a simplified statScore matching Stockfish range (max ~65,536) for 1024-scale LMR.
+    SF: 2 * mainHistory + contHist[0] + contHist[1]
+    """
+    score = search_context.history_table[aggressor_type, to_sq] * 2
+    
+    if ply > 0:
+        prev_move = search_context.move_stack[ply - 1]
+        prev_piece = search_context.piece_stack[ply - 1]
+        if prev_move != NO_MOVE and prev_piece != -1:
+            score += search_context.continuation_history[0, prev_piece, get_to_square(prev_move), aggressor_type, to_sq]
+
+    if ply > 1:
+        prev_move = search_context.move_stack[ply - 2]
+        prev_piece = search_context.piece_stack[ply - 2]
+        if prev_move != NO_MOVE and prev_piece != -1:
+            score += search_context.continuation_history[1, prev_piece, get_to_square(prev_move), aggressor_type, to_sq]
+
+    return score
 
 @numba.njit(cache=True, boundscheck=False, fastmath=True)
 def get_lmr_reduction(depth, move_count, history_score, improving, is_pv):
