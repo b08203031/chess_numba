@@ -12,7 +12,7 @@ from chess_engine.classical.move_generator import (
     generate_legal_moves_buffer, generate_captures_buffer,
     generate_pseudo_legal_moves_buffer, generate_pseudo_legal_captures_buffer,
     generate_pseudo_legal_quiets_buffer,
-    is_square_attacked, is_move_pseudo_legal
+    is_square_attacked, is_move_pseudo_legal, check_legality_and_gives_check
 )
 from chess_engine.classical.bitboard_utils import get_lsb_index, count_bits
 from chess_engine.classical.board_operations import make_move, unmake_move, make_null_move
@@ -112,7 +112,7 @@ full_static_eval_return_type = numba.types.Tuple((numba.int32, numba.int32, numb
 
 @numba.njit(full_static_eval_return_type(piece_bbs_signature, occupancy_bbs_signature, game_state_signature, search_context_type, numba.int32), cache=True, nogil=True)
 def compute_full_corrected_static_eval(piece_bbs, occupancy_bbs, game_state, search_context, ply):
-    raw_eval, pinned_white, pinned_black = _evaluate_position_jit(piece_bbs, occupancy_bbs, game_state, False)
+    raw_eval, pinned_white, pinned_black = _evaluate_position_jit(piece_bbs, occupancy_bbs, game_state, False, search_context)
     corrected_eval = apply_correction_history_score(game_state, search_context, raw_eval)
     search_context.static_eval_stack[ply] = corrected_eval
 
@@ -147,7 +147,7 @@ def quiescence_search(piece_bbs, occupancy_bbs, game_state, alpha, beta, ply, se
             return np.int32(0), q_nodes
 
     if ply >= MAX_PLY:
-        eval_score, _, _ = _evaluate_position_jit(piece_bbs, occupancy_bbs, game_state, False)
+        eval_score, _, _ = _evaluate_position_jit(piece_bbs, occupancy_bbs, game_state, False, search_context)
         return eval_score, q_nodes
 
     if not has_sufficient_material(piece_bbs):
@@ -181,7 +181,7 @@ def quiescence_search(piece_bbs, occupancy_bbs, game_state, alpha, beta, ply, se
         # Check evasions are very forcing, so we allow them to go deeper than normal QSearch.
         # (e.g., 2x MAX_QUIESCENCE_DEPTH)
         if q_ply >= MAX_QUIESCENCE_DEPTH * 2:
-            eval_score, _, _ = _evaluate_position_jit(piece_bbs, occupancy_bbs, game_state, False)
+            eval_score, _, _ = _evaluate_position_jit(piece_bbs, occupancy_bbs, game_state, False, search_context)
             return eval_score, q_nodes
 
         # We must generate ALL legal moves (evasions).
@@ -192,14 +192,14 @@ def quiescence_search(piece_bbs, occupancy_bbs, game_state, alpha, beta, ply, se
     else:
         # If not in check, we can stand pat (static evaluation)
         if q_ply >= MAX_QUIESCENCE_DEPTH:
-            eval_score, _, _ = _evaluate_position_jit(piece_bbs, occupancy_bbs, game_state, False)
+            eval_score, _, _ = _evaluate_position_jit(piece_bbs, occupancy_bbs, game_state, False, search_context)
             return eval_score, q_nodes
 
         # --- QSearch TT static_eval probe ---
         if tt_entry['flag'] != TT_FLAG_NONE and tt_entry['static_eval'] != 32767:
             stand_pat = np.int32(tt_entry['static_eval'])
         else:
-            stand_pat_val, _, _ = _evaluate_position_jit(piece_bbs, occupancy_bbs, game_state, False)
+            stand_pat_val, _, _ = _evaluate_position_jit(piece_bbs, occupancy_bbs, game_state, False, search_context)
             stand_pat = np.int32(stand_pat_val)
 
         if stand_pat >= beta:
@@ -467,7 +467,7 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
             return (np.int32(0), NO_MOVE, nodes_searched, quiescence_nodes, tt_hits)
 
     if ply >= MAX_PLY:
-        eval_score, _, _ = _evaluate_position_jit(piece_bbs, occupancy_bbs, game_state, False)
+        eval_score, _, _ = _evaluate_position_jit(piece_bbs, occupancy_bbs, game_state, False, search_context)
         return (eval_score, NO_MOVE, nodes_searched, quiescence_nodes, tt_hits)
 
     # --- Mate Distance Pruning ---
@@ -657,7 +657,7 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
         if tt_entry['flag'] != TT_FLAG_NONE and tt_entry['static_eval'] != 32767:
             raw_static_eval = np.int32(tt_entry['static_eval'])
         else:
-            raw_static_eval, _, _ = _evaluate_position_jit(piece_bbs, occupancy_bbs, game_state, True)
+            raw_static_eval, _, _ = _evaluate_position_jit(piece_bbs, occupancy_bbs, game_state, True, search_context)
 
         static_score = apply_correction_history_score(game_state, search_context, raw_static_eval)
         
@@ -1099,13 +1099,18 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
             moved_piece_type += 6
         
         # --- Integrated Legality & Check Detection (R3) ---
-        # 1. Determine if the move was legal (our king is not left in check)
         our_side = 1 - game_state[0] # game_state[0] is now the opponent
         our_king_bb = piece_bbs[5] if our_side == WHITE else piece_bbs[11]
-        
-        # We assume king is found, else the engine has bigger problems
         our_king_sq = get_lsb_index(our_king_bb) if our_king_bb else 0
-        if is_square_attacked(piece_bbs, occupancy_bbs, our_king_sq, game_state[0]):
+        
+        their_king_bb = piece_bbs[11] if our_side == WHITE else piece_bbs[5]
+        their_king_sq = get_lsb_index(their_king_bb) if their_king_bb else 0
+        
+        is_legal, is_giving_check_after_move = check_legality_and_gives_check(
+            piece_bbs, occupancy_bbs, our_king_sq, their_king_sq, our_side
+        )
+        
+        if not is_legal:
             unmake_move(piece_bbs, occupancy_bbs, game_state, move, unmake_info)
             continue
             
@@ -1113,11 +1118,6 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
 
         search_context.move_stack[ply] = move # Record move in stack
         search_context.piece_stack[ply] = moved_piece_type # Record piece in stack
-        
-        # 2. Determine if the move gives check to the opponent
-        their_king_bb = piece_bbs[11] if our_side == WHITE else piece_bbs[5]
-        their_king_sq = get_lsb_index(their_king_bb) if their_king_bb else 0
-        is_giving_check_after_move = is_square_attacked(piece_bbs, occupancy_bbs, their_king_sq, our_side)
         
         # Final determination of quiet move
         is_quiet_move = is_pseudo_quiet

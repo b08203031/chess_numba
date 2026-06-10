@@ -248,6 +248,87 @@ def is_square_attacked(piece_bbs, occupancy_bbs, sq, attacker_side):
     return False
 
 @numba.njit(cache=True, boundscheck=False, fastmath=True)
+def check_legality_and_gives_check(piece_bbs, occupancy_bbs, our_king_sq, their_king_sq, our_side):
+    """
+    Combined function to check:
+    1. Is the move legal? (our_king_sq is NOT attacked by 1 - our_side)
+    2. Does the move give check? (their_king_sq IS attacked by our_side)
+    Returns (is_legal, gives_check) as explicit booleans.
+    """
+    all_pieces_bb = occupancy_bbs[2]
+    
+    if our_side == WHITE:
+        # Our side is WHITE, opponent is BLACK
+        bp, bn, bb, br, bq, bk = piece_bbs[6], piece_bbs[7], piece_bbs[8], piece_bbs[9], piece_bbs[10], piece_bbs[11]
+        
+        # 1. Check Legality (Is our king attacked by black?)
+        is_legal = True
+        if PAWN_ATTACKS[BLACK, our_king_sq] & bp:
+            is_legal = False
+        elif KING_ATTACKS[our_king_sq] & bk:
+            is_legal = False
+        elif KNIGHT_ATTACKS[our_king_sq] & bn:
+            is_legal = False
+        elif (bb | bq) and (get_bishop_attacks(our_king_sq, all_pieces_bb) & (bb | bq)):
+            is_legal = False
+        elif (br | bq) and (get_rook_attacks(our_king_sq, all_pieces_bb) & (br | bq)):
+            is_legal = False
+            
+        if not is_legal:
+            return False, False
+        
+        # 2. Check Gives Check (Is their king attacked by white?)
+        wp, wn, wb, wr, wq, wk = piece_bbs[0], piece_bbs[1], piece_bbs[2], piece_bbs[3], piece_bbs[4], piece_bbs[5]
+        gives_check = False
+        if PAWN_ATTACKS[WHITE, their_king_sq] & wp:
+            gives_check = True
+        elif KING_ATTACKS[their_king_sq] & wk:
+            gives_check = True
+        elif KNIGHT_ATTACKS[their_king_sq] & wn:
+            gives_check = True
+        elif (wb | wq) and (get_bishop_attacks(their_king_sq, all_pieces_bb) & (wb | wq)):
+            gives_check = True
+        elif (wr | wq) and (get_rook_attacks(their_king_sq, all_pieces_bb) & (wr | wq)):
+            gives_check = True
+            
+        return True, gives_check
+    else:
+        # Our side is BLACK, opponent is WHITE
+        wp, wn, wb, wr, wq, wk = piece_bbs[0], piece_bbs[1], piece_bbs[2], piece_bbs[3], piece_bbs[4], piece_bbs[5]
+        
+        # 1. Check Legality (Is our king attacked by white?)
+        is_legal = True
+        if PAWN_ATTACKS[WHITE, our_king_sq] & wp:
+            is_legal = False
+        elif KING_ATTACKS[our_king_sq] & wk:
+            is_legal = False
+        elif KNIGHT_ATTACKS[our_king_sq] & wn:
+            is_legal = False
+        elif (wb | wq) and (get_bishop_attacks(our_king_sq, all_pieces_bb) & (wb | wq)):
+            is_legal = False
+        elif (wr | wq) and (get_rook_attacks(our_king_sq, all_pieces_bb) & (wr | wq)):
+            is_legal = False
+            
+        if not is_legal:
+            return False, False
+        
+        # 2. Check Gives Check (Is their king attacked by black?)
+        bp, bn, bb, br, bq, bk = piece_bbs[6], piece_bbs[7], piece_bbs[8], piece_bbs[9], piece_bbs[10], piece_bbs[11]
+        gives_check = False
+        if PAWN_ATTACKS[BLACK, their_king_sq] & bp:
+            gives_check = True
+        elif KING_ATTACKS[their_king_sq] & bk:
+            gives_check = True
+        elif KNIGHT_ATTACKS[their_king_sq] & bn:
+            gives_check = True
+        elif (bb | bq) and (get_bishop_attacks(their_king_sq, all_pieces_bb) & (bb | bq)):
+            gives_check = True
+        elif (br | bq) and (get_rook_attacks(their_king_sq, all_pieces_bb) & (br | bq)):
+            gives_check = True
+            
+        return True, gives_check
+
+@numba.njit(cache=True, boundscheck=False, fastmath=True)
 def get_pinned_pieces(piece_bbs, occupancy_bbs, side):
     """
     Returns a bitboard of all pieces of 'side' that are pinned to their King

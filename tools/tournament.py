@@ -394,7 +394,7 @@ if __name__ == "__main__":
     parser.add_argument("--engine2", default=default_engine2, help="Path to the second engine's main.py")
     parser.add_argument("--name1", default="New", help="Name of the first engine")
     parser.add_argument("--name2", default="Old", help="Name of the second engine")
-    parser.add_argument("--games", type=int, default=300, help="Number of games to play (default: 100)")
+    parser.add_argument("--games", type=int, default=100, help="Number of games to play (default: 100)")
     parser.add_argument("--time", type=int, default=1000, help="Time per move in ms (default: 1000)")
     parser.add_argument("--depth", type=int, default=None, help="Fixed search depth per move (overrides --time if set)")
 
