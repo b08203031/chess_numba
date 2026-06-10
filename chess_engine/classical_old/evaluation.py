@@ -399,6 +399,45 @@ def evaluate_pawn_structure(piece_bbs):
     return mg_score, eg_score, white_pawn_tropism, black_pawn_tropism, white_pawn_storm, black_pawn_storm
 
 
+@numba.njit(cache=True, boundscheck=False, fastmath=True)
+def evaluate_pawn_structure_cached(piece_bbs, pawn_key, search_context):
+    """
+    Cached version of evaluate_pawn_structure using Pawn Hash Table.
+    """
+    idx = int(pawn_key & np.uint64(0xFFFF))
+    white_king_sq = get_lsb_index(piece_bbs[5])
+    black_king_sq = get_lsb_index(piece_bbs[11])
+    
+    # Verify pawn key and king positions to validate king safety / tropism / storm caches
+    if (search_context.pawn_table_keys[idx] == pawn_key and 
+        search_context.pawn_table_w_king_sq[idx] == white_king_sq and 
+        search_context.pawn_table_b_king_sq[idx] == black_king_sq):
+        
+        return (
+            search_context.pawn_table_mg[idx],
+            search_context.pawn_table_eg[idx],
+            search_context.pawn_table_w_tropism[idx],
+            search_context.pawn_table_b_tropism[idx],
+            search_context.pawn_table_w_storm[idx],
+            search_context.pawn_table_b_storm[idx]
+        )
+        
+    mg, eg, w_trop, b_trop, w_storm, b_storm = evaluate_pawn_structure(piece_bbs)
+    
+    # Store computed values in cache (write-always)
+    search_context.pawn_table_keys[idx] = pawn_key
+    search_context.pawn_table_w_king_sq[idx] = np.int8(white_king_sq)
+    search_context.pawn_table_b_king_sq[idx] = np.int8(black_king_sq)
+    search_context.pawn_table_mg[idx] = mg
+    search_context.pawn_table_eg[idx] = eg
+    search_context.pawn_table_w_tropism[idx] = w_trop
+    search_context.pawn_table_b_tropism[idx] = b_trop
+    search_context.pawn_table_w_storm[idx] = w_storm
+    search_context.pawn_table_b_storm[idx] = b_storm
+    
+    return mg, eg, w_trop, b_trop, w_storm, b_storm
+
+
 @numba.njit(numba.types.UniTuple(numba.int32, 2)(piece_bbs_signature, piece_counts_signature), cache=True, boundscheck=False, fastmath=True)
 def evaluate_piece_coordination(piece_bbs, piece_counts):
     """
@@ -1322,7 +1361,7 @@ def _process_piece_score_and_count(piece_type, bb, is_white):
     return mg, eg, count
 
 @numba.njit(cache=True, boundscheck=False, fastmath=True)
-def _evaluate_position_jit(piece_bbs, occupancy_bbs, game_state, lazy: bool):
+def _evaluate_position_jit(piece_bbs, occupancy_bbs, game_state, lazy: bool, search_context=None):
     """
     使用 Tapered Evaluation (加權評估) 模型評估目前局面，並從當前執棋方的角度返回分數。
     評估包括：材質、PST、國王安全、兵形結構、棋子協同性和機動性。
@@ -1390,7 +1429,11 @@ def _evaluate_position_jit(piece_bbs, occupancy_bbs, game_state, lazy: bool):
      white_piece_tropism, black_piece_tropism, mg_outpost, eg_outpost) = evaluate_attacks_mobility_threats(piece_bbs, occupancy_bbs)
 
     # --- 4. 加入兵形結構分數 (Moved up for King Safety dependency) ---
-    mg_pawn_structure, eg_pawn_structure, white_pawn_tropism, black_pawn_tropism, white_pawn_storm, black_pawn_storm = evaluate_pawn_structure(piece_bbs)
+    if search_context is not None:
+        pawn_key = game_state[PAWN_KEY_INDEX]
+        mg_pawn_structure, eg_pawn_structure, white_pawn_tropism, black_pawn_tropism, white_pawn_storm, black_pawn_storm = evaluate_pawn_structure_cached(piece_bbs, pawn_key, search_context)
+    else:
+        mg_pawn_structure, eg_pawn_structure, white_pawn_tropism, black_pawn_tropism, white_pawn_storm, black_pawn_storm = evaluate_pawn_structure(piece_bbs)
     mg_score += mg_pawn_structure
     eg_score += eg_pawn_structure
 

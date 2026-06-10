@@ -84,6 +84,15 @@ search_context_spec = [
     ('cutoff_cnt', numba.int32[::1]),
     ('reduction_stack', numba.int32[::1]),
     ('tt_pv_stack', numba.boolean[::1]),
+    ('pawn_table_keys', numba.uint64[::1]),
+    ('pawn_table_w_king_sq', numba.int8[::1]),
+    ('pawn_table_b_king_sq', numba.int8[::1]),
+    ('pawn_table_mg', numba.int32[::1]),
+    ('pawn_table_eg', numba.int32[::1]),
+    ('pawn_table_w_tropism', numba.int32[::1]),
+    ('pawn_table_b_tropism', numba.int32[::1]),
+    ('pawn_table_w_storm', numba.int32[::1]),
+    ('pawn_table_b_storm', numba.int32[::1]),
 ]
 
 @jitclass(search_context_spec)
@@ -194,6 +203,17 @@ class _SearchContextJIT:
         self.cutoff_cnt = np.zeros(MAX_PLY, dtype=np.int32)
         self.reduction_stack = np.zeros(MAX_PLY, dtype=np.int32)
         self.tt_pv_stack = np.zeros(MAX_PLY, dtype=np.bool_)
+        
+        # Pawn Hash Table arrays initialization (65536 entries, ~2.1MB total memory footprint)
+        self.pawn_table_keys = np.full(65536, np.uint64(0xFFFFFFFFFFFFFFFF), dtype=np.uint64)
+        self.pawn_table_w_king_sq = np.full(65536, -1, dtype=np.int8)
+        self.pawn_table_b_king_sq = np.full(65536, -1, dtype=np.int8)
+        self.pawn_table_mg = np.zeros(65536, dtype=np.int32)
+        self.pawn_table_eg = np.zeros(65536, dtype=np.int32)
+        self.pawn_table_w_tropism = np.zeros(65536, dtype=np.int32)
+        self.pawn_table_b_tropism = np.zeros(65536, dtype=np.int32)
+        self.pawn_table_w_storm = np.zeros(65536, dtype=np.int32)
+        self.pawn_table_b_storm = np.zeros(65536, dtype=np.int32)
 
 
 
