@@ -31,7 +31,9 @@ AI 助手在執行任務時，應依據觸發條件自動載入並遵循以下�
     * *重要提醒*：
         * **工作前讀文檔**：修改任何檔案前，必須先閱讀 `README.md` 的「📂 專案文件導覽 (Documentation Map)」以檢索相關背景。
         * **工作後更新文檔**：新增功能或重構後，必須主動更新技術文檔並同步 `README.md` 中的導覽索引。
+        * **讀取 Stockfish 原始碼**：為對齊演算法與數值細節，本專案根目錄下設有 `stockfish_repo/src/` 資料夾，AI 助手可以使用 `grep_search` 或開啟 `research` 子代理 (Subagent) 在背景閱讀與分析該目錄下的 C++ 原始碼。
         * **允許輕量自動測試**：對於不需要或僅需輕度 Numba 編譯的單元測試（例如 `unittest`），AI 助手可以主動在背景執行以驗證代碼正確性。但重型測試（如 Elo 對局、大型 Benchmark 或大規模 Perft 測試）仍需取得使用者指示或核准後始可執行。
+        * **編譯時間警示**：由於 Numba JIT 靜態編譯計算密集型函數可能耗時較長，首次執行測試或搜尋（編譯期）可能需要超過 5 分鐘，請耐心等候，切勿頻繁輪詢或重複啟動任務。
 2. **Numba 編譯相容性限制**：參見 [numba-jit.md](file:///.agents/rules/numba-jit.md) (Always-on)
     * 標準 Numba `nopython` 限制（禁止 Class, dynamic types, dict/set comprehensions, try/except）與專案數組規範。
 3. **棋盤完整性與可逆性**：參見 [board-integrity.md](file:///.agents/rules/board-integrity.md) (Glob: `board_operations.py`, `board.py`, `move_generator.py`, `zobrist.py`)

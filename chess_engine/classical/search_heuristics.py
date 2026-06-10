@@ -153,6 +153,69 @@ def get_quiet_stat_score(search_context, ply, from_sq, to_sq, aggressor_type, pa
     return score
 
 @numba.njit(cache=True, boundscheck=False, fastmath=True)
+def score_captures_lazy(piece_bbs, occupancy_bbs, game_state, moves, scores, start_idx, end_idx, search_context, pinned_white, pinned_black, ply):
+    side_to_move = game_state[0]
+    
+    for i in range(start_idx, end_idx):
+        move = moves[i]
+        to_square = get_to_square(move)
+        from_sq = get_from_square(move)
+        
+        victim_type = find_piece_type_on_square_side(piece_bbs, to_square, 1 - side_to_move)
+        aggressor_type = find_piece_type_on_square_side(piece_bbs, from_sq, side_to_move)
+        
+        if victim_type == -1 and get_special_move_flag(move) == SPECIAL_MOVE_FLAG_EN_PASSANT:
+            victim_type = 0 # Pawn value for En Passant
+            
+        search_context.aggressor_cache[ply, i] = aggressor_type
+        search_context.victim_cache[ply, i] = victim_type
+
+        mvv_lva = 0
+        if victim_type != -1:
+            mvv_lva = MG_MATERIAL_VALUES[victim_type % 6] - MG_MATERIAL_VALUES[aggressor_type % 6]
+        
+        # Base score formula: mvv_lva + capture_history_bonus
+        base_score = mvv_lva
+        if victim_type != -1:
+            base_score += search_context.capture_history[aggressor_type, to_square, victim_type]
+            
+        scores[i] = base_score
+
+@numba.njit(cache=True, boundscheck=False, fastmath=True)
+def score_captures_with_tt_lazy(piece_bbs, occupancy_bbs, game_state, moves, scores, move_count, tt_move, pinned_white, pinned_black, search_context, ply):
+    side_to_move = game_state[0]
+    
+    for i in range(move_count):
+        move = moves[i]
+        score = 0
+        
+        if move == tt_move:
+            score = SCORE_TT_MOVE
+        else:
+            to_square = get_to_square(move)
+            from_sq = get_from_square(move)
+            
+            victim_type = find_piece_type_on_square_side(piece_bbs, to_square, 1 - side_to_move)
+            aggressor_type = find_piece_type_on_square_side(piece_bbs, from_sq, side_to_move)
+            
+            if victim_type == -1 and get_special_move_flag(move) == SPECIAL_MOVE_FLAG_EN_PASSANT:
+                victim_type = 0 # Pawn value for En Passant
+                
+            search_context.aggressor_cache[ply, i] = aggressor_type
+            search_context.victim_cache[ply, i] = victim_type
+
+            mvv_lva = 0
+            if victim_type != -1:
+                mvv_lva = MG_MATERIAL_VALUES[victim_type % 6] - MG_MATERIAL_VALUES[aggressor_type % 6]
+            
+            base_score = mvv_lva
+            if victim_type != -1:
+                base_score += search_context.capture_history[aggressor_type, to_square, victim_type]
+            score = base_score
+                 
+        scores[i] = score
+
+@numba.njit(cache=True, boundscheck=False, fastmath=True)
 def score_captures(piece_bbs, occupancy_bbs, game_state, moves, scores, start_idx, end_idx, search_context, pinned_white, pinned_black, ply):
     side_to_move = game_state[0]
     

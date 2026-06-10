@@ -22,7 +22,7 @@ from chess_engine.classical.move import (
 )
 from chess_engine.classical.constants import (
     BB_SQUARES, MG_MATERIAL_VALUES, INFINITY, MAX_QUIESCENCE_DEPTH, ASPIRATION_WINDOW_SIZE,
-    NULL_MOVE_REDUCTION, MAX_PLY, LMR_MIN_DEPTH, LMR_MIN_QUIET_MOVE_INDEX, LMR_REDUCTION, SEE_THRESHOLD,
+    NULL_MOVE_REDUCTION, MAX_PLY, LMR_MIN_DEPTH, LMR_MIN_QUIET_MOVE_INDEX, LMR_REDUCTION, SEE_THRESHOLD, QS_SEE_THRESHOLD,
     ENABLE_SEE_IN_QUIESCENCE, MATE_SCORE, MATE_IN_MAX_PLY, NO_MOVE,
     RAZORING_MARGIN, FP_BASE, FP_MULTIPLIER, RFP_BASE_MULT, RFP_MAX_DEPTH, RFP_NO_TT_PENALTY,
     ENABLE_DELTA_PRUNING, DELTA_PRUNING_MARGIN, LMP_MOVE_COUNT, ENABLE_LMP,
@@ -72,6 +72,7 @@ from chess_engine.classical.move import move_to_uci
 from chess_engine.classical.search_heuristics import (
     update_history, update_butterfly_history, update_capture_history,
     update_continuation_history, update_pawn_history, score_captures, score_captures_with_tt,
+    score_captures_lazy, score_captures_with_tt_lazy,
     score_quiets, update_quiet_stats_on_tt_hit, get_lmr_reduction, partial_insertion_sort_moves,
     get_quiet_stat_score, compute_lmr_reduction_1024, get_lmr_stat_score
 )
@@ -105,7 +106,7 @@ def apply_correction_history_score(game_state, search_context, raw_static_eval):
                          global_minor * CORRECTION_HISTORY_MINOR_WEIGHT +
                          search_context.non_pawn_correction_history_black[np_black_key & CORRECTION_HISTORY_MASK] * CORRECTION_HISTORY_NON_PAWN_WEIGHT)
 
-    corrected = np.int32(raw_static_eval) + np.int32(correction_sum // CORRECTION_HISTORY_DIVISOR)
+    corrected = np.int32(raw_static_eval) + np.int32(trunc_div(correction_sum, CORRECTION_HISTORY_DIVISOR))
     return np.int32(min(max(corrected, SCORE_MIN), SCORE_MAX))
 
 full_static_eval_return_type = numba.types.Tuple((numba.int32, numba.int32, numba.boolean, numba.uint64, numba.uint64))
@@ -232,7 +233,7 @@ def quiescence_search(piece_bbs, occupancy_bbs, game_state, alpha, beta, ply, se
         pinned_white = get_pinned_pieces(piece_bbs, occupancy_bbs, WHITE)
         pinned_black = get_pinned_pieces(piece_bbs, occupancy_bbs, BLACK)
 
-    score_captures_with_tt(
+    score_captures_with_tt_lazy(
         piece_bbs, occupancy_bbs, game_state,
         moves,
         scores,
@@ -277,7 +278,9 @@ def quiescence_search(piece_bbs, occupancy_bbs, game_state, alpha, beta, ply, se
 
         if not is_currently_in_check:
             if ENABLE_SEE_IN_QUIESCENCE and move != qs_tt_move:
-                if score_val < SCORE_GOOD_CAPTURE_BONUS:
+                c_from = get_from_square(move)
+                c_to = get_to_square(move)
+                if not _see_ge_jit(piece_bbs, occupancy_bbs, game_state[0], c_from, c_to, QS_SEE_THRESHOLD, pinned_white, pinned_black):
                     continue
 
         unmake_info = make_move(piece_bbs, occupancy_bbs, game_state, move)
@@ -352,7 +355,7 @@ def get_next_move(piece_bbs, occupancy_bbs, game_state, search_context, ply, tt_
             
         elif mp_stage == STAGE_GEN_CAPTURES:
             search_context.mp_captures_end[ply] = generate_pseudo_legal_captures_buffer(piece_bbs, occupancy_bbs, game_state, search_context.moves_buffer, ply)
-            score_captures(piece_bbs, occupancy_bbs, game_state, moves, scores, 0, search_context.mp_captures_end[ply], search_context, pinned_white, pinned_black, ply)
+            score_captures_lazy(piece_bbs, occupancy_bbs, game_state, moves, scores, 0, search_context.mp_captures_end[ply], search_context, pinned_white, pinned_black, ply)
             partial_insertion_sort_moves(moves, scores, 0, search_context.mp_captures_end[ply], -1000000)
             search_context.mp_current_idx[ply] = 0
             search_context.mp_stage[ply] = STAGE_GOOD_CAPTURES
@@ -363,13 +366,17 @@ def get_next_move(piece_bbs, occupancy_bbs, game_state, search_context, ply, tt_
             current_idx = search_context.mp_current_idx[ply]
             if current_idx < captures_end:
                 candidate_move = moves[current_idx]
-                candidate_score = scores[current_idx]
                 search_context.mp_current_idx[ply] += 1
                 
                 if candidate_move == tt_move or candidate_move == excluded_move:
                     continue
                     
-                if candidate_score >= 0:
+                # Lazy SEE Evaluation with threshold 0
+                c_from = get_from_square(candidate_move)
+                c_to = get_to_square(candidate_move)
+                is_good = _see_ge_jit(piece_bbs, occupancy_bbs, game_state[0], c_from, c_to, 0, pinned_white, pinned_black)
+                
+                if is_good:
                     move = candidate_move
                     return move
                 else:
@@ -806,7 +813,7 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                 pc_pinned_w = get_pinned_pieces(piece_bbs, occupancy_bbs, WHITE)
                 pc_pinned_b = get_pinned_pieces(piece_bbs, occupancy_bbs, BLACK)
 
-            score_captures(
+            score_captures_lazy(
                 piece_bbs, occupancy_bbs, game_state,
                 search_context.moves_buffer[ply],
                 search_context.move_scores[ply],
@@ -1622,6 +1629,8 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                     if opp_prev_move_2 != NO_MOVE and opp_prev_piece_2 != -1:
                         update_continuation_history(search_context, 3, opp_prev_move_2, opp_prev_piece_2, prev_move, prev_piece, sub_bonus)
 
+    original_best_move = best_move
+
     if best_move == NO_MOVE and search_context.mp_captures_end[ply] + search_context.mp_quiets_end[ply] > 0:
         # Fallback to first move that is not excluded
         for i in range(search_context.mp_captures_end[ply] + search_context.mp_quiets_end[ply]):
@@ -1630,51 +1639,55 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                 break
     
     # --- Update Correction History ---
-    if depth >= CORRECTION_HISTORY_UPDATE_DEPTH and not is_currently_in_check and best_move != NO_MOVE and abs(max_eval) < MATE_SCORE - MAX_PLY:
+    if depth >= CORRECTION_HISTORY_UPDATE_DEPTH and not is_currently_in_check and abs(max_eval) < MATE_SCORE - MAX_PLY:
         # Only update if we have a valid static eval (raw_static_eval != -INFINITY)
-        # And we are not in check
         if raw_static_eval != -INFINITY:
-            diff = max_eval - raw_static_eval
-            
             pawn_key = game_state[PAWN_KEY_INDEX]
             minor_key = game_state[MINOR_KEY_INDEX]
             np_white_key = game_state[NON_PAWN_KEY_WHITE_INDEX]
             np_black_key = game_state[NON_PAWN_KEY_BLACK_INDEX]
             side = game_state[0]
             
-            # Stockfish-style bonus calculation with depth scaling
-            bonus = (max_eval - raw_static_eval) * depth // (10 if best_move != NO_MOVE else 8)
-            # Limit single bonus to 1/4 of the total limit
-            bonus = min(max(bonus, -CORRECTION_HISTORY_LIMIT // 4), CORRECTION_HISTORY_LIMIT // 4)
+            is_capture = False
+            if original_best_move != NO_MOVE:
+                to_sq = get_to_square(original_best_move)
+                move_flag = get_special_move_flag(original_best_move)
+                enemy_side = 1 - side
+                is_capture = ((occupancy_bbs[enemy_side] & BB_SQUARES[to_sq]) != 0) or (move_flag == SPECIAL_MOVE_FLAG_EN_PASSANT)
             
-            # Absolute White perspective for Pawn and Minor
-            white_bonus = bonus if side == WHITE else -bonus
-            
-            # Stockfish Update Formula: val + bonus - val * abs(bonus) / LIMIT
-            
-            # Update Pawn Correction (relative to White)
-            idx_pawn = pawn_key & CORRECTION_HISTORY_MASK
-            curr_pawn = search_context.pawn_correction_history[idx_pawn]
-            search_context.pawn_correction_history[idx_pawn] = curr_pawn + white_bonus - (curr_pawn * abs(white_bonus)) // CORRECTION_HISTORY_LIMIT
-            
-            # Update Minor Correction (relative to White)
-            idx_minor = minor_key & CORRECTION_HISTORY_MASK
-            curr_minor = search_context.minor_correction_history[idx_minor]
-            # Minor update in SF is further scaled: bonus * 155 / 128
-            scaled_minor_bonus = (white_bonus * 155) // 128
-            search_context.minor_correction_history[idx_minor] = curr_minor + scaled_minor_bonus - (curr_minor * abs(scaled_minor_bonus)) // CORRECTION_HISTORY_LIMIT
-            
-            # Update Non-Pawn Correction based on Side (relative to Side to Move)
-            # Non-Pawn update in SF is further scaled: bonus * 181 / 128
-            scaled_np_bonus = (bonus * 181) // 128
-            if side == WHITE:
-                idx_np = np_white_key & CORRECTION_HISTORY_MASK
-                curr_np = search_context.non_pawn_correction_history_white[idx_np]
-                search_context.non_pawn_correction_history_white[idx_np] = curr_np + scaled_np_bonus - (curr_np * abs(scaled_np_bonus)) // CORRECTION_HISTORY_LIMIT
-            else:
-                idx_np = np_black_key & CORRECTION_HISTORY_MASK
-                curr_np = search_context.non_pawn_correction_history_black[idx_np]
-                search_context.non_pawn_correction_history_black[idx_np] = curr_np + scaled_np_bonus - (curr_np * abs(scaled_np_bonus)) // CORRECTION_HISTORY_LIMIT
+            has_best_move = (original_best_move != NO_MOVE)
+            if not is_capture and (max_eval > static_score) == has_best_move:
+                # Based on static_score calculation of bonus
+                diff = max_eval - static_score
+                bonus = trunc_div(diff * depth, (10 if has_best_move else 8))
+                
+                # Limit single bonus to 1/4 of the total limit
+                bonus = min(max(bonus, -CORRECTION_HISTORY_LIMIT // 4), CORRECTION_HISTORY_LIMIT // 4)
+                
+                # Absolute White perspective for Pawn and Minor
+                white_bonus = bonus if side == WHITE else -bonus
+                
+                # Update Pawn Correction (relative to White)
+                idx_pawn = pawn_key & CORRECTION_HISTORY_MASK
+                curr_pawn = search_context.pawn_correction_history[idx_pawn]
+                search_context.pawn_correction_history[idx_pawn] = curr_pawn + white_bonus - trunc_div(curr_pawn * abs(white_bonus), CORRECTION_HISTORY_LIMIT)
+                
+                # Update Minor Correction (relative to White)
+                idx_minor = minor_key & CORRECTION_HISTORY_MASK
+                curr_minor = search_context.minor_correction_history[idx_minor]
+                scaled_minor_bonus = trunc_div(white_bonus * 155, 128)
+                search_context.minor_correction_history[idx_minor] = curr_minor + scaled_minor_bonus - trunc_div(curr_minor * abs(scaled_minor_bonus), CORRECTION_HISTORY_LIMIT)
+                
+                # Update Non-Pawn Correction based on Side (relative to Side to Move)
+                scaled_np_bonus = trunc_div(bonus * 181, 128)
+                if side == WHITE:
+                    idx_np = np_white_key & CORRECTION_HISTORY_MASK
+                    curr_np = search_context.non_pawn_correction_history_white[idx_np]
+                    search_context.non_pawn_correction_history_white[idx_np] = curr_np + scaled_np_bonus - trunc_div(curr_np * abs(scaled_np_bonus), CORRECTION_HISTORY_LIMIT)
+                else:
+                    idx_np = np_black_key & CORRECTION_HISTORY_MASK
+                    curr_np = search_context.non_pawn_correction_history_black[idx_np]
+                    search_context.non_pawn_correction_history_black[idx_np] = curr_np + scaled_np_bonus - trunc_div(curr_np * abs(scaled_np_bonus), CORRECTION_HISTORY_LIMIT)
 
     tt_score = max_eval
     if tt_score > MATE_IN_MAX_PLY: tt_score += ply

@@ -13,6 +13,7 @@ To maintain code cleanliness and documentation consistency across the project, a
 
 * **Retrieve Documentation**: Before modifying any files or starting a new design phase, the AI assistant **MUST** read the **📂 Project Documentation Map (📂 專案文件導覽)** section in the project root's `README.md`.
 * **Primary Objective**: Check if the module being modified already has an associated design specification, algorithm analysis report, or configuration guide. This prevents duplicate logic implementation or breaking established architectural invariants.
+* **Analyze Stockfish Reference Source Code**: To align mathematical formulas and algorithmic behaviors with standard chess engine designs, a complete Stockfish repository is located in `stockfish_repo/src/`. The AI assistant is encouraged to query and read this directory (using search tools or by spawning a background `research` subagent) before planning changes.
 
 ---
 
@@ -27,3 +28,4 @@ To maintain code cleanliness and documentation consistency across the project, a
 
 * **Allowed Automated Light Tests**: AI assistants are allowed to automatically run light unit tests (e.g., `unittest`) that do not require heavy Numba compiling, in order to verify code correctness immediately.
 * **Heavy Tests Restrictions**: Heavy benchmarks, Elo matches, and deep performance profiling tests must not be run automatically and require explicit user instructions.
+* **JIT Compilation Warning**: Because Numba JIT compiling complex mathematical search functions takes substantial resources and time, compilation/first run can take upwards of 5 minutes. The agent must wait patiently and avoid repeatedly executing search commands.
