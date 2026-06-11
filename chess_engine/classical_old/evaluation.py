@@ -147,8 +147,7 @@ def evaluate_pawn_structure(piece_bbs):
     white_pawns = piece_bbs[0]
     black_pawns = piece_bbs[6]
     
-    white_pieces = piece_bbs[0] | piece_bbs[1] | piece_bbs[2] | piece_bbs[3] | piece_bbs[4] | piece_bbs[5]
-    black_pieces = piece_bbs[6] | piece_bbs[7] | piece_bbs[8] | piece_bbs[9] | piece_bbs[10] | piece_bbs[11]
+
 
     white_king_sq = get_lsb_index(piece_bbs[5])
     black_king_sq = get_lsb_index(piece_bbs[11])
@@ -179,95 +178,30 @@ def evaluate_pawn_structure(piece_bbs):
             eg_score += ISOLATED_PAWN_PENALTY[1]
 
         # Doubled Pawn
-        # Check if there is a friendly pawn ahead on the same file
         if (WHITE_FORWARD_RANKS[sq] & white_pawns & FILE_MASKS[file_idx]):
-             mg_score += DOUBLED_PAWN_PENALTY[0]
-             eg_score += DOUBLED_PAWN_PENALTY[1]
+            mg_score += DOUBLED_PAWN_PENALTY[0]
+            eg_score += DOUBLED_PAWN_PENALTY[1]
 
-        # A. Passed Pawn Logic
-        if not (WHITE_PASSED_PAWN_MASKS[sq] & black_pawns):
-            # Check if blocked by any piece directly in front (Non-Pawn Blockader)
-            # This prevents giving full passed pawn bonus when blocked by knights/rooks, etc.
-            is_blocked = ((white_pieces | black_pieces) & (np.uint64(1) << np.uint64(sq + 8))) != 0
-            
-            p_bonus_mg = PASSED_PAWN_BONUS[rank, 0]
-            p_bonus_eg = PASSED_PAWN_BONUS[rank, 1]
-            if is_blocked:
-                p_bonus_mg //= 2
-                p_bonus_eg //= 2
-                
-            mg_score += p_bonus_mg
-            eg_score += p_bonus_eg
-
-        # B. Connected Passed Pawn Bonus — removed, replaced by SF11 Connected formula below
-
-        # King Proximity Logic & Blocked Check
-            # If the passed pawn is blocked by the enemy King, reduce the bonus drastically
-            block_sq = sq + 8
-            if block_sq < 64:
-                dist_friendly = CHEBYSHEV_DISTANCE[white_king_sq, block_sq]
-                dist_enemy = CHEBYSHEV_DISTANCE[black_king_sq, block_sq]
-
-                # Unstoppable Pawn (Simple Logic)
-                # If Friendly King is closer or supports, and Enemy King is far
-                # (TODO: Full Rule of the Square is complex with turn logic, this is a proxy)
-                
-                if rank > 3: # Only consider advanced passed pawns for proximity logic to save time/noise
-                    # Bonus if friendly king is closer, penalty if enemy is closer
-                    # Weight: 5 * Enemy - 2 * Friendly
-                    proximity_bonus = (dist_enemy * 5 - dist_friendly * 2) * rank # Scale by rank
-                    # Limit the impact
-                    proximity_bonus = max(-150, min(150, proximity_bonus))
-                    eg_score += proximity_bonus
-
-        # B. Candidate Passed Pawn Logic
-        # A pawn is a candidate if it's not passed, but only has 1 enemy pawn blocking its path
-        # (on an adjacent file) and NO enemy pawns on the same file ahead of it.
-        elif not (WHITE_FORWARD_RANKS[sq] & FILE_MASKS[file_idx] & black_pawns):
-            # No enemy pawns on the same file. Check adjacent files.
+        # Determine if passed or candidate for backward pawn exclusion
+        is_passed = not (WHITE_PASSED_PAWN_MASKS[sq] & black_pawns)
+        is_candidate = False
+        if not is_passed and not (WHITE_FORWARD_RANKS[sq] & FILE_MASKS[file_idx] & black_pawns):
             enemy_blockers = (WHITE_PASSED_PAWN_MASKS[sq] & black_pawns) | (RANK_MASKS[rank] & ADJACENT_FILES_MASKS[file_idx] & black_pawns)
-            # Count set bits (number of enemy blockers)
             num_blockers = 0
             temp_blockers = enemy_blockers
             while temp_blockers:
                 num_blockers += 1
                 temp_blockers &= temp_blockers - np.uint64(1)
-            
             if num_blockers == 1:
-                # Candidate passer!
-                c_bonus_mg = CANDIDATE_PASSED_PAWN_BONUS[rank, 0]
-                c_bonus_eg = CANDIDATE_PASSED_PAWN_BONUS[rank, 1]
-                
-                # If blocked by any piece directly in front, halve it too
-                is_blocked = ((white_pieces | black_pieces) & (np.uint64(1) << np.uint64(sq + 8))) != 0
-                if is_blocked:
-                    c_bonus_mg //= 2
-                    c_bonus_eg //= 2
-                    
-                mg_score += c_bonus_mg
-                eg_score += c_bonus_eg
+                is_candidate = True
 
-         # C. Backward Pawn Logic
-        # Definition: No friendly pawn on adjacent files is at the same rank or behind (supporting).
-        # A backward pawn is one that has fallen behind its neighbors.
-        # And the stop square (sq + 8) is controlled by an enemy pawn.
-        else: # Not passed
-             # Check adjacent friendly pawns support (from BEHIND or SAME RANK)
-             # Friendly pawns on adjacent files AND (rank <= current rank)
-             # WHITE_FORWARD_RANKS[sq] gives ranks > rank.
-             # BLACK_FORWARD_RANKS[sq] gives ranks < rank.
-             # We need ranks <= rank. So BLACK_FORWARD_RANKS[sq] | RANK_MASKS[rank].
-
+        # Backward Pawn Logic (Only for non-passed and non-candidate pawns)
+        if not is_passed and not is_candidate:
              support_mask = BLACK_FORWARD_RANKS[sq] | RANK_MASKS[rank]
              has_support = (adjacent_pawns & support_mask) != 0
-
              if not has_support:
-                 # Check if stop square is attacked by enemy pawn
-                 # Stop square for white is sq + 8
                  stop_sq = sq + 8
                  if stop_sq < 64:
-                     # Check if black pawns attack stop_sq
-                     # PAWN_ATTACKS[1, stop_sq] gives squares occupied by Black pawns that attack stop_sq.
                      if (PAWN_ATTACKS[1, stop_sq] & black_pawns):
                          mg_score += BACKWARD_PAWN_PENALTY[0]
                          eg_score += BACKWARD_PAWN_PENALTY[1]
@@ -282,7 +216,10 @@ def evaluate_pawn_structure(piece_bbs):
             sup_cnt = count_bits(support)
             v = CONNECTED_BONUS[rank] * (np.int32(2) + ph - opposed) + CONNECTED_SUPPORT_WEIGHT * sup_cnt
             mg_score += v
-            eg_score += v * max(np.int32(0), np.int32(rank) - np.int32(2)) // np.int32(2)
+            if is_passed:
+                eg_score += (v * (np.int32(rank) + np.int32(1))) // np.int32(4)
+            else:
+                eg_score += v // 2
 
         temp_wp &= temp_wp - np.uint64(1)
 
@@ -310,74 +247,31 @@ def evaluate_pawn_structure(piece_bbs):
             eg_score -= ISOLATED_PAWN_PENALTY[1]
 
         # Doubled Pawn
-        # Check if there is a friendly pawn ahead (towards rank 0) on the same file
         if (BLACK_FORWARD_RANKS[sq] & black_pawns & FILE_MASKS[file_idx]):
              mg_score -= DOUBLED_PAWN_PENALTY[0]
              eg_score -= DOUBLED_PAWN_PENALTY[1]
 
-        # A. Passed Pawn Logic
-        if not (BLACK_PASSED_PAWN_MASKS[sq] & white_pawns):
-            # Check if blocked by any piece directly in front (Non-Pawn Blockader)
-            is_blocked = ((white_pieces | black_pieces) & (np.uint64(1) << np.uint64(sq - 8))) != 0
-            
-            p_bonus_mg = PASSED_PAWN_BONUS[relative_rank, 0]
-            p_bonus_eg = PASSED_PAWN_BONUS[relative_rank, 1]
-            if is_blocked:
-                p_bonus_mg //= 2
-                p_bonus_eg //= 2
-                
-            mg_score -= p_bonus_mg
-            eg_score -= p_bonus_eg
-
-        # B. Connected Passed Pawn Bonus — removed, replaced by SF11 Connected formula below
-
-        # King Proximity Logic & Blocked Check
-            block_sq = sq - 8
-            if block_sq >= 0:
-                dist_friendly = CHEBYSHEV_DISTANCE[black_king_sq, block_sq]
-                dist_enemy = CHEBYSHEV_DISTANCE[white_king_sq, block_sq]
-
-                # Rule 1: Pawn Blocked by Enemy King
-                if relative_rank > 3:
-                    proximity_bonus = (dist_enemy * 5 - dist_friendly * 2) * relative_rank
-                    proximity_bonus = max(-150, min(150, proximity_bonus))
-                    eg_score -= proximity_bonus
-
-        # B. Candidate Passed Pawn Logic (Black)
-        elif not (BLACK_FORWARD_RANKS[sq] & FILE_MASKS[file_idx] & white_pawns):
+        # Determine if passed or candidate for backward pawn exclusion
+        is_passed = not (BLACK_PASSED_PAWN_MASKS[sq] & white_pawns)
+        is_candidate = False
+        if not is_passed and not (BLACK_FORWARD_RANKS[sq] & FILE_MASKS[file_idx] & white_pawns):
             enemy_blockers = (BLACK_PASSED_PAWN_MASKS[sq] & white_pawns) | (RANK_MASKS[rank] & ADJACENT_FILES_MASKS[file_idx] & white_pawns)
             num_blockers = 0
             temp_blockers = enemy_blockers
             while temp_blockers:
                 num_blockers += 1
                 temp_blockers &= temp_blockers - np.uint64(1)
-            
             if num_blockers == 1:
-                c_bonus_mg = CANDIDATE_PASSED_PAWN_BONUS[relative_rank, 0]
-                c_bonus_eg = CANDIDATE_PASSED_PAWN_BONUS[relative_rank, 1]
-                
-                is_blocked = ((white_pieces | black_pieces) & (np.uint64(1) << np.uint64(sq - 8))) != 0
-                if is_blocked:
-                    c_bonus_mg //= 2
-                    c_bonus_eg //= 2
-                    
-                mg_score -= c_bonus_mg
-                eg_score -= c_bonus_eg
+                is_candidate = True
 
-        # C. Backward Pawn Logic
-        else:
-             # Support: Friendly pawns on adjacent files and rank <= current rank (since black moves down)
-             # BLACK_FORWARD_RANKS[sq] gives ranks < rank.
-             # FIX: Support comes from BEHIND (ranks > rank for Black). This corresponds to WHITE_FORWARD_RANKS for Black.
-
+        # Backward Pawn Logic (Only for non-passed and non-candidate pawns)
+        if not is_passed and not is_candidate:
              support_mask = WHITE_FORWARD_RANKS[sq] | RANK_MASKS[rank]
              has_support = (adjacent_pawns & support_mask) != 0
 
              if not has_support:
                  stop_sq = sq - 8
                  if stop_sq >= 0:
-                     # Check if white pawns attack stop_sq
-                     # PAWN_ATTACKS[0, stop_sq] gives squares occupied by White pawns that attack stop_sq.
                      if (PAWN_ATTACKS[0, stop_sq] & white_pawns):
                          mg_score -= BACKWARD_PAWN_PENALTY[0]
                          eg_score -= BACKWARD_PAWN_PENALTY[1]
@@ -392,7 +286,10 @@ def evaluate_pawn_structure(piece_bbs):
             sup_cnt = count_bits(support)
             v = CONNECTED_BONUS[relative_rank] * (np.int32(2) + ph - opposed) + CONNECTED_SUPPORT_WEIGHT * sup_cnt
             mg_score -= v
-            eg_score -= v * max(np.int32(0), np.int32(relative_rank) - np.int32(2)) // np.int32(2)
+            if is_passed:
+                eg_score -= (v * (np.int32(relative_rank) + np.int32(1))) // np.int32(4)
+            else:
+                eg_score -= v // 2
 
         temp_bp &= temp_bp - np.uint64(1)
 
@@ -436,6 +333,281 @@ def evaluate_pawn_structure_cached(piece_bbs, pawn_key, search_context):
     search_context.pawn_table_b_storm[idx] = b_storm
     
     return mg, eg, w_trop, b_trop, w_storm, b_storm
+
+
+@numba.njit(cache=True, boundscheck=False, fastmath=True)
+def evaluate_passed_pawns(piece_bbs, occupancy_bbs, white_attacks, black_attacks):
+    """
+    Evaluates passed pawns and candidate passed pawns dynamically.
+    Incorporates blockade scaling, Tarrasch rook/queen behind passed pawn support,
+    and King proximity logic.
+    """
+    mg_score = np.int32(0)
+    eg_score = np.int32(0)
+
+    white_pawns = piece_bbs[0]
+    black_pawns = piece_bbs[6]
+
+    # Count non-pawns for material-based scaling
+    w_non_pawns = count_bits(piece_bbs[1] | piece_bbs[2] | piece_bbs[3] | piece_bbs[4])
+    b_non_pawns = count_bits(piece_bbs[7] | piece_bbs[8] | piece_bbs[9] | piece_bbs[10])
+    
+    w_minors = count_bits(piece_bbs[1] | piece_bbs[2])
+    b_minors = count_bits(piece_bbs[7] | piece_bbs[8])
+    
+    w_scale = np.int32(4)
+    if w_non_pawns < b_non_pawns:
+        w_scale = np.int32(2)
+        if w_minors == 0 and b_minors >= 1:
+            w_scale = np.int32(1)
+            
+    b_scale = np.int32(4)
+    if b_non_pawns < w_non_pawns:
+        b_scale = np.int32(2)
+        if b_minors == 0 and w_minors >= 1:
+            b_scale = np.int32(1)
+
+    white_king_sq = get_lsb_index(piece_bbs[5])
+    black_king_sq = get_lsb_index(piece_bbs[11])
+
+    all_pieces = occupancy_bbs[2]
+
+    # --- 1. Iterate White Pawns ---
+    temp_wp = white_pawns
+    while temp_wp:
+        sq = get_lsb_index(temp_wp)
+        rank = sq // 8
+        file_idx = sq % 8
+
+        is_passed = not (WHITE_PASSED_PAWN_MASKS[sq] & black_pawns)
+        is_candidate = False
+        if not is_passed and not (WHITE_FORWARD_RANKS[sq] & FILE_MASKS[file_idx] & black_pawns):
+            enemy_blockers = (WHITE_PASSED_PAWN_MASKS[sq] & black_pawns) | (RANK_MASKS[rank] & ADJACENT_FILES_MASKS[file_idx] & black_pawns)
+            num_blockers = 0
+            temp_blockers = enemy_blockers
+            while temp_blockers:
+                num_blockers += 1
+                temp_blockers &= temp_blockers - np.uint64(1)
+            if num_blockers == 1:
+                is_candidate = True
+
+        if is_passed:
+            p_bonus_mg = PASSED_PAWN_BONUS[rank, 0]
+            p_bonus_eg = PASSED_PAWN_BONUS[rank, 1]
+
+            # PassedFile adjustment
+            edge_dist = np.int32(min(file_idx, 7 - file_idx))
+            p_bonus_mg += PASSED_FILE_BONUS[0] * edge_dist
+            p_bonus_eg += PASSED_FILE_BONUS[1] * edge_dist
+
+            # Blockade and Path Safety Scaling
+            block_sq = sq + 8
+            is_blocked = (all_pieces & (np.uint64(1) << np.uint64(block_sq))) != 0
+            block_attacked = (black_attacks & (np.uint64(1) << np.uint64(block_sq))) != 0
+            block_defended = (white_attacks & (np.uint64(1) << np.uint64(block_sq))) != 0
+
+            path_mask = WHITE_FORWARD_RANKS[sq] & FILE_MASKS[file_idx]
+            path_attacked = (black_attacks & path_mask) != 0
+            path_occupied = (all_pieces & path_mask) != 0
+
+            if is_blocked:
+                p_bonus_mg //= 4
+                p_bonus_eg //= 4
+            elif block_attacked and not block_defended:
+                p_bonus_mg //= 2
+                p_bonus_eg //= 2
+            elif block_attacked and block_defended:
+                p_bonus_mg = (p_bonus_mg * 3) // 4
+                p_bonus_eg = (p_bonus_eg * 3) // 4
+            elif path_attacked or path_occupied:
+                p_bonus_mg = (p_bonus_mg * 3) // 4
+                p_bonus_eg = (p_bonus_eg * 3) // 4
+
+            # Tarrasch support from behind (Rook/Queen)
+            behind_mask = BLACK_FORWARD_RANKS[sq] & FILE_MASKS[file_idx]
+            has_support_behind = ((piece_bbs[3] | piece_bbs[4]) & behind_mask) != 0
+            if has_support_behind:
+                p_bonus_mg += 15
+                p_bonus_eg += 30
+
+            # Scale passed pawn bonus
+            p_bonus_mg = (p_bonus_mg * w_scale) // 4
+            p_bonus_eg = (p_bonus_eg * w_scale) // 4
+
+            mg_score += p_bonus_mg
+            eg_score += p_bonus_eg
+
+            # King Proximity Logic
+            if block_sq < 64:
+                r = np.int32(rank) - np.int32(1)
+                rr = r * (r - np.int32(1))
+                if rr > 0:
+                    dist_friendly = CHEBYSHEV_DISTANCE[white_king_sq, block_sq]
+                    dist_enemy = CHEBYSHEV_DISTANCE[black_king_sq, block_sq]
+
+                    dist_friendly_2nd = np.int32(0)
+                    if (block_sq // 8) != 7:
+                        dist_friendly_2nd = CHEBYSHEV_DISTANCE[white_king_sq, block_sq + 8]
+
+                    proximity_bonus = (dist_enemy * 5 - dist_friendly * 2 - dist_friendly_2nd) * rr
+                    proximity_bonus = max(-150, min(150, proximity_bonus))
+                    proximity_bonus = (proximity_bonus * w_scale) // 4
+                    eg_score += proximity_bonus
+
+        elif is_candidate:
+            c_bonus_mg = CANDIDATE_PASSED_PAWN_BONUS[rank, 0]
+            c_bonus_eg = CANDIDATE_PASSED_PAWN_BONUS[rank, 1]
+
+            # Blockade and Path Safety Scaling (applied to candidates similarly)
+            block_sq = sq + 8
+            is_blocked = (all_pieces & (np.uint64(1) << np.uint64(block_sq))) != 0
+            block_attacked = (black_attacks & (np.uint64(1) << np.uint64(block_sq))) != 0
+            block_defended = (white_attacks & (np.uint64(1) << np.uint64(block_sq))) != 0
+
+            path_mask = WHITE_FORWARD_RANKS[sq] & FILE_MASKS[file_idx]
+            path_attacked = (black_attacks & path_mask) != 0
+            path_occupied = (all_pieces & path_mask) != 0
+
+            if is_blocked:
+                c_bonus_mg //= 4
+                c_bonus_eg //= 4
+            elif block_attacked and not block_defended:
+                c_bonus_mg //= 2
+                c_bonus_eg //= 2
+            elif block_attacked and block_defended:
+                c_bonus_mg = (c_bonus_mg * 3) // 4
+                c_bonus_eg = (c_bonus_eg * 3) // 4
+            elif path_attacked or path_occupied:
+                c_bonus_mg = (c_bonus_mg * 3) // 4
+                c_bonus_eg = (c_bonus_eg * 3) // 4
+
+            c_bonus_mg = (c_bonus_mg * w_scale) // 4
+            c_bonus_eg = (c_bonus_eg * w_scale) // 4
+
+            mg_score += c_bonus_mg
+            eg_score += c_bonus_eg
+
+        temp_wp &= temp_wp - np.uint64(1)
+
+    # --- 2. Iterate Black Pawns ---
+    temp_bp = black_pawns
+    while temp_bp:
+        sq = get_lsb_index(temp_bp)
+        rank = sq // 8
+        relative_rank = 7 - rank
+        file_idx = sq % 8
+
+        is_passed = not (BLACK_PASSED_PAWN_MASKS[sq] & white_pawns)
+        is_candidate = False
+        if not is_passed and not (BLACK_FORWARD_RANKS[sq] & FILE_MASKS[file_idx] & white_pawns):
+            enemy_blockers = (BLACK_PASSED_PAWN_MASKS[sq] & white_pawns) | (RANK_MASKS[rank] & ADJACENT_FILES_MASKS[file_idx] & white_pawns)
+            num_blockers = 0
+            temp_blockers = enemy_blockers
+            while temp_blockers:
+                num_blockers += 1
+                temp_blockers &= temp_blockers - np.uint64(1)
+            if num_blockers == 1:
+                is_candidate = True
+
+        if is_passed:
+            p_bonus_mg = PASSED_PAWN_BONUS[relative_rank, 0]
+            p_bonus_eg = PASSED_PAWN_BONUS[relative_rank, 1]
+
+            # PassedFile adjustment
+            edge_dist = np.int32(min(file_idx, 7 - file_idx))
+            p_bonus_mg += PASSED_FILE_BONUS[0] * edge_dist
+            p_bonus_eg += PASSED_FILE_BONUS[1] * edge_dist
+
+            # Blockade and Path Safety Scaling
+            block_sq = sq - 8
+            is_blocked = (all_pieces & (np.uint64(1) << np.uint64(block_sq))) != 0
+            block_attacked = (white_attacks & (np.uint64(1) << np.uint64(block_sq))) != 0
+            block_defended = (black_attacks & (np.uint64(1) << np.uint64(block_sq))) != 0
+
+            path_mask = BLACK_FORWARD_RANKS[sq] & FILE_MASKS[file_idx]
+            path_attacked = (white_attacks & path_mask) != 0
+            path_occupied = (all_pieces & path_mask) != 0
+
+            if is_blocked:
+                p_bonus_mg //= 4
+                p_bonus_eg //= 4
+            elif block_attacked and not block_defended:
+                p_bonus_mg //= 2
+                p_bonus_eg //= 2
+            elif block_attacked and block_defended:
+                p_bonus_mg = (p_bonus_mg * 3) // 4
+                p_bonus_eg = (p_bonus_eg * 3) // 4
+            elif path_attacked or path_occupied:
+                p_bonus_mg = (p_bonus_mg * 3) // 4
+                p_bonus_eg = (p_bonus_eg * 3) // 4
+
+            # Tarrasch support from behind (Rook/Queen)
+            behind_mask = WHITE_FORWARD_RANKS[sq] & FILE_MASKS[file_idx]
+            has_support_behind = ((piece_bbs[9] | piece_bbs[10]) & behind_mask) != 0
+            if has_support_behind:
+                p_bonus_mg += 15
+                p_bonus_eg += 30
+
+            # Scale passed pawn bonus
+            p_bonus_mg = (p_bonus_mg * b_scale) // 4
+            p_bonus_eg = (p_bonus_eg * b_scale) // 4
+
+            mg_score -= p_bonus_mg
+            eg_score -= p_bonus_eg
+
+            # King Proximity Logic
+            if block_sq >= 0:
+                r = np.int32(relative_rank) - np.int32(1)
+                rr = r * (r - np.int32(1))
+                if rr > 0:
+                    dist_friendly = CHEBYSHEV_DISTANCE[black_king_sq, block_sq]
+                    dist_enemy = CHEBYSHEV_DISTANCE[white_king_sq, block_sq]
+
+                    dist_friendly_2nd = np.int32(0)
+                    if (block_sq // 8) != 0:
+                        dist_friendly_2nd = CHEBYSHEV_DISTANCE[black_king_sq, block_sq - 8]
+
+                    proximity_bonus = (dist_enemy * 5 - dist_friendly * 2 - dist_friendly_2nd) * rr
+                    proximity_bonus = max(-150, min(150, proximity_bonus))
+                    proximity_bonus = (proximity_bonus * b_scale) // 4
+                    eg_score -= proximity_bonus
+
+        elif is_candidate:
+            c_bonus_mg = CANDIDATE_PASSED_PAWN_BONUS[relative_rank, 0]
+            c_bonus_eg = CANDIDATE_PASSED_PAWN_BONUS[relative_rank, 1]
+
+            # Blockade and Path Safety Scaling (applied to candidates similarly)
+            block_sq = sq - 8
+            is_blocked = (all_pieces & (np.uint64(1) << np.uint64(block_sq))) != 0
+            block_attacked = (white_attacks & (np.uint64(1) << np.uint64(block_sq))) != 0
+            block_defended = (black_attacks & (np.uint64(1) << np.uint64(block_sq))) != 0
+
+            path_mask = BLACK_FORWARD_RANKS[sq] & FILE_MASKS[file_idx]
+            path_attacked = (white_attacks & path_mask) != 0
+            path_occupied = (all_pieces & path_mask) != 0
+
+            if is_blocked:
+                c_bonus_mg //= 4
+                c_bonus_eg //= 4
+            elif block_attacked and not block_defended:
+                c_bonus_mg //= 2
+                c_bonus_eg //= 2
+            elif block_attacked and block_defended:
+                c_bonus_mg = (c_bonus_mg * 3) // 4
+                c_bonus_eg = (c_bonus_eg * 3) // 4
+            elif path_attacked or path_occupied:
+                c_bonus_mg = (c_bonus_mg * 3) // 4
+                c_bonus_eg = (c_bonus_eg * 3) // 4
+
+            c_bonus_mg = (c_bonus_mg * b_scale) // 4
+            c_bonus_eg = (c_bonus_eg * b_scale) // 4
+
+            mg_score -= c_bonus_mg
+            eg_score -= c_bonus_eg
+
+        temp_bp &= temp_bp - np.uint64(1)
+
+    return mg_score, eg_score
 
 
 @numba.njit(numba.types.UniTuple(numba.int32, 2)(piece_bbs_signature, piece_counts_signature), cache=True, boundscheck=False, fastmath=True)
@@ -1309,9 +1481,25 @@ def _evaluate_king_pawn_endgame(piece_bbs, side_to_move):
     score += PST_EG[5, white_king_sq]
     score -= PST_EG[5, black_king_sq ^ 56]
 
-    # 2. 通路兵獎勵 (使用 evaluate_pawn_structure 簡化計算)
+    # 2. 通路兵與後兵獎勵
     _, eg_pawn_score, _, _, _, _ = evaluate_pawn_structure(piece_bbs)
     score += eg_pawn_score
+
+    # 計算王與兵的動態攻擊 (王兵殘局)
+    white_pawn_attacks = ((white_pawns & NOT_A_FILE) << np.uint64(7)) | ((white_pawns & NOT_H_FILE) << np.uint64(9))
+    black_pawn_attacks = ((black_pawns & NOT_H_FILE) >> np.uint64(7)) | ((black_pawns & NOT_A_FILE) >> np.uint64(9))
+    white_attacks = white_pawn_attacks | KING_ATTACKS[white_king_sq]
+    black_attacks = black_pawn_attacks | KING_ATTACKS[black_king_sq]
+
+    # 建構臨時佔用陣列 (僅包含王、兵)
+    occ_bbs = np.zeros(3, dtype=np.uint64)
+    occ_bbs[0] = white_pawns | piece_bbs[5]
+    occ_bbs[1] = black_pawns | piece_bbs[11]
+    occ_bbs[2] = occ_bbs[0] | occ_bbs[1]
+
+    # 呼叫 evaluate_passed_pawns 並疊加 endgame 得分
+    _, eg_passed_score = evaluate_passed_pawns(piece_bbs, occ_bbs, white_attacks, black_attacks)
+    score += eg_passed_score
 
     # 3. 國王活動獎勵
     # 獎勵國王靠近所有兵 (自己的和對手的)
@@ -1436,6 +1624,11 @@ def _evaluate_position_jit(piece_bbs, occupancy_bbs, game_state, lazy: bool, sea
         mg_pawn_structure, eg_pawn_structure, white_pawn_tropism, black_pawn_tropism, white_pawn_storm, black_pawn_storm = evaluate_pawn_structure(piece_bbs)
     mg_score += mg_pawn_structure
     eg_score += eg_pawn_structure
+
+    # --- 4.5 評估並加入動態通路兵與候選兵分數 ---
+    mg_passed, eg_passed = evaluate_passed_pawns(piece_bbs, occupancy_bbs, white_attacks, black_attacks)
+    mg_score += mg_passed
+    eg_score += eg_passed
 
     # --- 3. (Full Evaluation) 加入國王安全分數 ---
     white_attack_tropism = -(white_pawn_tropism + white_piece_tropism) # White attacking Black

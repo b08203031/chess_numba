@@ -97,6 +97,7 @@ def add_theta_to_def(text, func_name):
 
 funcs = [
     "evaluate_pawn_structure", 
+    "evaluate_passed_pawns",
     "evaluate_king_safety",
     "evaluate_piece_coordination",
     "evaluate_attacks_mobility_threats",

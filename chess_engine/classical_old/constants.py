@@ -306,44 +306,47 @@ ROOK_ON_SEVENTH_BONUS = np.array([20, 50], dtype=np.int32) # MG, EG
 PASSED_PAWN_BONUS = np.array([
     # MG, EG
     [  0,   0], # Rank 1
-    [ 0,  0], # Rank 2
-    [ 10,  20], # Rank 3
-    [ 30, 50],  # Rank 4
-    [ 50, 80],  # Rank 5
-    [ 80, 150], # Rank 6
-    [150, 250], # Rank 7
+    [  6,  20], # Rank 2
+    [ 10,  23], # Rank 3
+    [ 12,  30], # Rank 4
+    [ 37,  50], # Rank 5
+    [100, 124], # Rank 6
+    [166, 182], # Rank 7
     [  0,   0]  # Rank 8
 ], dtype=np.int32)
+
+# PassedFile adjustment constants (SF11: PassedFile = S(11, 8), scaled by edge_distance)
+PASSED_FILE_BONUS = np.array([7, 5], dtype=np.int32) # MG, EG
 
 # Candidate Passed Pawns Bonus by Rank (0-7).
 # Pawns that are not passed yet, but can become passed easily (e.g. facing only one enemy pawn that is at the same rank or ahead on adjacent file).
 # Bonus is roughly half that of a true passed pawn.
 CANDIDATE_PASSED_PAWN_BONUS = np.array([
     [  0,   0], # Rank 1
-    [  0,   0], # Rank 2
-    [  5,  10], # Rank 3
-    [ 15,  25], # Rank 4
-    [ 25,  40], # Rank 5
-    [ 40,  75], # Rank 6
-    [ 75, 125], # Rank 7
+    [  3,  10], # Rank 2
+    [  5,  11], # Rank 3
+    [  6,  15], # Rank 4
+    [ 19,  25], # Rank 5
+    [ 50,  62], # Rank 6
+    [ 83,  91], # Rank 7
     [  0,   0]  # Rank 8
 ], dtype=np.int32)
 
 # --- Isolated Pawns / 孤兵 ---
 # Penalty for each isolated pawn on a file.
 # 每一個孤兵的懲罰。
-ISOLATED_PAWN_PENALTY = np.array([-10, -5], dtype=np.int32) # MG, EG
+ISOLATED_PAWN_PENALTY = np.array([-5, -12], dtype=np.int32) # MG, EG
 
 # --- Doubled Pawns / 重疊兵 ---
 # Penalty for each doubled pawn on a file.
 # 每一個重疊兵的懲罰。
-DOUBLED_PAWN_PENALTY = np.array([-15, -10], dtype=np.int32) # MG, EG
+DOUBLED_PAWN_PENALTY = np.array([-10, -30], dtype=np.int32) # MG, EG
 
 # --- Connected Pawn Bonus by Rank (SF11) / SF11 連結兵獎勵（按橫排） ---
 # Applied to ALL pawns that are in phalanx (side-by-side) or supported (diagonally behind).
-# 適用於所有處於並列或受支撐狀態的兵。
-CONNECTED_BONUS = np.array([0, 4, 7, 12, 19, 28, 39, 0], dtype=np.int32)
-CONNECTED_SUPPORT_WEIGHT = np.int32(10)  # SF11 value was 21
+# 適用於所有處於並列或受支撐狀態 of the pawns.
+CONNECTED_BONUS = np.array([0, 4, 6, 9, 22, 36, 60, 0], dtype=np.int32)
+CONNECTED_SUPPORT_WEIGHT = np.int32(12)  # SF11 value was 21
 
 # --- Connected Passed Pawns / 連結通路兵 --- (legacy, kept for reference)
 CONNECTED_PASSED_PAWN_BONUS = np.array([15, 35], dtype=np.int32) # MG, EG (not used in evaluation)
@@ -790,7 +793,7 @@ TT_SIZE_MB = 256
 # Penalty for a backward pawn.
 # 後兵的懲罰。
 # Negative values, applied with += (consistent with ISOLATED_PAWN_PENALTY and DOUBLED_PAWN_PENALTY)
-BACKWARD_PAWN_PENALTY = np.array([-10, -25], dtype=np.int32) # MG, EG
+BACKWARD_PAWN_PENALTY = np.array([-8, -20], dtype=np.int32) # MG, EG
 
 # File constants
 NOT_A_FILE = ~np.uint64(0x0101010101010101)

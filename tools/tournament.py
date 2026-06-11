@@ -77,7 +77,7 @@ class Engine:
         print(f"[{self.name}] Warming up...")
         self.send_command("setoption name OwnBook value false")
         self.send_command("position kiwipete")
-        self.send_command("go depth 10")
+        self.send_command("go depth 12")
         while True:
             line = self.read_line()
             if line is None:

@@ -13,7 +13,10 @@ To maintain code cleanliness and documentation consistency across the project, a
 
 * **Retrieve Documentation**: Before modifying any files or starting a new design phase, the AI assistant **MUST** read the **📂 Project Documentation Map (📂 專案文件導覽)** section in the project root's `README.md`.
 * **Primary Objective**: Check if the module being modified already has an associated design specification, algorithm analysis report, or configuration guide. This prevents duplicate logic implementation or breaking established architectural invariants.
-* **Analyze Stockfish Reference Source Code**: To align mathematical formulas and algorithmic behaviors with standard chess engine designs, a complete Stockfish repository is located in `stockfish_repo/src/`. The AI assistant is encouraged to query and read this directory (using search tools or by spawning a background `research` subagent) before planning changes.
+* **Analyze Stockfish Reference Source Code**: To align mathematical formulas and algorithmic behaviors with standard chess engine designs, references are located in respective directories:
+    * For analyzing **search functions**, refer to [stockfish_repo](file:///c:/Users/ren%20cian/OneDrive/桌面/chess/chess_numba/chess_numba/stockfish_repo) (SF 18).
+    * For analyzing **HCE evaluation functions**, refer to [stockfish_11](file:///c:/Users/ren%20cian/OneDrive/桌面/chess/chess_numba/chess_numba/stockfish_11) (SF 11).
+    The AI assistant is encouraged to query and read these directories (using search tools or by spawning a background `research` subagent) before planning changes.
 
 ---
 
