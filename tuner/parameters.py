@@ -101,7 +101,6 @@ class ParameterManager:
         self._add_param("TRAPPED_ROOK", constants.TRAPPED_ROOK)
         
         # --- Other ---
-        self._add_param("INITIATIVE_BONUS", constants.INITIATIVE_BONUS)
         self._add_param("MAX_KING_ATTACKERS", constants.MAX_KING_ATTACKERS)
         self._add_param("PROXIMITY_ENEMY_WEIGHT", constants.PROXIMITY_ENEMY_WEIGHT)
         self._add_param("PROXIMITY_FRIENDLY_WEIGHT", constants.PROXIMITY_FRIENDLY_WEIGHT)

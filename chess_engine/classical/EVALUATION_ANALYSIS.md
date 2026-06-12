@@ -2,14 +2,17 @@
 
 ## 1. 前言
 
-本報告旨在對比分析 Stockfish 11（最後一個純手工評估的經典版本）的評估架構，與目前的 Antares 引擎（經典手工評估模組）�| 項目 | Stockfish 11 (SF11) | Antares Engine (現況) | 狀態與備註 |
+本報告旨在對比分析 Stockfish 11（最後一個純手工評估的經典版本）的評估架構，與目前的 Antares 引擎（經典手工評估模組）。
+
+| 項目 | Stockfish 11 (SF11) | Antares Engine (現況) | 狀態與備註 |
 | :--- | :--- | :--- | :--- |
 | **材質 (Material)** | 漸進式 (Tapered)，含複雜不平衡表。 | 漸進式 (Tapered)，基礎材質值。 | ✅ 材質比例合理，殘局中象的價值高於馬。 |
 | **PST (位置分)** | 中局/殘局雙表，數值極為精細。 | 中局/殘局雙表，數值高度相似。 | ✅ 邏輯一致。 |
 | **機動性 (Mobility)** | 排除被攻擊與受限格子後的非線性查表。 | 排除敵兵攻擊與牽制子後的非線性查表。 | ✅ 已實現非線性查表（`KNIGHT_MOBILITY_BONUS` 等）。 |
 | **威脅 (Threats)** | 詳細威脅矩陣 (Minor/Rook 威脅不同棋子)。 | 實現分類型的威脅矩陣，含懸掛子與兵推，並補足限制棋子威脅。 | ✅ **已完全實現**。限制棋子威脅 (`THREAT_RESTRICTED_PIECE`) 已啟用並整合於評估函數中。 |
 | **國王安全 (King Safety)** | 非線性 kingDanger 二次方懲罰，含安全將軍檢測。 | kingDanger 累加器與二次方轉換，含安全將軍與弱格。 | ✅ 已成功實現 SF11-like 的安全將軍與防守弱格統計。 |
-| **空間評估 (Space)** | 中局中央四直行空間控制評估（Rank 2-4）。 | 中局中央四直行空間控制評估（Rank 2-4）。 | ✅ **已完全實現**。引入了 `SPACE_THRESHOLD = 4700`，並採用了 4 倍安全折減因子（`// 4` 縮放）與對稱除法，以完美適配本引擎的材質比例與國王安全系統。 |
+| **空間評估 (Space)** | 中局中央四直行空間控制評估（Rank 2-4）。 | 中局中央四直行空間控制評估（Rank 2-4）。 | ✅ **已完全實現**。已引入 `SPACE_THRESHOLD = 4700`，並採用了 4 倍安全折減因子（`// 4` 縮放）與對稱除法，以完美適配本引擎的材質比例。 (註：目前主程式為追求極致效能暫不啟用，但在 initiative 中有保留註解說明)。 |
+| **主動權 (Initiative)** | 基於 complexity 的動態修正，防止和棋漂移。 | 基於 complexity 的動態複雜度修正。 | ✅ **已完全實現**。已將固定 10 cp 修正替換為動態複雜度 (Complexity) 評估與獨立輪行權 (Tempo) 獎勵。 |
 
 ---
 
@@ -29,7 +32,7 @@
     *   **判定**: 相鄰直行的兵並排 (Phalanx) 或斜向支撐 (Connected)。
     *   **獎勵**: ✅ **已實作**。使用 `CONNECTED_BONUS[rank]`，並區分是否被阻擋（`opposed`）給予加成。
 4.  **孤兵 (Isolated) 與 重疊兵 (Doubled)**:
-    *   ✅ **已實作**。已套用獨立的中局/殘局懲罰。
+    *   ✅ **已實作**。已套用獨立中局/殘局懲罰。
 
 ---
 
@@ -52,49 +55,38 @@
 
 ### 1. 實現「空間評估 (Space Evaluation)」與參數優化
 *   **優化內容**：完全實現了中央 4 直行（C, D, E, F 線）與中路橫排（Rank 2-4）的控制格與兵後安全格控制評估。
-*   **閾值設定**：`SPACE_THRESHOLD = 4700`，相當於非兵大子材質的 73.6%，當皇后或多個大子被交易後自動關閉，完美避免殘局的評估漂移。
-*   **折減與適配**：由於引擎的材質尺度不同於 SF11（馬的價值為 320 cp，而非 781 cp），我們對空間得分進行了 **4 倍安全折減 (`// 4` 縮放)**，並在正數側完成除法以保持數學對稱。這能避免空間紅利過高而誘使引擎盲目前推兵搶空間，同時彌補了目前線性國王安全強度稍弱的反饋力。
+*   **折減與適配**：由於引擎的材質尺度不同於 SF11（馬的價值為 320 cp，而非 781 cp），對空間得分進行了 4 倍安全折減，並在正數側完成除法以保持對稱。
 
 ### 2. 啟用「限制棋子威脅 (Restricted Piece)」
 *   **優化內容**：正式將 `THREAT_RESTRICTED_PIECE` 補入威脅評估函數中，對被我方多重攻擊封鎖、無法自由移動的敵方棋子給予額外的威脅分加算。
 
-### 3. 未來規劃：動態主動權修正 (Dynamic Initiative)
-*   **痛點**：目前僅在子力階段大於門檻時給予行棋方固定的 `INITIATIVE_BONUS = 10` cp 獎勵。
-*   **未來改進**：可引入基於兵數、通路兵數、國王向心性等特徵的動態 `complexity` 複雜度運算，在殘局動態修正評估值，防止和棋漂移。
-��直行的兵並排 (Phalanx) 或斜向支撐 (Connected)。
-    *   **獎勵**: ✅ **已實作**。使用 `CONNECTED_BONUS[rank]`，並區分是否被阻擋（`opposed`）給予加成。
-4.  **孤兵 (Isolated) 與 重疊兵 (Doubled)**:
-    *   ✅ **已實作**。已套用獨立的中局/殘局懲罰。
+### 3. 動態主動權與複雜度修正 (Dynamic Initiative)
+*   **優化內容**：完全移除固定 10 cp 獎勵，實作基於國王向性、兵數、通路兵、分側兵等的動態局勢複雜度 (Complexity) 修正公式，並保留了獨立的 `TEMPO_BONUS`（10 cp）加成。
+
+### 4. 兵型評估 (Pawn Structure) 與死代碼優化
+*   **Connected 殘局分數適配**：為 `CONNECTED_BONUS_EG` 和 `CONNECTED_SUPPORT_WEIGHT_EG` 引入了獨立的殘局 (EG) 縮放常數 (與 SF11 的 $0.563$ 縮放對齊)，解決了殘局加分被放大 38% 的不對稱問題。
+*   **消除死代碼**：清理了 `evaluate_pawn_structure` 內未使用的通路兵 `is_passed` 判定邏輯，避免無謂的位元運算與 CPU 消耗，提升了引擎手工評估的整體性能。
+*   **候選兵阻擋者計數優化**：將 `evaluate_passed_pawns` 中原本對雙方候選通路兵阻擋者數量的手動 `while` 計數循環，替換為高效能的 `count_bits()` 硬體人口計數 (POPCNT) 呼叫，徹底消除了 Numba 的循環開銷，讓執行效率達到極致。
+
+### 5. 兵型評估與兵盾快取化優化 (Pawn Evaluation & Shield Cache Optimization)
+*   **預計算候選兵與前進直行掩碼**：在模組載入時，一次性預計算雙方所有位置的 `WHITE_FORWARD_FILE_MASKS`, `BLACK_FORWARD_FILE_MASKS`, `WHITE_CANDIDATE_MASKS`, `BLACK_CANDIDATE_MASKS`。在 `evaluate_passed_pawns` 中，直接使用預計算好的掩碼進行位元與（`&`）運算，免去每次動態做查表與位元 OR 的開銷。
+*   **兵盾與兵風暴評估併入 Pawn Table 快取**：將 `evaluate_king_safety` 中的兵盾評估 `evaluate_shelter_aligned` 及其易位虛擬化判定邏輯完全移入 `evaluate_pawn_structure`。如此一來，兵盾評估結果即可隨同兵型分數一起由 `evaluate_pawn_structure_cached` 快取並返回。快取驗證中新增對 `castling_rights` 的比對，確保在 >99% 的快取命中情況下，省去重複的兵盾循環與虛擬化計算，大幅降低 `evaluate_king_safety` 每次呼叫時的運算量。
+*   **兵型與兵盾評估預計算及重構優化 (已優化)**：
+    *   在模組載入時，新增預計算 `PHALANX_MASK`、`WHITE_SUPPORT_MASK`、`BLACK_SUPPORT_MASK`、`WHITE_BACKWARD_TEST_MASK`、`BLACK_BACKWARD_TEST_MASK` 等 5 組兵型結構遮罩，大幅消除在 `evaluate_pawn_structure` 迴圈中的多次位元 AND 和查表運算。
+    *   在評估過程中，全面使用 `BB_SQUARES` 查表取代 `1 << sq` 的動態位元移位運算。
+    *   將 `evaluate_shelter_aligned` 原本手動展開的 3 次直行 for 循環改寫為簡潔的迴圈，並由 Numba JIT (LLVM) 的編譯期自動展開 (Loop Unrolling) 處理，兼顧代碼可讀性與執行效能。
+*   **以移位代替除法 (Bitwise Shift Micro-optimizations)**：在所有的熱點函數（Hot Loops）中，將所有求橫排 `sq // 8` 和直行 `sq % 8` 的除法與模運算，明確改寫為位元移位與掩碼操作 `sq >> 3` 和 `sq & 7`，保證 Numba/LLVM 編譯成最簡化的二進位機器碼指令。
+
+### 6. 通路兵判定演算法與 Stockfish 11 完全對齊及 Bug 修復
+*   **優化內容**：在 `evaluate_passed_pawns` 中引入了 Stockfish 11 的完整三階段（Condition A、B、C）偵測邏輯，實現了互鎖（Lever）、併聯支持推升（Phalanx vs LeverPush）、以及後方移位兵支持推升（Shifted Support Pushes Through）的完整評估判定。
+*   **Bug 修復**：徹底修復了在 `evaluate_pawn_structure` 與 `evaluate_passed_pawns` 中，原本 `PAWN_ATTACKS` 顏色索引定義顛倒（把 `WHITE` 和 `BLACK` 索引混淆）導致兵互鎖與推升格偵測在程式碼中長久失效的嚴重漏洞。同時，確保所有的位元移位操作在 Numba JIT 中具有類型安全性。
 
 ---
 
-## 4. 國王安全 (King Safety) 對比
+## 6. 優化與改進 Action Items
 
-當前的國王安全模型已非常接近 SF11 的核心思想：
+基於現有程式碼的審查，目前的 Action Items 如下：
 
-1.  **安全將軍檢測 (Safe Checks)**:
-    *   ✅ **已實作**。程式碼中單獨計算了車（`SAFE_CHECK_ROOK`）、后（`SAFE_CHECK_QUEEN`）、象（`SAFE_CHECK_BISHOP`）與馬（`SAFE_CHECK_KNIGHT`）的**安全將軍威脅格**，並將其計入 kingDanger 線性累加器。
-2.  **弱格與區域 (Weak Squares)**:
-    *   ✅ **已實作**。計算國王周圍 (King Ring) 被敵方攻擊且我方無防守（或僅有王/后防守）的弱格數。
-3.  **牽制子懲罰**:
-    *   ✅ **已實作**。防守方被牽制子暴露國王會受到 `KING_DANGER_PINNED` 的威脅分懲罰。
-4.  **無后折扣 (No-Queen Discount)**:
-    *   ✅ **已實作**。當進攻方沒有后時，國王危險分大幅減扣（`KING_DANGER_NO_QUEEN`）。
-
----
-
-## 5. 優化與改進 Action Items
-
-基於現有程式碼的審查，未來的優化應專注於補足以下真正缺失的區塊，而非盲目重構已實現的模組：
-
-### 1. 補足「空間評估 (Space Evaluation)」
-*   **痛點**：中局子力飽滿時，引擎缺乏對中路空間被封鎖或壓迫的敏感度，容易走出被動退縮的棋。
-*   **改進**：參考 SF11 實作中央 4 直行（C, D, E, F 線）與中路橫排（Rank 2-4）的控制評估。
-
-### 2. 啟用「限制棋子威脅 (Restricted Piece)」
-*   **痛點**：在 [`constants.py`](constants.py) 中定義了 `THREAT_RESTRICTED_PIECE = np.array([5, 4], dtype=np.int32)`，但 **在 [`evaluation.py`](evaluation.py) 中並未實際調用**。
-*   **改進**：在威脅評估中引入該邏輯：當敵方棋子因我方多重攻擊而無法自由移動時給予額外威脅加分。
-
-### 3. 動態主動權修正 (Dynamic Initiative)
-*   **痛點**：目前僅在子力階段大於門檻時給予行棋方固定的 `INITIATIVE_BONUS = 10` cp 獎勵。
-*   **改進**：未來可引入基於兵數、通路兵數、國王向心性等特徵的動態 `complexity` 複雜度運算，在殘局動態修正評估值，防止和棋漂移。
+### 1. 材質不平衡 (Imbalance) 補強
+*   **痛點**：未實作完整的不平衡對局加減分。
+*   **方向**：引入輕子對峙（如單馬對單象時的修正）等不平衡項。

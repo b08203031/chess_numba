@@ -57,6 +57,7 @@ def create_transposition_table(size_mb):
         num_entries = 1 << (max_entries.bit_length() - 1)
         
     transposition_table = np.zeros(num_entries, dtype=tt_entry_dtype)
+    transposition_table['static_eval'] = 32767
     return transposition_table
 
 @nb.njit(cache=True)

@@ -242,12 +242,31 @@ PST_EG = np.array([
 # --- Other Evaluation Constants / 其他評估常量 ---
 # =============================================================================
 
-# --- Initiative Bonus / 主動權獎勵 ---
-# A small bonus awarded to the side to move, acknowledging the advantage of having the turn.
-# This bonus is tapered and disappears in the endgame.
-# 給予輪到行棋一方的小獎勵，承認擁有下棋權的優勢。此獎勵是漸進的，在殘局中會消失。
-INITIATIVE_BONUS = 21 # centipawns
-INITIATIVE_PHASE_THRESHOLD = MAX_PHASE * 0.4 # Apply only when phase is above 40% of max / 僅在階段值高於最大值的 40% 時應用
+# --- Initiative / Complexity Constants (SF11-inspired) ---
+# Dynamic complexity-based score dampening, prevents draw-drift in simple endgames.
+
+# Middlegame (MG) weights - scaled by Pawn ratio MG = 100/128 ≈ 0.78
+INITIATIVE_PASSED_WEIGHT_MG = np.int32(7)      # 9  * 0.78 ≈ 7
+INITIATIVE_PAWN_WEIGHT_MG = np.int32(9)        # 11 * 0.78 ≈ 9
+INITIATIVE_OUTFLANKING_WEIGHT_MG = np.int32(7) # 9  * 0.78 ≈ 7
+INITIATIVE_INFILTRATION_WEIGHT_MG = np.int32(9)  # 12 * 0.78 ≈ 9
+INITIATIVE_BOTH_FLANKS_WEIGHT_MG = np.int32(16)  # 21 * 0.78 ≈ 16
+INITIATIVE_PAWN_ENDGAME_WEIGHT_MG = np.int32(40) # 51 * 0.78 ≈ 40
+INITIATIVE_ALMOST_UNWIN_WEIGHT_MG = np.int32(34) # 43 * 0.78 ≈ 34
+INITIATIVE_OFFSET_MG = np.int32(-78)             # -100 * 0.78 ≈ -78
+INITIATIVE_MG_OFFSET = np.int32(39)              # +50 * 0.78 ≈ 39
+
+# Endgame (EG) weights - scaled by Pawn ratio EG = 120/213 ≈ 0.563
+INITIATIVE_PASSED_WEIGHT_EG = np.int32(5)      # 9  * 0.563 ≈ 5
+INITIATIVE_PAWN_WEIGHT_EG = np.int32(6)        # 11 * 0.563 ≈ 6
+INITIATIVE_OUTFLANKING_WEIGHT_EG = np.int32(5) # 9  * 0.563 ≈ 5
+INITIATIVE_INFILTRATION_WEIGHT_EG = np.int32(7)  # 12 * 0.563 ≈ 7
+INITIATIVE_BOTH_FLANKS_WEIGHT_EG = np.int32(12)  # 21 * 0.563 ≈ 12
+INITIATIVE_PAWN_ENDGAME_WEIGHT_EG = np.int32(29) # 51 * 0.563 ≈ 29
+INITIATIVE_ALMOST_UNWIN_WEIGHT_EG = np.int32(24) # 43 * 0.563 ≈ 24
+INITIATIVE_OFFSET_EG = np.int32(-56)             # -100 * 0.563 ≈ -56
+
+TEMPO_BONUS = np.int32(10)
 
 
 # =============================================================================

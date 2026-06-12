@@ -133,7 +133,6 @@ class SPSAOptimizer:
         # NOTE: THREAT_RESTRICTED_PIECE removed — not used in evaluation.py
         cm.add_range("THREAT_PAWN_PUSH", min_val=0)
         
-        cm.add_range("INITIATIVE_BONUS", min_val=0)
         cm.add_range("TRAPPED_ROOK", min_val=0)
         cm.add_range("BISHOP_PAWNS_PENALTY", min_val=0)
         cm.add_range("KING_PROTECTOR", min_val=0)

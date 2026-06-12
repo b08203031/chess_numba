@@ -226,12 +226,31 @@ PST_EG = np.array([
 # --- Other Evaluation Constants / 其他評估常量 ---
 # =============================================================================
 
-# --- Initiative Bonus / 主動權獎勵 ---
-# A small bonus awarded to the side to move, acknowledging the advantage of having the turn.
-# This bonus is tapered and disappears in the endgame.
-# 給予輪到行棋一方的小獎勵，承認擁有下棋權的優勢。此獎勵是漸進的，在殘局中會消失。
-INITIATIVE_BONUS = 10 # centipawns
-INITIATIVE_PHASE_THRESHOLD = MAX_PHASE * 0.4 # Apply only when phase is above 40% of max / 僅在階段值高於最大值的 40% 時應用
+# --- Initiative / Complexity Constants (SF11-inspired) ---
+# Dynamic complexity-based score dampening, prevents draw-drift in simple endgames.
+
+# Middlegame (MG) weights - scaled by Pawn ratio MG = 100/128 ≈ 0.78
+INITIATIVE_PASSED_WEIGHT_MG = np.int32(7)      # 9  * 0.78 ≈ 7
+INITIATIVE_PAWN_WEIGHT_MG = np.int32(9)        # 11 * 0.78 ≈ 9
+INITIATIVE_OUTFLANKING_WEIGHT_MG = np.int32(7) # 9  * 0.78 ≈ 7
+INITIATIVE_INFILTRATION_WEIGHT_MG = np.int32(9)  # 12 * 0.78 ≈ 9
+INITIATIVE_BOTH_FLANKS_WEIGHT_MG = np.int32(16)  # 21 * 0.78 ≈ 16
+INITIATIVE_PAWN_ENDGAME_WEIGHT_MG = np.int32(40) # 51 * 0.78 ≈ 40
+INITIATIVE_ALMOST_UNWIN_WEIGHT_MG = np.int32(34) # 43 * 0.78 ≈ 34
+INITIATIVE_OFFSET_MG = np.int32(-78)             # -100 * 0.78 ≈ -78
+INITIATIVE_MG_OFFSET = np.int32(39)              # +50 * 0.78 ≈ 39
+
+# Endgame (EG) weights - scaled by Pawn ratio EG = 120/213 ≈ 0.563
+INITIATIVE_PASSED_WEIGHT_EG = np.int32(5)      # 9  * 0.563 ≈ 5
+INITIATIVE_PAWN_WEIGHT_EG = np.int32(6)        # 11 * 0.563 ≈ 6
+INITIATIVE_OUTFLANKING_WEIGHT_EG = np.int32(5) # 9  * 0.563 ≈ 5
+INITIATIVE_INFILTRATION_WEIGHT_EG = np.int32(7)  # 12 * 0.563 ≈ 7
+INITIATIVE_BOTH_FLANKS_WEIGHT_EG = np.int32(12)  # 21 * 0.563 ≈ 12
+INITIATIVE_PAWN_ENDGAME_WEIGHT_EG = np.int32(29) # 51 * 0.563 ≈ 29
+INITIATIVE_ALMOST_UNWIN_WEIGHT_EG = np.int32(24) # 43 * 0.563 ≈ 24
+INITIATIVE_OFFSET_EG = np.int32(-56)             # -100 * 0.563 ≈ -56
+
+TEMPO_BONUS = np.int32(10)
 
 
 # =============================================================================
@@ -335,18 +354,24 @@ CANDIDATE_PASSED_PAWN_BONUS = np.array([
 # --- Isolated Pawns / 孤兵 ---
 # Penalty for each isolated pawn on a file.
 # 每一個孤兵的懲罰。
-ISOLATED_PAWN_PENALTY = np.array([-5, -12], dtype=np.int32) # MG, EG
+ISOLATED_PAWN_PENALTY = np.array([-4, -8], dtype=np.int32) # MG, EG (SF11 S(5, 15) * scale)
 
 # --- Doubled Pawns / 重疊兵 ---
 # Penalty for each doubled pawn on a file.
 # 每一個重疊兵的懲罰。
-DOUBLED_PAWN_PENALTY = np.array([-10, -30], dtype=np.int32) # MG, EG
+DOUBLED_PAWN_PENALTY = np.array([-8, -31], dtype=np.int32) # MG, EG (SF11 S(11, 56) * scale)
+
+# --- Weak Lever & Weak Unopposed / 弱對決兵與開放線弱兵 ---
+WEAK_LEVER_PENALTY = np.array([0, -31], dtype=np.int32)      # MG, EG (SF11 S(0, 56) * scale)
+WEAK_UNOPPOSED_PENALTY = np.array([-10, -15], dtype=np.int32) # MG, EG (SF11 S(13, 27) * scale)
 
 # --- Connected Pawn Bonus by Rank (SF11) / SF11 連結兵獎勵（按橫排） ---
 # Applied to ALL pawns that are in phalanx (side-by-side) or supported (diagonally behind).
 # 適用於所有處於並列或受支撐狀態 of the pawns.
-CONNECTED_BONUS = np.array([0, 4, 6, 9, 22, 36, 60, 0], dtype=np.int32)
-CONNECTED_SUPPORT_WEIGHT = np.int32(12)  # SF11 value was 21
+CONNECTED_BONUS = np.array([0, 5, 6, 9, 23, 37, 67, 0], dtype=np.int32) # SF11 S(Connected) * 0.78
+CONNECTED_BONUS_EG = np.array([0, 4, 5, 7, 16, 27, 48, 0], dtype=np.int32) # SF11 * 0.563
+CONNECTED_SUPPORT_WEIGHT = np.int32(16)  # SF11 21 * 0.78 ≈ 16
+CONNECTED_SUPPORT_WEIGHT_EG = np.int32(12)  # SF11 21 * 0.563 ≈ 12
 
 # --- Connected Passed Pawns / 連結通路兵 --- (legacy, kept for reference)
 CONNECTED_PASSED_PAWN_BONUS = np.array([15, 35], dtype=np.int32) # MG, EG (not used in evaluation)
@@ -448,20 +473,33 @@ KING_TROPISM_WEIGHTS = np.array([0, 1, 1, 2, 3], dtype=np.int32) # P, N, B, R, Q
 # For White King (Rank 0), enemy Black pawn at Rank 2 is index 2.
 # For Black King (Rank 7), enemy White pawn at Rank 5 is index 2 (7-5=2).
 # Values: [Dummy, Dummy, Rank2, Rank3, Rank4, Rank5, Rank6, Rank7]
-PAWN_STORM_PENALTY_BY_RANK = np.array([0, 120, 80, 50, 30, 10, 5, 0], dtype=np.int32)
-
 SCALING_WEIGHTS = np.array([0, 4, 4, 6, 10], dtype=np.int32) # N, B, R, Q - for scaling factor / 用於縮放因子的權重
 MAX_SCALING_MATERIAL = (2*4 + 2*4 + 2*6 + 1*10) # Sum of all weights for one side / 一方所有權重的總和
 
-PAWN_SHIELD_MISSING_PENALTY = 15
-PAWN_SHIELD_INTACT_BONUS = 10
-PAWN_SHIELD_ADVANCED_BONUS = 5
-PAWN_SHIELD_PUSHED_PENALTY = 10
-KING_OPEN_FILE_PENALTY = 10
-KING_SEMI_OPEN_FILE_PENALTY = 5
-KING_SAFETY_WEAK_SQUARE_PENALTY = 20
-
 EG_SAFETY_SCALE = 0.5 # Scale down endgame king safety impact / 縮減殘局王的安全影響
+
+# --- SF11-aligned King Shelter & Storm Tables ---
+# ShelterStrength: friendly pawn shield defense values (MG)
+SHELTER_STRENGTH = np.array([
+    [ -5,  63,  72,  45,  30,  14,  19,   0], # d=0 (A/H file)
+    [-33,  47,  27, -38, -22,  -8, -49,   0], # d=1 (B/G file)
+    [ -7,  58,  17,  -1,  24,   2, -35,   0], # d=2 (C/F file)
+    [-30, -10, -22, -40, -37, -52, -129,  0]  # d=3 (D/E file)
+], dtype=np.int32)
+
+# UnblockedStorm: enemy pawn storm threat penalties (MG)
+UNBLOCKED_STORM = np.array([
+    [ -66,  225,  129,  -75,  -39,  -35,  -39,   0], # d=0
+    [ -35,   19,  -95,  -35,  -28,    7,  -15,   0], # d=1
+    [   4,  -39, -131,  -26,    1,   17,   10,   0], # d=2
+    [  11,    8,  -78,   -3,   -8,   11,   22,   0]  # d=3
+], dtype=np.int32)
+
+BLOCKED_STORM = np.int32(-64) # SF11: -82 * 0.78 ≈ -64
+BLOCKED_STORM_EG = np.int32(-46) # SF11: -82 * 0.563 ≈ -46
+SHELTER_BASE_MG = np.int32(4) # SF11: 5 * 0.78 ≈ 4
+SHELTER_BASE_EG = np.int32(3) # SF11: 5 * 0.563 ≈ 3
+KING_PAWN_DIST_PENALTY_EG = np.int32(-9) # SF11: -16 * 0.563 ≈ -9
 
 # =============================================================================
 # --- Threat Evaluation Constants / 威脅評估常量 ---
@@ -793,11 +831,13 @@ TT_SIZE_MB = 256
 # Penalty for a backward pawn.
 # 後兵的懲罰。
 # Negative values, applied with += (consistent with ISOLATED_PAWN_PENALTY and DOUBLED_PAWN_PENALTY)
-BACKWARD_PAWN_PENALTY = np.array([-8, -20], dtype=np.int32) # MG, EG
+BACKWARD_PAWN_PENALTY = np.array([-7, -13], dtype=np.int32) # MG, EG (SF11 S(9, 24) * scale)
 
 # File constants
 NOT_A_FILE = ~np.uint64(0x0101010101010101)
 NOT_H_FILE = ~np.uint64(0x8080808080808080)
+QUEEN_SIDE_BB = np.uint64(0x0F0F0F0F0F0F0F0F)
+KING_SIDE_BB = np.uint64(0xF0F0F0F0F0F0F0F0)
 
 # =============================================================================
 # --- Space Evaluation Constants / 空間評估常量 ---

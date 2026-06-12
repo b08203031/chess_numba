@@ -9,7 +9,7 @@ import shutil
 from pathlib import Path
 
 # --- Transposition Table Setup ---
-from chess_engine.classical.transposition_table import TT_SIZE_MB, create_transposition_table, clear_transposition_table
+from chess_engine.classical.transposition_table import TT_SIZE_MB, create_transposition_table, clear_transposition_table, estimate_tt_occupancy_percentage
 from chess_engine.classical.engine_types import SearchContext
 transposition_table = create_transposition_table(TT_SIZE_MB)
 
@@ -30,7 +30,7 @@ def clear_numba_cache():
     log_info("--- Cache Cleared ---")
 
 # Clear cache before importing the engine to avoid stale cache issues
-# clear_numba_cache()
+clear_numba_cache()
 
 from chess_engine.classical.fen_parser import parse_fen
 from chess_engine.classical.search import iterative_deepening_search
@@ -65,13 +65,13 @@ def run_search_test():
     )
     
     # Run a quick search
-    iterative_deepening_search(p_bbs, o_bbs, g_state, 2, {'optimum_time': 0, 'maximum_time': 0}, ctx)
+    iterative_deepening_search(p_bbs, o_bbs, g_state, 15, {'optimum_time': 0, 'maximum_time': 0}, ctx)
     print("--- WARM-UP COMPLETE ---\n")
 
     # 2. Actual Search Test
     fen = "r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - "
-    depth = 10
-    time_limit = 3000
+    depth = 13
+    time_limit = 30
     time_limit_ms = time_limit * 1000
 
     log_info("--- Starting Iterative Deepening Search Test ---")
@@ -124,8 +124,8 @@ def run_search_test():
     elapsed_time = end_time - start_time
 
     total_entries = len(transposition_table)
-    used_entries = np.count_nonzero(transposition_table['key'])
-    usage_percentage = (used_entries / total_entries * 100) if total_entries > 0 else 0
+    usage_percentage = estimate_tt_occupancy_percentage(transposition_table)
+    used_entries = int(total_entries * (usage_percentage / 100.0))
 
     total_nodes = nodes_searched + quiescence_nodes
     nps = int(total_nodes / elapsed_time) if elapsed_time > 0 else 0
