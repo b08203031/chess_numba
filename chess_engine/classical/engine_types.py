@@ -96,8 +96,8 @@ search_context_spec = [
     ('pawn_table_b_shield_eg', numba.int32[::1]),
     ('pawn_table_w_passed', numba.uint64[::1]),
     ('pawn_table_b_passed', numba.uint64[::1]),
-    ('pawn_table_w_candidate', numba.uint64[::1]),
-    ('pawn_table_b_candidate', numba.uint64[::1]),
+    ('pawn_table_w_attacks_span', numba.uint64[::1]),
+    ('pawn_table_b_attacks_span', numba.uint64[::1]),
 ]
 
 @jitclass(search_context_spec)
@@ -222,8 +222,8 @@ class _SearchContextJIT:
         self.pawn_table_b_shield_eg = np.zeros(262144, dtype=np.int32)
         self.pawn_table_w_passed = np.zeros(262144, dtype=np.uint64)
         self.pawn_table_b_passed = np.zeros(262144, dtype=np.uint64)
-        self.pawn_table_w_candidate = np.zeros(262144, dtype=np.uint64)
-        self.pawn_table_b_candidate = np.zeros(262144, dtype=np.uint64)
+        self.pawn_table_w_attacks_span = np.zeros(262144, dtype=np.uint64)
+        self.pawn_table_b_attacks_span = np.zeros(262144, dtype=np.uint64)
 
 
 

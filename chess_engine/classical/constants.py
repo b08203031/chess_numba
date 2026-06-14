@@ -337,20 +337,6 @@ PASSED_PAWN_BONUS = np.array([
 # PassedFile adjustment constants (SF11: PassedFile = S(11, 8), scaled by edge_distance)
 PASSED_FILE_BONUS = np.array([7, 5], dtype=np.int32) # MG, EG
 
-# Candidate Passed Pawns Bonus by Rank (0-7).
-# Pawns that are not passed yet, but can become passed easily (e.g. facing only one enemy pawn that is at the same rank or ahead on adjacent file).
-# Bonus is roughly half that of a true passed pawn.
-CANDIDATE_PASSED_PAWN_BONUS = np.array([
-    [  0,   0], # Rank 1
-    [  3,  10], # Rank 2
-    [  5,  11], # Rank 3
-    [  6,  15], # Rank 4
-    [ 19,  25], # Rank 5
-    [ 50,  62], # Rank 6
-    [ 83,  91], # Rank 7
-    [  0,   0]  # Rank 8
-], dtype=np.int32)
-
 # --- Isolated Pawns / 孤兵 ---
 # Penalty for each isolated pawn on a file.
 # 每一個孤兵的懲罰。
@@ -412,6 +398,7 @@ OUTPOST_BONUS_BISHOP = np.array([
 # Bonus if the outpost is a "Hole" (cannot be attacked by enemy pawns at all).
 # 如果前哨是“洞”（完全無法被敵方兵攻擊），則給予額外獎勵。
 OUTPOST_HOLE_BONUS = np.array([25, 15], dtype=np.int32) # MG, EG
+REACHABLE_OUTPOST_BONUS = np.array([16, 5], dtype=np.int32) # MG, EG (SF11: S(32, 10) scaled)
 
 # =============================================================================
 # --- King Safety Constants (NEW - based on Chessprogramming Wiki) / 王的安全常量 ---
@@ -578,6 +565,8 @@ KING_PROTECTOR = np.array([4, 3], dtype=np.int32)  # mg, eg — per distance uni
 
 # MinorBehindPawn: Bonus for minor piece sheltered behind a pawn.
 # 輕子藏兵後：輕子站在兵後方的獎勵。
+MINOR_BEHIND_PAWN = np.array([14, 2], dtype=np.int32)  # SF11: S(18, 3) * scale
+
 # BishopPawns: Penalty per own pawn on same color as bishop.
 # 壞象懲罰：象同色上的己方兵數量懲罰（含封閉中心加重）。
 BISHOP_PAWNS_PENALTY = np.array([2, 4], dtype=np.int32)  # SF11: (3, 7)

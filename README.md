@@ -198,6 +198,8 @@ python -m tests.perft divide --depth 4
   * 詳細記錄靜態交換評估（Static Exchange Evaluation, SEE）的 Swap 演算法、射線過濾、過路兵與升變的邊界處理及性能優化。
 * **[經典評估函數研析](chess_engine/classical/EVALUATION_ANALYSIS.md)**：
   * 分析 Stockfish 11 與本引擎手工評估函數（Tapered Evaluation、兵型結構、王安全）的對比與改進點。
+* **[兵評估剩餘差異分析報告](chess_engine/classical/PAWN_EVALUATION_DIFFERENCES.md)**：
+  * 對照 Stockfish 11 原始碼，深入剖析本引擎安全兵威脅、兵前推威脅、限制棋子威脅與純王兵殘局評估的剩餘演算法差異與出處。
 * **[搜尋歷史啟發技術解析](chess_engine/classical/HISTORY_HEURISTICS_CN.md)**：
   * 深入探討主歷史、蝴蝶歷史、吃子歷史、延續歷史與糾錯歷史（Correction History）的原理與重力更新公式。
 * **[評估函數研究與對比報告](chess_engine/classical/RESEARCH_REPORT.md)**：

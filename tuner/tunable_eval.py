@@ -565,8 +565,8 @@ def evaluate_passed_pawns(piece_bbs, occupancy_bbs, white_attacks, black_attacks
 
         # PassedFile adjustment
         edge_dist = np.int32(min(file_idx, 7 - file_idx))
-        p_bonus_mg += PASSED_FILE_BONUS[0] * edge_dist
-        p_bonus_eg += PASSED_FILE_BONUS[1] * edge_dist
+        p_bonus_mg -= PASSED_FILE_BONUS[0] * edge_dist
+        p_bonus_eg -= PASSED_FILE_BONUS[1] * edge_dist
 
         # Blockade and Path Safety Scaling
         block_sq = sq + 8
@@ -682,8 +682,8 @@ def evaluate_passed_pawns(piece_bbs, occupancy_bbs, white_attacks, black_attacks
 
         # PassedFile adjustment
         edge_dist = np.int32(min(file_idx, 7 - file_idx))
-        p_bonus_mg += PASSED_FILE_BONUS[0] * edge_dist
-        p_bonus_eg += PASSED_FILE_BONUS[1] * edge_dist
+        p_bonus_mg -= PASSED_FILE_BONUS[0] * edge_dist
+        p_bonus_eg -= PASSED_FILE_BONUS[1] * edge_dist
 
         # Blockade and Path Safety Scaling
         block_sq = sq - 8
@@ -1209,6 +1209,50 @@ def evaluate_attacks_mobility_threats(piece_bbs, occupancy_bbs, theta):
     white_pawn_attacks = ((wp_bb & NOT_A_FILE) << np.uint64(7)) | ((wp_bb & NOT_H_FILE) << np.uint64(9))
     black_pawn_attacks = ((bp_bb & NOT_H_FILE) >> np.uint64(7)) | ((bp_bb & NOT_A_FILE) >> np.uint64(9))
 
+    # --- Local constants for parity ---
+    MINOR_BEHIND_PAWN = np.array([14, 2], dtype=np.int32)
+    REACHABLE_OUTPOST_BONUS = np.array([16, 5], dtype=np.int32)
+
+    # Project pawn attacks span forward dynamically in tuner
+    white_pawn_attacks_span = white_pawn_attacks
+    temp_wp = wp_bb
+    while temp_wp:
+        sq = get_lsb_index(temp_wp)
+        file_idx = sq & 7
+        lever_push = bp_bb & PAWN_ATTACKS[0, sq + 8]
+        blocked = bp_bb & BB_SQUARES[sq + 8]
+        backward = False
+        if not (wp_bb & WHITE_BACKWARD_TEST_MASK[sq]) and (lever_push | blocked):
+            backward = True
+        if not backward and not blocked:
+            white_pawn_attacks_span |= WHITE_FORWARD_RANKS[sq] & ADJACENT_FILES_MASKS[file_idx]
+        temp_wp &= temp_wp - np.uint64(1)
+
+    black_pawn_attacks_span = black_pawn_attacks
+    temp_bp = bp_bb
+    while temp_bp:
+        sq = get_lsb_index(temp_bp)
+        file_idx = sq & 7
+        lever_push = wp_bb & PAWN_ATTACKS[1, sq - 8]
+        blocked = wp_bb & BB_SQUARES[sq - 8]
+        backward = False
+        if not (bp_bb & BLACK_BACKWARD_TEST_MASK[sq]) and (lever_push | blocked):
+            backward = True
+        if not backward and not blocked:
+            black_pawn_attacks_span |= BLACK_FORWARD_RANKS[sq] & ADJACENT_FILES_MASKS[file_idx]
+        temp_bp &= temp_bp - np.uint64(1)
+
+    # --- Outpost Projective Ranks & Spans ---
+    WHITE_OUTPOST_RANKS = np.uint64(0x00FFFFFFFFFF0000) # ranks index 2 to 6
+    BLACK_OUTPOST_RANKS = np.uint64(0x0000FFFFFFFFFF00) # ranks index 1 to 5 (relative 2 to 6)
+    white_outposts = WHITE_OUTPOST_RANKS & white_pawn_attacks & ~black_pawn_attacks_span
+    black_outposts = BLACK_OUTPOST_RANKS & black_pawn_attacks & ~white_pawn_attacks_span
+
+    # X-Ray occupancy mask precalculations (Loop invariant optimizations)
+    bishop_xray_occ = all_occupancy ^ wq_bb ^ bq_bb
+    white_rook_xray_occ = bishop_xray_occ ^ wr_bb
+    black_rook_xray_occ = bishop_xray_occ ^ br_bb
+
     white_attacks = white_pawn_attacks | KING_ATTACKS[white_king_sq]
     black_attacks = black_pawn_attacks | KING_ATTACKS[black_king_sq]
 
@@ -1289,16 +1333,24 @@ def evaluate_attacks_mobility_threats(piece_bbs, occupancy_bbs, theta):
         distance = MANHATTAN_DISTANCE[sq, black_king_sq]
         white_piece_tropism += get_array_val(theta, IDX_KING_TROPISM_WEIGHTS, 1) * (KING_TROPISM_MAX_DISTANCE - distance)
         
+        # MinorBehindPawn: bonus for knight behind friendly pawn
+        if sq < 56 and (wp_bb & BB_SQUARES[sq + 8]) != np.uint64(0):
+            mg_mobility += MINOR_BEHIND_PAWN[0]
+            eg_mobility += MINOR_BEHIND_PAWN[1]
+
         # Outpost Logic (White Knight)
-        if not (black_pawn_attacks & BB_SQUARES[sq]):
-            if (PAWN_ATTACKS[WHITE, sq] & wp_bb):
-                rank = sq // 8
-                mg_outpost += get_2d_val(theta, IDX_OUTPOST_BONUS_KNIGHT, rank, 2, 0)
-                eg_outpost += get_2d_val(theta, IDX_OUTPOST_BONUS_KNIGHT, rank, 2, 1)
-                file_idx = sq % 8
-                if not (ADJACENT_FILES_MASKS[file_idx] & WHITE_FORWARD_RANKS[sq] & bp_bb):
-                     mg_outpost += get_array_val(theta, IDX_OUTPOST_HOLE_BONUS, 0)
-                     eg_outpost += get_array_val(theta, IDX_OUTPOST_HOLE_BONUS, 1)
+        is_outpost = (BB_SQUARES[sq] & white_outposts) != np.uint64(0)
+        if is_outpost:
+            rank = sq // 8
+            mg_outpost += get_2d_val(theta, IDX_OUTPOST_BONUS_KNIGHT, rank, 2, 0)
+            eg_outpost += get_2d_val(theta, IDX_OUTPOST_BONUS_KNIGHT, rank, 2, 1)
+            file_idx = sq % 8
+            if not (ADJACENT_FILES_MASKS[file_idx] & WHITE_FORWARD_RANKS[sq] & bp_bb):
+                 mg_outpost += get_array_val(theta, IDX_OUTPOST_HOLE_BONUS, 0)
+                 eg_outpost += get_array_val(theta, IDX_OUTPOST_HOLE_BONUS, 1)
+        elif (att & white_outposts & ~white_occupancy) != np.uint64(0):
+            mg_outpost += REACHABLE_OUTPOST_BONUS[0]
+            eg_outpost += REACHABLE_OUTPOST_BONUS[1]
 
         temp_bb &= temp_bb - np.uint64(1)
 
@@ -1306,7 +1358,7 @@ def evaluate_attacks_mobility_threats(piece_bbs, occupancy_bbs, theta):
     while temp_bb:
         sq = get_lsb_index(temp_bb)
         # X-Ray: bishop attacks through all queens
-        att = get_bishop_attacks(sq, all_occupancy ^ wq_bb ^ bq_bb)
+        att = get_bishop_attacks(sq, bishop_xray_occ)
         white_attacks2 |= (white_attacks & att)
         white_attacks |= att
         white_bishop_attacks |= att
@@ -1334,16 +1386,21 @@ def evaluate_attacks_mobility_threats(piece_bbs, occupancy_bbs, theta):
         distance = MANHATTAN_DISTANCE[sq, black_king_sq]
         white_piece_tropism += get_array_val(theta, IDX_KING_TROPISM_WEIGHTS, 2) * (KING_TROPISM_MAX_DISTANCE - distance)
 
+        # MinorBehindPawn: bonus for bishop behind friendly pawn
+        if sq < 56 and (wp_bb & BB_SQUARES[sq + 8]) != np.uint64(0):
+            mg_mobility += MINOR_BEHIND_PAWN[0]
+            eg_mobility += MINOR_BEHIND_PAWN[1]
+
         # Outpost Logic (White Bishop)
-        if not (black_pawn_attacks & BB_SQUARES[sq]):
-            if (PAWN_ATTACKS[WHITE, sq] & wp_bb):
-                rank = sq // 8
-                mg_outpost += get_2d_val(theta, IDX_OUTPOST_BONUS_BISHOP, rank, 2, 0)
-                eg_outpost += get_2d_val(theta, IDX_OUTPOST_BONUS_BISHOP, rank, 2, 1)
-                file_idx = sq % 8
-                if not (ADJACENT_FILES_MASKS[file_idx] & WHITE_FORWARD_RANKS[sq] & bp_bb):
-                     mg_outpost += get_array_val(theta, IDX_OUTPOST_HOLE_BONUS, 0)
-                     eg_outpost += get_array_val(theta, IDX_OUTPOST_HOLE_BONUS, 1)
+        is_outpost = (BB_SQUARES[sq] & white_outposts) != np.uint64(0)
+        if is_outpost:
+            rank = sq // 8
+            mg_outpost += get_2d_val(theta, IDX_OUTPOST_BONUS_BISHOP, rank, 2, 0)
+            eg_outpost += get_2d_val(theta, IDX_OUTPOST_BONUS_BISHOP, rank, 2, 1)
+            file_idx = sq % 8
+            if not (ADJACENT_FILES_MASKS[file_idx] & WHITE_FORWARD_RANKS[sq] & bp_bb):
+                 mg_outpost += get_array_val(theta, IDX_OUTPOST_HOLE_BONUS, 0)
+                 eg_outpost += get_array_val(theta, IDX_OUTPOST_HOLE_BONUS, 1)
 
         temp_bb &= temp_bb - np.uint64(1)
 
@@ -1351,7 +1408,7 @@ def evaluate_attacks_mobility_threats(piece_bbs, occupancy_bbs, theta):
     while temp_bb:
         sq = get_lsb_index(temp_bb)
         # X-Ray: rook attacks through all queens + own rooks
-        att = get_rook_attacks(sq, all_occupancy ^ wq_bb ^ bq_bb ^ wr_bb)
+        att = get_rook_attacks(sq, white_rook_xray_occ)
         white_attacks2 |= (white_attacks & att)
         white_attacks |= att
         white_rook_attacks |= att
@@ -1417,17 +1474,25 @@ def evaluate_attacks_mobility_threats(piece_bbs, occupancy_bbs, theta):
         distance = MANHATTAN_DISTANCE[sq, white_king_sq]
         black_piece_tropism += get_array_val(theta, IDX_KING_TROPISM_WEIGHTS, 1) * (KING_TROPISM_MAX_DISTANCE - distance)
 
+        # MinorBehindPawn: bonus for knight behind friendly pawn
+        if sq >= 8 and (bp_bb & BB_SQUARES[sq - 8]) != np.uint64(0):
+            mg_mobility -= MINOR_BEHIND_PAWN[0]
+            eg_mobility -= MINOR_BEHIND_PAWN[1]
+
         # Outpost Logic (Black Knight)
-        if not (white_pawn_attacks & BB_SQUARES[sq]):
-            if (PAWN_ATTACKS[BLACK, sq] & bp_bb):
-                rank = sq // 8
-                rel_rank = 7 - rank
-                mg_outpost -= get_2d_val(theta, IDX_OUTPOST_BONUS_KNIGHT, rel_rank, 2, 0)
-                eg_outpost -= get_2d_val(theta, IDX_OUTPOST_BONUS_KNIGHT, rel_rank, 2, 1)
-                file_idx = sq % 8
-                if not (ADJACENT_FILES_MASKS[file_idx] & BLACK_FORWARD_RANKS[sq] & wp_bb):
-                     mg_outpost -= get_array_val(theta, IDX_OUTPOST_HOLE_BONUS, 0)
-                     eg_outpost -= get_array_val(theta, IDX_OUTPOST_HOLE_BONUS, 1)
+        is_outpost = (BB_SQUARES[sq] & black_outposts) != np.uint64(0)
+        if is_outpost:
+            rank = sq // 8
+            rel_rank = 7 - rank
+            mg_outpost -= get_2d_val(theta, IDX_OUTPOST_BONUS_KNIGHT, rel_rank, 2, 0)
+            eg_outpost -= get_2d_val(theta, IDX_OUTPOST_BONUS_KNIGHT, rel_rank, 2, 1)
+            file_idx = sq % 8
+            if not (ADJACENT_FILES_MASKS[file_idx] & BLACK_FORWARD_RANKS[sq] & wp_bb):
+                 mg_outpost -= get_array_val(theta, IDX_OUTPOST_HOLE_BONUS, 0)
+                 eg_outpost -= get_array_val(theta, IDX_OUTPOST_HOLE_BONUS, 1)
+        elif (att & black_outposts & ~black_occupancy) != np.uint64(0):
+            mg_outpost -= REACHABLE_OUTPOST_BONUS[0]
+            eg_outpost -= REACHABLE_OUTPOST_BONUS[1]
 
         temp_bb &= temp_bb - np.uint64(1)
 
@@ -1435,7 +1500,7 @@ def evaluate_attacks_mobility_threats(piece_bbs, occupancy_bbs, theta):
     while temp_bb:
         sq = get_lsb_index(temp_bb)
         # X-Ray: bishop attacks through all queens
-        att = get_bishop_attacks(sq, all_occupancy ^ wq_bb ^ bq_bb)
+        att = get_bishop_attacks(sq, bishop_xray_occ)
         black_attacks2 |= (black_attacks & att)
         black_attacks |= att
         black_bishop_attacks |= att
@@ -1463,17 +1528,22 @@ def evaluate_attacks_mobility_threats(piece_bbs, occupancy_bbs, theta):
         distance = MANHATTAN_DISTANCE[sq, white_king_sq]
         black_piece_tropism += get_array_val(theta, IDX_KING_TROPISM_WEIGHTS, 2) * (KING_TROPISM_MAX_DISTANCE - distance)
 
+        # MinorBehindPawn: bonus for bishop behind friendly pawn
+        if sq >= 8 and (bp_bb & BB_SQUARES[sq - 8]) != np.uint64(0):
+            mg_mobility -= MINOR_BEHIND_PAWN[0]
+            eg_mobility -= MINOR_BEHIND_PAWN[1]
+
         # Outpost Logic (Black Bishop)
-        if not (white_pawn_attacks & BB_SQUARES[sq]):
-            if (PAWN_ATTACKS[BLACK, sq] & bp_bb):
-                rank = sq // 8
-                rel_rank = 7 - rank
-                mg_outpost -= get_2d_val(theta, IDX_OUTPOST_BONUS_BISHOP, rel_rank, 2, 0)
-                eg_outpost -= get_2d_val(theta, IDX_OUTPOST_BONUS_BISHOP, rel_rank, 2, 1)
-                file_idx = sq % 8
-                if not (ADJACENT_FILES_MASKS[file_idx] & BLACK_FORWARD_RANKS[sq] & wp_bb):
-                     mg_outpost -= get_array_val(theta, IDX_OUTPOST_HOLE_BONUS, 0)
-                     eg_outpost -= get_array_val(theta, IDX_OUTPOST_HOLE_BONUS, 1)
+        is_outpost = (BB_SQUARES[sq] & black_outposts) != np.uint64(0)
+        if is_outpost:
+            rank = sq // 8
+            rel_rank = 7 - rank
+            mg_outpost -= get_2d_val(theta, IDX_OUTPOST_BONUS_BISHOP, rel_rank, 2, 0)
+            eg_outpost -= get_2d_val(theta, IDX_OUTPOST_BONUS_BISHOP, rel_rank, 2, 1)
+            file_idx = sq % 8
+            if not (ADJACENT_FILES_MASKS[file_idx] & BLACK_FORWARD_RANKS[sq] & wp_bb):
+                 mg_outpost -= get_array_val(theta, IDX_OUTPOST_HOLE_BONUS, 0)
+                 eg_outpost -= get_array_val(theta, IDX_OUTPOST_HOLE_BONUS, 1)
 
         temp_bb &= temp_bb - np.uint64(1)
 
@@ -1481,7 +1551,7 @@ def evaluate_attacks_mobility_threats(piece_bbs, occupancy_bbs, theta):
     while temp_bb:
         sq = get_lsb_index(temp_bb)
         # X-Ray: rook attacks through all queens + own rooks
-        att = get_rook_attacks(sq, all_occupancy ^ wq_bb ^ bq_bb ^ br_bb)
+        att = get_rook_attacks(sq, black_rook_xray_occ)
         black_attacks2 |= (black_attacks & att)
         black_attacks |= att
         black_rook_attacks |= att
@@ -1541,14 +1611,21 @@ def evaluate_attacks_mobility_threats(piece_bbs, occupancy_bbs, theta):
     black_weak = all_black_pieces & white_attacks & ~black_strongly_protected
 
     # --- 1. ThreatBySafePawn: safe pawn attacks enemy non-pawn ---
-    # White safe pawns: pawn attacks squares not strongly defended by enemy
-    white_safe_pawn_sq = white_pawn_attacks & black_non_pawns & ~black_strongly_protected
+    # In SF11, only pawns on safe squares (not attacked by Them, or defended by Us) can threaten enemy pieces.
+    # safe = ~attackedBy[Them][ALL_PIECES] | attackedBy[Us][ALL_PIECES]
+    white_safe = ~black_attacks | white_attacks
+    white_safe_pawns = wp_bb & white_safe
+    white_safe_pawn_attacks = ((white_safe_pawns & NOT_A_FILE) << np.uint64(7)) | ((white_safe_pawns & NOT_H_FILE) << np.uint64(9))
+    white_safe_pawn_sq = white_safe_pawn_attacks & black_non_pawns
     if white_safe_pawn_sq:
         count = count_bits(white_safe_pawn_sq)
         mg_threats += get_array_val(theta, IDX_THREAT_SAFE_PAWN, 0) * count
         eg_threats += get_array_val(theta, IDX_THREAT_SAFE_PAWN, 1) * count
 
-    black_safe_pawn_sq = black_pawn_attacks & white_non_pawns & ~white_strongly_protected
+    black_safe = ~white_attacks | black_attacks
+    black_safe_pawns = bp_bb & black_safe
+    black_safe_pawn_attacks = ((black_safe_pawns & NOT_H_FILE) >> np.uint64(7)) | ((black_safe_pawns & NOT_A_FILE) >> np.uint64(9))
+    black_safe_pawn_sq = black_safe_pawn_attacks & white_non_pawns
     if black_safe_pawn_sq:
         count = count_bits(black_safe_pawn_sq)
         mg_threats -= get_array_val(theta, IDX_THREAT_SAFE_PAWN, 0) * count
@@ -1615,24 +1692,26 @@ def evaluate_attacks_mobility_threats(piece_bbs, occupancy_bbs, theta):
         eg_threats -= get_array_val(theta, IDX_THREAT_HANGING, 1) * count
 
     # Restricted piece threat (RestrictedPiece * popcount(b))
-    # w_restricted = black_attacks & ~black_strongly_protected & white_attacks
-    # if w_restricted:
-    #     count = count_bits(w_restricted)
-    #     mg_threats += get_array_val(theta, IDX_THREAT_RESTRICTED_PIECE, 0) * count
-    #     eg_threats += get_array_val(theta, IDX_THREAT_RESTRICTED_PIECE, 1) * count
+    w_restricted = black_attacks & ~black_strongly_protected & white_attacks
+    if w_restricted:
+        count = count_bits(w_restricted)
+        mg_threats += get_array_val(theta, IDX_THREAT_RESTRICTED_PIECE, 0) * count
+        eg_threats += get_array_val(theta, IDX_THREAT_RESTRICTED_PIECE, 1) * count
 
-    # b_restricted = white_attacks & ~white_strongly_protected & black_attacks
-    # if b_restricted:
-    #     count = count_bits(b_restricted)
-    #     mg_threats -= get_array_val(theta, IDX_THREAT_RESTRICTED_PIECE, 0) * count
-    #     eg_threats -= get_array_val(theta, IDX_THREAT_RESTRICTED_PIECE, 1) * count
+    b_restricted = white_attacks & ~white_strongly_protected & black_attacks
+    if b_restricted:
+        count = count_bits(b_restricted)
+        mg_threats -= get_array_val(theta, IDX_THREAT_RESTRICTED_PIECE, 0) * count
+        eg_threats -= get_array_val(theta, IDX_THREAT_RESTRICTED_PIECE, 1) * count
 
     # --- 7. ThreatByPawnPush ---
-    # White pawns push threat: non-rank8 squares that would attack enemy non-pawns
+    # In SF11, pawn pushes are only evaluated if the landing square is unoccupied and safe.
+    # b &= ~attackedBy[Them][PAWN] & safe (where safe = ~attackedBy[Them][ALL_PIECES] | attackedBy[Us][ALL_PIECES])
     w_push1 = (wp_bb << np.uint64(8)) & ~all_occupancy & ~np.uint64(0xFF00000000000000)
     w_push2 = ((w_push1 & np.uint64(0xFF0000)) << np.uint64(8)) & ~all_occupancy  # double push from rank 2
-    w_push_attacks = (((w_push1 | w_push2) & NOT_A_FILE) << np.uint64(7)) | (((w_push1 | w_push2) & NOT_H_FILE) << np.uint64(9))
-    w_push_threat = w_push_attacks & black_non_pawns & ~black_attacks2
+    w_push_landings = (w_push1 | w_push2) & ~black_pawn_attacks & (~black_attacks | white_attacks)
+    w_push_attacks = ((w_push_landings & NOT_A_FILE) << np.uint64(7)) | ((w_push_landings & NOT_H_FILE) << np.uint64(9))
+    w_push_threat = w_push_attacks & black_non_pawns
     if w_push_threat:
         count = count_bits(w_push_threat)
         mg_threats += get_array_val(theta, IDX_THREAT_PAWN_PUSH, 0) * count
@@ -1640,8 +1719,9 @@ def evaluate_attacks_mobility_threats(piece_bbs, occupancy_bbs, theta):
 
     b_push1 = (bp_bb >> np.uint64(8)) & ~all_occupancy & ~np.uint64(0xFF)
     b_push2 = ((b_push1 & np.uint64(0xFF0000000000)) >> np.uint64(8)) & ~all_occupancy  # double push from rank 7
-    b_push_attacks = (((b_push1 | b_push2) & NOT_H_FILE) >> np.uint64(7)) | (((b_push1 | b_push2) & NOT_A_FILE) >> np.uint64(9))
-    b_push_threat = b_push_attacks & white_non_pawns & ~white_attacks2
+    b_push_landings = (b_push1 | b_push2) & ~white_pawn_attacks & (~white_attacks | black_attacks)
+    b_push_attacks = ((b_push_landings & NOT_H_FILE) >> np.uint64(7)) | ((b_push_landings & NOT_A_FILE) >> np.uint64(9))
+    b_push_threat = b_push_attacks & white_non_pawns
     if b_push_threat:
         count = count_bits(b_push_threat)
         mg_threats -= get_array_val(theta, IDX_THREAT_PAWN_PUSH, 0) * count
