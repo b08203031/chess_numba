@@ -90,6 +90,10 @@ def make_move(piece_bbs: np.ndarray, occupancy_bbs: np.ndarray, game_state: np.n
     flag = get_special_move_flag(move)
 
     moving_piece_type = find_piece_type_for_square(piece_bbs, from_sq, side)
+    
+    # [DEBUG PRINTS]
+    # print("  [JIT make_move] side =", side, "from =", from_sq, "to =", to_sq, "piece =", moving_piece_type)
+    
     moving_piece_bb_idx = side * 6 + moving_piece_type
 
     captured_piece_type = np.int8(-1)

@@ -1,7 +1,7 @@
 # chess_engine/transposition_table.py
 import numpy as np
 import numba as nb
-from chess_engine.classical_old.constants import TT_SIZE_MB
+from chess_engine.classical_old.constants import TT_SIZE_MB, MATE_IN_MAX_PLY
 
 # 1. Define constants for TT entry flags / 定義置換表項目標誌的常量
 TT_FLAG_NONE = 0
@@ -79,17 +79,44 @@ def clear_transposition_table(tt):
         tt[i]['is_pv'] = False
 
 @nb.njit(cache=True)
-def mul_hi64(a, b):
-    a = np.uint64(a)
-    b = np.uint64(b)
-    aL = np.uint32(a)
-    aH = np.uint32(a >> np.uint64(32))
-    bL = np.uint32(b)
-    bH = np.uint32(b >> np.uint64(32))
-    c1 = np.uint64(aL) * np.uint64(bL) >> np.uint64(32)
-    c2 = np.uint64(aH) * np.uint64(bL) + c1
-    c3 = np.uint64(aL) * np.uint64(bH) + np.uint64(np.uint32(c2))
-    return np.uint64(aH) * np.uint64(bH) + (c2 >> np.uint64(32)) + (c3 >> np.uint64(32))
+def hashfull(tt, current_generation):
+    """
+    計算置換表的使用率（以千分比表示，0 到 1000）。
+    掃描前 1000 個 bucket (共 4000 個 entry) 中，
+    屬於當前世代且已被佔用的項目數量。
+    """
+    num_buckets = len(tt) // 4
+    scan_buckets = min(1000, num_buckets)
+    if scan_buckets <= 0:
+        return 0
+        
+    cnt = 0
+    for i in range(scan_buckets):
+        base = i * 4
+        for j in range(4):
+            entry = tt[base + j]
+            if entry['flag'] != TT_FLAG_NONE:
+                if entry['generation'] == current_generation:
+                    cnt += 1
+                    
+    return (cnt * 1000) // (scan_buckets * 4)
+
+@nb.njit(cache=True)
+def penalize_tt(tt, zobrist_key, penalty):
+    """
+    降低與 zobrist_key 匹配的置換表項目的深度。
+    """
+    if len(tt) < 4:
+        return
+    num_buckets = len(tt) // 4
+    base_index = np.int64(((zobrist_key >> np.uint64(32)) & np.uint64(num_buckets - 1)) * np.uint64(4))
+    key32 = np.uint32(zobrist_key)
+    for i in range(4):
+        idx = base_index + i
+        if tt[idx]['key'] == key32:
+            new_depth = max(int(tt[idx]['depth']) - penalty, 0)
+            tt[idx]['depth'] = np.uint8(new_depth)
+            break
 
 @nb.njit(cache=True)
 def probe_tt(tt, zobrist_key):
@@ -178,6 +205,12 @@ def store_tt(tt, zobrist_key, depth, score, static_eval, flag, best_move, curren
                 tt[idx]['generation'] = np.uint8(current_generation)
                 tt[idx]['best_move'] = final_best_move
                 tt[idx]['is_pv'] = is_pv
+            else:
+                # Secondary aging. Important for elementary mate finding.
+                if existing_entry['depth'] >= 8 and existing_entry['flag'] != TT_FLAG_EXACT:
+                    existing_score = existing_entry['score']
+                    if abs(existing_score) >= MATE_IN_MAX_PLY:
+                        tt[idx]['depth'] = np.uint8(max(int(existing_entry['depth']) - 1, 0))
             return # 找到並處理完相符局面，直接退出
             
     # 2. 如果沒有找到完全相同的局面 (雜湊碰撞 Collision)，進入替換評估 (Replacement Strategy)
@@ -213,3 +246,23 @@ def store_tt(tt, zobrist_key, depth, score, static_eval, flag, best_move, curren
     tt[replace_idx]['generation'] = np.uint8(current_generation)
     tt[replace_idx]['best_move'] = np.uint16(best_move)
     tt[replace_idx]['is_pv'] = is_pv
+
+@nb.njit(cache=True)
+def estimate_tt_occupancy_percentage(tt):
+    """
+    使用 Stockfish 的 1000 個 bucket 抽樣法，快速估算置換表歷史總使用率（百分比 %）。
+    這能避免全表掃描帶來的快取污染和效能下降。
+    """
+    if len(tt) < 4:
+        return 0.0
+    num_buckets = len(tt) // 4
+    scan_buckets = min(1000, num_buckets)
+    
+    cnt = 0
+    for i in range(scan_buckets):
+        base = i * 4
+        for j in range(4):
+            if tt[base + j]['flag'] != TT_FLAG_NONE:
+                cnt += 1
+                
+    return (cnt * 100.0) / (scan_buckets * 4)

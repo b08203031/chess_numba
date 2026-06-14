@@ -569,7 +569,7 @@ class ChessVisionApp(tk.Tk):
             # Use Kiwipete position to avoid book hits and force search
             kiwipete = "r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1"
             self.engine.send_command(f"position fen {kiwipete}")
-            self.engine.send_command("go depth 10")
+            self.engine.send_command("go depth 12")
 
     def new_game(self):
         """Resets the engine's transposition table."""

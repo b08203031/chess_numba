@@ -87,12 +87,17 @@ search_context_spec = [
     ('pawn_table_keys', numba.uint64[::1]),
     ('pawn_table_w_king_sq', numba.int8[::1]),
     ('pawn_table_b_king_sq', numba.int8[::1]),
+    ('pawn_table_castling_rights', numba.uint8[::1]),
     ('pawn_table_mg', numba.int32[::1]),
     ('pawn_table_eg', numba.int32[::1]),
-    ('pawn_table_w_tropism', numba.int32[::1]),
-    ('pawn_table_b_tropism', numba.int32[::1]),
-    ('pawn_table_w_storm', numba.int32[::1]),
-    ('pawn_table_b_storm', numba.int32[::1]),
+    ('pawn_table_w_shield_mg', numba.int32[::1]),
+    ('pawn_table_w_shield_eg', numba.int32[::1]),
+    ('pawn_table_b_shield_mg', numba.int32[::1]),
+    ('pawn_table_b_shield_eg', numba.int32[::1]),
+    ('pawn_table_w_passed', numba.uint64[::1]),
+    ('pawn_table_b_passed', numba.uint64[::1]),
+    ('pawn_table_w_candidate', numba.uint64[::1]),
+    ('pawn_table_b_candidate', numba.uint64[::1]),
 ]
 
 @jitclass(search_context_spec)
@@ -204,16 +209,21 @@ class _SearchContextJIT:
         self.reduction_stack = np.zeros(MAX_PLY, dtype=np.int32)
         self.tt_pv_stack = np.zeros(MAX_PLY, dtype=np.bool_)
         
-        # Pawn Hash Table arrays initialization (65536 entries, ~2.1MB total memory footprint)
-        self.pawn_table_keys = np.full(65536, np.uint64(0xFFFFFFFFFFFFFFFF), dtype=np.uint64)
-        self.pawn_table_w_king_sq = np.full(65536, -1, dtype=np.int8)
-        self.pawn_table_b_king_sq = np.full(65536, -1, dtype=np.int8)
-        self.pawn_table_mg = np.zeros(65536, dtype=np.int32)
-        self.pawn_table_eg = np.zeros(65536, dtype=np.int32)
-        self.pawn_table_w_tropism = np.zeros(65536, dtype=np.int32)
-        self.pawn_table_b_tropism = np.zeros(65536, dtype=np.int32)
-        self.pawn_table_w_storm = np.zeros(65536, dtype=np.int32)
-        self.pawn_table_b_storm = np.zeros(65536, dtype=np.int32)
+        # Pawn Hash Table arrays initialization (262144 entries, ~8.4MB total memory footprint)
+        self.pawn_table_keys = np.full(262144, np.uint64(0xFFFFFFFFFFFFFFFF), dtype=np.uint64)
+        self.pawn_table_w_king_sq = np.full(262144, -1, dtype=np.int8)
+        self.pawn_table_b_king_sq = np.full(262144, -1, dtype=np.int8)
+        self.pawn_table_castling_rights = np.zeros(262144, dtype=np.uint8)
+        self.pawn_table_mg = np.zeros(262144, dtype=np.int32)
+        self.pawn_table_eg = np.zeros(262144, dtype=np.int32)
+        self.pawn_table_w_shield_mg = np.zeros(262144, dtype=np.int32)
+        self.pawn_table_w_shield_eg = np.zeros(262144, dtype=np.int32)
+        self.pawn_table_b_shield_mg = np.zeros(262144, dtype=np.int32)
+        self.pawn_table_b_shield_eg = np.zeros(262144, dtype=np.int32)
+        self.pawn_table_w_passed = np.zeros(262144, dtype=np.uint64)
+        self.pawn_table_b_passed = np.zeros(262144, dtype=np.uint64)
+        self.pawn_table_w_candidate = np.zeros(262144, dtype=np.uint64)
+        self.pawn_table_b_candidate = np.zeros(262144, dtype=np.uint64)
 
 
 

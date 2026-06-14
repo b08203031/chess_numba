@@ -60,7 +60,8 @@ from chess_engine.classical_old.debug_utils import log_info
 from chess_engine.classical_old.see import _see_ge_jit, get_pinned_pieces
 from chess_engine.classical_old.transposition_table import (
     probe_tt, store_tt, numba_tt_entry_type,
-    TT_FLAG_NONE, TT_FLAG_EXACT, TT_FLAG_ALPHA, TT_FLAG_BETA
+    TT_FLAG_NONE, TT_FLAG_EXACT, TT_FLAG_ALPHA, TT_FLAG_BETA,
+    hashfull, penalize_tt
 )
 from chess_engine.classical_old.zobrist import get_tt_key  # GHI protection: halfmove-aware TT key
 from chess_engine.classical_old.engine_types import (
@@ -158,7 +159,7 @@ def quiescence_search(piece_bbs, occupancy_bbs, game_state, alpha, beta, ply, se
     zobrist_key = game_state[4]
     tt_key = get_tt_key(zobrist_key, int(game_state[3]))  # GHI: halfmove-aware key for TT
     tt_entry = probe_tt(search_context.transposition_table, tt_key)
-    if tt_entry['flag'] != TT_FLAG_NONE and tt_entry['depth'] >= 0:
+    if tt_entry['flag'] != TT_FLAG_NONE:
         qs_tt_score = np.int32(tt_entry['score'])
         if qs_tt_score > MATE_IN_MAX_PLY: qs_tt_score -= ply
         elif qs_tt_score < -MATE_IN_MAX_PLY: qs_tt_score += ply
@@ -637,6 +638,20 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
 
                 search_context.pv_table[ply, ply] = NO_MOVE
                 return (tt_score, tt_entry['best_move'], nodes_searched, quiescence_nodes, tt_hits)
+
+        # 3. Penalize TT depth if a window-bound mismatch is the only reason cutoff failed
+        if ply > 0 and not is_pv and not is_exclusion_search and halfmove_clock < 96 and depth > 5:
+            if tt_entry['flag'] != TT_FLAG_NONE and tt_entry['flag'] != TT_FLAG_EXACT:
+                tt_score = np.int32(tt_entry['score'])
+                if tt_score > MATE_IN_MAX_PLY: tt_score -= ply
+                elif tt_score < -MATE_IN_MAX_PLY: tt_score += ply
+                if fifty_move_scale < FIFTY_MOVE_MAX_SCALE and abs(tt_score) < MATE_IN_MAX_PLY:
+                    tt_score = tt_score * fifty_move_scale // FIFTY_MOVE_MAX_SCALE
+
+                depth_diff = 1 if tt_score <= beta else 0
+                if tt_entry['depth'] > (depth - depth_diff):
+                    if tt_entry['flag'] == (TT_FLAG_ALPHA if tt_score >= beta else TT_FLAG_BETA):
+                        penalize_tt(search_context.transposition_table, tt_key, 1)
 
     # ==========================================
     # PHASE 3: Static Evaluation and Pre-Search Pruning
@@ -1856,7 +1871,8 @@ def iterative_deepening_search(piece_bbs, occupancy_bbs, game_state, max_depth, 
 
         if verbose:
             nps = int(total_nodes / (elapsed_time_ms / 1000)) if elapsed_time_ms > 0 else 0
-            print(f"info depth {current_depth} score {uci_score_string} nodes {total_nodes} nps {nps} time {int(elapsed_time_ms)} pv {pv_string}")
+            hashfull_val = hashfull(transposition_table, search_context.tt_generation)
+            print(f"info depth {current_depth} score {uci_score_string} nodes {total_nodes} nps {nps} hashfull {hashfull_val / 10:.1f}% time {int(elapsed_time_ms)} pv {pv_string}")
 
         # Predictive soft time limit
         if maximum_time_ms > 0:

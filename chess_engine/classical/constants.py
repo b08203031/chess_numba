@@ -501,6 +501,11 @@ SHELTER_BASE_MG = np.int32(4) # SF11: 5 * 0.78 ≈ 4
 SHELTER_BASE_EG = np.int32(3) # SF11: 5 * 0.563 ≈ 3
 KING_PAWN_DIST_PENALTY_EG = np.int32(-9) # SF11: -16 * 0.563 ≈ -9
 
+# --- Pawnless Flank & Flank Attacks (SF11-inspired) ---
+PAWNLESS_FLANK = np.array([-13, -53], dtype=np.int32) # MG, EG (SF11 S(17, 95) * scale)
+FLANK_ATTACKS = np.array([-6, 0], dtype=np.int32) # MG, EG (SF11 S(8, 0) * scale)
+
+
 # =============================================================================
 # --- Threat Evaluation Constants / 威脅評估常量 ---
 # =============================================================================
@@ -838,6 +843,19 @@ NOT_A_FILE = ~np.uint64(0x0101010101010101)
 NOT_H_FILE = ~np.uint64(0x8080808080808080)
 QUEEN_SIDE_BB = np.uint64(0x0F0F0F0F0F0F0F0F)
 KING_SIDE_BB = np.uint64(0xF0F0F0F0F0F0F0F0)
+
+# Exact King Flank bitboards by king file (0-7), matching Stockfish 11
+KING_FLANKS = np.array([
+    np.uint64(0x0707070707070707), # Files A, B, C
+    np.uint64(0x0F0F0F0F0F0F0F0F), # Files A, B, C, D
+    np.uint64(0x0F0F0F0F0F0F0F0F), # Files A, B, C, D
+    np.uint64(0x3C3C3C3C3C3C3C3C), # Files C, D, E, F
+    np.uint64(0x3C3C3C3C3C3C3C3C), # Files C, D, E, F
+    np.uint64(0xF0F0F0F0F0F0F0F0), # Files E, F, G, H
+    np.uint64(0xF0F0F0F0F0F0F0F0), # Files E, F, G, H
+    np.uint64(0xE0E0E0E0E0E0E0E0), # Files F, G, H
+], dtype=np.uint64)
+
 
 # =============================================================================
 # --- Space Evaluation Constants / 空間評估常量 ---
