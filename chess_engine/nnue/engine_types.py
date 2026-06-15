@@ -41,6 +41,7 @@ search_context_spec = [
     ('pv_table', numba.uint16[:, :]),
     ('history_table', numba.int32[:, :]),
     ('nodes_searched', numba.uint64),
+    ('nodes_searched_array', numba.uint64[:]),
     ('accumulator_stack', numba.int32[:, :, :]),
     ('end_time', numba.float64),
     ('stop_flag', numba.boolean[:]),
@@ -144,6 +145,7 @@ class SearchContext:
         self.non_pawn_correction_history_black = non_pawn_correction_history_black
         self.accumulator_stack = np.zeros((MAX_PLY + 20, 2, 512), dtype=np.int32)
         self.nodes_searched = np.uint64(0)
+        self.nodes_searched_array = np.zeros(1, dtype=np.uint64)
         self.end_time = 0.0
         # 使用陣列來包裝布林值，以便可以作為引用傳遞並在外部修改
         self.stop_flag = np.array([False], dtype=np.bool_)

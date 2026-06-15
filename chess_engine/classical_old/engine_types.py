@@ -40,6 +40,7 @@ search_context_spec = [
     ('pv_table', numba.uint16[:, :]),
     ('history_table', numba.int32[:, :]),
     ('nodes_searched', numba.uint64),
+    ('nodes_searched_array', numba.uint64[:]),
     ('end_time', numba.float64),
     ('stop_flag', numba.boolean[:]),
     ('game_history', numba.uint64[::1]),  # Array of Zobrist keys for game history
@@ -165,6 +166,7 @@ class _SearchContextJIT:
         self.non_pawn_correction_history_black = non_pawn_correction_history_black
         # accumulator_stack removed — not used in Classical engine
         self.nodes_searched = np.uint64(0)
+        self.nodes_searched_array = np.zeros(1, dtype=np.uint64)
         self.end_time = 0.0
         # 使用陣列來包裝布林值，以便可以作為引用傳遞並在外部修改
         self.stop_flag = np.array([False], dtype=np.bool_)

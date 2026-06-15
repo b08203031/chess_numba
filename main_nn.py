@@ -244,6 +244,9 @@ def uci_loop():
                 elif "depth" in tokens:
                     max_depth = int(tokens[tokens.index("depth") + 1])
                     time_config = {'optimum_time': 0, 'maximum_time': 0}
+                elif "nodes" in tokens:
+                    max_nodes = int(tokens[tokens.index("nodes") + 1])
+                    time_config = {'optimum_time': 0, 'maximum_time': 0, 'nodes_limit': max_nodes}
                 else:
                     wtime_ms = int(tokens[tokens.index("wtime") + 1]) if "wtime" in tokens else 0
                     btime_ms = int(tokens[tokens.index("btime") + 1]) if "btime" in tokens else 0

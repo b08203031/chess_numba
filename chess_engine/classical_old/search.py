@@ -145,6 +145,7 @@ def quiescence_search(piece_bbs, occupancy_bbs, game_state, alpha, beta, ply, se
 
     # Check for stop flag every 32768 nodes (at ~950k NPS this fires ~29x/sec)
     if (search_context.nodes_searched & 32767) == 0:
+        search_context.nodes_searched_array[0] = search_context.nodes_searched
         if search_context.stop_flag[0]:
             return np.int32(0), q_nodes
 
@@ -471,6 +472,7 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
 
     # Check for stop flag every 32768 nodes (at ~950k NPS this fires ~29x/sec)
     if (search_context.nodes_searched & 32767) == 0:
+        search_context.nodes_searched_array[0] = search_context.nodes_searched
         if search_context.stop_flag[0]:
             return (np.int32(0), NO_MOVE, nodes_searched, quiescence_nodes, tt_hits)
 
@@ -1762,20 +1764,31 @@ def iterative_deepening_search(piece_bbs, occupancy_bbs, game_state, max_depth, 
     
     search_context.stop_flag[0] = False
 
-    # Spawn timer thread if search is time-limited
+    nodes_limit = time_config.get('nodes_limit', 0)
+
+    # Spawn timer thread if search is time-limited or node-limited
     timer_thread = None
-    if search_context.end_time > 0.0:
-        duration = search_context.end_time - start_time
-        if duration > 0.0:
-            def timer_worker():
-                while time.time() < search_context.end_time:
-                    if search_context.stop_flag[0]:
-                        return
-                    time.sleep(0.005)
-                search_context.stop_flag[0] = True
+    nodes_searched_array = search_context.nodes_searched_array
+    if search_context.end_time > 0.0 or nodes_limit > 0:
+        def timer_worker():
+            end_time = search_context.end_time
+            has_time_limit = end_time > 0.0
             
-            timer_thread = threading.Thread(target=timer_worker, daemon=True)
-            timer_thread.start()
+            while True:
+                if search_context.stop_flag[0]:
+                    return
+                # Check time limit
+                if has_time_limit and time.time() >= end_time:
+                    search_context.stop_flag[0] = True
+                    return
+                # Check node limit (accumulated total_nodes + current search context nodes)
+                if nodes_limit > 0 and (total_nodes + nodes_searched_array[0]) >= nodes_limit:
+                    search_context.stop_flag[0] = True
+                    return
+                time.sleep(0.002) # Polling interval of 2ms for high responsiveness
+        
+        timer_thread = threading.Thread(target=timer_worker, daemon=True)
+        timer_thread.start()
     
     last_score, best_move_total = 0, NO_MOVE
     total_nodes, total_q_nodes, total_tt_hits = (np.uint64(v) for v in [0]*3)
@@ -1837,9 +1850,12 @@ def iterative_deepening_search(piece_bbs, occupancy_bbs, game_state, max_depth, 
         
         total_nodes += search_context.nodes_searched
 
+        if nodes_limit > 0 and total_nodes >= nodes_limit:
+            search_context.stop_flag[0] = True
+
         if search_context.stop_flag[0]:
             if verbose:
-                log_info(f"Search stopped at depth {current_depth} due to time limit.")
+                log_info(f"Search stopped at depth {current_depth} due to limit.")
             break
 
         # --- This block only runs if the search for the current depth was fully completed ---
