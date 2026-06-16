@@ -147,7 +147,7 @@ python -m tests.perft divide --depth 4
 * `chess_engine/`: 引擎核心套件。
   * `polyglot.bin`: 共享的二進位開局庫檔案。
   * `classical/`: 經典評估版本，各模組完全自洽。
-    * `constants.py`, `evaluation.py`, `search.py`, `move_generator.py` 等。
+    * `constants.py`, `evaluation.py`, `pawns.py`, `material.py`, `search.py`, `move_generator.py` 等。
   * `nnue/`: NNUE 評估版本，包含推理邏輯。
     * `constants.py`, `evaluation.py`, `search.py` 等。
     * `ml_eval/`: 機器學習訓練、量化及推導模組。
