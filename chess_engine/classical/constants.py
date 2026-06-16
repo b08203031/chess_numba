@@ -452,8 +452,16 @@ KING_SAFETY_ATTACK_UNITS = np.array([1, 4, 3, 3, 5], dtype=np.int32) # P, N, B, 
 # 這些值貢獻到 kingDanger 分數，最後進行二次轉換。
 
 # Weight per weak square in king zone (attacked by enemy, not defended by us except K)
-# 王圈內弱格（被敵攻、只被王守或不守）每個的 danger 貢獻
+# 王圈內弱格（被敵攻、只被王守 or 不守）每個的 danger 貢獻
 KING_DANGER_WEAK_SQ = np.int32(3)
+
+# Weight per pinned piece/blocker in king danger calculation
+# 國王防禦者中牽制/阻擋棋子的 danger 貢獻 (SF11 popcount(blockers_for_king(Us)) scaled)
+KING_DANGER_BLOCKERS = np.int32(2)
+
+# Flat offset in king danger formula when any danger exists
+# 國王遭受攻擊時的固定 offset
+KING_DANGER_OFFSET = np.int32(1)
 
 # Weight per unsafe check square (enemy can check but not safely)
 # 不安全將軍格每個的 danger 貢獻
@@ -557,6 +565,14 @@ FLANK_ATTACKS = np.array([-6, 0], dtype=np.int32) # MG, EG (SF11 S(8, 0) * scale
 # 安全兵的威脅：己方安全兵攻擊敵方非兵棋子。
 THREAT_SAFE_PAWN = np.array([70, 45], dtype=np.int32)  # SF11: (173, 94)
 
+# KnightOnQueen: Knight attacks squares that attack queen.
+# 騎士攻擊能攻擊后的方格的獎勵。
+THREAT_KNIGHT_ON_QUEEN = np.array([12, 7], dtype=np.int32)
+
+# SliderOnQueen: Bishop/Rook attacks squares that attack queen.
+# 滑動棋子（象/車）攻擊能攻擊后的方格的獎勵。
+THREAT_SLIDER_ON_QUEEN = np.array([46, 10], dtype=np.int32)
+
 # ThreatByMinor[target_piece_type]: Minor (N/B) attacks piece of given type.
 # Index: 0=Pawn, 1=Knight, 2=Bishop, 3=Rook, 4=Queen, 5=King
 # 輕子威脅：馬/象攻擊對應類型棋子的獎勵。
@@ -626,6 +642,18 @@ BISHOP_PAWNS_CENTER_BLOCKED_FACTOR = np.int32(1)  # 中心鎖死時的壞象懲�
 # 困車懲罰：車移動格數 ≤ 3 且在己方王同側。
 TRAPPED_ROOK = np.array([41, 6], dtype=np.int32)  # SF11: (52, 10)
 
+# LongDiagonalBishop: Bishop on long diagonal seeing both center squares.
+# 長對角線象：象在長對角線上，且能穿過兵阻擋看到兩個中心方格。
+LONG_DIAGONAL_BISHOP = np.array([35, 0], dtype=np.int32)
+
+# RookOnQueenFile: Rook on same file as queen (both colors).
+# 車后同列：車在與任何一方的后同一列上。
+ROOK_ON_QUEEN_FILE = np.array([5, 3], dtype=np.int32)
+
+# WeakQueen: Queen in relative pin or discovered attack line.
+# 弱勢后：后處於被牽制或發現攻擊射線上。
+WEAK_QUEEN = np.array([38, 8], dtype=np.int32)
+
 # --- Endgame Scale Factors / 殘局縮放因子 ---
 SCALE_FACTOR_NORMAL = 64              # Normal scaling (64/64 = 1.0) / 正常殘局縮放因子（無縮減）
 SCALE_FACTOR_DRAW = 0                 # Scaling for forced draw positions (0/64 = 0.0) / 強制和棋局面縮放因子
@@ -639,6 +667,44 @@ SCALE_FACTOR_KRPKR_FORTRESS = 8       # King + Rook + Pawn vs King + Rook (fortr
 SCALE_FACTOR_KQKR_FORTRESS = 64       # King + Queen vs King + Rook / 王后對王車殘局縮放因子
 SCALE_FACTOR_KQKRPs_FORTRESS = 8      # King + Queen vs King + Rook + Pawns (fortress) / 王后對王車兵堡壘局面縮放因子
 
+# =============================================================================
+# --- Material Imbalance Polynomial Matrix (SF11 material.cpp) ---
+# --- 材質不平衡多項式矩陣 ---
+# =============================================================================
+# SF11 uses a quadratic polynomial to evaluate material imbalance beyond simple
+# piece values. The index order is: [BishopPair, Pawn, Knight, Bishop, Rook, Queen].
+# This models cross-piece-type interactions (e.g., knights are worth more with many pawns,
+# rooks are worth less when queens are present on the same side, etc.).
+#
+# Reference: stockfish_11/src/material.cpp lines 33-53
+# 公式: for pt1=0..5: bonus += count[Us][pt1] * Σ(Ours[pt1][pt2]*count[Us][pt2] + Theirs[pt1][pt2]*count[Them][pt2])
+# 最終不平衡 = (white_bonus - black_bonus) / 16
+
+IMBALANCE_QUADRATIC_OURS = np.array([
+    #  BP   Pawn  Knight Bishop  Rook  Queen
+    [1438,    0,    0,    0,    0,    0],  # Bishop pair
+    [  40,   38,    0,    0,    0,    0],  # Pawn
+    [  32,  255,  -62,    0,    0,    0],  # Knight
+    [   0,  104,    4,    0,    0,    0],  # Bishop
+    [ -26,   -2,   47,  105, -208,    0],  # Rook
+    [-189,   24,  117,  133, -134,   -6],  # Queen
+], dtype=np.int32)
+
+IMBALANCE_QUADRATIC_THEIRS = np.array([
+    #  BP   Pawn  Knight Bishop  Rook  Queen
+    [   0,    0,    0,    0,    0,    0],  # Bishop pair
+    [  36,    0,    0,    0,    0,    0],  # Pawn
+    [   9,   63,    0,    0,    0,    0],  # Knight
+    [  59,   65,   42,    0,    0,    0],  # Bishop
+    [  46,   39,   24,  -24,    0,    0],  # Rook
+    [  97,  100,  -42,  137,  268,    0],  # Queen
+], dtype=np.int32)
+
+IMBALANCE_DIVISOR = np.int32(16)  # SF11 divides raw imbalance by 16
+
+# Scaling from SF11's internal centipawn scale (PawnMg=128) to our scale (PawnMg=100)
+IMBALANCE_SCALE_MG = np.int32(78)   # 100/128 ≈ 0.78, stored as percentage for integer math
+IMBALANCE_SCALE_EG = np.int32(56)   # 120/213 ≈ 0.563, stored as percentage for integer math
 
 # =============================================================================
 # --- Search Constants / 搜尋常量 ---

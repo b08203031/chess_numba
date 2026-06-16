@@ -622,16 +622,16 @@ def get_endgame_scale_factor(piece_bbs, occupancy_bbs, game_state, phase, eg_sco
             and CHEBYSHEV_DISTANCE[wksq, brsq] - tempo >= 2):
             return SCALE_FACTOR_DRAW
 
-        # Pawn on 7th rank progressive scaling
+        # Pawn on 7th rank progressive scaling (SCALE_FACTOR_MAX = 128)
         if (r == 6 
             and f != 0 
             and wrsq % 8 == f 
             and wrsq != queening_sq 
             and CHEBYSHEV_DISTANCE[wksq, queening_sq] < CHEBYSHEV_DISTANCE[bksq, queening_sq] - 2 + tempo 
             and CHEBYSHEV_DISTANCE[wksq, queening_sq] < CHEBYSHEV_DISTANCE[bksq, wrsq] + tempo):
-            return max(0, 64 - 2 * CHEBYSHEV_DISTANCE[wksq, queening_sq])
+            return max(0, 128 - 2 * CHEBYSHEV_DISTANCE[wksq, queening_sq])
 
-        # Pawn further back progressive scaling
+        # Pawn further back progressive scaling (SCALE_FACTOR_MAX = 128)
         if (f != 0 
             and wrsq % 8 == f 
             and wrsq < wpsq 
@@ -640,7 +640,7 @@ def get_endgame_scale_factor(piece_bbs, occupancy_bbs, game_state, phase, eg_sco
             and (CHEBYSHEV_DISTANCE[bksq, wrsq] + tempo >= 3 
                  or (CHEBYSHEV_DISTANCE[wksq, queening_sq] < CHEBYSHEV_DISTANCE[bksq, wrsq] + tempo 
                      and CHEBYSHEV_DISTANCE[wksq, wpsq + 8] < CHEBYSHEV_DISTANCE[bksq, wrsq] + tempo))):
-            val = 64 - 8 * CHEBYSHEV_DISTANCE[wpsq, queening_sq] - 2 * CHEBYSHEV_DISTANCE[wksq, queening_sq]
+            val = 128 - 8 * CHEBYSHEV_DISTANCE[wpsq, queening_sq] - 2 * CHEBYSHEV_DISTANCE[wksq, queening_sq]
             return max(0, val)
 
         # Pawn not far advanced progressive scaling
@@ -696,14 +696,15 @@ def get_endgame_scale_factor(piece_bbs, occupancy_bbs, game_state, phase, eg_sco
 
     sf = SCALE_FACTOR_NORMAL  # 64
 
-    if is_ocb:
-        if wn == 0 and bn == 0 and wr == 0 and br == 0 and wq == 0 and bq == 0:
-            # Pure OCB: no other pieces except kings, opposite-colored bishops and pawns
-            sf = 22
-        else:
-            sf = min(sf, 36 + 7 * pawn_count_strong)
+    if is_ocb and wn == 0 and bn == 0 and wr == 0 and br == 0 and wq == 0 and bq == 0:
+        # Pure OCB: no other pieces except kings, opposite-colored bishops and pawns
+        sf = 22
+    else:
+        # General pawn count scaling: multiplier is 2 if opposite-colored bishops exist, 7 otherwise
+        mult = 2 if is_ocb else 7
+        sf = min(sf, 36 + mult * pawn_count_strong)
 
-    # 50-move rule counter decay (halfmove clock is game_state[3])
+    # 50-move rule decay (halfmove clock is game_state[3])
     rule50 = int(game_state[3])
     if rule50 > 12:
         sf = max(0, sf - (rule50 - 12) // 4)
