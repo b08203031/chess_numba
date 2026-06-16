@@ -228,29 +228,40 @@ PST_EG = np.array([
 
 # --- Initiative / Complexity Constants (SF11-inspired) ---
 # Dynamic complexity-based score dampening, prevents draw-drift in simple endgames.
+# 動態複雜度主動權修正，防止簡單殘局中的和棋漂移。
 
-# Middlegame (MG) weights - scaled by Pawn ratio MG = 100/128 ≈ 0.78
-INITIATIVE_PASSED_WEIGHT_MG = np.int32(7)      # 9  * 0.78 ≈ 7
-INITIATIVE_PAWN_WEIGHT_MG = np.int32(9)        # 11 * 0.78 ≈ 9
-INITIATIVE_OUTFLANKING_WEIGHT_MG = np.int32(7) # 9  * 0.78 ≈ 7
-INITIATIVE_INFILTRATION_WEIGHT_MG = np.int32(9)  # 12 * 0.78 ≈ 9
-INITIATIVE_BOTH_FLANKS_WEIGHT_MG = np.int32(16)  # 21 * 0.78 ≈ 16
-INITIATIVE_PAWN_ENDGAME_WEIGHT_MG = np.int32(40) # 51 * 0.78 ≈ 40
-INITIATIVE_ALMOST_UNWIN_WEIGHT_MG = np.int32(34) # 43 * 0.78 ≈ 34
-INITIATIVE_OFFSET_MG = np.int32(-78)             # -100 * 0.78 ≈ -78
-INITIATIVE_MG_OFFSET = np.int32(39)              # +50 * 0.78 ≈ 39
+# Middlegame (MG) weights - scaled by Pawn ratio MG = 100/128 ≈ 0.78 / 中局主動權/複雜度係數
+INITIATIVE_PASSED_WEIGHT_MG = np.int32(7)      # 9  * 0.78 ≈ 7 / 通路兵權重
+INITIATIVE_PAWN_WEIGHT_MG = np.int32(9)        # 11 * 0.78 ≈ 9 / 兵數量權重
+INITIATIVE_OUTFLANKING_WEIGHT_MG = np.int32(7) # 9  * 0.78 ≈ 7 / 側翼國王相對位置權重
+INITIATIVE_INFILTRATION_WEIGHT_MG = np.int32(9)  # 12 * 0.78 ≈ 9 / 國王滲透權重
+INITIATIVE_BOTH_FLANKS_WEIGHT_MG = np.int32(16)  # 21 * 0.78 ≈ 16 / 雙翼皆有兵權重
+INITIATIVE_PAWN_ENDGAME_WEIGHT_MG = np.int32(40) # 51 * 0.78 ≈ 40 / 純王兵殘局權重
+INITIATIVE_ALMOST_UNWIN_WEIGHT_MG = np.int32(34) # 43 * 0.78 ≈ 34 / 幾乎不可獲勝局面懲罰權重
+INITIATIVE_OFFSET_MG = np.int32(-78)             # -100 * 0.78 ≈ -78 / 複雜度基礎偏置
+INITIATIVE_MG_OFFSET = np.int32(39)              # +50 * 0.78 ≈ 39 / 主動權分數修正偏置
 
-# Endgame (EG) weights - scaled by Pawn ratio EG = 120/213 ≈ 0.563
-INITIATIVE_PASSED_WEIGHT_EG = np.int32(5)      # 9  * 0.563 ≈ 5
-INITIATIVE_PAWN_WEIGHT_EG = np.int32(6)        # 11 * 0.563 ≈ 6
-INITIATIVE_OUTFLANKING_WEIGHT_EG = np.int32(5) # 9  * 0.563 ≈ 5
-INITIATIVE_INFILTRATION_WEIGHT_EG = np.int32(7)  # 12 * 0.563 ≈ 7
-INITIATIVE_BOTH_FLANKS_WEIGHT_EG = np.int32(12)  # 21 * 0.563 ≈ 12
-INITIATIVE_PAWN_ENDGAME_WEIGHT_EG = np.int32(29) # 51 * 0.563 ≈ 29
-INITIATIVE_ALMOST_UNWIN_WEIGHT_EG = np.int32(24) # 43 * 0.563 ≈ 24
-INITIATIVE_OFFSET_EG = np.int32(-56)             # -100 * 0.563 ≈ -56
+# Endgame (EG) weights - scaled by Pawn ratio EG = 120/213 ≈ 0.563 / 殘局主動權/複雜度係數
+INITIATIVE_PASSED_WEIGHT_EG = np.int32(5)      # 9  * 0.563 ≈ 5 / 通路兵權重
+INITIATIVE_PAWN_WEIGHT_EG = np.int32(6)        # 11 * 0.563 ≈ 6 / 兵數量權重
+INITIATIVE_OUTFLANKING_WEIGHT_EG = np.int32(5) # 9  * 0.563 ≈ 5 / 側翼國王相對位置權重
+INITIATIVE_INFILTRATION_WEIGHT_EG = np.int32(7)  # 12 * 0.563 ≈ 7 / 國王滲透權重
+INITIATIVE_BOTH_FLANKS_WEIGHT_EG = np.int32(12)  # 21 * 0.563 ≈ 12 / 雙翼皆有兵權重
+INITIATIVE_PAWN_ENDGAME_WEIGHT_EG = np.int32(29) # 51 * 0.563 ≈ 29 / 純王兵殘局權重
+INITIATIVE_ALMOST_UNWIN_WEIGHT_EG = np.int32(24) # 43 * 0.563 ≈ 24 / 幾乎不可獲勝局面懲罰權重
+INITIATIVE_OFFSET_EG = np.int32(-56)             # -100 * 0.563 ≈ -56 / 複雜度基礎偏置
 
-TEMPO_BONUS = np.int32(10)
+TEMPO_BONUS = np.int32(10)                       # Positional bonus for the side to move / 輪行方（先手/Tempo）的位置分數獎勵
+
+# --- King-Pawn Endgame Specifics / 王兵殘局特定常數 ---
+UNSTOPPABLE_PAWN_BONUS = np.int32(800)       # 王兵殘局中不可阻擋通路兵的額外獎勵（接近一個后）/ Unstoppable passed pawn bonus in king-pawn endgame
+KING_PAWN_PROXIMITY_FACTOR = np.int32(5)     # 王兵殘局中，國王親近所有兵的加分係數（每格曼哈頓距離）/ King proximity to all pawns factor
+
+# --- Space Evaluation Constants / 空間控制評估常數 ---
+# SPACE_THRESHOLD scaled from SF11's 12222: 6400 * (12222 / 16604) ≈ 4710
+SPACE_THRESHOLD = np.int32(4700)             # 啟用空間評估的最小非兵子力閥值 / Minimum non-pawn material to enable space eval
+SPACE_BONUS_DIVISOR = np.int32(16)           # 空間控制基礎分數除數 / Space bonus divisor
+SPACE_SCALE_DIVISOR = np.int32(4)            # 空間控制縮放除數 / Space scale divisor
 
 
 # =============================================================================
@@ -311,6 +322,7 @@ BISHOP_PAIR_BONUS = np.array([20, 30], dtype=np.int32) # MG, EG
 ROOK_ON_SEMI_OPEN_FILE_BONUS = np.array([15, 10], dtype=np.int32) # MG, EG
 ROOK_ON_OPEN_FILE_BONUS = np.array([25, 15], dtype=np.int32) # MG, EG
 
+# Rook on 7th rank (confining king or attacking pawns) bonus / 車在第 7 橫排（限制國王或攻擊兵）的獎勵
 ROOK_ON_SEVENTH_BONUS = np.array([20, 50], dtype=np.int32) # MG, EG
 
 # =============================================================================
@@ -337,6 +349,30 @@ PASSED_PAWN_BONUS = np.array([
 # PassedFile adjustment constants (SF11: PassedFile = S(11, 8), scaled by edge_distance)
 PASSED_FILE_BONUS = np.array([7, 5], dtype=np.int32) # MG, EG
 
+# --- Passed Pawn Evaluation Refinements / 通路兵動態安全與比例評估參數 ---
+PASSED_SCALE_FULL = np.int32(4)          # 材質充足時的完整加成比例 / Full scale when material is sufficient
+PASSED_SCALE_HALF = np.int32(2)          # 材質較少時的減半加成比例 / Half scale when material is less
+PASSED_SCALE_MIN = np.int32(1)           # 極少材質時的最低加成比例 / Minimum scale when material is very scarce
+CANDIDATE_PASSER_DIVISOR = np.int32(2)    # 候選通路兵（非真正通路兵）的加成折半除數 / Divisor for candidate passed pawn bonus
+
+# Path Safety coefficients (SF11 dynamic bonus) / 推進路徑安全性係數
+PASSED_PATH_SAFE_NONE_ATTACK = np.int32(21)  # 前進路徑無人控制 / Safe path weight (no enemy attacks)
+PASSED_PATH_SAFE_EDGE_ATTACK = np.int32(12)  # 僅路徑邊緣受控 / Safe path weight (attacks on adjacent files only)
+PASSED_PATH_SAFE_BLOCK_ONLY = np.int32(5)    # 僅前方阻擋格安全 / Safe path weight (attacks on blocker square only)
+PASSED_PATH_SUPPORT_BONUS = np.int32(3)      # 友方車后在後方支援或控制阻擋格的額外安全係數 / Support from behind bonus
+
+# Passed pawn rank-based scaling formula / 通路兵動態加分成長公式參數 (5 * rank - 13)
+PASSED_DYNAMICS_MULT = np.int32(5)           # 行動加分排數乘數 / Rank multiplier
+PASSED_DYNAMICS_OFFSET = np.int32(-13)       # 行動加分偏置 / Rank offset
+
+# King Proximity in Passed Pawn Endgames / 通路兵殘局國王親近度參數
+KING_PROXIMITY_MAX_DIST = np.int32(5)        # 距離計算上限格數 / Cap for Chebyshev distance
+KING_PROX_ENEMY_MULT = np.int32(19)          # 敵方王距離權重乘數 / Enemy king distance weight
+KING_PROX_ENEMY_DIV = np.int32(4)            # 敵方王距離權重除數 / Enemy king distance divisor (19/4)
+KING_PROX_FRIENDLY_MULT = np.int32(2)        # 己方王距離權重乘數 / Friendly king distance weight
+KING_PROX_MIN_BONUS = np.int32(-150)         # 國王親近度最小懲罰 / Proximity bonus lower bound
+KING_PROX_MAX_BONUS = np.int32(150)          # 國王親近度最大加分 / Proximity bonus upper bound
+
 # --- Isolated Pawns / 孤兵 ---
 # Penalty for each isolated pawn on a file.
 # 每一個孤兵的懲罰。
@@ -348,7 +384,9 @@ ISOLATED_PAWN_PENALTY = np.array([-4, -8], dtype=np.int32) # MG, EG (SF11 S(5, 1
 DOUBLED_PAWN_PENALTY = np.array([-8, -31], dtype=np.int32) # MG, EG (SF11 S(11, 56) * scale)
 
 # --- Weak Lever & Weak Unopposed / 弱對決兵與開放線弱兵 ---
+# Penalty for a weak pawn under pressure (lever) / 弱兵對決時的懲罰
 WEAK_LEVER_PENALTY = np.array([0, -31], dtype=np.int32)      # MG, EG (SF11 S(0, 56) * scale)
+# Penalty for an unopposed weak pawn on an open/semi-open file / 開放線或半開放線上無敵兵對決的弱兵懲罰
 WEAK_UNOPPOSED_PENALTY = np.array([-10, -15], dtype=np.int32) # MG, EG (SF11 S(13, 27) * scale)
 
 # --- Connected Pawn Bonus by Rank (SF11) / SF11 連結兵獎勵（按橫排） ---
@@ -414,8 +452,16 @@ KING_SAFETY_ATTACK_UNITS = np.array([1, 4, 3, 3, 5], dtype=np.int32) # P, N, B, 
 # 這些值貢獻到 kingDanger 分數，最後進行二次轉換。
 
 # Weight per weak square in king zone (attacked by enemy, not defended by us except K)
-# 王圈內弱格（被敵攻、只被王守或不守）每個的 danger 貢獻
+# 王圈內弱格（被敵攻、只被王守 or 不守）每個的 danger 貢獻
 KING_DANGER_WEAK_SQ = np.int32(3)
+
+# Weight per pinned piece/blocker in king danger calculation
+# 國王防禦者中牽制/阻擋棋子的 danger 貢獻 (SF11 popcount(blockers_for_king(Us)) scaled)
+KING_DANGER_BLOCKERS = np.int32(2)
+
+# Flat offset in king danger formula when any danger exists
+# 國王遭受攻擊時的固定 offset
+KING_DANGER_OFFSET = np.int32(1)
 
 # Weight per unsafe check square (enemy can check but not safely)
 # 不安全將軍格每個的 danger 貢獻
@@ -488,8 +534,20 @@ SHELTER_BASE_MG = np.int32(4) # SF11: 5 * 0.78 ≈ 4
 SHELTER_BASE_EG = np.int32(3) # SF11: 5 * 0.563 ≈ 3
 KING_PAWN_DIST_PENALTY_EG = np.int32(-9) # SF11: -16 * 0.563 ≈ -9
 
+# --- King Danger Calculation Refinement Constants / 王危險度計算精細化常數 ---
+KING_FLANK_ATTACK_FACTOR = 3.0       # 翼部攻擊強度加權因子 / Flank attack weight factor
+KING_FLANK_ATTACK_DIVISOR = 360.0    # 翼部攻擊強度除數 / Flank attack divisor
+KING_SAFETY_MOBILITY_SCALE = 45.0    # 機動性對王安全影響的縮放比例 / Mobility scale for king safety danger
+KING_DEFENDER_KNIGHT_BONUS = 2       # 守護馬防禦王鄰格的 danger 扣除 / Knight protector danger bonus
+KING_SAFETY_SHIELD_SCALE = 60.0      # 兵盾反饋對王安全危險度的縮放除數 / Shelter shield scale for danger
+KING_SAFETY_FLANK_DEF_SCALE = 11.25  # 翼部防禦子力對王安全危險度的縮放除數 / Flank defense scale for danger
+KING_DANGER_THRESHOLD = 2            # 王危險度二次方懲罰起步閥值 / Danger quadratic penalty start threshold
+KING_DANGER_QUAD_DIVISOR = 2         # 王危險度二次方懲罰除數 / Danger quadratic penalty divisor
+
 # --- Pawnless Flank & Flank Attacks (SF11-inspired) ---
+# Penalty when own king flank has no pawns / 己方國王側翼完全無兵時的防禦缺失懲罰（中局與殘局）
 PAWNLESS_FLANK = np.array([-13, -53], dtype=np.int32) # MG, EG (SF11 S(17, 95) * scale)
+# Penalty factor per flank attack square when king flank is attacked / 國王側翼遭受攻擊時，每格受控格的危險度加成懲罰（中局與殘局）
 FLANK_ATTACKS = np.array([-6, 0], dtype=np.int32) # MG, EG (SF11 S(8, 0) * scale)
 
 
@@ -506,6 +564,14 @@ FLANK_ATTACKS = np.array([-6, 0], dtype=np.int32) # MG, EG (SF11 S(8, 0) * scale
 # ThreatBySafePawn: Friendly safe pawn attacks enemy non-pawn piece.
 # 安全兵的威脅：己方安全兵攻擊敵方非兵棋子。
 THREAT_SAFE_PAWN = np.array([70, 45], dtype=np.int32)  # SF11: (173, 94)
+
+# KnightOnQueen: Knight attacks squares that attack queen.
+# 騎士攻擊能攻擊后的方格的獎勵。
+THREAT_KNIGHT_ON_QUEEN = np.array([12, 7], dtype=np.int32)
+
+# SliderOnQueen: Bishop/Rook attacks squares that attack queen.
+# 滑動棋子（象/車）攻擊能攻擊后的方格的獎勵。
+THREAT_SLIDER_ON_QUEEN = np.array([46, 10], dtype=np.int32)
 
 # ThreatByMinor[target_piece_type]: Minor (N/B) attacks piece of given type.
 # Index: 0=Pawn, 1=Knight, 2=Bishop, 3=Rook, 4=Queen, 5=King
@@ -570,24 +636,75 @@ MINOR_BEHIND_PAWN = np.array([14, 2], dtype=np.int32)  # SF11: S(18, 3) * scale
 # BishopPawns: Penalty per own pawn on same color as bishop.
 # 壞象懲罰：象同色上的己方兵數量懲罰（含封閉中心加重）。
 BISHOP_PAWNS_PENALTY = np.array([2, 4], dtype=np.int32)  # SF11: (3, 7)
+BISHOP_PAWNS_CENTER_BLOCKED_FACTOR = np.int32(1)  # 中心鎖死時的壞象懲罰加重因子 / Bad bishop penalty multiplier in blocked center
 
 # TrappedRook: Penalty for rook with mobility <= 3 trapped by own king.
 # 困車懲罰：車移動格數 ≤ 3 且在己方王同側。
 TRAPPED_ROOK = np.array([41, 6], dtype=np.int32)  # SF11: (52, 10)
 
-# --- Endgame Scale Factors ---
-SCALE_FACTOR_NORMAL = 64
-SCALE_FACTOR_DRAW = 0
-SCALE_FACTOR_OCB_ONE_PAWN = 16
-SCALE_FACTOR_OCB_TWO_PAWNS = 32
-SCALE_FACTOR_OCB_MULTIPLE_PAWNS = 48
-SCALE_FACTOR_KXK = 64
-SCALE_FACTOR_KBNK = 64
-SCALE_FACTOR_KBPSK_FORTRESS = 8
-SCALE_FACTOR_KRPKR_FORTRESS = 8
-SCALE_FACTOR_KQKR_FORTRESS = 64
-SCALE_FACTOR_KQKRPs_FORTRESS = 8
+# LongDiagonalBishop: Bishop on long diagonal seeing both center squares.
+# 長對角線象：象在長對角線上，且能穿過兵阻擋看到兩個中心方格。
+LONG_DIAGONAL_BISHOP = np.array([35, 0], dtype=np.int32)
 
+# RookOnQueenFile: Rook on same file as queen (both colors).
+# 車后同列：車在與任何一方的后同一列上。
+ROOK_ON_QUEEN_FILE = np.array([5, 3], dtype=np.int32)
+
+# WeakQueen: Queen in relative pin or discovered attack line.
+# 弱勢后：后處於被牽制或發現攻擊射線上。
+WEAK_QUEEN = np.array([38, 8], dtype=np.int32)
+
+# --- Endgame Scale Factors / 殘局縮放因子 ---
+SCALE_FACTOR_NORMAL = 64              # Normal scaling (64/64 = 1.0) / 正常殘局縮放因子（無縮減）
+SCALE_FACTOR_DRAW = 0                 # Scaling for forced draw positions (0/64 = 0.0) / 強制和棋局面縮放因子
+SCALE_FACTOR_OCB_ONE_PAWN = 16        # Opposite-colored bishops endgame with 1 pawn / 異色象殘局且僅有 1 兵時的縮放因子
+SCALE_FACTOR_OCB_TWO_PAWNS = 32       # Opposite-colored bishops endgame with 2 pawns / 異色象殘局且有 2 兵時的縮放因子
+SCALE_FACTOR_OCB_MULTIPLE_PAWNS = 48  # Opposite-colored bishops endgame with multiple pawns / 異色象殘局且有多兵時的縮放因子
+SCALE_FACTOR_KXK = 64                 # King vs King or other basic endgames / 基本國王殘局縮放因子
+SCALE_FACTOR_KBNK = 64                # King + Bishop + Knight vs King / 王象馬對單王殘局縮放因子
+SCALE_FACTOR_KBPSK_FORTRESS = 8       # King + Bishop + Pawn vs King (fortress) / 王象兵對單王堡壘局面縮放因子
+SCALE_FACTOR_KRPKR_FORTRESS = 8       # King + Rook + Pawn vs King + Rook (fortress) / 王車兵對王車堡壘局面縮放因子
+SCALE_FACTOR_KQKR_FORTRESS = 64       # King + Queen vs King + Rook / 王后對王車殘局縮放因子
+SCALE_FACTOR_KQKRPs_FORTRESS = 8      # King + Queen vs King + Rook + Pawns (fortress) / 王后對王車兵堡壘局面縮放因子
+
+# =============================================================================
+# --- Material Imbalance Polynomial Matrix (SF11 material.cpp) ---
+# --- 材質不平衡多項式矩陣 ---
+# =============================================================================
+# SF11 uses a quadratic polynomial to evaluate material imbalance beyond simple
+# piece values. The index order is: [BishopPair, Pawn, Knight, Bishop, Rook, Queen].
+# This models cross-piece-type interactions (e.g., knights are worth more with many pawns,
+# rooks are worth less when queens are present on the same side, etc.).
+#
+# Reference: stockfish_11/src/material.cpp lines 33-53
+# 公式: for pt1=0..5: bonus += count[Us][pt1] * Σ(Ours[pt1][pt2]*count[Us][pt2] + Theirs[pt1][pt2]*count[Them][pt2])
+# 最終不平衡 = (white_bonus - black_bonus) / 16
+
+IMBALANCE_QUADRATIC_OURS = np.array([
+    #  BP   Pawn  Knight Bishop  Rook  Queen
+    [1438,    0,    0,    0,    0,    0],  # Bishop pair
+    [  40,   38,    0,    0,    0,    0],  # Pawn
+    [  32,  255,  -62,    0,    0,    0],  # Knight
+    [   0,  104,    4,    0,    0,    0],  # Bishop
+    [ -26,   -2,   47,  105, -208,    0],  # Rook
+    [-189,   24,  117,  133, -134,   -6],  # Queen
+], dtype=np.int32)
+
+IMBALANCE_QUADRATIC_THEIRS = np.array([
+    #  BP   Pawn  Knight Bishop  Rook  Queen
+    [   0,    0,    0,    0,    0,    0],  # Bishop pair
+    [  36,    0,    0,    0,    0,    0],  # Pawn
+    [   9,   63,    0,    0,    0,    0],  # Knight
+    [  59,   65,   42,    0,    0,    0],  # Bishop
+    [  46,   39,   24,  -24,    0,    0],  # Rook
+    [  97,  100,  -42,  137,  268,    0],  # Queen
+], dtype=np.int32)
+
+IMBALANCE_DIVISOR = np.int32(16)  # SF11 divides raw imbalance by 16
+
+# Scaling from SF11's internal centipawn scale (PawnMg=128) to our scale (PawnMg=100)
+IMBALANCE_SCALE_MG = np.int32(78)   # 100/128 ≈ 0.78, stored as percentage for integer math
+IMBALANCE_SCALE_EG = np.int32(56)   # 120/213 ≈ 0.563, stored as percentage for integer math
 
 # =============================================================================
 # --- Search Constants / 搜尋常量 ---
@@ -846,8 +963,4 @@ KING_FLANKS = np.array([
 ], dtype=np.uint64)
 
 
-# =============================================================================
-# --- Space Evaluation Constants / 空間評估常量 ---
-# =============================================================================
-# SPACE_THRESHOLD scaled from SF11's 12222: 6400 * (12222 / 16604) ≈ 4710
-SPACE_THRESHOLD = 4700
+

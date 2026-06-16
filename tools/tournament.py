@@ -8,6 +8,52 @@ import sys
 import time
 from datetime import datetime
 
+def parse_info_line(line):
+    if not line:
+        return ""
+    
+    tokens = line.split()
+    info_dict = {}
+    
+    i = 0
+    while i < len(tokens):
+        if tokens[i] == "depth" and i + 1 < len(tokens):
+            info_dict["depth"] = tokens[i+1]
+            i += 2
+        elif tokens[i] == "score" and i + 2 < len(tokens):
+            score_type = tokens[i+1]  # "cp" or "mate"
+            score_val = tokens[i+2]
+            if score_type == "cp":
+                try:
+                    val = int(score_val)
+                    info_dict["score"] = f"{val/100:+.2f}"
+                except ValueError:
+                    info_dict["score"] = f"cp {score_val}"
+            elif score_type == "mate":
+                info_dict["score"] = f"#{score_val}"
+            else:
+                info_dict["score"] = f"{score_type} {score_val}"
+            i += 3
+        elif tokens[i] == "nodes" and i + 1 < len(tokens):
+            info_dict["nodes"] = tokens[i+1]
+            i += 2
+        elif tokens[i] == "time" and i + 1 < len(tokens):
+            info_dict["time"] = tokens[i+1] + "ms"
+            i += 2
+        elif tokens[i] == "pv":
+            info_dict["pv"] = " ".join(tokens[i+1:])
+            break
+        else:
+            i += 1
+            
+    parts = []
+    if "depth" in info_dict: parts.append(f"d={info_dict['depth']}")
+    if "score" in info_dict: parts.append(f"eval={info_dict['score']}")
+    if "nodes" in info_dict: parts.append(f"n={info_dict['nodes']}")
+    if "time" in info_dict: parts.append(f"t={info_dict['time']}")
+    
+    return ", ".join(parts)
+
 class Engine:
     def __init__(self, name, script_path, cache_dir=None, verbose=True):
         self.name = name
@@ -137,6 +183,7 @@ class Engine:
             self.send_command(f"go movetime {time_limit_ms}")
 
         best_move = None
+        last_info = ""
         while True:
             line = self.read_line()
             if line is None:
@@ -144,6 +191,9 @@ class Engine:
                 break
 
             # print(f"[{self.name}] {line}") # Debug output
+            if line.startswith("info"):
+                if "depth" in line:
+                    last_info = line
 
             if line.startswith("bestmove"):
                 parts = line.split()
@@ -154,7 +204,8 @@ class Engine:
                         print(f"[{self.name}] Invalid move received: {parts[1]}")
                 break
 
-        return best_move
+        info_str = parse_info_line(last_info)
+        return best_move, info_str
 
 class SPRTTest:
     def __init__(self, elo0=0.0, elo1=5.0, alpha=0.05, beta=0.05):
@@ -241,7 +292,7 @@ def play_game(white_engine, black_engine, time_limit_ms, game_number, start_fen=
 
         try:
             moves_history = [m.uci() for m in board.move_stack]
-            move = mover.get_move(moves_history, time_limit_ms, start_fen, depth=depth, nodes=nodes)
+            move, info_str = mover.get_move(moves_history, time_limit_ms, start_fen, depth=depth, nodes=nodes)
         except Exception as e:
             log(f"Error getting move from {mover.name}: {e}")
             break
@@ -260,6 +311,8 @@ def play_game(white_engine, black_engine, time_limit_ms, game_number, start_fen=
 
         board.push(move)
         node = node.add_variation(move)
+        if info_str:
+            node.comment = info_str
 
     result = board.result(claim_draw=True)
     pgn_game.headers["Result"] = result

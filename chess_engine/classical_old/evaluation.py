@@ -4,6 +4,7 @@ import numba
 import numpy as np
 
 from chess_engine.classical_old.constants import *
+from chess_engine.classical_old.endgame import get_endgame_scale_factor
 
 from chess_engine.classical_old.bitboard_utils import get_lsb_index, get_msb_index, count_bits, WHITE_KING_ZONES, BLACK_KING_ZONES, FILE_MASKS, SQUARES_BETWEEN, ROOK_RAYS, BISHOP_RAYS
 from chess_engine.classical_old.engine_types import (
@@ -450,17 +451,17 @@ def evaluate_passed_pawns(piece_bbs, occupancy_bbs, white_attacks, black_attacks
     w_minors = count_bits(piece_bbs[1] | piece_bbs[2])
     b_minors = count_bits(piece_bbs[7] | piece_bbs[8])
     
-    w_scale = np.int32(4)
+    w_scale = PASSED_SCALE_FULL
     if w_non_pawns < b_non_pawns:
-        w_scale = np.int32(2)
+        w_scale = PASSED_SCALE_HALF
         if w_minors == 0 and b_minors >= 1:
-            w_scale = np.int32(1)
+            w_scale = PASSED_SCALE_MIN
             
-    b_scale = np.int32(4)
+    b_scale = PASSED_SCALE_FULL
     if b_non_pawns < w_non_pawns:
-        b_scale = np.int32(2)
+        b_scale = PASSED_SCALE_HALF
         if b_minors == 0 and w_minors >= 1:
-            b_scale = np.int32(1)
+            b_scale = PASSED_SCALE_MIN
 
     all_pieces = occupancy_bbs[2]
     white_pawns = piece_bbs[0]
@@ -500,11 +501,11 @@ def evaluate_passed_pawns(piece_bbs, occupancy_bbs, white_attacks, black_attacks
             # Calculate path safety weight k (pre-scaled by 3/5 to match centipawn scale)
             squares_to_queen = WHITE_FORWARD_FILE_MASKS[sq]
             if unsafe_squares == np.uint64(0):
-                k = np.int32(21)
+                k = PASSED_PATH_SAFE_NONE_ATTACK
             elif (unsafe_squares & squares_to_queen) == np.uint64(0):
-                k = np.int32(12)
+                k = PASSED_PATH_SAFE_EDGE_ATTACK
             elif (unsafe_squares & block_mask) == np.uint64(0):
-                k = np.int32(5)
+                k = PASSED_PATH_SAFE_BLOCK_ONLY
             else:
                 k = np.int32(0)
 
@@ -512,10 +513,10 @@ def evaluate_passed_pawns(piece_bbs, occupancy_bbs, white_attacks, black_attacks
             our_rq_behind = ((piece_bbs[3] | piece_bbs[4]) & BLACK_FORWARD_FILE_MASKS[sq]) != 0
             block_defended = (white_attacks & block_mask) != 0
             if our_rq_behind or block_defended:
-                k += np.int32(3)
+                k += PASSED_PATH_SUPPORT_BONUS
 
             # Calculate dynamic bonus (pre-scaled)
-            w = np.int32(5 * rank - 13)
+            w = np.int32(PASSED_DYNAMICS_MULT * rank + PASSED_DYNAMICS_OFFSET)
             dynamic_bonus = k * w
             p_bonus_mg += dynamic_bonus
             p_bonus_eg += dynamic_bonus
@@ -527,8 +528,8 @@ def evaluate_passed_pawns(piece_bbs, occupancy_bbs, white_attacks, black_attacks
             next_passed = (black_pawns & WHITE_PASSED_PAWN_MASKS[next_sq]) == np.uint64(0)
             any_pawn_ahead = (all_pawns & BB_SQUARES[next_sq]) != np.uint64(0)
             if not next_passed or any_pawn_ahead:
-                p_bonus_mg //= 2
-                p_bonus_eg //= 2
+                p_bonus_mg //= CANDIDATE_PASSER_DIVISOR
+                p_bonus_eg //= CANDIDATE_PASSER_DIVISOR
 
         # Scale passed pawn bonus
         p_bonus_mg = (p_bonus_mg * w_scale) // 4
@@ -540,19 +541,19 @@ def evaluate_passed_pawns(piece_bbs, occupancy_bbs, white_attacks, black_attacks
         # King Proximity Logic
         if block_sq < 64:
             if rank > 3:
-                w = np.int32(5 * rank - 13)
-                dist_friendly = min(CHEBYSHEV_DISTANCE[white_king_sq, block_sq], 5)
-                dist_enemy = min(CHEBYSHEV_DISTANCE[black_king_sq, block_sq], 5)
+                w = np.int32(PASSED_DYNAMICS_MULT * rank + PASSED_DYNAMICS_OFFSET)
+                dist_friendly = min(CHEBYSHEV_DISTANCE[white_king_sq, block_sq], KING_PROXIMITY_MAX_DIST)
+                dist_enemy = min(CHEBYSHEV_DISTANCE[black_king_sq, block_sq], KING_PROXIMITY_MAX_DIST)
 
                 dist_friendly_2nd = np.int32(0)
                 if (block_sq >> 3) != 7:
-                    dist_friendly_2nd = min(CHEBYSHEV_DISTANCE[white_king_sq, block_sq + 8], 5)
+                    dist_friendly_2nd = min(CHEBYSHEV_DISTANCE[white_king_sq, block_sq + 8], KING_PROXIMITY_MAX_DIST)
 
-                proximity_bonus = ((dist_enemy * 19) // 4 - dist_friendly * 2) * w
+                proximity_bonus = ((dist_enemy * KING_PROX_ENEMY_MULT) // KING_PROX_ENEMY_DIV - dist_friendly * KING_PROX_FRIENDLY_MULT) * w
                 if (block_sq >> 3) != 7:
                     proximity_bonus -= dist_friendly_2nd * w
 
-                proximity_bonus = max(-150, min(150, proximity_bonus))
+                proximity_bonus = max(KING_PROX_MIN_BONUS, min(KING_PROX_MAX_BONUS, proximity_bonus))
                 proximity_bonus = (proximity_bonus * w_scale) // 4
                 eg_score += proximity_bonus
 
@@ -592,11 +593,11 @@ def evaluate_passed_pawns(piece_bbs, occupancy_bbs, white_attacks, black_attacks
             # Calculate path safety weight k (pre-scaled by 3/5 to match centipawn scale)
             squares_to_queen = BLACK_FORWARD_FILE_MASKS[sq]
             if unsafe_squares == np.uint64(0):
-                k = np.int32(21)
+                k = PASSED_PATH_SAFE_NONE_ATTACK
             elif (unsafe_squares & squares_to_queen) == np.uint64(0):
-                k = np.int32(12)
+                k = PASSED_PATH_SAFE_EDGE_ATTACK
             elif (unsafe_squares & block_mask) == np.uint64(0):
-                k = np.int32(5)
+                k = PASSED_PATH_SAFE_BLOCK_ONLY
             else:
                 k = np.int32(0)
 
@@ -604,10 +605,10 @@ def evaluate_passed_pawns(piece_bbs, occupancy_bbs, white_attacks, black_attacks
             our_rq_behind = ((piece_bbs[9] | piece_bbs[10]) & WHITE_FORWARD_FILE_MASKS[sq]) != 0
             block_defended = (black_attacks & block_mask) != 0
             if our_rq_behind or block_defended:
-                k += np.int32(3)
+                k += PASSED_PATH_SUPPORT_BONUS
 
             # Calculate dynamic bonus (pre-scaled)
-            w = np.int32(5 * relative_rank - 13)
+            w = np.int32(PASSED_DYNAMICS_MULT * relative_rank + PASSED_DYNAMICS_OFFSET)
             dynamic_bonus = k * w
             p_bonus_mg += dynamic_bonus
             p_bonus_eg += dynamic_bonus
@@ -619,8 +620,8 @@ def evaluate_passed_pawns(piece_bbs, occupancy_bbs, white_attacks, black_attacks
             next_passed = (white_pawns & BLACK_PASSED_PAWN_MASKS[next_sq]) == np.uint64(0)
             any_pawn_ahead = (all_pawns & BB_SQUARES[next_sq]) != np.uint64(0)
             if not next_passed or any_pawn_ahead:
-                p_bonus_mg //= 2
-                p_bonus_eg //= 2
+                p_bonus_mg //= CANDIDATE_PASSER_DIVISOR
+                p_bonus_eg //= CANDIDATE_PASSER_DIVISOR
 
         # Scale passed pawn bonus
         p_bonus_mg = (p_bonus_mg * b_scale) // 4
@@ -632,19 +633,19 @@ def evaluate_passed_pawns(piece_bbs, occupancy_bbs, white_attacks, black_attacks
         # King Proximity Logic
         if block_sq >= 0:
             if relative_rank > 3:
-                w = np.int32(5 * relative_rank - 13)
-                dist_friendly = min(CHEBYSHEV_DISTANCE[black_king_sq, block_sq], 5)
-                dist_enemy = min(CHEBYSHEV_DISTANCE[white_king_sq, block_sq], 5)
+                w = np.int32(PASSED_DYNAMICS_MULT * relative_rank + PASSED_DYNAMICS_OFFSET)
+                dist_friendly = min(CHEBYSHEV_DISTANCE[black_king_sq, block_sq], KING_PROXIMITY_MAX_DIST)
+                dist_enemy = min(CHEBYSHEV_DISTANCE[white_king_sq, block_sq], KING_PROXIMITY_MAX_DIST)
 
                 dist_friendly_2nd = np.int32(0)
                 if (block_sq >> 3) != 0:
-                    dist_friendly_2nd = min(CHEBYSHEV_DISTANCE[black_king_sq, block_sq - 8], 5)
+                    dist_friendly_2nd = min(CHEBYSHEV_DISTANCE[black_king_sq, block_sq - 8], KING_PROXIMITY_MAX_DIST)
 
-                proximity_bonus = ((dist_enemy * 19) // 4 - dist_friendly * 2) * w
+                proximity_bonus = ((dist_enemy * KING_PROX_ENEMY_MULT) // KING_PROX_ENEMY_DIV - dist_friendly * KING_PROX_FRIENDLY_MULT) * w
                 if (block_sq >> 3) != 0:
                     proximity_bonus -= dist_friendly_2nd * w
 
-                proximity_bonus = max(-150, min(150, proximity_bonus))
+                proximity_bonus = max(KING_PROX_MIN_BONUS, min(KING_PROX_MAX_BONUS, proximity_bonus))
                 proximity_bonus = (proximity_bonus * b_scale) // 4
                 eg_score -= proximity_bonus
 
@@ -676,14 +677,9 @@ def evaluate_piece_coordination(piece_bbs, piece_counts):
     black_rooks = piece_bbs[9]
 
     # --- 1. Bishop Pair / 雙象 ---
-    # A bonus is awarded if a side has two or more bishops.
-    # 擁有雙象給予獎勵。
-    if piece_counts[2] >= 2:
-        mg_score += BISHOP_PAIR_BONUS[0]
-        eg_score += BISHOP_PAIR_BONUS[1]
-    if piece_counts[8] >= 2:
-        mg_score -= BISHOP_PAIR_BONUS[0]
-        eg_score -= BISHOP_PAIR_BONUS[1]
+    # NOTE: Bishop pair is now handled by the material imbalance polynomial matrix
+    # (compute_imbalance). The standalone bonus has been removed to avoid double-counting.
+    # See SF11 material.cpp QuadraticOurs[0][0] = 1438.
 
     # --- 2. Rooks on Open and Semi-Open Files / 車在開放線和半開放線 ---
     for f in range(8):
@@ -793,14 +789,12 @@ def evaluate_shelter_aligned(piece_bbs, king_sq, color):
 def _evaluate_king_attackers(king_sq, color, piece_bbs, occupancy_bbs, enemy_attacks_bb, friendly_attacks_bb, king_zone,
                              zone_attack_units, attacker_count, king_attacks_count,
                              en_n_attacks_all, en_b_attacks_all, en_r_attacks_all, en_q_attacks_all,
-                             friendly_attacks2, enemy_attacks2, friendly_queen_attacks):
+                             friendly_attacks2, enemy_attacks2, friendly_queen_attacks,
+                             pinned_count):
     """
     Calculates king danger using a multi-indicator linear formula inspired by SF11.
     Returns the raw un-squared kingDanger score.
     """
-    if attacker_count == 0:
-        return np.int32(0)
-
     # --- Safe Check Detection (Inspired by Stockfish 11) ---
     friendly_start_idx = 0 if color == 0 else 6
     all_pieces_occupancy = occupancy_bbs[2]
@@ -860,16 +854,14 @@ def _evaluate_king_attackers(king_sq, color, piece_bbs, occupancy_bbs, enemy_att
         + KING_DANGER_WEAK_SQ * weak_sq_count
         + KING_DANGER_UNSAFE_CHECK * unsafe_check_count
         + KING_DANGER_ATTACK_ON_KING_SQ * king_attacks_count
+        + KING_DANGER_BLOCKERS * pinned_count
+        + KING_DANGER_OFFSET
     )
 
     # Queen absence: flat deduction
     enemy_start_idx = 6 if color == 0 else 0
     if not piece_bbs[enemy_start_idx + 4]:
         kingDanger = max(np.int32(0), kingDanger - KING_DANGER_NO_QUEEN)
-
-    # Single attacker: halve the final danger score (softened threat)
-    if attacker_count == 1:
-        kingDanger = kingDanger // 2
 
     return max(np.int32(0), kingDanger)
 
@@ -894,13 +886,15 @@ def evaluate_king_safety(piece_bbs, occupancy_bbs, game_state, white_attacks, bl
         white_king_sq, 0, piece_bbs, occupancy_bbs, black_attacks, white_attacks, WHITE_KING_ZONES[white_king_sq],
         w_zone_attack_units, w_attacker_count, w_king_attacks_count,
         black_knight_attacks, black_bishop_attacks, black_rook_attacks, black_queen_attacks,
-        white_attacks2, black_attacks2, white_queen_attacks
+        white_attacks2, black_attacks2, white_queen_attacks,
+        np.int32(count_bits(pinned_white))
     )
     b_danger = _evaluate_king_attackers(
         black_king_sq, 1, piece_bbs, occupancy_bbs, white_attacks, black_attacks, BLACK_KING_ZONES[black_king_sq],
         b_zone_attack_units, b_attacker_count, b_king_attacks_count,
         white_knight_attacks, white_bishop_attacks, white_rook_attacks, white_queen_attacks,
-        black_attacks2, white_attacks2, black_queen_attacks
+        black_attacks2, white_attacks2, black_queen_attacks,
+        np.int32(count_bits(pinned_black))
     )
 
     # 2. Flank Attack & Flank Defense Calculations
@@ -924,38 +918,38 @@ def evaluate_king_safety(piece_bbs, occupancy_bbs, game_state, white_attacks, bl
     # 3. Add missing kingDanger indicators (scaled by 45x relative to SF11)
     if w_danger > 0:
         # flank attack squared: 3 * flank_attack^2 / 8 / 45 = flank_attack^2 * 3 / 360
-        w_danger += np.int32(round(3.0 * w_flank_attack * w_flank_attack / 360.0))
+        w_danger += np.int32(round(KING_FLANK_ATTACK_FACTOR * w_flank_attack * w_flank_attack / KING_FLANK_ATTACK_DIVISOR))
         # mobility difference: (Them - Us) -> (Black - White) -> -mg_mobility
-        w_danger += np.int32(round(-mg_mobility / 45.0))
+        w_danger += np.int32(round(-mg_mobility / KING_SAFETY_MOBILITY_SCALE))
         # knight defends king: -100 / 45 ≈ -2
         if (white_knight_attacks & KING_ATTACKS[white_king_sq]) != np.uint64(0):
-            w_danger -= 2
+            w_danger -= KING_DEFENDER_KNIGHT_BONUS
         # shelter feedback: -6 * mg_shield / 8 / 45 = -mg_shield / 60
-        w_danger -= np.int32(round(white_mg_shield / 60.0))
+        w_danger -= np.int32(round(white_mg_shield / KING_SAFETY_SHIELD_SCALE))
         # flank defense: -4 * defense / 45 = -defense / 11.25
-        w_danger -= np.int32(round(w_flank_defense / 11.25))
+        w_danger -= np.int32(round(w_flank_defense / KING_SAFETY_FLANK_DEF_SCALE))
         w_danger = max(np.int32(0), w_danger)
 
     if b_danger > 0:
-        b_danger += np.int32(round(3.0 * b_flank_attack * b_flank_attack / 360.0))
-        b_danger += np.int32(round(mg_mobility / 45.0))
+        b_danger += np.int32(round(KING_FLANK_ATTACK_FACTOR * b_flank_attack * b_flank_attack / KING_FLANK_ATTACK_DIVISOR))
+        b_danger += np.int32(round(mg_mobility / KING_SAFETY_MOBILITY_SCALE))
         if (black_knight_attacks & KING_ATTACKS[black_king_sq]) != np.uint64(0):
-            b_danger -= 2
-        b_danger -= np.int32(round(black_mg_shield / 60.0))
-        b_danger -= np.int32(round(b_flank_defense / 11.25))
+            b_danger -= KING_DEFENDER_KNIGHT_BONUS
+        b_danger -= np.int32(round(black_mg_shield / KING_SAFETY_SHIELD_SCALE))
+        b_danger -= np.int32(round(b_flank_defense / KING_SAFETY_FLANK_DEF_SCALE))
         b_danger = max(np.int32(0), b_danger)
 
     # 4. Convert danger to quadratic penalty (MG is quadratic, EG is linear)
     w_penalty_mg = np.int32(0)
     w_penalty_eg = np.int32(0)
-    if w_danger > 2:  # Scaled threshold (> 100 / 45 ≈ 2)
-        w_penalty_mg = w_danger * w_danger // 2
+    if w_danger > KING_DANGER_THRESHOLD:  # Scaled threshold (> 100 / 45 ≈ 2)
+        w_penalty_mg = w_danger * w_danger // KING_DANGER_QUAD_DIVISOR
         w_penalty_eg = w_danger
 
     b_penalty_mg = np.int32(0)
     b_penalty_eg = np.int32(0)
-    if b_danger > 2:
-        b_penalty_mg = b_danger * b_danger // 2
+    if b_danger > KING_DANGER_THRESHOLD:
+        b_penalty_mg = b_danger * b_danger // KING_DANGER_QUAD_DIVISOR
         b_penalty_eg = b_danger
 
     # 5. Pinned pieces penalty (directly added to danger penalty before material scaling)
@@ -1048,7 +1042,7 @@ def evaluate_king_safety(piece_bbs, occupancy_bbs, game_state, white_attacks, bl
 
 
 @numba.njit(cache=True, boundscheck=False, fastmath=True)
-def evaluate_attacks_mobility_threats(piece_bbs, occupancy_bbs, white_king_sq, black_king_sq, white_pawn_attacks_span, black_pawn_attacks_span):
+def evaluate_attacks_mobility_threats(piece_bbs, occupancy_bbs, white_king_sq, black_king_sq, white_pawn_attacks_span, black_pawn_attacks_span, castling_rights):
     (wp_bb, wn_bb, wb_bb, wr_bb, wq_bb, wk_bb,
      bp_bb, bn_bb, bb_bb, br_bb, bq_bb, bk_bb) = piece_bbs
 
@@ -1220,7 +1214,7 @@ def evaluate_attacks_mobility_threats(piece_bbs, occupancy_bbs, white_king_sq, b
         same_color_pawns = count_bits(wp_bb & bishop_color_mask)
         blocked_w = wp_bb & (all_occupancy >> np.uint64(8))
         center_blocked = count_bits(blocked_w & CENTER_FILES)
-        multiplier = 1 + center_blocked
+        multiplier = np.int32(1) + BISHOP_PAWNS_CENTER_BLOCKED_FACTOR * center_blocked
         mg_mobility -= BISHOP_PAWNS_PENALTY[0] * same_color_pawns * multiplier
         eg_mobility -= BISHOP_PAWNS_PENALTY[1] * same_color_pawns * multiplier
         
@@ -1244,6 +1238,14 @@ def evaluate_attacks_mobility_threats(piece_bbs, occupancy_bbs, white_king_sq, b
             if not (ADJACENT_FILES_MASKS[file_idx] & WHITE_FORWARD_RANKS[sq] & bp_bb):
                  mg_outpost += OUTPOST_HOLE_BONUS[0]
                  eg_outpost += OUTPOST_HOLE_BONUS[1]
+
+        # LongDiagonalBishop: bonus if bishop sees both center squares through pawns only
+        CENTER_SQUARES = np.uint64(0x0000001818000000)  # d4, e4, d5, e5
+        pawn_only_occ = wp_bb | bp_bb
+        bishop_center_attacks = get_bishop_attacks(sq, pawn_only_occ) & CENTER_SQUARES
+        if count_bits(bishop_center_attacks) >= 2:
+            mg_mobility += LONG_DIAGONAL_BISHOP[0]
+            eg_mobility += LONG_DIAGONAL_BISHOP[1]
 
         temp_bb &= temp_bb - np.uint64(1)
 
@@ -1272,8 +1274,15 @@ def evaluate_attacks_mobility_threats(piece_bbs, occupancy_bbs, white_king_sq, b
             king_file = white_king_sq % 8
             rook_file = sq % 8
             if (king_file < 4) == (rook_file < king_file):
-                mg_mobility -= TRAPPED_ROOK[0]
-                eg_mobility -= TRAPPED_ROOK[1]
+                trap_factor = np.int32(1) if (castling_rights & np.uint8(3)) != np.uint8(0) else np.int32(2)
+                mg_mobility -= TRAPPED_ROOK[0] * trap_factor
+                eg_mobility -= TRAPPED_ROOK[1] * trap_factor
+
+        # RookOnQueenFile: bonus for rook on same file as any queen
+        rook_file = sq % 8
+        if (wq_bb | bq_bb) & FILE_MASKS[rook_file]:
+            mg_mobility += ROOK_ON_QUEEN_FILE[0]
+            eg_mobility += ROOK_ON_QUEEN_FILE[1]
         
         # Tropism
         distance = MANHATTAN_DISTANCE[sq, black_king_sq]
@@ -1316,6 +1325,31 @@ def evaluate_attacks_mobility_threats(piece_bbs, occupancy_bbs, white_king_sq, b
             b_zone_attack_units += KING_SAFETY_ATTACK_UNITS[4]
             b_attacker_count += 1
         b_king_attacks_count += count_bits(att & black_king_adjacent)
+
+        # WeakQueen: penalty if queen is in a relative pin / discovered attack line
+        rook_pinners = ROOK_RAYS[sq] & br_bb
+        temp_pinners = rook_pinners
+        is_weak = False
+        while temp_pinners and not is_weak:
+            pinner_sq = get_lsb_index(temp_pinners)
+            between = SQUARES_BETWEEN[sq, pinner_sq]
+            blockers_between = between & all_occupancy
+            if count_bits(blockers_between) == 1:
+                is_weak = True
+            temp_pinners &= temp_pinners - np.uint64(1)
+        if not is_weak:
+            bishop_pinners = BISHOP_RAYS[sq] & bb_bb
+            temp_pinners = bishop_pinners
+            while temp_pinners and not is_weak:
+                pinner_sq = get_lsb_index(temp_pinners)
+                between = SQUARES_BETWEEN[sq, pinner_sq]
+                blockers_between = between & all_occupancy
+                if count_bits(blockers_between) == 1:
+                    is_weak = True
+                temp_pinners &= temp_pinners - np.uint64(1)
+        if is_weak:
+            mg_mobility -= WEAK_QUEEN[0]
+            eg_mobility -= WEAK_QUEEN[1]
 
         temp_bb &= temp_bb - np.uint64(1)
 
@@ -1411,7 +1445,7 @@ def evaluate_attacks_mobility_threats(piece_bbs, occupancy_bbs, white_king_sq, b
         same_color_pawns = count_bits(bp_bb & bishop_color_mask)
         blocked_b = bp_bb & (all_occupancy << np.uint64(8))
         center_blocked = count_bits(blocked_b & CENTER_FILES)
-        multiplier = 1 + center_blocked
+        multiplier = np.int32(1) + BISHOP_PAWNS_CENTER_BLOCKED_FACTOR * center_blocked
         mg_mobility += BISHOP_PAWNS_PENALTY[0] * same_color_pawns * multiplier
         eg_mobility += BISHOP_PAWNS_PENALTY[1] * same_color_pawns * multiplier
         
@@ -1436,6 +1470,14 @@ def evaluate_attacks_mobility_threats(piece_bbs, occupancy_bbs, white_king_sq, b
             if not (ADJACENT_FILES_MASKS[file_idx] & BLACK_FORWARD_RANKS[sq] & wp_bb):
                  mg_outpost -= OUTPOST_HOLE_BONUS[0]
                  eg_outpost -= OUTPOST_HOLE_BONUS[1]
+
+        # LongDiagonalBishop: bonus if bishop sees both center squares through pawns only
+        CENTER_SQUARES = np.uint64(0x0000001818000000)  # d4, e4, d5, e5
+        pawn_only_occ = wp_bb | bp_bb
+        bishop_center_attacks = get_bishop_attacks(sq, pawn_only_occ) & CENTER_SQUARES
+        if count_bits(bishop_center_attacks) >= 2:
+            mg_mobility -= LONG_DIAGONAL_BISHOP[0]
+            eg_mobility -= LONG_DIAGONAL_BISHOP[1]
 
         temp_bb &= temp_bb - np.uint64(1)
 
@@ -1463,8 +1505,15 @@ def evaluate_attacks_mobility_threats(piece_bbs, occupancy_bbs, white_king_sq, b
             king_file = black_king_sq % 8
             rook_file = sq % 8
             if (king_file < 4) == (rook_file < king_file):
-                mg_mobility += TRAPPED_ROOK[0]
-                eg_mobility += TRAPPED_ROOK[1]
+                trap_factor = np.int32(1) if (castling_rights & np.uint8(12)) != np.uint8(0) else np.int32(2)
+                mg_mobility += TRAPPED_ROOK[0] * trap_factor
+                eg_mobility += TRAPPED_ROOK[1] * trap_factor
+
+        # RookOnQueenFile: bonus for rook on same file as any queen
+        rook_file = sq % 8
+        if (wq_bb | bq_bb) & FILE_MASKS[rook_file]:
+            mg_mobility -= ROOK_ON_QUEEN_FILE[0]
+            eg_mobility -= ROOK_ON_QUEEN_FILE[1]
         
         # Tropism
         distance = MANHATTAN_DISTANCE[sq, white_king_sq]
@@ -1507,6 +1556,31 @@ def evaluate_attacks_mobility_threats(piece_bbs, occupancy_bbs, white_king_sq, b
             w_zone_attack_units += KING_SAFETY_ATTACK_UNITS[4]
             w_attacker_count += 1
         w_king_attacks_count += count_bits(att & white_king_adjacent)
+
+        # WeakQueen: penalty if queen is in a relative pin / discovered attack line
+        rook_pinners = ROOK_RAYS[sq] & wr_bb
+        temp_pinners = rook_pinners
+        is_weak = False
+        while temp_pinners and not is_weak:
+            pinner_sq = get_lsb_index(temp_pinners)
+            between = SQUARES_BETWEEN[sq, pinner_sq]
+            blockers_between = between & all_occupancy
+            if count_bits(blockers_between) == 1:
+                is_weak = True
+            temp_pinners &= temp_pinners - np.uint64(1)
+        if not is_weak:
+            bishop_pinners = BISHOP_RAYS[sq] & wb_bb
+            temp_pinners = bishop_pinners
+            while temp_pinners and not is_weak:
+                pinner_sq = get_lsb_index(temp_pinners)
+                between = SQUARES_BETWEEN[sq, pinner_sq]
+                blockers_between = between & all_occupancy
+                if count_bits(blockers_between) == 1:
+                    is_weak = True
+                temp_pinners &= temp_pinners - np.uint64(1)
+        if is_weak:
+            mg_mobility += WEAK_QUEEN[0]
+            eg_mobility += WEAK_QUEEN[1]
 
         temp_bb &= temp_bb - np.uint64(1)
 
@@ -1645,6 +1719,51 @@ def evaluate_attacks_mobility_threats(piece_bbs, occupancy_bbs, white_king_sq, b
         mg_threats -= THREAT_PAWN_PUSH[0] * count
         eg_threats -= THREAT_PAWN_PUSH[1] * count
 
+    # --- KnightOnQueen & SliderOnQueen threats ---
+    # White threats against Black Queen
+    if count_bits(bq_bb) == 1:
+        bq_sq = get_lsb_index(bq_bb)
+        w_safe_for_queen_threat = white_mobility_area & ~black_strongly_protected
+
+        # KnightOnQueen: white knight attacks squares that also attack black queen
+        bq_knight_attacks = KNIGHT_ATTACKS[bq_sq]
+        w_koq = white_knight_attacks & bq_knight_attacks & w_safe_for_queen_threat
+        if w_koq != np.uint64(0):
+            count = count_bits(w_koq)
+            mg_threats += THREAT_KNIGHT_ON_QUEEN[0] * count
+            eg_threats += THREAT_KNIGHT_ON_QUEEN[1] * count
+
+        # SliderOnQueen: white bishop/rook attacks squares that also attack black queen
+        bq_rook_attacks = get_rook_attacks(bq_sq, all_occupancy)
+        bq_bishop_attacks = get_bishop_attacks(bq_sq, all_occupancy)
+        w_soq = ((white_bishop_attacks & bq_bishop_attacks) | (white_rook_attacks & bq_rook_attacks)) & w_safe_for_queen_threat & white_attacks2
+        if w_soq != np.uint64(0):
+            count = count_bits(w_soq)
+            mg_threats += THREAT_SLIDER_ON_QUEEN[0] * count
+            eg_threats += THREAT_SLIDER_ON_QUEEN[1] * count
+
+    # Black threats against White Queen
+    if count_bits(wq_bb) == 1:
+        wq_sq = get_lsb_index(wq_bb)
+        b_safe_for_queen_threat = black_mobility_area & ~white_strongly_protected
+
+        # KnightOnQueen: black knight attacks squares that also attack white queen
+        wq_knight_attacks = KNIGHT_ATTACKS[wq_sq]
+        b_koq = black_knight_attacks & wq_knight_attacks & b_safe_for_queen_threat
+        if b_koq != np.uint64(0):
+            count = count_bits(b_koq)
+            mg_threats -= THREAT_KNIGHT_ON_QUEEN[0] * count
+            eg_threats -= THREAT_KNIGHT_ON_QUEEN[1] * count
+
+        # SliderOnQueen: black bishop/rook attacks squares that also attack white queen
+        wq_rook_attacks = get_rook_attacks(wq_sq, all_occupancy)
+        wq_bishop_attacks = get_bishop_attacks(wq_sq, all_occupancy)
+        b_soq = ((black_bishop_attacks & wq_bishop_attacks) | (black_rook_attacks & wq_rook_attacks)) & b_safe_for_queen_threat & black_attacks2
+        if b_soq != np.uint64(0):
+            count = count_bits(b_soq)
+            mg_threats -= THREAT_SLIDER_ON_QUEEN[0] * count
+            eg_threats -= THREAT_SLIDER_ON_QUEEN[1] * count
+
     return (white_attacks, black_attacks, white_pawn_attacks, black_pawn_attacks,
             white_attacks2, black_attacks2, pinned_white, pinned_black,
             mg_mobility, eg_mobility, mg_threats, eg_threats, white_piece_tropism, black_piece_tropism, mg_outpost, eg_outpost,
@@ -1689,7 +1808,7 @@ def _evaluate_king_pawn_endgame(piece_bbs, side_to_move, castling_rights):
             
             # If King is too far -> Unstoppable
             if king_dist > adjusted_pawn_steps:
-                 score += 800 # Queen value approx
+                 score += UNSTOPPABLE_PAWN_BONUS # Queen value approx
             
         temp_wp &= temp_wp - np.uint64(1)
 
@@ -1713,7 +1832,7 @@ def _evaluate_king_pawn_endgame(piece_bbs, side_to_move, castling_rights):
                 adjusted_pawn_steps += 1
                 
             if king_dist > adjusted_pawn_steps:
-                score -= 800
+                score -= UNSTOPPABLE_PAWN_BONUS
 
         temp_bp &= temp_bp - np.uint64(1)
 
@@ -1752,7 +1871,7 @@ def _evaluate_king_pawn_endgame(piece_bbs, side_to_move, castling_rights):
         sq = get_lsb_index(temp_pawns)
         w_dist = MANHATTAN_DISTANCE[white_king_sq, sq]
         b_dist = MANHATTAN_DISTANCE[black_king_sq, sq]
-        score += (b_dist - w_dist) * 5
+        score += (b_dist - w_dist) * KING_PAWN_PROXIMITY_FACTOR
         temp_pawns &= temp_pawns - np.uint64(1)
 
     return score
@@ -1840,12 +1959,12 @@ def evaluate_space(piece_bbs, occupancy_bbs, white_attacks, black_attacks, white
     w_weight = w_pieces_count - 1
     b_weight = b_pieces_count - 1
 
-    white_space_score = (w_bonus * w_weight * w_weight) // 16
-    black_space_score = (b_bonus * b_weight * b_weight) // 16
+    white_space_score = (w_bonus * w_weight * w_weight) // SPACE_BONUS_DIVISOR
+    black_space_score = (b_bonus * b_weight * b_weight) // SPACE_BONUS_DIVISOR
 
     # Scale to engine's evaluation units (using optimized // 4 division for positional safety)
-    white_space_scaled = white_space_score // 4
-    black_space_scaled = black_space_score // 4
+    white_space_scaled = white_space_score // SPACE_SCALE_DIVISOR
+    black_space_scaled = black_space_score // SPACE_SCALE_DIVISOR
 
     # Difference in space score
     return np.int32(white_space_scaled - black_space_scaled)
@@ -1925,6 +2044,52 @@ def _compute_initiative(mg, eg, piece_bbs, passed_count, white_king_sq, black_ki
 
 
 @numba.njit(cache=True, boundscheck=False, fastmath=True)
+def compute_imbalance(cnt_0, cnt_1, cnt_2, cnt_3, cnt_4, cnt_6, cnt_7, cnt_8, cnt_9, cnt_10):
+    """
+    Compute polynomial material imbalance (SF11 material.cpp style).
+    Uses QuadraticOurs/QuadraticTheirs matrices to model cross-piece-type interactions.
+    Index order: [BishopPair, Pawn, Knight, Bishop, Rook, Queen]
+    
+    Returns (mg_imbalance, eg_imbalance) from White's perspective.
+    """
+    # Pack into pieceCount format: [bishop_pair, pawn, knight, bishop, rook, queen]
+    w_bp = np.int32(1) if cnt_2 > 1 else np.int32(0)
+    b_bp = np.int32(1) if cnt_8 > 1 else np.int32(0)
+
+    w = np.array([w_bp, np.int32(cnt_0), np.int32(cnt_1), np.int32(cnt_2),
+                  np.int32(cnt_3), np.int32(cnt_4)], dtype=np.int32)
+    b = np.array([b_bp, np.int32(cnt_6), np.int32(cnt_7), np.int32(cnt_8),
+                  np.int32(cnt_9), np.int32(cnt_10)], dtype=np.int32)
+
+    # White imbalance (Us=White, Them=Black)
+    w_bonus = np.int32(0)
+    for pt1 in range(6):
+        if w[pt1] == 0:
+            continue
+        v = np.int32(0)
+        for pt2 in range(pt1 + 1):
+            v += IMBALANCE_QUADRATIC_OURS[pt1, pt2] * w[pt2]
+            v += IMBALANCE_QUADRATIC_THEIRS[pt1, pt2] * b[pt2]
+        w_bonus += w[pt1] * v
+
+    # Black imbalance (Us=Black, Them=White)
+    b_bonus = np.int32(0)
+    for pt1 in range(6):
+        if b[pt1] == 0:
+            continue
+        v = np.int32(0)
+        for pt2 in range(pt1 + 1):
+            v += IMBALANCE_QUADRATIC_OURS[pt1, pt2] * b[pt2]
+            v += IMBALANCE_QUADRATIC_THEIRS[pt1, pt2] * w[pt2]
+        b_bonus += b[pt1] * v
+
+    raw = (w_bonus - b_bonus) // IMBALANCE_DIVISOR
+    mg_imbalance = raw * IMBALANCE_SCALE_MG // np.int32(100)
+    eg_imbalance = raw * IMBALANCE_SCALE_EG // np.int32(100)
+    return mg_imbalance, eg_imbalance
+
+
+@numba.njit(cache=True, boundscheck=False, fastmath=True)
 def _evaluate_position_jit(piece_bbs, occupancy_bbs, game_state, lazy: bool, search_context=None):
     """
     使用 Tapered Evaluation (加權評估) 模型評估目前局面，並從當前執棋方的角度返回分數。
@@ -1985,6 +2150,12 @@ def _evaluate_position_jit(piece_bbs, occupancy_bbs, game_state, lazy: bool, sea
              cnt_7 * PHASE_WEIGHTS[1] + cnt_8 * PHASE_WEIGHTS[2] + cnt_9 * PHASE_WEIGHTS[3] + cnt_10 * PHASE_WEIGHTS[4])
     phase = min(phase, MAX_PHASE)
 
+    # --- Material Imbalance / 材質不平衡多項式 ---
+    mg_imb, eg_imb = compute_imbalance(cnt_0, cnt_1, cnt_2, cnt_3, cnt_4,
+                                        cnt_6, cnt_7, cnt_8, cnt_9, cnt_10)
+    mg_score += mg_imb
+    eg_score += eg_imb
+
     # --- Lazy Evaluation Checkpoint / 懶惰評估檢查點 ---
     if lazy:
         final_score = (mg_score * phase + eg_score * (MAX_PHASE - phase)) // MAX_PHASE
@@ -2017,7 +2188,7 @@ def _evaluate_position_jit(piece_bbs, occupancy_bbs, game_state, lazy: bool, sea
      black_knight_attacks, black_bishop_attacks, black_rook_attacks, black_queen_attacks,
      w_zone_attack_units, w_attacker_count, w_king_attacks_count,
      b_zone_attack_units, b_attacker_count, b_king_attacks_count) = evaluate_attacks_mobility_threats(
-         piece_bbs, occupancy_bbs, white_king_sq, black_king_sq, white_pawn_attacks_span, black_pawn_attacks_span)
+         piece_bbs, occupancy_bbs, white_king_sq, black_king_sq, white_pawn_attacks_span, black_pawn_attacks_span, castling_rights)
 
     # --- 4.5 評估並加入動態通路兵與候選兵分數 ---
     mg_passed, eg_passed, passed_count = evaluate_passed_pawns(piece_bbs, occupancy_bbs, white_attacks, black_attacks,
@@ -2068,37 +2239,15 @@ def _evaluate_position_jit(piece_bbs, occupancy_bbs, game_state, lazy: bool, sea
     mg_score += mg_init
     eg_score += eg_init
 
-    # --- 9. 根據遊戲階段進行插值計算 ---
-    final_score = (mg_score * phase + eg_score * (MAX_PHASE - phase)) // MAX_PHASE
-
-    # --- 9.5 OCB Endgame Scale Factor / 異色象殘局縮放因子 ---
-    # When both sides have exactly one bishop on opposite color squares and no
-    # major pieces (rooks/queens), the position is likely drawn. Scale down eg.
-    # 當雙方各有一個異色格象且無車后時，局面趨向和棋，縮減殘局差距。
-    if phase < MAX_PHASE // 2:  # Only in near-endgame
-        w_bishops = cnt_2  # white bishop count
-        b_bishops = cnt_8  # black bishop count
-        w_majors = cnt_3 + cnt_4  # white rooks + queens
-        b_majors = cnt_9 + cnt_10  # black rooks + queens
-        if w_bishops == 1 and b_bishops == 1 and w_majors == 0 and b_majors == 0:
-            # Check if bishops are on opposite color squares
-            wb_sq = get_lsb_index(piece_bbs[2])
-            bb_sq = get_lsb_index(piece_bbs[8])
-            wb_color = (wb_sq >> 3 ^ wb_sq) & 1
-            bb_color = (bb_sq >> 3 ^ bb_sq) & 1
-            if wb_color != bb_color:
-                # Opposite color bishops: scale based on pawn count
-                total_pawns = cnt_0 + cnt_6
-                if total_pawns <= 1:
-                    scale = SCALE_FACTOR_OCB_ONE_PAWN    # 16/64
-                elif total_pawns <= 2:
-                    scale = SCALE_FACTOR_OCB_TWO_PAWNS   # 32/64
-                else:
-                    scale = SCALE_FACTOR_OCB_MULTIPLE_PAWNS  # 48/64
-                # Apply: shrink the endgame portion of the score
-                eg_portion = eg_score * (MAX_PHASE - phase) // MAX_PHASE
-                mg_portion = final_score - eg_portion
-                final_score = mg_portion + eg_portion * scale // SCALE_FACTOR_NORMAL
+    # --- 9. Endgame Scale Factor + Tapered Evaluation ---
+    # Apply SF11-style endgame scale factor (OCB, fortress draws, 50-move decay, etc.)
+    # before tapering. This replaces the previous inline OCB-only scaling.
+    sf = get_endgame_scale_factor(piece_bbs, occupancy_bbs, game_state, phase, eg_score)
+    if sf != SCALE_FACTOR_NORMAL:
+        eg_scaled = eg_score * sf // SCALE_FACTOR_NORMAL
+        final_score = (mg_score * phase + eg_scaled * (MAX_PHASE - phase)) // MAX_PHASE
+    else:
+        final_score = (mg_score * phase + eg_score * (MAX_PHASE - phase)) // MAX_PHASE
 
     # --- 10. Tempo Bonus / 輪行權獎勵 (SF11 Eval::Tempo = 28) ---
     # The side to move receives the Tempo bonus.

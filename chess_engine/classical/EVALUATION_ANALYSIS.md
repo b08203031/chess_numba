@@ -9,10 +9,11 @@
 | **材質 (Material)** | 漸進式 (Tapered)，含複雜不平衡表。 | 漸進式 (Tapered)，基礎材質值。 | ✅ 材質比例合理，殘局中象的價值高於馬。 |
 | **PST (位置分)** | 中局/殘局雙表，數值極為精細。 | 中局/殘局雙表，數值高度相似。 | ✅ 邏輯一致。 |
 | **機動性 (Mobility)** | 排除被攻擊與受限格子後的非線性查表。 | 排除敵兵攻擊與牽制子後的非線性查表。 | ✅ 已實現非線性查表（`KNIGHT_MOBILITY_BONUS` 等）。 |
-| **威脅 (Threats)** | 詳細威脅矩陣 (Minor/Rook 威脅不同棋子)。 | 實現分類型的威脅矩陣，含懸掛子與兵推，並補足限制棋子威脅。 | ✅ **已完全實現**。限制棋子威脅 (`THREAT_RESTRICTED_PIECE`) 已啟用並整合於評估函數中。 |
-| **國王安全 (King Safety)** | 非線性 kingDanger 二次方懲罰，含安全將軍檢測。 | kingDanger 累加器與二次方轉換，含安全將軍與弱格。 | ✅ 已成功實現 SF11-like 的安全將軍與防守弱格統計。 |
+| **威脅 (Threats)** | 詳細威脅矩陣 (Minor/Rook 威脅不同棋子)。 | 實現分類型的威脅矩陣，含懸掛子與兵推，並補足限制棋子威脅。新增 Knight/Slider On Queen。 | ✅ **已完全實現**。整合了 Queen-target 威脅特徵，包含馬/滑動棋子威脅后。 |
+| **國王安全 (King Safety)** | 非線性 kingDanger 二次方懲罰，含安全將軍檢測與 blockers。 | kingDanger 累加器與二次方轉換，含安全將軍、弱格、阻擋子與 offset。 | ✅ **已完全實現**。新增 `KING_DANGER_BLOCKERS` 與 `KING_DANGER_OFFSET`，移除了 0/1 進攻子的硬編碼門檻以完全對齊 SF11 非線性安全評估。 |
 | **空間評估 (Space)** | 中局中央四直行空間控制評估（Rank 2-4）。 | 中局中央四直行空間控制評估（Rank 2-4）。 | ✅ **已完全實現**。已引入 `SPACE_THRESHOLD = 4700`，並採用了 4 倍安全折減因子（`// 4` 縮放）與對稱除法，以完美適配本引擎的材質比例。 (註：目前主程式為追求極致效能暫不啟用，但在 initiative 中有保留註解說明)。 |
 | **主動權 (Initiative)** | 基於 complexity 的動態修正，防止和棋漂移。 | 基於 complexity 的動態複雜度修正。 | ✅ **已完全實現**。已將固定 10 cp 修正替換為動態複雜度 (Complexity) 評估與獨立輪行權 (Tempo) 獎勵。 |
+| **棋子特定獎懲 (Piece-Specific)** | 長對角線象、車后同列、弱勢后、與易位權掛鉤的困車。 | 長對角線象、車后同列、弱勢后、困車係數。 | ✅ **已完全實現**。成功整合 Bishop/Rook/Queen 特徵並與 castling rights 掛鉤。 |
 
 ---
 
@@ -96,6 +97,16 @@
 * **同色兵主教中心阻擋乘數 (§3)**：
   * 定義了 `CENTER_FILES = np.uint64(0x3C3C3C3C3C3C3C3C)`（C、D、E、F 四列）。
   * 對於與主教同色格的己方兵（same-color pawns），當這些兵位於 C、D、E、F 中央四列且被前方任何棋子直接阻擋（White: `wp_bb & (all_occupancy >> 8)`；Black: `bp_bb & (all_occupancy << 8)`）時，每增加一個被阻擋的中心兵，主教的同色兵懲罰項便乘以 `(1 + center_blocked_pawns)`。這使得防守被鎖死的中央兵型時，主教的靈活性與評估懲罰能完美地與 Stockfish 11 的 BishopPawns 評估對齊。
+
+### 8. 經典評估函數優化 - 第二階段 (Phase II Evaluation Upgrades)
+
+* **國王安全阻擋子與偏移量**：在王安全公式中引入 `KING_DANGER_BLOCKERS`（2 cp）與 `KING_DANGER_OFFSET`（1 cp）。移除原本進攻子為 0 與 1 時的硬編碼提早返回和減半逻辑，使其完全藉由非線性二次懲罰自然過渡，與 Stockfish 11 對齊。
+* **棋子位置與協同特徵**：
+  - **長對角線象 (LongDiagonalBishop)**：若主教在長對角線上，且能穿過兵阻擋看到至少兩個中心方格（d4, e4, d5, e5）則給予額外加分（MG: 35, EG: 0）。
+  - **車后同列 (RookOnQueenFile)**：若車與任何一方的后處於同一列上，給予額外加分（MG: 5, EG: 3）。
+  - **弱勢后 (WeakQueen)**：若后處於被敵方車/象通過單一阻擋子 X 射線射擊（即潛在的牽制或發現攻擊射線），則給予懲罰（MG: -38, EG: -8）。
+* **困車易位權縮放 (TrappedRook Scaling)**：將困車（TrappedRook）的懲罰與雙方的易位權（`castling_rights`）掛鉤。若一方仍保有對應側的易位權，則懲罰保持常規；否則施以雙倍懲罰（乘以 2），與 SF11 對齊。
+* **馬/滑動棋子威脅后 (Knight/Slider On Queen)**：新增了白/黑馬（`THREAT_KNIGHT_ON_QUEEN`，MG: 12, EG: 7）或滑動棋子象/車（`THREAT_SLIDER_ON_QUEEN`，MG: 46, EG: 10）攻擊能直接威脅對方后的方格的威脅分數。
 
 ---
 
