@@ -81,16 +81,14 @@ def normalize_square(sq, strong_side, p_sq):
     return sq
 
 @numba.njit(cache=True, boundscheck=False, fastmath=True)
-def mate_kbnk(strong_king_sq, weak_king_sq, bishop_sq, knight_sq):
-    opposite_colors_bishop = ((bishop_sq % 8) + (bishop_sq // 8)) & 1
-    idx = (weak_king_sq ^ 56) if opposite_colors_bishop else weak_king_sq
+def mate_kbnk(strong_king_sq, weak_king_sq, bishop_sq):
+    is_opposite = opposite_colors(bishop_sq, 0)  # 0 is SQ_A1
+    idx = (weak_king_sq ^ 56) if is_opposite else weak_king_sq
     
     dist_kings = CHEBYSHEV_DISTANCE[strong_king_sq, weak_king_sq]
     
-    corner_bonus = PUSH_TO_CORNERS[idx] // 32
-    close_bonus = PUSH_CLOSE[dist_kings] // 2
-    
-    return np.int32(corner_bonus + close_bonus)
+    result = np.int32(10000) + PUSH_CLOSE[dist_kings] + PUSH_TO_CORNERS[idx]
+    return result
 
 @numba.njit(cache=True, boundscheck=False, fastmath=True)
 def evaluate_special_endgame(piece_bbs, occupancy_bbs, game_state, phase):
@@ -116,12 +114,10 @@ def evaluate_special_endgame(piece_bbs, occupancy_bbs, game_state, phase):
     if total_pawns == 0:
         if w_minor_major == 2 and wb == 1 and wn == 1 and b_minor_major == 0:
             bishop_sq = get_lsb_index(piece_bbs[2])
-            knight_sq = get_lsb_index(piece_bbs[1])
-            return True, np.int32(650 + mate_kbnk(wk_sq, bk_sq, bishop_sq, knight_sq))
+            return True, np.int32(mate_kbnk(wk_sq, bk_sq, bishop_sq))
         if b_minor_major == 2 and bb == 1 and bn == 1 and w_minor_major == 0:
             bishop_sq = get_lsb_index(piece_bbs[8])
-            knight_sq = get_lsb_index(piece_bbs[7])
-            return True, np.int32(-650 - mate_kbnk(bk_sq, wk_sq, bishop_sq, knight_sq))
+            return True, np.int32(-mate_kbnk(bk_sq, wk_sq, bishop_sq))
             
     return False, np.int32(0)
 

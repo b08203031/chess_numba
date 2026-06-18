@@ -1,10 +1,10 @@
-# chess_engine/evaluation.py
+# chess_engine/classical_old/evaluation.py
 
 import numba
 import numpy as np
 
 from chess_engine.classical_old.constants import *
-from chess_engine.classical_old.endgame import get_endgame_scale_factor
+from chess_engine.classical_old.endgame import get_endgame_scale_factor, mate_kbnk
 
 from chess_engine.classical_old.bitboard_utils import get_lsb_index, get_msb_index, count_bits, WHITE_KING_ZONES, BLACK_KING_ZONES, FILE_MASKS, SQUARES_BETWEEN, ROOK_RAYS, BISHOP_RAYS
 from chess_engine.classical_old.engine_types import (
@@ -14,421 +14,16 @@ from chess_engine.classical_old.move_generator import (
     get_bishop_attacks, get_rook_attacks, get_queen_attacks, KNIGHT_ATTACKS, PAWN_ATTACKS, KING_ATTACKS,
     get_pinned_pieces
 )
-
-NOT_A_FILE = ~np.uint64(0x0101010101010101)
-NOT_H_FILE = ~np.uint64(0x8080808080808080)
-CENTER_FILES = np.uint64(0x3C3C3C3C3C3C3C3C)  # Files C, D, E, F
-
-# --- Pre-computed Manhattan Distance Table / 預計算曼哈頓距離表 ---
-def _create_manhattan_distance_table():
-    """
-    Pre-computes a 64x64 lookup table for the manhattan distance between any two squares.
-    Distance = abs(rank1 - rank2) + abs(file1 - file2).
-    預計算任意兩個方格之間的曼哈頓距離。
-    """
-    table = np.zeros((64, 64), dtype=np.int32)
-    for sq1 in range(64):
-        rank1, file1 = sq1 // 8, sq1 % 8
-        for sq2 in range(64):
-            rank2, file2 = sq2 // 8, sq2 % 8
-            table[sq1, sq2] = abs(rank1 - rank2) + abs(file1 - file2)
-    return table
-
-MANHATTAN_DISTANCE = _create_manhattan_distance_table()
-
-def _create_chebyshev_distance_table():
-    """
-    Pre-computes a 64x64 lookup table for the Chebyshev distance (King distance) between any two squares.
-    Distance = max(abs(rank1 - rank2), abs(file1 - file2)).
-    預計算任意兩個方格之間的切比雪夫距離（國王距離）。
-    """
-    table = np.zeros((64, 64), dtype=np.int32)
-    for sq1 in range(64):
-        rank1, file1 = sq1 // 8, sq1 % 8
-        for sq2 in range(64):
-            rank2, file2 = sq2 // 8, sq2 % 8
-            table[sq1, sq2] = max(abs(rank1 - rank2), abs(file1 - file2))
-    return table
-
-CHEBYSHEV_DISTANCE = _create_chebyshev_distance_table()
-
-
-# --- Pre-computed Masks for Pawn Structure Evaluation / 兵型評估的預計算掩碼 ---
-
-# Masks for adjacent files (e.g., for file B, it's file A and C)
-# 相鄰直線的掩碼（例如 B 線的相鄰線是 A 和 C）
-ADJACENT_FILES_MASKS = np.array([
-    FILE_MASKS[1],  # File A
-    FILE_MASKS[0] | FILE_MASKS[2],  # File B
-    FILE_MASKS[1] | FILE_MASKS[3],  # File C
-    FILE_MASKS[2] | FILE_MASKS[4],  # File D
-    FILE_MASKS[3] | FILE_MASKS[5],  # File E
-    FILE_MASKS[4] | FILE_MASKS[6],  # File F
-    FILE_MASKS[5] | FILE_MASKS[7],  # File G
-    FILE_MASKS[6],  # File H
-], dtype=np.uint64)
-
-# Precomputed masks for forward ranks (relative to white)
-# White pawn at rank r: forward mask includes ranks > r
-# Black pawn at rank r: forward mask includes ranks < r (relative to board)
-WHITE_FORWARD_RANKS = np.zeros(64, dtype=np.uint64)
-BLACK_FORWARD_RANKS = np.zeros(64, dtype=np.uint64)
-
-for sq in range(64):
-    rank = sq // 8
-    # White forward: ranks > rank
-    mask = np.uint64(0)
-    for r in range(rank + 1, 8):
-        mask |= RANK_MASKS[r]
-    WHITE_FORWARD_RANKS[sq] = mask
-
-    # Black forward: ranks < rank
-    mask = np.uint64(0)
-    for r in range(0, rank):
-        mask |= RANK_MASKS[r]
-    BLACK_FORWARD_RANKS[sq] = mask
-
-
-def _create_passed_pawn_masks():
-    """
-    預計算通路兵掩碼。通路兵是指前方沒有敵方兵阻擋（包括相鄰直線）。
-    """
-    white_masks = np.zeros(64, dtype=np.uint64)
-    black_masks = np.zeros(64, dtype=np.uint64)
-    for sq in range(64):
-        file_idx = sq % 8
-        rank_idx = sq // 8
-        
-        # Mask includes the pawn's own file and adjacent files
-        # 掩碼包括兵自己的直線和相鄰直線
-        path_mask = FILE_MASKS[file_idx] | ADJACENT_FILES_MASKS[file_idx]
-        
-        # White passed pawn: no black pawns in front on the path
-        # 白方通路兵：前方路徑上沒有黑兵
-        white_front_span = np.uint64(0)
-        for r in range(rank_idx + 1, 8):
-            white_front_span |= (path_mask & (np.uint64(0xFF) << np.uint64(r * 8)))
-        white_masks[sq] = white_front_span
-
-        # Black passed pawn: no white pawns in front on the path
-        # 黑方通路兵：前方路徑上沒有白兵
-        black_front_span = np.uint64(0)
-        for r in range(rank_idx - 1, -1, -1):
-            black_front_span |= (path_mask & (np.uint64(0xFF) << np.uint64(r * 8)))
-        black_masks[sq] = black_front_span
-        
-    return white_masks, black_masks
-
-WHITE_PASSED_PAWN_MASKS, BLACK_PASSED_PAWN_MASKS = _create_passed_pawn_masks()
-
-# Precompute forward file masks
-WHITE_FORWARD_FILE_MASKS = np.zeros(64, dtype=np.uint64)
-BLACK_FORWARD_FILE_MASKS = np.zeros(64, dtype=np.uint64)
-
-for sq in range(64):
-    file_idx = sq % 8
-    WHITE_FORWARD_FILE_MASKS[sq] = WHITE_FORWARD_RANKS[sq] & FILE_MASKS[file_idx]
-    BLACK_FORWARD_FILE_MASKS[sq] = BLACK_FORWARD_RANKS[sq] & FILE_MASKS[file_idx]
-
-
-# --- Pre-computed Pawn Structure Masks ---
-PHALANX_MASK = np.zeros(64, dtype=np.uint64)
-WHITE_SUPPORT_MASK = np.zeros(64, dtype=np.uint64)
-BLACK_SUPPORT_MASK = np.zeros(64, dtype=np.uint64)
-WHITE_BACKWARD_TEST_MASK = np.zeros(64, dtype=np.uint64)
-BLACK_BACKWARD_TEST_MASK = np.zeros(64, dtype=np.uint64)
-
-for sq in range(64):
-    file_idx = sq % 8
-    rank = sq // 8
-    
-    # Phalanx
-    PHALANX_MASK[sq] = ADJACENT_FILES_MASKS[file_idx] & RANK_MASKS[rank]
-    
-    # Support
-    if rank > 0:
-        WHITE_SUPPORT_MASK[sq] = ADJACENT_FILES_MASKS[file_idx] & RANK_MASKS[rank - 1]
-    if rank < 7:
-        BLACK_SUPPORT_MASK[sq] = ADJACENT_FILES_MASKS[file_idx] & RANK_MASKS[rank + 1]
-        
-    # Backward Test Masks
-    if sq < 56:
-        WHITE_BACKWARD_TEST_MASK[sq] = ADJACENT_FILES_MASKS[file_idx] & BLACK_FORWARD_RANKS[sq + 8]
-    if sq >= 8:
-        BLACK_BACKWARD_TEST_MASK[sq] = ADJACENT_FILES_MASKS[file_idx] & WHITE_FORWARD_RANKS[sq - 8]
-
-
-@numba.njit(cache=True, boundscheck=False, fastmath=True)
-def evaluate_pawn_structure(piece_bbs, castling_rights):
-    """
-    評估雙方的兵型結構（通路兵、孤兵、重疊兵、後兵、連結兵、弱對決、開放線弱兵）。
-    同時計算並返回兵盾與兵風暴評估分數（已併入國王安全）。
-    
-    Args:
-        piece_bbs (np.ndarray): 12 個棋子的位元棋盤。
-        castling_rights (np.uint8): 易位權限位元遮罩。
-        
-    Returns:
-        tuple: (mg_score, eg_score, 
-                white_mg_shield, white_eg_shield, black_mg_shield, black_eg_shield,
-                w_passed, b_passed,
-                white_pawn_attacks_span, black_pawn_attacks_span) 從白方視角。
-    """
-    mg_score = np.int32(0)
-    eg_score = np.int32(0)
-    
-    white_pawns = piece_bbs[0]
-    black_pawns = piece_bbs[6]
-    
-    white_king_sq = get_lsb_index(piece_bbs[5])
-    black_king_sq = get_lsb_index(piece_bbs[11])
-    
-    w_passed = np.uint64(0)
-    b_passed = np.uint64(0)
-    
-    # Precompute base pawn attacks and spans
-    white_pawn_attacks = ((white_pawns & NOT_A_FILE) << np.uint64(7)) | ((white_pawns & NOT_H_FILE) << np.uint64(9))
-    black_pawn_attacks = ((black_pawns & NOT_H_FILE) >> np.uint64(7)) | ((black_pawns & NOT_A_FILE) >> np.uint64(9))
-    white_pawn_attacks_span = white_pawn_attacks
-    black_pawn_attacks_span = black_pawn_attacks
-
-    # Precompute double attacks needed for passed pawn condition C
-    white_double_attacks = ((white_pawns & NOT_A_FILE) << np.uint64(7)) & ((white_pawns & NOT_H_FILE) << np.uint64(9))
-    black_double_attacks = ((black_pawns & NOT_A_FILE) >> np.uint64(9)) & ((black_pawns & NOT_H_FILE) >> np.uint64(7))
-    
-    # --- 1. Iterate White Pawns ---
-    temp_wp = white_pawns
-    while temp_wp:
-        sq = get_lsb_index(temp_wp)
-        rank = sq >> 3
-        file_idx = sq & 7
-        mask_sq = BB_SQUARES[sq]
-
-        # Extract bits for backward and lever checks
-        lever = black_pawns & PAWN_ATTACKS[0, sq]
-        lever_push = black_pawns & PAWN_ATTACKS[0, sq + 8]
-        blocked = black_pawns & BB_SQUARES[sq + 8]
-        
-        phalanx = white_pawns & PHALANX_MASK[sq]
-        support = white_pawns & WHITE_SUPPORT_MASK[sq]
-        doubled = (white_pawns & BB_SQUARES[sq - 8]) != 0
-
-        # Backward Pawn Detection
-        backward = False
-        if not (white_pawns & WHITE_BACKWARD_TEST_MASK[sq]) and (lever_push | blocked):
-            backward = True
-
-        # Project attacks span forward if pawn is not backward nor blocked
-        if not backward and not blocked:
-            white_pawn_attacks_span |= WHITE_FORWARD_RANKS[sq] & ADJACENT_FILES_MASKS[file_idx]
-
-        opposed = (black_pawns & WHITE_FORWARD_FILE_MASKS[sq]) != 0
-        
-        # Evaluate Passed Pawn Conditions (Stopper/Lever/Support logic)
-        stoppers = black_pawns & WHITE_PASSED_PAWN_MASKS[sq]
-        cond_a = (stoppers ^ lever) == 0
-        cond_b = False
-        if (stoppers ^ lever_push) == 0:
-            cond_b = count_bits(phalanx) >= count_bits(lever_push)
-            
-        cond_c = False
-        if stoppers == blocked and rank >= 4:
-            shifted_support = support << np.uint64(8)
-            if (shifted_support & ~(black_pawns | black_double_attacks)) != 0:
-                cond_c = True
-
-        is_passed = cond_a or cond_b or cond_c
-
-        if is_passed:
-            w_passed |= mask_sq
-
-        # Score calculations
-        if support or phalanx:
-            # Connected Bonus (using distinct MG/EG bonuses and weights for proper scaling)
-            v_mg = CONNECTED_BONUS[rank] * (2 + (1 if phalanx else 0) - (1 if opposed else 0)) + CONNECTED_SUPPORT_WEIGHT * count_bits(support)
-            v_eg = CONNECTED_BONUS_EG[rank] * (2 + (1 if phalanx else 0) - (1 if opposed else 0)) + CONNECTED_SUPPORT_WEIGHT_EG * count_bits(support)
-            mg_score += v_mg
-            eg_score += np.int32((v_eg * (rank - 2)) / 4)
-        elif not (white_pawns & ADJACENT_FILES_MASKS[file_idx]):
-            # Isolated
-            mg_score += ISOLATED_PAWN_PENALTY[0]
-            eg_score += ISOLATED_PAWN_PENALTY[1]
-            if not opposed:
-                mg_score += WEAK_UNOPPOSED_PENALTY[0]
-                eg_score += WEAK_UNOPPOSED_PENALTY[1]
-        elif backward:
-            # Backward
-            mg_score += BACKWARD_PAWN_PENALTY[0]
-            eg_score += BACKWARD_PAWN_PENALTY[1]
-            if not opposed:
-                mg_score += WEAK_UNOPPOSED_PENALTY[0]
-                eg_score += WEAK_UNOPPOSED_PENALTY[1]
-
-        if not support:
-            if doubled:
-                mg_score += DOUBLED_PAWN_PENALTY[0]
-                eg_score += DOUBLED_PAWN_PENALTY[1]
-            if count_bits(lever) > 1:
-                mg_score += WEAK_LEVER_PENALTY[0]
-                eg_score += WEAK_LEVER_PENALTY[1]
-
-        temp_wp &= temp_wp - np.uint64(1)
-
-    # --- 2. Iterate Black Pawns ---
-    temp_bp = black_pawns
-    while temp_bp:
-        sq = get_lsb_index(temp_bp)
-        rank = sq >> 3
-        relative_rank = 7 - rank
-        file_idx = sq & 7
-        mask_sq = BB_SQUARES[sq]
-
-        # Extract bits for backward and lever checks
-        lever = white_pawns & PAWN_ATTACKS[1, sq]
-        lever_push = white_pawns & PAWN_ATTACKS[1, sq - 8]
-        blocked = white_pawns & BB_SQUARES[sq - 8]
-        
-        phalanx = black_pawns & PHALANX_MASK[sq]
-        support = black_pawns & BLACK_SUPPORT_MASK[sq]
-        doubled = (black_pawns & BB_SQUARES[sq + 8]) != 0
-
-        # Backward Pawn Detection
-        backward = False
-        if not (black_pawns & BLACK_BACKWARD_TEST_MASK[sq]) and (lever_push | blocked):
-            backward = True
-
-        # Project attacks span forward if pawn is not backward nor blocked
-        if not backward and not blocked:
-            black_pawn_attacks_span |= BLACK_FORWARD_RANKS[sq] & ADJACENT_FILES_MASKS[file_idx]
-
-        opposed = (white_pawns & BLACK_FORWARD_FILE_MASKS[sq]) != 0
-        
-        # Evaluate Passed Pawn Conditions (Stopper/Lever/Support logic)
-        stoppers = white_pawns & BLACK_PASSED_PAWN_MASKS[sq]
-        cond_a = (stoppers ^ lever) == 0
-        cond_b = False
-        if (stoppers ^ lever_push) == 0:
-            cond_b = count_bits(phalanx) >= count_bits(lever_push)
-            
-        cond_c = False
-        if stoppers == blocked and relative_rank >= 4:
-            shifted_support = support >> np.uint64(8)
-            if (shifted_support & ~(white_pawns | white_double_attacks)) != 0:
-                cond_c = True
-
-        is_passed = cond_a or cond_b or cond_c
-
-        if is_passed:
-            b_passed |= mask_sq
-
-        # Score calculations
-        if support or phalanx:
-            # Connected Bonus (using distinct MG/EG bonuses and weights for proper scaling)
-            v_mg = CONNECTED_BONUS[relative_rank] * (2 + (1 if phalanx else 0) - (1 if opposed else 0)) + CONNECTED_SUPPORT_WEIGHT * count_bits(support)
-            v_eg = CONNECTED_BONUS_EG[relative_rank] * (2 + (1 if phalanx else 0) - (1 if opposed else 0)) + CONNECTED_SUPPORT_WEIGHT_EG * count_bits(support)
-            mg_score -= v_mg
-            eg_score -= np.int32((v_eg * (relative_rank - 2)) / 4)
-        elif not (black_pawns & ADJACENT_FILES_MASKS[file_idx]):
-            # Isolated
-            mg_score -= ISOLATED_PAWN_PENALTY[0]
-            eg_score -= ISOLATED_PAWN_PENALTY[1]
-            if not opposed:
-                mg_score -= WEAK_UNOPPOSED_PENALTY[0]
-                eg_score -= WEAK_UNOPPOSED_PENALTY[1]
-        elif backward:
-            # Backward
-            mg_score -= BACKWARD_PAWN_PENALTY[0]
-            eg_score -= BACKWARD_PAWN_PENALTY[1]
-            if not opposed:
-                mg_score -= WEAK_UNOPPOSED_PENALTY[0]
-                eg_score -= WEAK_UNOPPOSED_PENALTY[1]
-
-        if not support:
-            if doubled:
-                mg_score -= DOUBLED_PAWN_PENALTY[0]
-                eg_score -= DOUBLED_PAWN_PENALTY[1]
-            if count_bits(lever) > 1:
-                mg_score -= WEAK_LEVER_PENALTY[0]
-                eg_score -= WEAK_LEVER_PENALTY[1]
-
-        temp_bp &= temp_bp - np.uint64(1)
-
-    # --- 3. Evaluate Pawn Shield & Storm (Virtualized Castling aligned) ---
-    # White Shield Evaluation
-    white_mg_shield, white_eg_shield = evaluate_shelter_aligned(piece_bbs, white_king_sq, 0)
-    if (castling_rights & 1) != 0:
-        mg, eg = evaluate_shelter_aligned(piece_bbs, 6, 0) # G1
-        if mg > white_mg_shield:
-            white_mg_shield, white_eg_shield = mg, eg
-    if (castling_rights & 2) != 0:
-        mg, eg = evaluate_shelter_aligned(piece_bbs, 2, 0) # C1
-        if mg > white_mg_shield:
-            white_mg_shield, white_eg_shield = mg, eg
-
-    # Black Shield Evaluation
-    black_mg_shield, black_eg_shield = evaluate_shelter_aligned(piece_bbs, black_king_sq, 1)
-    if (castling_rights & 4) != 0:
-        mg, eg = evaluate_shelter_aligned(piece_bbs, 62, 1) # G8
-        if mg > black_mg_shield:
-            black_mg_shield, black_eg_shield = mg, eg
-    if (castling_rights & 8) != 0:
-        mg, eg = evaluate_shelter_aligned(piece_bbs, 58, 1) # C8
-        if mg > black_mg_shield:
-            black_mg_shield, black_eg_shield = mg, eg
-
-    return (mg_score, eg_score, 
-            white_mg_shield, white_eg_shield, black_mg_shield, black_eg_shield,
-            w_passed, b_passed,
-            white_pawn_attacks_span, black_pawn_attacks_span)
-
-
-@numba.njit(cache=True, boundscheck=False, fastmath=True)
-def evaluate_pawn_structure_cached(piece_bbs, pawn_key, castling_rights, search_context):
-    """
-    Cached version of evaluate_pawn_structure using Pawn Hash Table.
-    """
-    idx = int(pawn_key & np.uint64(0x3FFFF))
-    white_king_sq = get_lsb_index(piece_bbs[5])
-    black_king_sq = get_lsb_index(piece_bbs[11])
-    
-    # Verify pawn key, king positions, and castling rights to validate caches
-    if (search_context.pawn_table_keys[idx] == pawn_key and 
-        search_context.pawn_table_w_king_sq[idx] == white_king_sq and 
-        search_context.pawn_table_b_king_sq[idx] == black_king_sq and
-        search_context.pawn_table_castling_rights[idx] == castling_rights):
-        
-        return (
-            search_context.pawn_table_mg[idx],
-            search_context.pawn_table_eg[idx],
-            search_context.pawn_table_w_shield_mg[idx],
-            search_context.pawn_table_w_shield_eg[idx],
-            search_context.pawn_table_b_shield_mg[idx],
-            search_context.pawn_table_b_shield_eg[idx],
-            search_context.pawn_table_w_passed[idx],
-            search_context.pawn_table_b_passed[idx],
-            search_context.pawn_table_w_attacks_span[idx],
-            search_context.pawn_table_b_attacks_span[idx]
-        )
-        
-    res = evaluate_pawn_structure(piece_bbs, castling_rights)
-    
-    # Store computed values in cache (write-always)
-    search_context.pawn_table_keys[idx] = pawn_key
-    search_context.pawn_table_w_king_sq[idx] = np.int8(white_king_sq)
-    search_context.pawn_table_b_king_sq[idx] = np.int8(black_king_sq)
-    search_context.pawn_table_castling_rights[idx] = castling_rights
-    search_context.pawn_table_mg[idx] = res[0]
-    search_context.pawn_table_eg[idx] = res[1]
-    search_context.pawn_table_w_shield_mg[idx] = res[2]
-    search_context.pawn_table_w_shield_eg[idx] = res[3]
-    search_context.pawn_table_b_shield_mg[idx] = res[4]
-    search_context.pawn_table_b_shield_eg[idx] = res[5]
-    search_context.pawn_table_w_passed[idx] = res[6]
-    search_context.pawn_table_b_passed[idx] = res[7]
-    search_context.pawn_table_w_attacks_span[idx] = res[8]
-    search_context.pawn_table_b_attacks_span[idx] = res[9]
-    
-    return res
+from chess_engine.classical_old.pawns import (
+    NOT_A_FILE, NOT_H_FILE, CENTER_FILES, CHEBYSHEV_DISTANCE, MANHATTAN_DISTANCE,
+    WHITE_PASSED_PAWN_MASKS, BLACK_PASSED_PAWN_MASKS,
+    WHITE_FORWARD_FILE_MASKS, BLACK_FORWARD_FILE_MASKS,
+    WHITE_FORWARD_RANKS, BLACK_FORWARD_RANKS,
+    ADJACENT_FILES_MASKS,
+    evaluate_pawn_structure, evaluate_pawn_structure_cached,
+    evaluate_piece_coordination, evaluate_shelter_aligned
+)
+from chess_engine.classical_old.material import compute_imbalance
 
 
 @numba.njit(cache=True, boundscheck=False, fastmath=True)
@@ -654,137 +249,6 @@ def evaluate_passed_pawns(piece_bbs, occupancy_bbs, white_attacks, black_attacks
     return mg_score, eg_score, passed_count
 
 
-@numba.njit(numba.types.UniTuple(numba.int32, 2)(piece_bbs_signature, piece_counts_signature), cache=True, boundscheck=False, fastmath=True)
-def evaluate_piece_coordination(piece_bbs, piece_counts):
-    """
-    評估棋子協同性特徵（雙象、車在開放線）。
-    
-    Args:
-        piece_bbs (np.ndarray): 12 個棋子的位元棋盤。
-        piece_counts (np.ndarray): 12 個棋子的數量。
-        
-    Returns:
-        tuple: (mg_score, eg_score) 從白方視角。
-    """
-    mg_score = np.int32(0)
-    eg_score = np.int32(0)
-
-    white_pawns = piece_bbs[0]
-    # white_bishops = piece_bbs[2] # Not needed for iteration, count from piece_counts
-    white_rooks = piece_bbs[3]
-    black_pawns = piece_bbs[6]
-    # black_bishops = piece_bbs[8] # Not needed for iteration
-    black_rooks = piece_bbs[9]
-
-    # --- 1. Bishop Pair / 雙象 ---
-    # NOTE: Bishop pair is now handled by the material imbalance polynomial matrix
-    # (compute_imbalance). The standalone bonus has been removed to avoid double-counting.
-    # See SF11 material.cpp QuadraticOurs[0][0] = 1438.
-
-    # --- 2. Rooks on Open and Semi-Open Files / 車在開放線和半開放線 ---
-    for f in range(8):
-        file_mask = FILE_MASKS[f]
-        
-        white_pawns_on_file = (white_pawns & file_mask) != 0
-        black_pawns_on_file = (black_pawns & file_mask) != 0
-
-        # White rooks
-        if (white_rooks & file_mask):
-            if not white_pawns_on_file:
-                if not black_pawns_on_file:
-                    # Open file for White / 白方開放線
-                    mg_score += ROOK_ON_OPEN_FILE_BONUS[0]
-                    eg_score += ROOK_ON_OPEN_FILE_BONUS[1]
-                else:
-                    # Semi-open file for White / 白方半開放線
-                    mg_score += ROOK_ON_SEMI_OPEN_FILE_BONUS[0]
-                    eg_score += ROOK_ON_SEMI_OPEN_FILE_BONUS[1]
-        
-        # Black rooks
-        if (black_rooks & file_mask):
-            if not black_pawns_on_file:
-                if not white_pawns_on_file:
-                    # Open file for Black / 黑方開放線
-                    mg_score -= ROOK_ON_OPEN_FILE_BONUS[0]
-                    eg_score -= ROOK_ON_OPEN_FILE_BONUS[1]
-                else:
-                    # Semi-open file for Black / 黑方半開放線
-                    mg_score -= ROOK_ON_SEMI_OPEN_FILE_BONUS[0]
-                    eg_score -= ROOK_ON_SEMI_OPEN_FILE_BONUS[1]
-    
-    # --- 3. Rooks on 7th Rank / 車在第 7 橫排 ---
-    # White Rooks on Rank 7 (Index 6)
-    white_rooks_on_7th = white_rooks & RANK_MASKS[6]
-    if white_rooks_on_7th:
-        # Check if Black King is on Rank 8 (Index 7)
-        # Note: We can also award bonus if there are pawns on rank 7, but King on 8th is classic.
-        # Simple implementation: Just bonus for Rook on 7th.
-        # Ideally, we should check if it confines the king or attacks pawns.
-        # Simplified: Bonus if on 7th.
-        count = count_bits(white_rooks_on_7th)
-        mg_score += ROOK_ON_SEVENTH_BONUS[0] * count
-        eg_score += ROOK_ON_SEVENTH_BONUS[1] * count
-
-    # Black Rooks on Rank 2 (Index 1) - Relative 7th for Black
-    black_rooks_on_7th = black_rooks & RANK_MASKS[1]
-    if black_rooks_on_7th:
-        count = count_bits(black_rooks_on_7th)
-        mg_score -= ROOK_ON_SEVENTH_BONUS[0] * count
-        eg_score -= ROOK_ON_SEVENTH_BONUS[1] * count
-
-    return mg_score, eg_score
-
-
-@numba.njit(cache=True, boundscheck=False, fastmath=True)
-def evaluate_shelter_aligned(piece_bbs, king_sq, color):
-    """
-    評估國王前方的兵盾（Friendly Shelter）與敵兵風暴（Enemy Storm）。
-    使用 for 循環，LLVM 會自動展開以提高效能與可讀性。
-    """
-    mg_score = SHELTER_BASE_MG
-    eg_score = SHELTER_BASE_EG
-    king_rank = king_sq >> 3
-    if color == 0:
-        rank_mask = WHITE_FORWARD_RANKS[king_sq] | RANK_MASKS[king_rank]
-    else:
-        rank_mask = BLACK_FORWARD_RANKS[king_sq] | RANK_MASKS[king_rank]
-
-    friendly_pawns = (piece_bbs[0] if color == 0 else piece_bbs[6]) & rank_mask
-    enemy_pawns = (piece_bbs[6] if color == 0 else piece_bbs[0]) & rank_mask
-    
-    # 決定國王所在的中心直行 (B-G 線)
-    king_file = king_sq & 7
-    center_file = max(1, min(6, king_file))
-
-    # 迴圈遍歷三個直線：center_file - 1, center_file, center_file + 1
-    for f in range(center_file - 1, center_file + 2):
-        file_mask = FILE_MASKS[f]
-        
-        our_pawns_on_file = friendly_pawns & file_mask
-        our_rank = 0
-        if our_pawns_on_file:
-            pawn_sq = get_lsb_index(our_pawns_on_file) if color == 0 else get_msb_index(our_pawns_on_file)
-            our_rank = (pawn_sq >> 3) if color == 0 else (7 - (pawn_sq >> 3))
-            
-        their_pawns_on_file = enemy_pawns & file_mask
-        their_rank = 0
-        if their_pawns_on_file:
-            pawn_sq = get_lsb_index(their_pawns_on_file) if color == 0 else get_msb_index(their_pawns_on_file)
-            their_rank = (pawn_sq >> 3) if color == 0 else (7 - (pawn_sq >> 3))
-            
-        d = f if f < 4 else 7 - f
-        mg_score += SHELTER_STRENGTH[d, our_rank]
-        
-        if our_rank > 0 and our_rank == their_rank - 1:
-            if their_rank == 2:
-                mg_score += BLOCKED_STORM
-                eg_score += BLOCKED_STORM_EG
-        else:
-            mg_score += UNBLOCKED_STORM[d, their_rank]
-            
-    return mg_score, eg_score
-
-
 @numba.njit(cache=True, boundscheck=False, fastmath=True)
 def _evaluate_king_attackers(king_sq, color, piece_bbs, occupancy_bbs, enemy_attacks_bb, friendly_attacks_bb, king_zone,
                              zone_attack_units, attacker_count, king_attacks_count,
@@ -864,6 +328,7 @@ def _evaluate_king_attackers(king_sq, color, piece_bbs, occupancy_bbs, enemy_att
         kingDanger = max(np.int32(0), kingDanger - KING_DANGER_NO_QUEEN)
 
     return max(np.int32(0), kingDanger)
+
 
 @numba.njit(cache=True, boundscheck=False, fastmath=True)
 def evaluate_king_safety(piece_bbs, occupancy_bbs, game_state, white_attacks, black_attacks, 
@@ -1378,8 +843,6 @@ def evaluate_attacks_mobility_threats(piece_bbs, occupancy_bbs, white_king_sq, b
             mg_mobility -= MINOR_BEHIND_PAWN[0]
             eg_mobility -= MINOR_BEHIND_PAWN[1]
 
-
-        
         # Tropism: Distance to White King
         distance = MANHATTAN_DISTANCE[sq, white_king_sq]
         black_piece_tropism += KING_TROPISM_WEIGHTS[1] * (KING_TROPISM_MAX_DISTANCE - distance)
@@ -1435,8 +898,6 @@ def evaluate_attacks_mobility_threats(piece_bbs, occupancy_bbs, white_king_sq, b
         if sq >= 8 and (bp_bb & BB_SQUARES[sq - 8]) != np.uint64(0):
             mg_mobility -= MINOR_BEHIND_PAWN[0]
             eg_mobility -= MINOR_BEHIND_PAWN[1]
-
-
 
         # BishopPawns: penalty per own pawn on same color square as bishop
         # Square color: (rank + file) % 2, where rank = sq//8, file = sq%8
@@ -1772,6 +1233,7 @@ def evaluate_attacks_mobility_threats(piece_bbs, occupancy_bbs, white_king_sq, b
             w_zone_attack_units, w_attacker_count, w_king_attacks_count,
             b_zone_attack_units, b_attacker_count, b_king_attacks_count)
 
+
 @numba.njit(numba.int32(piece_bbs_signature, numba.uint64, numba.uint8), cache=True, boundscheck=False, fastmath=True)
 def _evaluate_king_pawn_endgame(piece_bbs, side_to_move, castling_rights):
     """
@@ -2044,52 +1506,6 @@ def _compute_initiative(mg, eg, piece_bbs, passed_count, white_king_sq, black_ki
 
 
 @numba.njit(cache=True, boundscheck=False, fastmath=True)
-def compute_imbalance(cnt_0, cnt_1, cnt_2, cnt_3, cnt_4, cnt_6, cnt_7, cnt_8, cnt_9, cnt_10):
-    """
-    Compute polynomial material imbalance (SF11 material.cpp style).
-    Uses QuadraticOurs/QuadraticTheirs matrices to model cross-piece-type interactions.
-    Index order: [BishopPair, Pawn, Knight, Bishop, Rook, Queen]
-    
-    Returns (mg_imbalance, eg_imbalance) from White's perspective.
-    """
-    # Pack into pieceCount format: [bishop_pair, pawn, knight, bishop, rook, queen]
-    w_bp = np.int32(1) if cnt_2 > 1 else np.int32(0)
-    b_bp = np.int32(1) if cnt_8 > 1 else np.int32(0)
-
-    w = np.array([w_bp, np.int32(cnt_0), np.int32(cnt_1), np.int32(cnt_2),
-                  np.int32(cnt_3), np.int32(cnt_4)], dtype=np.int32)
-    b = np.array([b_bp, np.int32(cnt_6), np.int32(cnt_7), np.int32(cnt_8),
-                  np.int32(cnt_9), np.int32(cnt_10)], dtype=np.int32)
-
-    # White imbalance (Us=White, Them=Black)
-    w_bonus = np.int32(0)
-    for pt1 in range(6):
-        if w[pt1] == 0:
-            continue
-        v = np.int32(0)
-        for pt2 in range(pt1 + 1):
-            v += IMBALANCE_QUADRATIC_OURS[pt1, pt2] * w[pt2]
-            v += IMBALANCE_QUADRATIC_THEIRS[pt1, pt2] * b[pt2]
-        w_bonus += w[pt1] * v
-
-    # Black imbalance (Us=Black, Them=White)
-    b_bonus = np.int32(0)
-    for pt1 in range(6):
-        if b[pt1] == 0:
-            continue
-        v = np.int32(0)
-        for pt2 in range(pt1 + 1):
-            v += IMBALANCE_QUADRATIC_OURS[pt1, pt2] * b[pt2]
-            v += IMBALANCE_QUADRATIC_THEIRS[pt1, pt2] * w[pt2]
-        b_bonus += b[pt1] * v
-
-    raw = (w_bonus - b_bonus) // IMBALANCE_DIVISOR
-    mg_imbalance = raw * IMBALANCE_SCALE_MG // np.int32(100)
-    eg_imbalance = raw * IMBALANCE_SCALE_EG // np.int32(100)
-    return mg_imbalance, eg_imbalance
-
-
-@numba.njit(cache=True, boundscheck=False, fastmath=True)
 def _evaluate_position_jit(piece_bbs, occupancy_bbs, game_state, lazy: bool, search_context=None):
     """
     使用 Tapered Evaluation (加權評估) 模型評估目前局面，並從當前執棋方的角度返回分數。
@@ -2099,13 +1515,12 @@ def _evaluate_position_jit(piece_bbs, occupancy_bbs, game_state, lazy: bool, sea
         piece_bbs (np.ndarray): 12 個棋子的位元棋盤。
         occupancy_bbs (np.ndarray): 佔用位元棋盤。
         game_state (np.ndarray): 遊戲狀態。
-        lazy (bool): 是否使用懶惰評估（僅材質和 PST，用於 Razoring 等）。
+        lazy (bool): 是否使用懶惰評估（僅材質 and PST，用於 Razoring 等）。
         
     Returns:
         int: 從行棋方視角的評估分數。
     """
     # --- King and Pawn Endgame Check / 檢查王兵殘局 ---
-    # 檢查是否只有王和兵，如果
     all_pieces_except_pawns_and_kings = (
         piece_bbs[1] | piece_bbs[2] | piece_bbs[3] | piece_bbs[4] |
         piece_bbs[7] | piece_bbs[8] | piece_bbs[9] | piece_bbs[10]
@@ -2117,13 +1532,45 @@ def _evaluate_position_jit(piece_bbs, occupancy_bbs, game_state, lazy: bool, sea
         return val, np.uint64(0), np.uint64(0)
     side_to_move = game_state[0]
 
+    # --- Specialized KBNK Endgame Check ---
+    wp_bb = piece_bbs[0]
+    bp_bb = piece_bbs[6]
+    if (wp_bb | bp_bb) == 0:
+        wn_bb = piece_bbs[1]
+        wb_bb = piece_bbs[2]
+        wr_bb = piece_bbs[3]
+        wq_bb = piece_bbs[4]
+        
+        bn_bb = piece_bbs[7]
+        bb_bb = piece_bbs[8]
+        br_bb = piece_bbs[9]
+        bq_bb = piece_bbs[10]
+        
+        # White has KBN vs Black lone King
+        if (count_bits(wn_bb) == 1 and count_bits(wb_bb) == 1 and 
+                (wr_bb | wq_bb | bn_bb | bb_bb | br_bb | bq_bb) == 0):
+            white_king_sq = get_lsb_index(piece_bbs[5])
+            black_king_sq = get_lsb_index(piece_bbs[11])
+            bishop_sq = get_lsb_index(wb_bb)
+            result = mate_kbnk(white_king_sq, black_king_sq, bishop_sq)
+            val = result if side_to_move == 0 else -result
+            return val, np.uint64(0), np.uint64(0)
+            
+        # Black has KBN vs White lone King
+        elif (count_bits(bn_bb) == 1 and count_bits(bb_bb) == 1 and 
+                (wr_bb | wq_bb | wn_bb | wb_bb | br_bb | bq_bb) == 0):
+            white_king_sq = get_lsb_index(piece_bbs[5])
+            black_king_sq = get_lsb_index(piece_bbs[11])
+            bishop_sq = get_lsb_index(bb_bb)
+            result = mate_kbnk(black_king_sq, white_king_sq, bishop_sq)
+            val = result if side_to_move == 1 else -result
+            return val, np.uint64(0), np.uint64(0)
+
     # Precompute King Squares for evaluation components
     white_king_sq = get_lsb_index(piece_bbs[5])
     black_king_sq = get_lsb_index(piece_bbs[11])
 
     # --- 1. & 2. Phase, Material, and PST (Unrolled & Fused) ---
-    # Unrolled to avoid array allocation for piece_counts and improve vectorization
-    
     mg_0, eg_0, cnt_0 = _process_piece_score_and_count(0, piece_bbs[0], True)
     mg_1, eg_1, cnt_1 = _process_piece_score_and_count(1, piece_bbs[1], True)
     mg_2, eg_2, cnt_2 = _process_piece_score_and_count(2, piece_bbs[2], True)
@@ -2144,25 +1591,23 @@ def _evaluate_position_jit(piece_bbs, occupancy_bbs, game_state, lazy: bool, sea
     piece_counts = (cnt_0, cnt_1, cnt_2, cnt_3, cnt_4, cnt_5, cnt_6, cnt_7, cnt_8, cnt_9, cnt_10, cnt_11)
     
     # Calculate phase
-    # PHASE_WEIGHTS: [0, 1, 1, 2, 4, 0] (Pawn, Knight, Bishop, Rook, Queen, King)
-    # Using tuple indexing for counts
     phase = (cnt_1 * PHASE_WEIGHTS[1] + cnt_2 * PHASE_WEIGHTS[2] + cnt_3 * PHASE_WEIGHTS[3] + cnt_4 * PHASE_WEIGHTS[4] +
              cnt_7 * PHASE_WEIGHTS[1] + cnt_8 * PHASE_WEIGHTS[2] + cnt_9 * PHASE_WEIGHTS[3] + cnt_10 * PHASE_WEIGHTS[4])
     phase = min(phase, MAX_PHASE)
 
-    # --- Material Imbalance / 材質不平衡多項式 ---
+    # --- Material Imbalance ---
     mg_imb, eg_imb = compute_imbalance(cnt_0, cnt_1, cnt_2, cnt_3, cnt_4,
                                         cnt_6, cnt_7, cnt_8, cnt_9, cnt_10)
     mg_score += mg_imb
     eg_score += eg_imb
 
-    # --- Lazy Evaluation Checkpoint / 懶惰評估檢查點 ---
+    # --- Lazy Evaluation Checkpoint ---
     if lazy:
         final_score = (mg_score * phase + eg_score * (MAX_PHASE - phase)) // MAX_PHASE
         val = np.int32(final_score) if side_to_move == 0 else np.int32(-final_score)
         return val, np.uint64(0), np.uint64(0)
 
-    # --- 4. 加入兵形結構分數 (Moved up to provide pawn attacks span for outpost safety checks) ---
+    # --- 4. Pawn Structure (Cached or Uncached) ---
     if search_context is not None:
         pawn_key = game_state[PAWN_KEY_INDEX]
         castling_rights = np.uint8(game_state[1])
@@ -2179,6 +1624,23 @@ def _evaluate_position_jit(piece_bbs, occupancy_bbs, game_state, lazy: bool, sea
     mg_score += mg_pawn_structure
     eg_score += eg_pawn_structure
 
+    # --- Dynamic Lazy Evaluation Threshold Early Exit ---
+    if not lazy:
+        v = (mg_score + eg_score) // 2
+        w_npm = (cnt_1 * MG_MATERIAL_VALUES[1] +
+                 cnt_2 * MG_MATERIAL_VALUES[2] +
+                 cnt_3 * MG_MATERIAL_VALUES[3] +
+                 cnt_4 * MG_MATERIAL_VALUES[4])
+        b_npm = (cnt_7 * MG_MATERIAL_VALUES[1] +
+                 cnt_8 * MG_MATERIAL_VALUES[2] +
+                 cnt_9 * MG_MATERIAL_VALUES[3] +
+                 cnt_10 * MG_MATERIAL_VALUES[4])
+        npm = w_npm + b_npm
+        if abs(v) > LAZY_EVAL_THRESHOLD + npm // 64:
+            final_score = (mg_score * phase + eg_score * (MAX_PHASE - phase)) // MAX_PHASE
+            val = np.int32(final_score) if side_to_move == 0 else np.int32(-final_score)
+            return val, np.uint64(0), np.uint64(0)
+
     # --- Compute Attacks, Mobility, Threats (Optimized Single Pass) ---
     (white_attacks, black_attacks, white_pawn_attacks, black_pawn_attacks,
      white_attacks2, black_attacks2, pinned_white, pinned_black,
@@ -2190,14 +1652,14 @@ def _evaluate_position_jit(piece_bbs, occupancy_bbs, game_state, lazy: bool, sea
      b_zone_attack_units, b_attacker_count, b_king_attacks_count) = evaluate_attacks_mobility_threats(
          piece_bbs, occupancy_bbs, white_king_sq, black_king_sq, white_pawn_attacks_span, black_pawn_attacks_span, castling_rights)
 
-    # --- 4.5 評估並加入動態通路兵與候選兵分數 ---
+    # --- 4.5 Passed Pawns (Dynamic Evaluation) ---
     mg_passed, eg_passed, passed_count = evaluate_passed_pawns(piece_bbs, occupancy_bbs, white_attacks, black_attacks,
                                                                w_passed, b_passed,
                                                                white_king_sq, black_king_sq)
     mg_score += mg_passed
     eg_score += eg_passed
 
-    # --- 3. (Full Evaluation) 加入國王安全分數 ---
+    # --- 3. King Safety ---
     mg_king_safety, eg_king_safety = evaluate_king_safety(
         piece_bbs, occupancy_bbs, game_state, white_attacks, black_attacks,
         piece_counts, white_attacks2, black_attacks2, pinned_white, pinned_black,
@@ -2212,36 +1674,35 @@ def _evaluate_position_jit(piece_bbs, occupancy_bbs, game_state, lazy: bool, sea
     mg_score += mg_king_safety
     eg_score += eg_king_safety
 
-    # --- 5. 加入棋子協同性分數 ---
+    # --- 5. Piece Coordination ---
     mg_coord, eg_coord = evaluate_piece_coordination(piece_bbs, piece_counts)
     mg_score += mg_coord
     eg_score += eg_coord
 
-    # --- 6. 加入棋子機動性分數 ---
+    # --- 6. Piece Mobility ---
     mg_score += mg_mobility
     eg_score += eg_mobility
 
-    # --- 7. Join Outpost Evaluation / 加入前哨評估 ---
-    # mg_outpost, eg_outpost = evaluate_outposts(piece_bbs, occupancy_bbs, white_pawn_attacks, black_pawn_attacks)
+    # --- 7. Outpost Evaluation ---
     mg_score += mg_outpost
     eg_score += eg_outpost
 
-    # --- 8. Join Threat Evaluation / 加入威脅評估 ---
+    # --- 8. Threat Evaluation ---
     mg_score += mg_threats
     eg_score += eg_threats
 
-    # --- 8.5 空間評估 / Space Evaluation ---
-    # mg_space = evaluate_space(piece_bbs, occupancy_bbs, white_attacks, black_attacks, white_pawn_attacks, black_pawn_attacks, piece_counts)
-    # mg_score += mg_space
+    # --- 8.5 Space Evaluation ---
+    if not lazy:
+        mg_space = evaluate_space(piece_bbs, occupancy_bbs, white_attacks, black_attacks, 
+                                  white_pawn_attacks, black_pawn_attacks, piece_counts)
+        mg_score += mg_space
 
-    # --- 8.75 Initiative / 主動權修正 ---
+    # --- 8.75 Initiative ---
     mg_init, eg_init = _compute_initiative(mg_score, eg_score, piece_bbs, passed_count, white_king_sq, black_king_sq)
     mg_score += mg_init
     eg_score += eg_init
 
     # --- 9. Endgame Scale Factor + Tapered Evaluation ---
-    # Apply SF11-style endgame scale factor (OCB, fortress draws, 50-move decay, etc.)
-    # before tapering. This replaces the previous inline OCB-only scaling.
     sf = get_endgame_scale_factor(piece_bbs, occupancy_bbs, game_state, phase, eg_score)
     if sf != SCALE_FACTOR_NORMAL:
         eg_scaled = eg_score * sf // SCALE_FACTOR_NORMAL
@@ -2249,14 +1710,15 @@ def _evaluate_position_jit(piece_bbs, occupancy_bbs, game_state, lazy: bool, sea
     else:
         final_score = (mg_score * phase + eg_score * (MAX_PHASE - phase)) // MAX_PHASE
 
-    # --- 10. Tempo Bonus / 輪行權獎勵 (SF11 Eval::Tempo = 28) ---
+    # --- 10. Tempo Bonus ---
     # The side to move receives the Tempo bonus.
 
-    # --- 11. 從當前執棋方的角度返回最終分數 ---
-    if side_to_move == 0:  # 白方回合
+    # --- 11. Return side-relative score ---
+    if side_to_move == 0:  # White's turn
         return np.int32(final_score + TEMPO_BONUS), pinned_white, pinned_black
-    else:  # 黑方回合
+    else:  # Black's turn
         return np.int32(-final_score + TEMPO_BONUS), pinned_white, pinned_black
+
 
 def evaluate_position(piece_bbs, occupancy_bbs, game_state, lazy: bool = False):
     """

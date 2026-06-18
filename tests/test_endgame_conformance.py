@@ -58,15 +58,14 @@ class TestEndgameConformance(unittest.TestCase):
 
         # White KBN vs Black K (win)
         # bishop = 27 (d4), knight = 28 (e4), wk_sq = 7 (h1), bk_sq = 60 (e8)
-        # PUSH_TO_CORNERS[60] = 5440. 5440 // 32 = 170.
-        # PUSH_CLOSE[7] // 2 = 10 // 2 = 5.
-        # mate_kbnk = 170 + 5 = 175.
-        # score = 650 + 175 = 825
+        # PUSH_TO_CORNERS[60] = 5440.
+        # PUSH_CLOSE[7] = 10.
+        # mate_kbnk = 10000 + 10 + 5440 = 15450.
         fen = "4k3/8/8/8/3BN3/8/8/7K w - - 0 1"
         piece_bbs, occupancy_bbs, active_color = parse_fen(fen)
         is_special, score = evaluate_special_endgame(piece_bbs, occupancy_bbs, self.game_state, self.phase)
         self.assertTrue(is_special)
-        self.assertEqual(score, 825)
+        self.assertEqual(score, 15450)
 
     def test_evaluate_special_endgame_krkb_krkn_kqkr(self):
         # White KR vs Black KB (KRKB)

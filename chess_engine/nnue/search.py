@@ -26,7 +26,7 @@ from chess_engine.nnue.move import (
 from chess_engine.nnue.constants import (
     BB_SQUARES, MG_MATERIAL_VALUES, INFINITY, MAX_QUIESCENCE_DEPTH, ASPIRATION_WINDOW_SIZE,
     NULL_MOVE_REDUCTION, MAX_PLY, LMR_MIN_DEPTH, LMR_MIN_QUIET_MOVE_INDEX, LMR_REDUCTION, SEE_THRESHOLD,
-    ENABLE_SEE_IN_QUIESCENCE, MATE_SCORE, MATE_IN_MAX_PLY, NO_MOVE,
+    ENABLE_SEE_IN_QUIESCENCE, MATE_SCORE, MATE_IN_MAX_PLY, VALUE_KNOWN_WIN, NO_MOVE,
     RAZORING_MARGIN, FP_BASE, FP_MULTIPLIER, RFP_BASE_MULT, RFP_MAX_DEPTH, RFP_NO_TT_PENALTY,
     ENABLE_DELTA_PRUNING, DELTA_PRUNING_MARGIN, LMP_MOVE_COUNT, ENABLE_LMP,
     ENABLE_PROBCUT, PROBCUT_R, PROBCUT_MARGIN,
@@ -412,6 +412,8 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
     if ply >= MAX_PLY:
         return (evaluate_position(piece_bbs, occupancy_bbs, game_state, search_context, ply, lazy=False), NO_MOVE, nodes_searched, quiescence_nodes, tt_hits)
 
+    search_context.pv_table[ply, ply] = NO_MOVE
+
     # --- Mate Distance Pruning ---
     if ENABLE_MATE_DISTANCE_PRUNING:
         # If we find a mate at 'ply', the score would be MATE_SCORE - ply.
@@ -525,47 +527,86 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
         #    e. We are NOT in a singular extension search (excluded_move == NO_MOVE)
         #       OR the TT move is NOT the excluded move.
         #    f. (P1) The halfmove clock is < 96 to avoid GHI pollution near the 50-move rule.
-        if ply > 0 and not is_pv and not is_exclusion_search and tt_entry['depth'] >= depth and halfmove_clock < 96:
-            tt_hits += np.uint64(1)
+        if ply > 0 and not is_pv and not is_exclusion_search and halfmove_clock < 96:
             tt_score = np.int32(tt_entry['score'])
 
             # Adjust mate scores relative to the current ply
             if tt_score > MATE_IN_MAX_PLY: tt_score -= ply
             elif tt_score < -MATE_IN_MAX_PLY: tt_score += ply
 
-            # NEW: Apply 50-move scale down immediately to TT scores to avoid overlooking impending draws
+            # Apply 50-move scale down immediately to TT scores to avoid overlooking impending draws
             if fifty_move_scale < FIFTY_MOVE_MAX_SCALE and abs(tt_score) < MATE_IN_MAX_PLY:
                 tt_score = tt_score * fifty_move_scale // FIFTY_MOVE_MAX_SCALE
 
-            should_cutoff = False
-            if tt_entry['flag'] == TT_FLAG_EXACT:
-                should_cutoff = True
-            elif tt_entry['flag'] == TT_FLAG_ALPHA and tt_score <= alpha:
-                should_cutoff = True
-            elif tt_entry['flag'] == TT_FLAG_BETA and tt_score >= beta:
-                should_cutoff = True
+            # Align with SF18 depth logic: ttData.depth > depth - (ttData.value <= beta)
+            required_depth = depth + (0 if tt_score <= beta else 1)
+            
+            if tt_entry['depth'] >= required_depth:
+                # Align with SF18 cutNode consistency guard: (cutNode == (ttData.value >= beta) || depth > 4)
+                tt_score_ge_beta = tt_score >= beta
+                consistency_guard = (cut_node == tt_score_ge_beta) or depth > 4
+                
+                if consistency_guard:
+                    should_cutoff = False
+                    if tt_entry['flag'] == TT_FLAG_EXACT:
+                        should_cutoff = True
+                    elif tt_entry['flag'] == TT_FLAG_ALPHA and tt_score <= alpha:
+                        should_cutoff = True
+                    elif tt_entry['flag'] == TT_FLAG_BETA and tt_score >= beta:
+                        should_cutoff = True
 
-            if should_cutoff:
-                # --- P3-C: History Update on TT Fail-High ---
-                if tt_entry['flag'] == TT_FLAG_BETA and tt_score >= beta and tt_move != NO_MOVE:
-                    tt_from = get_from_square(tt_move)
-                    tt_to = get_to_square(tt_move)
-                    tt_flag_special = get_special_move_flag(tt_move)
-                    
-                    our_side = game_state[0]
-                    enemy_side = 1 - our_side
-                    
-                    tt_is_capture = ((occupancy_bbs[enemy_side] & BB_SQUARES[tt_to]) != 0) or (tt_flag_special == SPECIAL_MOVE_FLAG_EN_PASSANT)
-                    tt_is_promotion = tt_flag_special == SPECIAL_MOVE_FLAG_PROMOTION
+                    if should_cutoff:
+                        # Align with SF18 Step 4 (Deep Move Verification):
+                        # At depth >= 7, check if the child node TT entry is consistent with this cutoff direction.
+                        run_cutoff = True
+                        if depth >= 7 and tt_move != NO_MOVE and abs(tt_score) < MATE_IN_MAX_PLY:
+                            if is_move_pseudo_legal(piece_bbs, occupancy_bbs, game_state, tt_move):
+                                search_context.old_piece_bbs[ply, :] = piece_bbs[:]
+                                unmake_info = make_move(piece_bbs, occupancy_bbs, game_state, tt_move)
+                                added_features, removed_features = get_bb_differences(search_context.old_piece_bbs[ply], piece_bbs)
+                                update_accumulator(piece_bbs, added_features, removed_features, ply + 1, search_context.accumulator_stack)
+                                
+                                king_bb = piece_bbs[5] if (1 - game_state[0]) == 0 else piece_bbs[11]
+                                king_sq = get_lsb_index(king_bb) if king_bb else 0
+                                if not is_square_attacked(piece_bbs, occupancy_bbs, king_sq, game_state[0]):
+                                    child_zobrist_key = game_state[4]
+                                    child_halfmove_clock = int(game_state[3])
+                                    child_tt_key = get_tt_key(child_zobrist_key, child_halfmove_clock)
+                                    child_tt_entry = probe_tt(search_context.transposition_table, child_tt_key)
+                                    unmake_move(piece_bbs, occupancy_bbs, game_state, tt_move, unmake_info)
+                                    
+                                    if child_tt_entry['flag'] != TT_FLAG_NONE:
+                                        child_score = np.int32(child_tt_entry['score'])
+                                        if child_score > MATE_IN_MAX_PLY: child_score -= (ply + 1)
+                                        elif child_score < -MATE_IN_MAX_PLY: child_score += (ply + 1)
+                                        
+                                        if tt_score_ge_beta != (-child_score >= beta):
+                                            run_cutoff = False
+                                else:
+                                    unmake_move(piece_bbs, occupancy_bbs, game_state, tt_move, unmake_info)
 
-                    if not tt_is_capture and not tt_is_promotion:
-                        tt_aggressor = find_piece_type_on_square_side(piece_bbs, tt_from, our_side)
-                        if tt_aggressor != -1 and ((occupancy_bbs[our_side] & BB_SQUARES[tt_to]) == 0):
-                            tt_bonus = min(15 * depth, 300) 
-                            update_quiet_stats_on_tt_hit(search_context, tt_move, tt_aggressor, tt_to, pawn_key_idx, tt_bonus, ply)
+                        if run_cutoff:
+                            tt_hits += np.uint64(1)
+                            # --- P3-C: History Update on TT Fail-High ---
+                            if tt_entry['flag'] == TT_FLAG_BETA and tt_score >= beta and tt_move != NO_MOVE:
+                                tt_from = get_from_square(tt_move)
+                                tt_to = get_to_square(tt_move)
+                                tt_flag_special = get_special_move_flag(tt_move)
+                                
+                                our_side = game_state[0]
+                                enemy_side = 1 - our_side
+                                
+                                tt_is_capture = ((occupancy_bbs[enemy_side] & BB_SQUARES[tt_to]) != 0) or (tt_flag_special == SPECIAL_MOVE_FLAG_EN_PASSANT)
+                                tt_is_promotion = tt_flag_special == SPECIAL_MOVE_FLAG_PROMOTION
 
-                search_context.pv_table[ply, ply] = NO_MOVE
-                return (tt_score, tt_entry['best_move'], nodes_searched, quiescence_nodes, tt_hits)
+                                if not tt_is_capture and not tt_is_promotion:
+                                    tt_aggressor = find_piece_type_on_square_side(piece_bbs, tt_from, our_side)
+                                    if tt_aggressor != -1 and ((occupancy_bbs[our_side] & BB_SQUARES[tt_to]) == 0):
+                                        tt_bonus = min(15 * depth, 300) 
+                                        update_quiet_stats_on_tt_hit(search_context, tt_move, tt_aggressor, tt_to, pawn_key_idx, tt_bonus, ply)
+
+                            search_context.pv_table[ply, ply] = NO_MOVE
+                            return (tt_score, tt_entry['best_move'], nodes_searched, quiescence_nodes, tt_hits)
 
     # ==========================================
     # PHASE 3: Static Evaluation and Pre-Search Pruning
@@ -700,7 +741,8 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
     if (search_context.enable_nmp and not is_exclusion_search and depth >= 3 and not is_currently_in_check
             and not low_material_pruning_guard
             and side_non_pawn_count >= NMP_MIN_SIDE_NON_PAWNS
-            and static_score >= beta + NMP_STATIC_MARGIN):
+            and static_score >= beta + NMP_STATIC_MARGIN
+            and abs(beta) < VALUE_KNOWN_WIN):
         # Manual save of only the fields make_null_move modifies (avoids heap allocation)
         nmp_saved_side = game_state[0]
         nmp_saved_ep   = game_state[2]

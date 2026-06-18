@@ -4,7 +4,7 @@ import numba
 import numpy as np
 
 from chess_engine.classical.constants import *
-from chess_engine.classical.endgame import get_endgame_scale_factor
+from chess_engine.classical.endgame import get_endgame_scale_factor, mate_kbnk
 
 from chess_engine.classical.bitboard_utils import get_lsb_index, get_msb_index, count_bits, WHITE_KING_ZONES, BLACK_KING_ZONES, FILE_MASKS, SQUARES_BETWEEN, ROOK_RAYS, BISHOP_RAYS
 from chess_engine.classical.engine_types import (
@@ -1532,6 +1532,40 @@ def _evaluate_position_jit(piece_bbs, occupancy_bbs, game_state, lazy: bool, sea
         return val, np.uint64(0), np.uint64(0)
     side_to_move = game_state[0]
 
+    # --- Specialized KBNK Endgame Check ---
+    wp_bb = piece_bbs[0]
+    bp_bb = piece_bbs[6]
+    if (wp_bb | bp_bb) == 0:
+        wn_bb = piece_bbs[1]
+        wb_bb = piece_bbs[2]
+        wr_bb = piece_bbs[3]
+        wq_bb = piece_bbs[4]
+        
+        bn_bb = piece_bbs[7]
+        bb_bb = piece_bbs[8]
+        br_bb = piece_bbs[9]
+        bq_bb = piece_bbs[10]
+        
+        # White has KBN vs Black lone King
+        if (count_bits(wn_bb) == 1 and count_bits(wb_bb) == 1 and 
+                (wr_bb | wq_bb | bn_bb | bb_bb | br_bb | bq_bb) == 0):
+            white_king_sq = get_lsb_index(piece_bbs[5])
+            black_king_sq = get_lsb_index(piece_bbs[11])
+            bishop_sq = get_lsb_index(wb_bb)
+            result = mate_kbnk(white_king_sq, black_king_sq, bishop_sq)
+            val = result if side_to_move == 0 else -result
+            return val, np.uint64(0), np.uint64(0)
+            
+        # Black has KBN vs White lone King
+        elif (count_bits(bn_bb) == 1 and count_bits(bb_bb) == 1 and 
+                (wr_bb | wq_bb | wn_bb | wb_bb | br_bb | bq_bb) == 0):
+            white_king_sq = get_lsb_index(piece_bbs[5])
+            black_king_sq = get_lsb_index(piece_bbs[11])
+            bishop_sq = get_lsb_index(bb_bb)
+            result = mate_kbnk(black_king_sq, white_king_sq, bishop_sq)
+            val = result if side_to_move == 1 else -result
+            return val, np.uint64(0), np.uint64(0)
+
     # Precompute King Squares for evaluation components
     white_king_sq = get_lsb_index(piece_bbs[5])
     black_king_sq = get_lsb_index(piece_bbs[11])
@@ -1590,6 +1624,23 @@ def _evaluate_position_jit(piece_bbs, occupancy_bbs, game_state, lazy: bool, sea
     mg_score += mg_pawn_structure
     eg_score += eg_pawn_structure
 
+    # --- Dynamic Lazy Evaluation Threshold Early Exit ---
+    if not lazy:
+        v = (mg_score + eg_score) // 2
+        w_npm = (cnt_1 * MG_MATERIAL_VALUES[1] +
+                 cnt_2 * MG_MATERIAL_VALUES[2] +
+                 cnt_3 * MG_MATERIAL_VALUES[3] +
+                 cnt_4 * MG_MATERIAL_VALUES[4])
+        b_npm = (cnt_7 * MG_MATERIAL_VALUES[1] +
+                 cnt_8 * MG_MATERIAL_VALUES[2] +
+                 cnt_9 * MG_MATERIAL_VALUES[3] +
+                 cnt_10 * MG_MATERIAL_VALUES[4])
+        npm = w_npm + b_npm
+        if abs(v) > LAZY_EVAL_THRESHOLD + npm // 64:
+            final_score = (mg_score * phase + eg_score * (MAX_PHASE - phase)) // MAX_PHASE
+            val = np.int32(final_score) if side_to_move == 0 else np.int32(-final_score)
+            return val, np.uint64(0), np.uint64(0)
+
     # --- Compute Attacks, Mobility, Threats (Optimized Single Pass) ---
     (white_attacks, black_attacks, white_pawn_attacks, black_pawn_attacks,
      white_attacks2, black_attacks2, pinned_white, pinned_black,
@@ -1639,6 +1690,12 @@ def _evaluate_position_jit(piece_bbs, occupancy_bbs, game_state, lazy: bool, sea
     # --- 8. Threat Evaluation ---
     mg_score += mg_threats
     eg_score += eg_threats
+
+    # --- 8.5 Space Evaluation ---
+    if not lazy:
+        mg_space = evaluate_space(piece_bbs, occupancy_bbs, white_attacks, black_attacks, 
+                                  white_pawn_attacks, black_pawn_attacks, piece_counts)
+        mg_score += mg_space
 
     # --- 8.75 Initiative ---
     mg_init, eg_init = _compute_initiative(mg_score, eg_score, piece_bbs, passed_count, white_king_sq, black_king_sq)

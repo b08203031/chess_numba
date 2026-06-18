@@ -3,6 +3,8 @@ import numpy as np
 from chess_engine.nnue.engine_types import piece_bbs_signature, occupancy_bbs_signature, game_state_signature, search_context_type
 from chess_engine.nnue.ml_eval.inference import nnue_forward_incremental
 
+from chess_engine.classical.endgame import evaluate_special_endgame
+
 # The NNUE evaluation function needs to be a drop-in replacement for the
 # original evaluate_position in evaluation.py, which has this signature:
 # @numba.njit(numba.int32(piece_bbs_signature, occupancy_bbs_signature, game_state_signature, search_context_type, numba.boolean))
@@ -24,6 +26,12 @@ def evaluate_position(piece_bbs, occupancy_bbs, game_state, search_context, ply,
     """
     # 1. 取得行棋方 (STM: 0=White, 1=Black)
     side_to_move = np.int32(game_state[0])
+
+    # 2. 特殊殘局評估覆蓋（例如 KBNK 象馬單王殘局）
+    is_special, special_score = evaluate_special_endgame(piece_bbs, occupancy_bbs, game_state, np.int32(0))
+    if is_special:
+        return special_score if side_to_move == 0 else -special_score
+
     
     # 2. 計算盤面全部棋子數量 (piece_count) 用作 NNUE 的 bucket 索引
     piece_count = 0

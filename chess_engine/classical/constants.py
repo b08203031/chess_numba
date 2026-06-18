@@ -251,7 +251,8 @@ INITIATIVE_PAWN_ENDGAME_WEIGHT_EG = np.int32(29) # 51 * 0.563 ≈ 29 / 純王兵
 INITIATIVE_ALMOST_UNWIN_WEIGHT_EG = np.int32(24) # 43 * 0.563 ≈ 24 / 幾乎不可獲勝局面懲罰權重
 INITIATIVE_OFFSET_EG = np.int32(-56)             # -100 * 0.563 ≈ -56 / 複雜度基礎偏置
 
-TEMPO_BONUS = np.int32(10)                       # Positional bonus for the side to move / 輪行方（先手/Tempo）的位置分數獎勵
+TEMPO_BONUS = np.int32(22)                       # Positional bonus for the side to move / 輪行方（先手/Tempo）的位置分數獎勵 (SF11 S(28) scaled by 100/128)
+LAZY_EVAL_THRESHOLD = np.int32(1100)             # Dynamic evaluation exit threshold / 動態評估提早結束閥值 (SF11 1400 scaled by 100/128)
 
 # --- King-Pawn Endgame Specifics / 王兵殘局特定常數 ---
 UNSTOPPABLE_PAWN_BONUS = np.int32(800)       # 王兵殘局中不可阻擋通路兵的額外獎勵（接近一個后）/ Unstoppable passed pawn bonus in king-pawn endgame
@@ -714,6 +715,7 @@ INFINITY = 32000
 MATE_SCORE = 30000
 MAX_PLY = 128
 MATE_IN_MAX_PLY = MATE_SCORE - MAX_PLY
+VALUE_KNOWN_WIN = 10000
 NO_MOVE = np.uint16(0)
 
 # Move Ordering Bonuses

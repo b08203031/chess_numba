@@ -192,7 +192,9 @@ class Engine:
 
             # print(f"[{self.name}] {line}") # Debug output
             if line.startswith("info"):
-                if "depth" in line:
+                # Only capture complete info lines that contain both depth and score
+                # to avoid capturing incomplete "Search stopped at depth X due to limit" lines
+                if "depth" in line and "score" in line:
                     last_info = line
 
             if line.startswith("bestmove"):
