@@ -41,7 +41,7 @@ from chess_engine.classical_old.constants import (
     PRUNING_CAPTURE_SEE_MARGIN, PRUNING_QUIET_SEE_MARGIN, PRUNING_HISTORY_THRESHOLD,
     WHITE, BLACK, PAWN, KNIGHT, BISHOP, ROOK, QUEEN, PAWN_KEY_INDEX, MINOR_KEY_INDEX, NON_PAWN_KEY_WHITE_INDEX, NON_PAWN_KEY_BLACK_INDEX, CORRECTION_HISTORY_SIZE, CORRECTION_HISTORY_MASK, CORRECTION_HISTORY_LIMIT, CORRECTION_HISTORY_DIVISOR, 
     CORRECTION_HISTORY_PAWN_WEIGHT, CORRECTION_HISTORY_MINOR_WEIGHT, CORRECTION_HISTORY_NON_PAWN_WEIGHT, CORRECTION_HISTORY_UPDATE_DEPTH, SCORE_MIN, SCORE_MAX,
-    CONTINUATION_HISTORY_FACTOR, HISTORY_MAX_CONTINUATION, HISTORY_MAX_PAWN, PAWN_HISTORY_MASK,
+    CONTINUATION_HISTORY_FACTOR, HISTORY_MAX_CONTINUATION, HISTORY_MAX_PAWN, PAWN_HISTORY_MASK, LOW_PLY_HISTORY_MAX,
     GOOD_QUIET_THRESHOLD,
     FIFTY_MOVE_RULE_LIMIT, FIFTY_MOVE_SCALE_THRESHOLD, FIFTY_MOVE_MAX_SCALE,
     SEE_HISTORY_DIVISOR,
@@ -392,7 +392,7 @@ def get_next_move(piece_bbs, occupancy_bbs, game_state, search_context, ply, tt_
         elif mp_stage == STAGE_GEN_QUIETS:
             captures_end = search_context.mp_captures_end[ply]
             search_context.mp_quiets_end[ply] = generate_pseudo_legal_quiets_buffer(piece_bbs, occupancy_bbs, game_state, search_context.moves_buffer, ply, captures_end)
-            score_quiets(piece_bbs, occupancy_bbs, game_state, moves, scores, captures_end, search_context.mp_quiets_end[ply], search_context, ply, killer_1, killer_2, counter_move, pawn_key_idx)
+            score_quiets(piece_bbs, occupancy_bbs, game_state, moves, scores, captures_end, search_context.mp_quiets_end[ply], search_context, ply, killer_1, killer_2, counter_move, pawn_key_idx, pinned_white, pinned_black)
             
             # Sort good quiets (score >= GOOD_QUIET_THRESHOLD) to the front. Bad quiets (score < GOOD_QUIET_THRESHOLD) remain at the back.
             num_sorted = partial_insertion_sort_moves(moves, scores, captures_end, search_context.mp_quiets_end[ply], GOOD_QUIET_THRESHOLD)
@@ -1561,6 +1561,18 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                     if prev_move_played != NO_MOVE and prev_piece_played != -1:
                         update_continuation_history(search_context, 3, prev_move_played, prev_piece_played, move, aggressor_type, bonus)
  
+                if ply > 5:
+                    prev_move_played = search_context.move_stack[ply - 6]
+                    prev_piece_played = search_context.piece_stack[ply - 6]
+                    if prev_move_played != NO_MOVE and prev_piece_played != -1:
+                        update_continuation_history(search_context, 4, prev_move_played, prev_piece_played, move, aggressor_type, bonus)
+
+                if ply < 5:
+                    lph_bonus = bonus * 663 // 1024
+                    curr = search_context.low_ply_history[ply, move]
+                    clamped = min(max(lph_bonus, -LOW_PLY_HISTORY_MAX), LOW_PLY_HISTORY_MAX)
+                    search_context.low_ply_history[ply, move] = curr + clamped - (curr * abs(clamped)) // LOW_PLY_HISTORY_MAX
+ 
                 # --- Update Counter Move ---
                 if ply > 0:
                     prev_move_played = search_context.move_stack[ply - 1]
@@ -1605,6 +1617,18 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                         prev_piece_played = search_context.piece_stack[ply - 4]
                         if prev_move_played != NO_MOVE and prev_piece_played != -1:
                             update_continuation_history(search_context, 3, prev_move_played, prev_piece_played, bad_move, bad_aggressor, -malus)
+ 
+                    if ply > 5:
+                        prev_move_played = search_context.move_stack[ply - 6]
+                        prev_piece_played = search_context.piece_stack[ply - 6]
+                        if prev_move_played != NO_MOVE and prev_piece_played != -1:
+                            update_continuation_history(search_context, 4, prev_move_played, prev_piece_played, bad_move, bad_aggressor, -malus)
+
+                    if ply < 5:
+                        lph_malus = malus * 663 // 1024
+                        curr = search_context.low_ply_history[ply, bad_move]
+                        clamped = min(max(-lph_malus, -LOW_PLY_HISTORY_MAX), LOW_PLY_HISTORY_MAX)
+                        search_context.low_ply_history[ply, bad_move] = curr + clamped - (curr * abs(clamped)) // LOW_PLY_HISTORY_MAX
  
                 if move != search_context.killer_moves[ply * 2]:
                     search_context.killer_moves[ply * 2 + 1] = search_context.killer_moves[ply * 2]
@@ -1674,6 +1698,12 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                     opp_prev_piece_2 = search_context.piece_stack[ply - 5]
                     if opp_prev_move_2 != NO_MOVE and opp_prev_piece_2 != -1:
                         update_continuation_history(search_context, 3, opp_prev_move_2, opp_prev_piece_2, prev_move, prev_piece, sub_bonus)
+ 
+                if ply > 6:
+                    opp_prev_move_3 = search_context.move_stack[ply - 7]
+                    opp_prev_piece_3 = search_context.piece_stack[ply - 7]
+                    if opp_prev_move_3 != NO_MOVE and opp_prev_piece_3 != -1:
+                        update_continuation_history(search_context, 4, opp_prev_move_3, opp_prev_piece_3, prev_move, prev_piece, sub_bonus)
 
     original_best_move = best_move
 
@@ -1767,6 +1797,7 @@ def iterative_deepening_search(piece_bbs, occupancy_bbs, game_state, max_depth, 
     np.divide(search_context.capture_history, 2, out=search_context.capture_history, casting='unsafe')
     np.divide(search_context.pawn_history, 2, out=search_context.pawn_history, casting='unsafe')
     np.divide(search_context.continuation_history, 2, out=search_context.continuation_history, casting='unsafe')
+    np.divide(search_context.low_ply_history, 2, out=search_context.low_ply_history, casting='unsafe')
 
     # --- Setup Game History ---
     if game_history_list is not None:

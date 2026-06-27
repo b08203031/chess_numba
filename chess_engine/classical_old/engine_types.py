@@ -66,6 +66,7 @@ search_context_spec = [
     ('mp_bad_captures_count', numba.int32[::1]),
     ('mp_bad_captures_idx', numba.int32[::1]),
     ('continuation_history', numba.int16[:, :, :, :, :]),
+    ('low_ply_history', numba.int16[:, :]),
     ('pawn_history', numba.int16[:, :, :]),
     ('pawn_correction_history', numba.int16[:]),
     ('minor_correction_history', numba.int16[:]),
@@ -164,6 +165,7 @@ class _SearchContextJIT:
         self.minor_correction_history = minor_correction_history
         self.non_pawn_correction_history_white = non_pawn_correction_history_white
         self.non_pawn_correction_history_black = non_pawn_correction_history_black
+        self.low_ply_history = np.zeros((5, 65536), dtype=np.int16)
         # accumulator_stack removed — not used in Classical engine
         self.nodes_searched = np.uint64(0)
         self.nodes_searched_array = np.zeros(1, dtype=np.uint64)
@@ -238,6 +240,12 @@ def SearchContext(
     continuation_history, capture_history, pawn_history, pawn_correction_history,
     minor_correction_history, non_pawn_correction_history_white, non_pawn_correction_history_black
 ):
+    if continuation_history.shape[0] < 5:
+        new_shape = (5,) + continuation_history.shape[1:]
+        new_continuation_history = np.zeros(new_shape, dtype=np.int16)
+        new_continuation_history[0:continuation_history.shape[0]] = continuation_history
+        continuation_history = new_continuation_history
+
     return _SearchContextJIT(
         transposition_table, killer_moves, pv_table, history_table,
         butterfly_history, continuation_history, capture_history, pawn_history,
