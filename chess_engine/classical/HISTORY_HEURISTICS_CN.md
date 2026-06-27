@@ -15,7 +15,8 @@
 | **主歷史 (Main History)** | `history_table[12][64]` | 給予安靜移動 (Quiet moves) 基礎排序分值，並參與 LMR 歸約計算。 | 產生 beta 截斷 (Beta Cutoff) 時增加；在 PV 節點或 Fail-Low 節點減分。 |
 | **蝴蝶歷史 (Butterfly History)** | `butterfly_history[64][64]` | 記錄移動的起點與終點格。作為主歷史的輔助分值。 | 同上。 |
 | **吃子歷史 (Capture History)** | `capture_history[12][64][12]` | 專門排序吃子移動。針對「行棋棋子 + 目標格 + 被吃棋子」進行評級。 | 吃子移動產生 beta 截斷或 Fail-Low 時更新。 |
-| **延續歷史 (Continuation History)** | `continuation_history[3][12][64][12][64]` | 關聯歷史。記錄當前移動與前幾步歷史移動（1步、2步、4步前）之間的協同效應。 | 當前安靜移動產生 beta 截斷或 Fail-Low 時更新。 |
+| **延續歷史 (Continuation History)** | `continuation_history[5][12][64][12][64]` | 關聯歷史。記錄當前移動與前幾步歷史移動（1步、2步、3步、4步與6步前）之間的協同效應。 | 當前安靜移動產生 beta 截斷或 Fail-Low 時更新。 |
+| **低層歷史 (Low Ply History)** | `low_ply_history[5][65536]` | 專門為靠近根部 (ply < 5) 的安靜移動提供更精確的排序偏置，彌補全域歷史在根部的盲點。 | 在 ply < 5 產生 beta 截斷或 Fail-Low 時更新。 |
 
 這些表格的管理與計算實作於 [search_heuristics.py](search_heuristics.py)。
 
@@ -54,9 +55,11 @@ def update_history(history_table, piece_type, to_square, bonus):
 ### 追溯層次 (Plies Offset)
 *   `Index 0` (1-ply ago): 前一步（對手剛下的子）。
 *   `Index 1` (2-plies ago): 前二步（己方上一次下的子）。
-*   `Index 2` (4-plies ago): 前四步（己方上上次下的子）。
+*   `Index 2` (3-plies ago): 前三步（對手上次下的子）。
+*   `Index 3` (4-plies ago): 前四步（己方上上次下的子）。
+*   `Index 4` (6-plies ago): 前六步（己方上上上次下的子），跳過 5-ply。
 
-在 [score_quiets](search_heuristics.py#L191) 中，這些關聯分值會被加權累加到安靜移動的排序分中。
+在 [score_quiets](search_heuristics.py#L306) 中，這些關聯分值會被加權累加到安靜移動的排序分中。
 
 ---
 
