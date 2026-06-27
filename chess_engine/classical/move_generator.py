@@ -1321,3 +1321,48 @@ def generate_captures(piece_bbs, occupancy_bbs, game_state):
     moves = np.zeros((1, 128), dtype=np.uint16)
     count = generate_captures_buffer(piece_bbs, occupancy_bbs, game_state, moves, 0)
     return moves[0, :count]
+
+@numba.njit(cache=True, boundscheck=False, fastmath=True)
+def get_all_pawn_attacks(piece_bbs, side):
+    pawn_bb = piece_bbs[0 if side == 0 else 6]
+    attacks = np.uint64(0)
+    if side == 0:
+        attacks |= ((pawn_bb & NOT_A_FILE) << 7) | ((pawn_bb & NOT_H_FILE) << 9)
+    else:
+        attacks |= ((pawn_bb & NOT_H_FILE) >> 7) | ((pawn_bb & NOT_A_FILE) >> 9)
+    return attacks
+
+@numba.njit(cache=True, boundscheck=False, fastmath=True)
+def get_all_knight_attacks(piece_bbs, side):
+    knight_bb = piece_bbs[1 if side == 0 else 7]
+    attacks = np.uint64(0)
+    bb = knight_bb
+    while bb:
+        sq = get_lsb_index(bb)
+        attacks |= KNIGHT_ATTACKS[sq]
+        bb &= bb - np.uint64(1)
+    return attacks
+
+@numba.njit(cache=True, boundscheck=False, fastmath=True)
+def get_all_bishop_attacks(piece_bbs, occupancy_bbs, side):
+    bishop_bb = piece_bbs[2 if side == 0 else 8]
+    attacks = np.uint64(0)
+    all_occ = occupancy_bbs[2]
+    bb = bishop_bb
+    while bb:
+        sq = get_lsb_index(bb)
+        attacks |= get_bishop_attacks(sq, all_occ)
+        bb &= bb - np.uint64(1)
+    return attacks
+
+@numba.njit(cache=True, boundscheck=False, fastmath=True)
+def get_all_rook_attacks(piece_bbs, occupancy_bbs, side):
+    rook_bb = piece_bbs[3 if side == 0 else 9]
+    attacks = np.uint64(0)
+    all_occ = occupancy_bbs[2]
+    bb = rook_bb
+    while bb:
+        sq = get_lsb_index(bb)
+        attacks |= get_rook_attacks(sq, all_occ)
+        bb &= bb - np.uint64(1)
+    return attacks

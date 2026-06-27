@@ -392,7 +392,7 @@ def get_next_move(piece_bbs, occupancy_bbs, game_state, search_context, ply, tt_
         elif mp_stage == STAGE_GEN_QUIETS:
             captures_end = search_context.mp_captures_end[ply]
             search_context.mp_quiets_end[ply] = generate_pseudo_legal_quiets_buffer(piece_bbs, occupancy_bbs, game_state, search_context.moves_buffer, ply, captures_end)
-            score_quiets(piece_bbs, occupancy_bbs, game_state, moves, scores, captures_end, search_context.mp_quiets_end[ply], search_context, ply, killer_1, killer_2, counter_move, pawn_key_idx)
+            score_quiets(piece_bbs, occupancy_bbs, game_state, moves, scores, captures_end, search_context.mp_quiets_end[ply], search_context, ply, killer_1, killer_2, counter_move, pawn_key_idx, pinned_white, pinned_black)
             
             # Sort good quiets (score >= GOOD_QUIET_THRESHOLD) to the front. Bad quiets (score < GOOD_QUIET_THRESHOLD) remain at the back.
             num_sorted = partial_insertion_sort_moves(moves, scores, captures_end, search_context.mp_quiets_end[ply], GOOD_QUIET_THRESHOLD)

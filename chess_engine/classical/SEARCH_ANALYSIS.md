@@ -55,8 +55,12 @@
     *   **不划算吃子 (Bad Captures)**：SEE < 0 的吃子移動會被降級，稍後再搜尋。
 3.  **殺手步 (Killer Moves)**：在兄弟節點中，在同一深度下產生 Beta 截斷的兩個安靜移動。
 4.  **反擊步 (Counter Move)**：記錄對手前一步棋在歷史上最常引起截斷的回應步。
-5.  **歷史啟發 (History Heuristic)**：按歷史成功率（引起截斷的頻率相對於深度）排序的安靜移動。
-    *   使用「重力公式」衰減舊歷史並限制最大範圍：`history += bonus - history * abs(bonus) / MAX_HISTORY`。
+5.  **歷史啟發 (History Heuristic) 與進階安靜步排序**：按多維度歷史和戰術威脅排序的安靜移動：
+    *   **主歷史 (Main History)** 與 **蝴蝶歷史 (Butterfly History)**：賦予基本歷史分值。
+    *   **延續歷史 (Continuation History)**：擴展至 5 個追溯層次（1、2、3、4、6 步前，跳過 5-ply），記錄多步棋之間的協同關聯。
+    *   **低層歷史 (Low Ply History)**：專為 ply < 5 的安靜移動引入獨立歷史表（大小 `[5, 65536]`），以 ply 為步長進行深度加權排序，彌補全局歷史的盲區。
+    *   **將軍獎勵 (Check Bonus)**：如果安靜移動能對敵王產生將軍，且 SEE 評估安全（SEE >= -75），則獲得顯著額外加成。
+    *   **威脅重排序 (Threat-Based Reordering)**：分析敵方兵和輕子的攻擊威脅，給予逃脫威脅的移動加分，給予主動走入威脅的移動扣分 (`piece_value * 20 * (escape - enter)`)。
 
 ---
 

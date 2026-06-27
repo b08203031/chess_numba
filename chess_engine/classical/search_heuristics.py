@@ -5,13 +5,14 @@ from chess_engine.classical.move import (
     get_to_square, get_from_square, get_special_move_flag,
     SPECIAL_MOVE_FLAG_PROMOTION, SPECIAL_MOVE_FLAG_EN_PASSANT
 )
-from chess_engine.classical.constants import SCORE_GOOD_CAPTURE_BONUS, SCORE_BAD_CAPTURE_PENALTY, SCORE_KILLER_1, SCORE_KILLER_2, SCORE_COUNTER_MOVE, MAX_HISTORY, LMR_TABLE, MAX_PLY, SCORE_TT_MOVE, BB_SQUARES, NO_MOVE, HISTORY_MAX_MAIN, HISTORY_MAX_BUTTERFLY, HISTORY_MAX_CAPTURE, HISTORY_MAX_CONTINUATION, HISTORY_MAX_PAWN, LMR_HISTORY_DIVISOR, HISTORY_WEIGHT_MAIN, HISTORY_WEIGHT_CONT_1, HISTORY_WEIGHT_CONT_2, HISTORY_WEIGHT_CONT_3, HISTORY_WEIGHT_CONT_4, HISTORY_WEIGHT_CONT_5, QS_SEE_THRESHOLD, REDUCTIONS
+from chess_engine.classical.constants import SCORE_GOOD_CAPTURE_BONUS, SCORE_BAD_CAPTURE_PENALTY, SCORE_KILLER_1, SCORE_KILLER_2, SCORE_COUNTER_MOVE, MAX_HISTORY, LMR_TABLE, MAX_PLY, SCORE_TT_MOVE, BB_SQUARES, NO_MOVE, HISTORY_MAX_MAIN, HISTORY_MAX_BUTTERFLY, HISTORY_MAX_CAPTURE, HISTORY_MAX_CONTINUATION, HISTORY_MAX_PAWN, LMR_HISTORY_DIVISOR, HISTORY_WEIGHT_MAIN, HISTORY_WEIGHT_CONT_1, HISTORY_WEIGHT_CONT_2, HISTORY_WEIGHT_CONT_3, HISTORY_WEIGHT_CONT_4, HISTORY_WEIGHT_CONT_5, QS_SEE_THRESHOLD, REDUCTIONS, CHECK_BONUS, THREAT_MULTIPLIER, KNIGHT, BISHOP, ROOK, QUEEN, PAWN
 from chess_engine.classical.constants import MG_MATERIAL_VALUES
 from chess_engine.classical.see import _see_ge_jit
 from chess_engine.classical.bitboard_utils import find_piece_type_on_square, find_piece_type_on_square_side, get_lsb_index
 from chess_engine.classical.board_operations import find_piece_type_for_square
 from chess_engine.classical.move_generator import (
-    KNIGHT_ATTACKS, get_bishop_attacks, get_rook_attacks, get_queen_attacks, PAWN_ATTACKS, KING_ATTACKS
+    KNIGHT_ATTACKS, get_bishop_attacks, get_rook_attacks, get_queen_attacks, PAWN_ATTACKS, KING_ATTACKS,
+    get_all_pawn_attacks, get_all_knight_attacks, get_all_bishop_attacks, get_all_rook_attacks
 )
 from chess_engine.classical.engine_types import (
     piece_bbs_signature, occupancy_bbs_signature, game_state_signature,
@@ -307,9 +308,30 @@ def score_captures_with_tt(piece_bbs, occupancy_bbs, game_state, moves, scores, 
         scores[i] = score
 
 @numba.njit(cache=True, boundscheck=False, fastmath=True)
-def score_quiets(piece_bbs, occupancy_bbs, game_state, moves, scores, start_idx, end_idx, search_context, ply, killer_1, killer_2, counter_move, pawn_key_idx):
+def score_quiets(piece_bbs, occupancy_bbs, game_state, moves, scores, start_idx, end_idx, search_context, ply, killer_1, killer_2, counter_move, pawn_key_idx, pinned_white, pinned_black):
+    if start_idx >= end_idx:
+        return
+        
     side_to_move = game_state[0]
+    all_occ = occupancy_bbs[2]
+    enemy_side = 1 - side_to_move
     
+    threats_computed = False
+    check_sq_computed = False
+    
+    # Initialize check squares to 0
+    check_sq_knight = np.uint64(0)
+    check_sq_bishop = np.uint64(0)
+    check_sq_rook   = np.uint64(0)
+    check_sq_queen  = np.uint64(0)
+    check_sq_pawn   = np.uint64(0)
+    
+    # Initialize threat bitboards to 0
+    threat_knight = np.uint64(0)
+    threat_bishop = np.uint64(0)
+    threat_rook   = np.uint64(0)
+    threat_queen  = np.uint64(0)
+
     for i in range(start_idx, end_idx):
         move = moves[i]
         to_square = get_to_square(move)
@@ -330,6 +352,64 @@ def score_quiets(piece_bbs, occupancy_bbs, game_state, moves, scores, start_idx,
             score += 350000
         elif move == counter_move:
             score += 300000
+        else:
+            # Lazy Check Squares (Part A)
+            if not check_sq_computed:
+                enemy_king_sq = get_lsb_index(piece_bbs[11] if side_to_move == 0 else piece_bbs[5])
+                check_sq_knight = KNIGHT_ATTACKS[enemy_king_sq]
+                check_sq_bishop = get_bishop_attacks(enemy_king_sq, all_occ)
+                check_sq_rook   = get_rook_attacks(enemy_king_sq, all_occ)
+                check_sq_queen  = check_sq_bishop | check_sq_rook
+                check_sq_pawn   = PAWN_ATTACKS[side_to_move, enemy_king_sq]
+                check_sq_computed = True
+                
+            # Lazy Threat Bitboards (Part B)
+            if not threats_computed:
+                enemy_pawn_attacks = get_all_pawn_attacks(piece_bbs, enemy_side)
+                enemy_knight_attacks = get_all_knight_attacks(piece_bbs, enemy_side)
+                
+                threat_knight = enemy_pawn_attacks
+                threat_bishop = enemy_pawn_attacks
+                threat_rook   = enemy_pawn_attacks | enemy_knight_attacks
+                threat_queen  = threat_rook
+                threat_computed = True
+
+            piece_rel_type = aggressor_type % 6
+            to_bb = BB_SQUARES[to_square]
+            from_bb = BB_SQUARES[from_sq]
+
+            # --- Check Bonus (Part A) ---
+            is_check_candidate = False
+            if piece_rel_type == KNIGHT:
+                is_check_candidate = (check_sq_knight & to_bb) != 0
+            elif piece_rel_type == BISHOP:
+                is_check_candidate = (check_sq_bishop & to_bb) != 0
+            elif piece_rel_type == ROOK:
+                is_check_candidate = (check_sq_rook & to_bb) != 0
+            elif piece_rel_type == QUEEN:
+                is_check_candidate = (check_sq_queen & to_bb) != 0
+            elif piece_rel_type == PAWN:
+                is_check_candidate = (check_sq_pawn & to_bb) != 0
+
+            if is_check_candidate:
+                score += CHECK_BONUS
+
+            # --- Threat-Based Reordering (Part B) ---
+            threat_bb = np.uint64(0)
+            piece_value = 0
+            if piece_rel_type == KNIGHT:
+                threat_bb = threat_knight; piece_value = 320
+            elif piece_rel_type == BISHOP:
+                threat_bb = threat_bishop; piece_value = 330
+            elif piece_rel_type == ROOK:
+                threat_bb = threat_rook; piece_value = 500
+            elif piece_rel_type == QUEEN:
+                threat_bb = threat_queen; piece_value = 900
+                
+            if piece_value > 0:
+                escape = 1 if (threat_bb & from_bb) != 0 else 0
+                enter  = 1 if (threat_bb & to_bb) != 0 else 0
+                score += piece_value * THREAT_MULTIPLIER * (escape - enter)
 
         scores[i] = score
 
@@ -404,9 +484,30 @@ def get_lmr_reduction(depth, move_count, history_score, improving, is_pv):
 
 @numba.njit(cache=True, boundscheck=False, fastmath=True)
 def score_moves(piece_bbs, occupancy_bbs, game_state, moves, scores, move_count, tt_move, killer_moves_at_ply, history_table, counter_move, pinned_white, pinned_black, search_context, ply, pawn_key_idx):
+    if move_count <= 0:
+        return
+        
     side_to_move = game_state[0]
     opponent_pieces_bb = occupancy_bbs[1] if side_to_move == 0 else occupancy_bbs[0]
+    all_occ = occupancy_bbs[2]
+    enemy_side = 1 - side_to_move
     
+    threats_computed = False
+    check_sq_computed = False
+    
+    # Initialize check squares to 0
+    check_sq_knight = np.uint64(0)
+    check_sq_bishop = np.uint64(0)
+    check_sq_rook   = np.uint64(0)
+    check_sq_queen  = np.uint64(0)
+    check_sq_pawn   = np.uint64(0)
+    
+    # Initialize threat bitboards to 0
+    threat_knight = np.uint64(0)
+    threat_bishop = np.uint64(0)
+    threat_rook   = np.uint64(0)
+    threat_queen  = np.uint64(0)
+
     prev_move_1 = NO_MOVE
     prev_piece_1 = -1
     prev_move_2 = NO_MOVE
@@ -456,17 +557,17 @@ def score_moves(piece_bbs, occupancy_bbs, game_state, moves, scores, move_count,
                 
                 if victim_type == -1 and get_special_move_flag(move) == SPECIAL_MOVE_FLAG_EN_PASSANT:
                     victim_type = 0 # Pawn
-
+ 
                 search_context.aggressor_cache[ply, i] = aggressor_type
                 search_context.victim_cache[ply, i] = victim_type
-
+ 
                 # Optimization: Use see_ge(0) instead of full see()
                 is_good_capture = _see_ge_jit(piece_bbs, occupancy_bbs, side_to_move, from_sq, to_square, 0, pinned_white, pinned_black, aggressor_type, victim_type)
                 
                 mvv_lva = 0
                 if victim_type != -1:
                     mvv_lva = (MG_MATERIAL_VALUES[victim_type % 6] - MG_MATERIAL_VALUES[aggressor_type % 6])
-
+ 
                 if is_good_capture:
                     score = SCORE_GOOD_CAPTURE_BONUS + mvv_lva
                     # Capture History for good captures
@@ -483,7 +584,7 @@ def score_moves(piece_bbs, occupancy_bbs, game_state, moves, scores, move_count,
                 from_sq = get_from_square(move)
                 aggressor_type = find_piece_type_on_square_side(piece_bbs, from_sq, side_to_move)
                 search_context.aggressor_cache[ply, i] = aggressor_type
-
+ 
                 if move == killer_moves_at_ply[0]:
                     score = SCORE_KILLER_1
                 elif move == killer_moves_at_ply[1]:
@@ -504,31 +605,89 @@ def score_moves(piece_bbs, occupancy_bbs, game_state, moves, scores, move_count,
                         cont_score = search_context.continuation_history[0, prev_piece_1, get_to_square(prev_move_1), aggressor_type, to_square]
                         if cont_score != 0:
                             score += cont_score
-
+ 
                     if prev_move_2 != NO_MOVE and prev_piece_2 != -1:
                         cont_score = search_context.continuation_history[1, prev_piece_2, get_to_square(prev_move_2), aggressor_type, to_square]
                         if cont_score != 0:
                             score += cont_score
-
+ 
                     if prev_move_3 != NO_MOVE and prev_piece_3 != -1:
                         cont_score = search_context.continuation_history[2, prev_piece_3, get_to_square(prev_move_3), aggressor_type, to_square]
                         if cont_score != 0:
                             score += cont_score
-
+ 
                     if prev_move_4 != NO_MOVE and prev_piece_4 != -1:
                         cont_score = search_context.continuation_history[3, prev_piece_4, get_to_square(prev_move_4), aggressor_type, to_square]
                         if cont_score != 0:
                             score += cont_score
-
+ 
                     if prev_move_6 != NO_MOVE and prev_piece_6 != -1:
                         cont_score = search_context.continuation_history[4, prev_piece_6, get_to_square(prev_move_6), aggressor_type, to_square]
                         if cont_score != 0:
                             score += cont_score
-
+ 
                     if ply < 5:
                         lph_score = search_context.low_ply_history[ply, move]
                         score += 8 * lph_score // (1 + ply)
 
+                    # Lazy Check Squares (Part A)
+                    if not check_sq_computed:
+                        enemy_king_sq = get_lsb_index(piece_bbs[11] if side_to_move == 0 else piece_bbs[5])
+                        check_sq_knight = KNIGHT_ATTACKS[enemy_king_sq]
+                        check_sq_bishop = get_bishop_attacks(enemy_king_sq, all_occ)
+                        check_sq_rook   = get_rook_attacks(enemy_king_sq, all_occ)
+                        check_sq_queen  = check_sq_bishop | check_sq_rook
+                        check_sq_pawn   = PAWN_ATTACKS[side_to_move, enemy_king_sq]
+                        check_sq_computed = True
+                        
+                    # Lazy Threat Bitboards (Part B)
+                    if not threats_computed:
+                        enemy_pawn_attacks = get_all_pawn_attacks(piece_bbs, enemy_side)
+                        enemy_knight_attacks = get_all_knight_attacks(piece_bbs, enemy_side)
+                        
+                        threat_knight = enemy_pawn_attacks
+                        threat_bishop = enemy_pawn_attacks
+                        threat_rook   = enemy_pawn_attacks | enemy_knight_attacks
+                        threat_queen  = threat_rook
+                        threat_computed = True
+
+                    piece_rel_type = aggressor_type % 6
+                    to_bb = BB_SQUARES[to_square]
+                    from_bb = BB_SQUARES[from_sq]
+
+                    # --- Check Bonus (Part A) ---
+                    is_check_candidate = False
+                    if piece_rel_type == KNIGHT:
+                        is_check_candidate = (check_sq_knight & to_bb) != 0
+                    elif piece_rel_type == BISHOP:
+                        is_check_candidate = (check_sq_bishop & to_bb) != 0
+                    elif piece_rel_type == ROOK:
+                        is_check_candidate = (check_sq_rook & to_bb) != 0
+                    elif piece_rel_type == QUEEN:
+                        is_check_candidate = (check_sq_queen & to_bb) != 0
+                    elif piece_rel_type == PAWN:
+                        is_check_candidate = (check_sq_pawn & to_bb) != 0
+
+                    if is_check_candidate:
+                        score += CHECK_BONUS
+
+                    # --- Threat-Based Reordering (Part B) ---
+                    threat_bb = np.uint64(0)
+                    piece_value = 0
+                    if piece_rel_type == KNIGHT:
+                        threat_bb = threat_knight; piece_value = 320
+                    elif piece_rel_type == BISHOP:
+                        threat_bb = threat_bishop; piece_value = 330
+                    elif piece_rel_type == ROOK:
+                        threat_bb = threat_rook; piece_value = 500
+                    elif piece_rel_type == QUEEN:
+                        threat_bb = threat_queen; piece_value = 900
+                        
+                    if piece_value > 0:
+                        escape = 1 if (threat_bb & from_bb) != 0 else 0
+                        enter  = 1 if (threat_bb & to_bb) != 0 else 0
+                        score += piece_value * THREAT_MULTIPLIER * (escape - enter)
+ 
         scores[i] = score
 
 @numba.njit(cache=True, boundscheck=False, fastmath=True)
