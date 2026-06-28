@@ -1,4 +1,4 @@
-# chess_engine/classical_old/material.py
+# chess_engine/classical/material.py
 
 import numba
 import numpy as np

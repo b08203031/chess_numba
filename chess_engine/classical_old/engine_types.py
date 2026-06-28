@@ -74,6 +74,10 @@ search_context_spec = [
     ('non_pawn_correction_history_black', numba.int16[:]),
     ('butterfly_history', numba.int32[:, :]),
     ('capture_history', numba.int32[:, :, :]),
+    ('capture_moves_tried', numba.uint16[:, :]),
+    ('capture_aggressor_tried', numba.int8[:, :]),
+    ('capture_victim_tried', numba.int8[:, :]),
+    ('capture_tosq_tried', numba.int8[:, :]),
     ('enable_nmp', numba.boolean),
     ('enable_rfp', numba.boolean),
     ('enable_razoring', numba.boolean),
@@ -84,6 +88,9 @@ search_context_spec = [
     ('enable_probcut', numba.boolean),
     ('enable_multicut', numba.boolean),
     ('cutoff_cnt', numba.int32[::1]),
+    ('move_count_stack', numba.int32[::1]),
+    ('tt_hit_stack', numba.boolean[::1]),
+    ('move_is_capture_stack', numba.boolean[::1]),
     ('reduction_stack', numba.int32[::1]),
     ('tt_pv_stack', numba.boolean[::1]),
     ('pawn_table_keys', numba.uint64[::1]),
@@ -189,6 +196,10 @@ class _SearchContextJIT:
         self.moves_buffer = np.zeros((MAX_PLY, 256), dtype=np.uint16)
         self.quiet_moves_tried = np.zeros((MAX_PLY, 256), dtype=np.uint16)
         self.quiet_pieces_tried = np.zeros((MAX_PLY, 256), dtype=np.int8)
+        self.capture_moves_tried = np.zeros((MAX_PLY, 64), dtype=np.uint16)
+        self.capture_aggressor_tried = np.zeros((MAX_PLY, 64), dtype=np.int8)
+        self.capture_victim_tried = np.zeros((MAX_PLY, 64), dtype=np.int8)
+        self.capture_tosq_tried = np.zeros((MAX_PLY, 64), dtype=np.int8)
         self.aggressor_cache = np.zeros((MAX_PLY, 256), dtype=np.int8)
         self.victim_cache = np.zeros((MAX_PLY, 256), dtype=np.int8)
         self.bad_captures = np.zeros((MAX_PLY, 256), dtype=np.uint16)
@@ -210,6 +221,9 @@ class _SearchContextJIT:
         self.enable_multicut = ENABLE_MULTICUT
         
         self.cutoff_cnt = np.zeros(MAX_PLY, dtype=np.int32)
+        self.move_count_stack = np.zeros(MAX_PLY, dtype=np.int32)
+        self.tt_hit_stack = np.zeros(MAX_PLY, dtype=np.bool_)
+        self.move_is_capture_stack = np.zeros(MAX_PLY, dtype=np.bool_)
         self.reduction_stack = np.zeros(MAX_PLY, dtype=np.int32)
         self.tt_pv_stack = np.zeros(MAX_PLY, dtype=np.bool_)
         

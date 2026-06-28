@@ -1,4 +1,4 @@
-# chess_engine/classical_old/pawns.py
+# chess_engine/classical/pawns.py
 
 import numba
 import numpy as np
@@ -211,7 +211,7 @@ def evaluate_pawn_structure(piece_bbs, castling_rights):
     black_pawn_attacks = ((black_pawns & NOT_H_FILE) >> np.uint64(7)) | ((black_pawns & NOT_A_FILE) >> np.uint64(9))
     white_pawn_attacks_span = white_pawn_attacks
     black_pawn_attacks_span = black_pawn_attacks
- 
+
     # Precompute double attacks needed for passed pawn condition C
     white_double_attacks = ((white_pawns & NOT_A_FILE) << np.uint64(7)) & ((white_pawns & NOT_H_FILE) << np.uint64(9))
     black_double_attacks = ((black_pawns & NOT_A_FILE) >> np.uint64(9)) & ((black_pawns & NOT_H_FILE) >> np.uint64(7))
@@ -353,15 +353,15 @@ def evaluate_pawn_structure(piece_bbs, castling_rights):
             mg_score -= ISOLATED_PAWN_PENALTY[0]
             eg_score -= ISOLATED_PAWN_PENALTY[1]
             if not opposed:
-                mg_score += WEAK_UNOPPOSED_PENALTY[0]
-                eg_score += WEAK_UNOPPOSED_PENALTY[1]
+                mg_score -= WEAK_UNOPPOSED_PENALTY[0]
+                eg_score -= WEAK_UNOPPOSED_PENALTY[1]
         elif backward:
             # Backward
             mg_score -= BACKWARD_PAWN_PENALTY[0]
             eg_score -= BACKWARD_PAWN_PENALTY[1]
             if not opposed:
-                mg_score += WEAK_UNOPPOSED_PENALTY[0]
-                eg_score += WEAK_UNOPPOSED_PENALTY[1]
+                mg_score -= WEAK_UNOPPOSED_PENALTY[0]
+                eg_score -= WEAK_UNOPPOSED_PENALTY[1]
 
         if not support:
             if doubled:

@@ -84,3 +84,23 @@ correction_sum = (global_pawn * CORRECTION_HISTORY_PAWN_WEIGHT +
 static_score = raw_static_eval + (correction_sum // CORRECTION_HISTORY_DIVISOR)
 ```
 這使得引擎即使在靜態評估偏低時，也能通過搜尋歷史學會「這類局面其實很好」，從而避免過早剪枝或錯誤選擇路徑。
+
+---
+
+## 5. 歷史更新優化與非對稱縮放 (Part B & E)
+
+為了讓歷史數據更平滑地反映搜尋優先級，我們在更新時引入了以下優化機制：
+
+### 兵歷史非對稱縮放 (Pawn History Asymmetric Scaling - Part E)
+在更新兵歷史時，我們對獎勵 (Bonus) 與懲罰 (Malus) 實施非對稱縮放。當傳入的 `bonus` 為小於 `-7` 的懲罰值時，我們將其減半以保留有價值的歷史痕跡：
+```python
+scaled_bonus = bonus * 1038 // 1024 if bonus > -7 else bonus * 525 // 1024
+```
+這能防止兵歷史因單次 beta 截斷而對其他可能可行的步產生過度懲罰。
+
+### 安靜移動懲罰衰減 (Quiet Malus Gradual Decay - Part B)
+當某個安靜移動觸發 beta 截斷時，我們需要對先前所有嘗試過但失敗 (fail-low) 的安靜移動施加 `malus` 懲罰。
+為了讓排序較前（原本預期較好）的移動受到較重的懲罰，而排序較後（原本就不看好）的移動懲罰遞減，我們對 `malus` 進行逐步衰減：
+* 初始懲罰設為：`actual_malus = malus * 1136 // 1024`。
+* 每走一步，懲罰值乘以 `956 / 1024`（衰減約 6.6%）。
+* 這使得越早搜到的 quiet 步懲罰越大，越遲搜到的步懲罰越小。此遞減懲罰同步應用於主歷史、蝴蝶歷史、兵歷史與延續歷史中。

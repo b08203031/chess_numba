@@ -575,6 +575,8 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
     tt_move = NO_MOVE
     tt_key = get_tt_key(zobrist_key, halfmove_clock)  # GHI: halfmove-aware key for TT
     tt_entry = probe_tt(search_context.transposition_table, tt_key)
+    tt_hit = tt_entry['flag'] != TT_FLAG_NONE
+    search_context.tt_hit_stack[ply] = tt_hit
 
     # Initialize tt_pv flag (TT-PV Memory Heuristic)
     if is_exclusion_search:
@@ -1093,6 +1095,13 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
     quiet_pieces_tried = search_context.quiet_pieces_tried[ply]
     quiet_moves_tried_count = 0
 
+    # Track tried capture moves for history malus
+    capture_moves_tried = search_context.capture_moves_tried[ply]
+    capture_aggressor_tried = search_context.capture_aggressor_tried[ply]
+    capture_victim_tried = search_context.capture_victim_tried[ply]
+    capture_tosq_tried = search_context.capture_tosq_tried[ply]
+    capture_moves_tried_count = 0
+
     # Staged Move Generation State Init
     search_context.mp_stage[ply] = STAGE_TT_MOVE
     search_context.mp_current_idx[ply] = 0
@@ -1333,11 +1342,24 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
         search_depth = depth - 1 + current_extension
 
         searched_legal_moves += 1
+        search_context.move_count_stack[ply] = searched_legal_moves
+        search_context.move_is_capture_stack[ply] = is_capture
 
         if is_quiet_move:
             quiet_moves_tried[quiet_moves_tried_count] = move
             quiet_pieces_tried[quiet_moves_tried_count] = moved_piece_type
             quiet_moves_tried_count += 1
+        elif is_capture and moved_piece_type != -1:
+            victim_type = unmake_info[1]
+            if victim_type != -1:
+                enemy_side = 1 - original_side
+                victim_type += enemy_side * 6
+                if capture_moves_tried_count < 64:
+                    capture_moves_tried[capture_moves_tried_count] = move
+                    capture_aggressor_tried[capture_moves_tried_count] = moved_piece_type
+                    capture_victim_tried[capture_moves_tried_count] = victim_type
+                    capture_tosq_tried[capture_moves_tried_count] = to_sq
+                    capture_moves_tried_count += 1
 
         evaluation = 0
         if searched_legal_moves == 1:
@@ -1518,6 +1540,45 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
             bonus = min(depth * depth + 120 * depth - 100, 1600)
             malus = min(depth * depth + 100 * depth - 50, 1400)
             
+            # --- D: Refutation Penalty ---
+            if ply > 0:
+                parent_was_capture = search_context.move_is_capture_stack[ply - 1]
+                parent_move = search_context.move_stack[ply - 1]
+                parent_aggressor = search_context.piece_stack[ply - 1]
+                
+                if parent_move != NO_MOVE and parent_aggressor != -1 and not parent_was_capture:
+                    parent_move_count = search_context.move_count_stack[ply - 1]
+                    parent_tt_hit = search_context.tt_hit_stack[ply - 1]
+                    
+                    if parent_move_count == 1 + (1 if parent_tt_hit else 0):
+                        refute_malus = malus
+                        
+                        if ply > 1:
+                            prev_move_1 = search_context.move_stack[ply - 2]
+                            prev_piece_1 = search_context.piece_stack[ply - 2]
+                            if prev_move_1 != NO_MOVE and prev_piece_1 != -1:
+                                update_continuation_history(search_context, 0, prev_move_1, prev_piece_1, parent_move, parent_aggressor, -refute_malus)
+                        if ply > 2:
+                            prev_move_2 = search_context.move_stack[ply - 3]
+                            prev_piece_2 = search_context.piece_stack[ply - 3]
+                            if prev_move_2 != NO_MOVE and prev_piece_2 != -1:
+                                update_continuation_history(search_context, 1, prev_move_2, prev_piece_2, parent_move, parent_aggressor, -refute_malus)
+                        if ply > 3:
+                            prev_move_3 = search_context.move_stack[ply - 4]
+                            prev_piece_3 = search_context.piece_stack[ply - 4]
+                            if prev_move_3 != NO_MOVE and prev_piece_3 != -1:
+                                update_continuation_history(search_context, 2, prev_move_3, prev_piece_3, parent_move, parent_aggressor, -refute_malus)
+                        if ply > 4:
+                            prev_move_4 = search_context.move_stack[ply - 5]
+                            prev_piece_4 = search_context.piece_stack[ply - 5]
+                            if prev_move_4 != NO_MOVE and prev_piece_4 != -1:
+                                update_continuation_history(search_context, 3, prev_move_4, prev_piece_4, parent_move, parent_aggressor, -refute_malus)
+                        if ply > 6:
+                            prev_move_6 = search_context.move_stack[ply - 7]
+                            prev_piece_6 = search_context.piece_stack[ply - 7]
+                            if prev_move_6 != NO_MOVE and prev_piece_6 != -1:
+                                update_continuation_history(search_context, 4, prev_move_6, prev_piece_6, parent_move, parent_aggressor, -refute_malus)
+            
             if is_capture and moved_piece_type != -1:
                 # Update Capture History
                 victim_type = unmake_info[1]
@@ -1526,6 +1587,15 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                     enemy_side = 1 - original_side
                     victim_type += enemy_side * 6
                     update_capture_history(search_context.capture_history, moved_piece_type, to_sq, victim_type, bonus)
+            
+            # Apply Capture Malus to all previous capture moves that failed low
+            cap_malus = malus * 1126 // 1024
+            cap_limit = capture_moves_tried_count - 1 if is_capture else capture_moves_tried_count
+            for c_idx in range(cap_limit):
+                bad_cap_agg = capture_aggressor_tried[c_idx]
+                bad_cap_vic = capture_victim_tried[c_idx]
+                bad_cap_to = capture_tosq_tried[c_idx]
+                update_capture_history(search_context.capture_history, bad_cap_agg, bad_cap_to, bad_cap_vic, -cap_malus)
             
             if is_quiet_move and moved_piece_type != -1:
                 aggressor_type = moved_piece_type
@@ -1582,50 +1652,52 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                         search_context.counter_moves[p_from, p_to] = move
                 
                 # Apply History Malus to all previous quiet moves that failed low
+                actual_malus = malus * 1136 // 1024
                 for q_idx in range(quiet_moves_tried_count - 1): # Exclude the current move (last one added)
+                    actual_malus = actual_malus * 990 // 1024
                     bad_move = quiet_moves_tried[q_idx]
                     bad_from = get_from_square(bad_move)
                     bad_to = get_to_square(bad_move)
                     bad_aggressor = quiet_pieces_tried[q_idx]
                     if bad_aggressor == -1:
                         continue
-                    update_history(search_context.history_table, bad_aggressor, bad_to, -malus)
-                    update_butterfly_history(search_context.butterfly_history, bad_from, bad_to, -malus)
-                    update_pawn_history(search_context.pawn_history, pawn_key_idx, bad_aggressor, bad_to, -malus)
+                    update_history(search_context.history_table, bad_aggressor, bad_to, -actual_malus)
+                    update_butterfly_history(search_context.butterfly_history, bad_from, bad_to, -actual_malus)
+                    update_pawn_history(search_context.pawn_history, pawn_key_idx, bad_aggressor, bad_to, -actual_malus)
                     
                     # --- Continuation History Update (Malus) ---
                     if ply > 0:
                         prev_move_played = search_context.move_stack[ply - 1]
                         prev_piece_played = search_context.piece_stack[ply - 1]
                         if prev_move_played != NO_MOVE and prev_piece_played != -1:
-                            update_continuation_history(search_context, 0, prev_move_played, prev_piece_played, bad_move, bad_aggressor, -malus)
+                            update_continuation_history(search_context, 0, prev_move_played, prev_piece_played, bad_move, bad_aggressor, -actual_malus)
  
                     if ply > 1:
                         prev_move_played = search_context.move_stack[ply - 2]
                         prev_piece_played = search_context.piece_stack[ply - 2]
                         if prev_move_played != NO_MOVE and prev_piece_played != -1:
-                            update_continuation_history(search_context, 1, prev_move_played, prev_piece_played, bad_move, bad_aggressor, -malus)
+                            update_continuation_history(search_context, 1, prev_move_played, prev_piece_played, bad_move, bad_aggressor, -actual_malus)
  
                     if ply > 2:
                         prev_move_played = search_context.move_stack[ply - 3]
                         prev_piece_played = search_context.piece_stack[ply - 3]
                         if prev_move_played != NO_MOVE and prev_piece_played != -1:
-                            update_continuation_history(search_context, 2, prev_move_played, prev_piece_played, bad_move, bad_aggressor, -malus)
+                            update_continuation_history(search_context, 2, prev_move_played, prev_piece_played, bad_move, bad_aggressor, -actual_malus)
  
                     if ply > 3:
                         prev_move_played = search_context.move_stack[ply - 4]
                         prev_piece_played = search_context.piece_stack[ply - 4]
                         if prev_move_played != NO_MOVE and prev_piece_played != -1:
-                            update_continuation_history(search_context, 3, prev_move_played, prev_piece_played, bad_move, bad_aggressor, -malus)
+                            update_continuation_history(search_context, 3, prev_move_played, prev_piece_played, bad_move, bad_aggressor, -actual_malus)
  
                     if ply > 5:
                         prev_move_played = search_context.move_stack[ply - 6]
                         prev_piece_played = search_context.piece_stack[ply - 6]
                         if prev_move_played != NO_MOVE and prev_piece_played != -1:
-                            update_continuation_history(search_context, 4, prev_move_played, prev_piece_played, bad_move, bad_aggressor, -malus)
+                            update_continuation_history(search_context, 4, prev_move_played, prev_piece_played, bad_move, bad_aggressor, -actual_malus)
 
                     if ply < 5:
-                        lph_malus = malus * 663 // 1024
+                        lph_malus = actual_malus * 663 // 1024
                         curr = search_context.low_ply_history[ply, bad_move]
                         clamped = min(max(-lph_malus, -LOW_PLY_HISTORY_MAX), LOW_PLY_HISTORY_MAX)
                         search_context.low_ply_history[ply, bad_move] = curr + clamped - (curr * abs(clamped)) // LOW_PLY_HISTORY_MAX

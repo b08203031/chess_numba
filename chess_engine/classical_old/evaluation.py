@@ -1,4 +1,4 @@
-# chess_engine/classical_old/evaluation.py
+# chess_engine/classical/evaluation.py
 
 import numba
 import numpy as np

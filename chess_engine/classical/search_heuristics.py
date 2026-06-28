@@ -57,7 +57,6 @@ def update_capture_history(capture_history, piece_type, to_square, victim_type, 
     # Gravity formula
     new_value = current_value + clamped_bonus - (current_value * abs(clamped_bonus)) // HISTORY_MAX_CAPTURE
     capture_history[piece_type, to_square, victim_type] = new_value
-
 @numba.njit(cache=True, boundscheck=False, fastmath=True)
 def update_pawn_history(pawn_history, pawn_key_idx, piece_type, to_square, bonus):
     """
@@ -66,8 +65,8 @@ def update_pawn_history(pawn_history, pawn_key_idx, piece_type, to_square, bonus
     """
     current_value = pawn_history[pawn_key_idx, piece_type, to_square]
     
-    # V2 asymmetric weighting: accept full positive bonus, but reduce the 1.5x malus by 2/3 for pawn history
-    scaled_bonus = bonus if bonus > 0 else (bonus * 2) // 3
+    # Tuned asymmetric scaling for HCE scale: near-zero malus nearly full strength, deep malus at 75%
+    scaled_bonus = bonus * 1038 // 1024 if bonus > -7 else bonus * 768 // 1024
     clamped_bonus = min(max(scaled_bonus, -HISTORY_MAX_PAWN), HISTORY_MAX_PAWN)
     
     # Gravity formula with explicit int32 casting to avoid int16 overflow under Numba
