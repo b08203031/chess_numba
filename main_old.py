@@ -66,6 +66,7 @@ def uci_loop():
     minor_correction_history = np.zeros(16384, dtype=np.int16)
     non_pawn_correction_history_white = np.zeros(16384, dtype=np.int16)
     non_pawn_correction_history_black = np.zeros(16384, dtype=np.int16)
+    continuation_correction_history = np.zeros((12, 64, 12, 64), dtype=np.int16)
     pv_table = np.zeros((MAX_PLY, MAX_PLY), dtype=np.uint16)
 
     # --- Initialize Opening Book / 初始化開局書 ---
@@ -133,6 +134,7 @@ def uci_loop():
                 minor_correction_history.fill(0)
                 non_pawn_correction_history_white.fill(0)
                 non_pawn_correction_history_black.fill(0)
+                continuation_correction_history.fill(0)
                 pv_table.fill(0)
                 game_history = []
                 global_tt_generation = 0 # Reset generation on new game
@@ -250,7 +252,8 @@ def uci_loop():
                     transposition_table, killer_moves, pv_table, history_table,
                     butterfly_history, continuation_history, capture_history, pawn_history,
                     pawn_correction_history, minor_correction_history,
-                    non_pawn_correction_history_white, non_pawn_correction_history_black
+                    non_pawn_correction_history_white, non_pawn_correction_history_black,
+                    continuation_correction_history
                 )
                 
                 # Update TT Generation

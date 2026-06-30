@@ -41,6 +41,7 @@ from chess_engine.classical.constants import (
     PRUNING_CAPTURE_SEE_MARGIN, PRUNING_QUIET_SEE_MARGIN, PRUNING_HISTORY_THRESHOLD,
     WHITE, BLACK, PAWN, KNIGHT, BISHOP, ROOK, QUEEN, PAWN_KEY_INDEX, MINOR_KEY_INDEX, NON_PAWN_KEY_WHITE_INDEX, NON_PAWN_KEY_BLACK_INDEX, CORRECTION_HISTORY_SIZE, CORRECTION_HISTORY_MASK, CORRECTION_HISTORY_LIMIT, CORRECTION_HISTORY_DIVISOR, 
     CORRECTION_HISTORY_PAWN_WEIGHT, CORRECTION_HISTORY_MINOR_WEIGHT, CORRECTION_HISTORY_NON_PAWN_WEIGHT, CORRECTION_HISTORY_UPDATE_DEPTH, SCORE_MIN, SCORE_MAX,
+    CORRECTION_HISTORY_CNTCV_FALLBACK, CORRECTION_HISTORY_OUTER_SCALE,
     CONTINUATION_HISTORY_FACTOR, HISTORY_MAX_CONTINUATION, HISTORY_MAX_PAWN, PAWN_HISTORY_MASK, LOW_PLY_HISTORY_MAX,
     GOOD_QUIET_THRESHOLD,
     FIFTY_MOVE_RULE_LIMIT, FIFTY_MOVE_SCALE_THRESHOLD, FIFTY_MOVE_MAX_SCALE,
@@ -87,8 +88,8 @@ quiescence_search_return_type = numba.types.Tuple([
 def trunc_div(n, d):
     return n // d if n >= 0 else -(-n // d)
 
-@numba.njit(numba.int32(game_state_signature, search_context_type, numba.int32), cache=True, nogil=True)
-def apply_correction_history_score(game_state, search_context, raw_static_eval):
+@numba.njit(numba.int32(game_state_signature, search_context_type, numba.int32, numba.int32), cache=True, nogil=True)
+def apply_correction_history_score(game_state, search_context, raw_static_eval, ply):
     pawn_key = game_state[PAWN_KEY_INDEX]
     minor_key = game_state[MINOR_KEY_INDEX]
     np_white_key = game_state[NON_PAWN_KEY_WHITE_INDEX]
@@ -98,6 +99,8 @@ def apply_correction_history_score(game_state, search_context, raw_static_eval):
     global_minor = search_context.minor_correction_history[minor_key & CORRECTION_HISTORY_MASK]
     side = game_state[0]
 
+    # Pawn and Minor are stored in white-absolute perspective.
+    # Non-Pawn is stored in side-exclusive tables (white table for WHITE, black table for BLACK) with side-relative values.
     if side == WHITE:
         correction_sum = (global_pawn * CORRECTION_HISTORY_PAWN_WEIGHT +
                          global_minor * CORRECTION_HISTORY_MINOR_WEIGHT +
@@ -107,6 +110,59 @@ def apply_correction_history_score(game_state, search_context, raw_static_eval):
                          global_minor * CORRECTION_HISTORY_MINOR_WEIGHT +
                          search_context.non_pawn_correction_history_black[np_black_key & CORRECTION_HISTORY_MASK] * CORRECTION_HISTORY_NON_PAWN_WEIGHT)
 
+    # Continuation Correction Heuristic (cntcv)
+    # Fallback to 0 if previous move is invalid (matching old baseline)
+    cntcv = CORRECTION_HISTORY_CNTCV_FALLBACK
+    if ply > 0:
+        m_prev = search_context.move_stack[ply - 1]
+        pc_prev = search_context.piece_stack[ply - 1]
+        if m_prev != NO_MOVE and pc_prev != -1:
+            to_prev = get_to_square(m_prev)
+            val_2 = 0
+            if ply >= 2:
+                m_2 = search_context.move_stack[ply - 2]
+                pc_2 = search_context.piece_stack[ply - 2]
+                if m_2 != NO_MOVE and pc_2 != -1:
+                    val_2 = search_context.continuation_correction_history[pc_2, get_to_square(m_2), pc_prev, to_prev]
+
+            val_4 = 0
+            if ply >= 4:
+                m_4 = search_context.move_stack[ply - 4]
+                pc_4 = search_context.piece_stack[ply - 4]
+                if m_4 != NO_MOVE and pc_4 != -1:
+                    val_4 = search_context.continuation_correction_history[pc_4, get_to_square(m_4), pc_prev, to_prev]
+
+            # HCE-specific tuning: weight = 10000 (larger than SF18's 8363)
+            cntcv = 10000 * (val_2 + val_4)
+
+    correction_sum += cntcv
+
+    # Continuation Correction Heuristic (cntcv)
+    cntcv = 0
+    if ply > 0:
+        m_prev = search_context.move_stack[ply - 1]
+        pc_prev = search_context.piece_stack[ply - 1]
+        if m_prev != NO_MOVE and pc_prev != -1:
+            to_prev = get_to_square(m_prev)
+            val_2 = 0
+            if ply >= 2:
+                m_2 = search_context.move_stack[ply - 2]
+                pc_2 = search_context.piece_stack[ply - 2]
+                if m_2 != NO_MOVE and pc_2 != -1:
+                    val_2 = search_context.continuation_correction_history[pc_2, get_to_square(m_2), pc_prev, to_prev]
+            
+            val_4 = 0
+            if ply >= 4:
+                m_4 = search_context.move_stack[ply - 4]
+                pc_4 = search_context.piece_stack[ply - 4]
+                if m_4 != NO_MOVE and pc_4 != -1:
+                    val_4 = search_context.continuation_correction_history[pc_4, get_to_square(m_4), pc_prev, to_prev]
+            
+            # HCE-specific tuning: weight = 10000 (larger than SF18's 8363)
+            cntcv = 10000 * (val_2 + val_4)
+            
+    correction_sum += cntcv
+
     corrected = np.int32(raw_static_eval) + np.int32(trunc_div(correction_sum, CORRECTION_HISTORY_DIVISOR))
     return np.int32(min(max(corrected, SCORE_MIN), SCORE_MAX))
 
@@ -115,7 +171,7 @@ full_static_eval_return_type = numba.types.Tuple((numba.int32, numba.int32, numb
 @numba.njit(full_static_eval_return_type(piece_bbs_signature, occupancy_bbs_signature, game_state_signature, search_context_type, numba.int32), cache=True, nogil=True)
 def compute_full_corrected_static_eval(piece_bbs, occupancy_bbs, game_state, search_context, ply):
     raw_eval, pinned_white, pinned_black = _evaluate_position_jit(piece_bbs, occupancy_bbs, game_state, False, search_context)
-    corrected_eval = apply_correction_history_score(game_state, search_context, raw_eval)
+    corrected_eval = apply_correction_history_score(game_state, search_context, raw_eval, ply)
     search_context.static_eval_stack[ply] = corrected_eval
 
     improving = False
@@ -674,7 +730,7 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                                 if not tt_is_capture and not tt_is_promotion:
                                     tt_aggressor = find_piece_type_on_square_side(piece_bbs, tt_from, our_side)
                                     if tt_aggressor != -1 and ((occupancy_bbs[our_side] & BB_SQUARES[tt_to]) == 0):
-                                        tt_bonus = min(depth * depth + 120 * depth - 100, 1600)
+                                        tt_bonus = min(120 * depth, 1800)
                                         update_quiet_stats_on_tt_hit(search_context, tt_move, tt_aggressor, tt_to, pawn_key_idx, tt_bonus, ply)
 
                             search_context.pv_table[ply, ply] = NO_MOVE
@@ -713,7 +769,7 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
         else:
             raw_static_eval, _, _ = _evaluate_position_jit(piece_bbs, occupancy_bbs, game_state, True, search_context)
 
-        static_score = apply_correction_history_score(game_state, search_context, raw_static_eval)
+        static_score = apply_correction_history_score(game_state, search_context, raw_static_eval, ply)
         
         # --- H2 Enhancement: Refine static_score using trusted TT Score Bounds ---
         if tt_entry['flag'] != TT_FLAG_NONE:
@@ -1537,8 +1593,12 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
         alpha = max(alpha, evaluation)
         if alpha >= beta:
             search_context.cutoff_cnt[ply] += 1
-            bonus = min(depth * depth + 120 * depth - 100, 1600)
-            malus = min(depth * depth + 100 * depth - 50, 1400)
+            bonus = min(120 * depth, 1800)
+            malus = min(120 * depth, 1600)
+            
+            # Node Width Scaling
+            if not is_pv:
+                bonus += bonus * (quiet_moves_tried_count + capture_moves_tried_count) // 256
             
             # --- D: Refutation Penalty ---
             if ply > 0:
@@ -1740,7 +1800,7 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                 prev_from = get_from_square(prev_move)
                 pawn_key_idx = game_state[PAWN_KEY_INDEX] & PAWN_HISTORY_MASK
                 
-                base_bonus = min(depth * depth + 120 * depth - 100, 1600)
+                base_bonus = min(120 * depth, 1800)
                 sub_bonus = base_bonus // 4
                 
                 update_pawn_history(search_context.pawn_history, pawn_key_idx, prev_piece, prev_to, sub_bonus)
@@ -1811,22 +1871,25 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                 
                 # Limit single bonus to 1/4 of the total limit
                 bonus = min(max(bonus, -CORRECTION_HISTORY_LIMIT // 4), CORRECTION_HISTORY_LIMIT // 4)
-                
-                # Absolute White perspective for Pawn and Minor
+
+                # Apply outer scaling (SF18: 1114 * bonus / 1024)
+                bonus = trunc_div(bonus * CORRECTION_HISTORY_OUTER_SCALE, 1024)
+
+                # Absolute White perspective for Pawn, Minor, and Non-Pawn
                 white_bonus = bonus if side == WHITE else -bonus
-                
-                # Update Pawn Correction (relative to White)
+
+                # Update Pawn Correction (white-absolute)
                 idx_pawn = pawn_key & CORRECTION_HISTORY_MASK
                 curr_pawn = search_context.pawn_correction_history[idx_pawn]
                 search_context.pawn_correction_history[idx_pawn] = curr_pawn + white_bonus - trunc_div(curr_pawn * abs(white_bonus), CORRECTION_HISTORY_LIMIT)
-                
-                # Update Minor Correction (relative to White)
+
+                # Update Minor Correction (white-absolute)
                 idx_minor = minor_key & CORRECTION_HISTORY_MASK
                 curr_minor = search_context.minor_correction_history[idx_minor]
                 scaled_minor_bonus = trunc_div(white_bonus * 155, 128)
                 search_context.minor_correction_history[idx_minor] = curr_minor + scaled_minor_bonus - trunc_div(curr_minor * abs(scaled_minor_bonus), CORRECTION_HISTORY_LIMIT)
-                
-                # Update Non-Pawn Correction based on Side (relative to Side to Move)
+
+                # Update Non-Pawn Correction (side-exclusive, relative to Side to Move)
                 scaled_np_bonus = trunc_div(bonus * 181, 128)
                 if side == WHITE:
                     idx_np = np_white_key & CORRECTION_HISTORY_MASK
@@ -1836,6 +1899,60 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                     idx_np = np_black_key & CORRECTION_HISTORY_MASK
                     curr_np = search_context.non_pawn_correction_history_black[idx_np]
                     search_context.non_pawn_correction_history_black[idx_np] = curr_np + scaled_np_bonus - trunc_div(curr_np * abs(scaled_np_bonus), CORRECTION_HISTORY_LIMIT)
+
+                # Update Continuation Correction History
+                if ply > 0:
+                    m_prev = search_context.move_stack[ply - 1]
+                    pc_prev = search_context.piece_stack[ply - 1]
+                    if m_prev != NO_MOVE and pc_prev != -1:
+                        to_prev = get_to_square(m_prev)
+                        
+                        # Update 2-ply offset (SF: bonus * 136 / 128)
+                        if ply >= 2:
+                            m_2 = search_context.move_stack[ply - 2]
+                            pc_2 = search_context.piece_stack[ply - 2]
+                            if m_2 != NO_MOVE and pc_2 != -1:
+                                bonus_2 = trunc_div(bonus * 136, 128)
+                                curr_val = search_context.continuation_correction_history[pc_2, get_to_square(m_2), pc_prev, to_prev]
+                                search_context.continuation_correction_history[pc_2, get_to_square(m_2), pc_prev, to_prev] = \
+                                    curr_val + bonus_2 - trunc_div(curr_val * abs(bonus_2), CORRECTION_HISTORY_LIMIT)
+                                    
+                        # Update 4-ply offset (SF: bonus * 68 / 128)
+                        if ply >= 4:
+                            m_4 = search_context.move_stack[ply - 4]
+                            pc_4 = search_context.piece_stack[ply - 4]
+                            if m_4 != NO_MOVE and pc_4 != -1:
+                                bonus_4 = trunc_div(bonus * 68, 128)
+                                curr_val = search_context.continuation_correction_history[pc_4, get_to_square(m_4), pc_prev, to_prev]
+                                search_context.continuation_correction_history[pc_4, get_to_square(m_4), pc_prev, to_prev] = \
+                                    curr_val + bonus_4 - trunc_div(curr_val * abs(bonus_4), CORRECTION_HISTORY_LIMIT)
+
+                # Update Continuation Correction History
+                if ply > 0:
+                    m_prev = search_context.move_stack[ply - 1]
+                    pc_prev = search_context.piece_stack[ply - 1]
+                    if m_prev != NO_MOVE and pc_prev != -1:
+                        to_prev = get_to_square(m_prev)
+                        
+                        # Update 2-ply offset (SF: bonus * 136 / 128)
+                        if ply >= 2:
+                            m_2 = search_context.move_stack[ply - 2]
+                            pc_2 = search_context.piece_stack[ply - 2]
+                            if m_2 != NO_MOVE and pc_2 != -1:
+                                bonus_2 = trunc_div(bonus * 136, 128)
+                                curr_val = search_context.continuation_correction_history[pc_2, get_to_square(m_2), pc_prev, to_prev]
+                                search_context.continuation_correction_history[pc_2, get_to_square(m_2), pc_prev, to_prev] = \
+                                    curr_val + bonus_2 - trunc_div(curr_val * abs(bonus_2), CORRECTION_HISTORY_LIMIT)
+                                    
+                        # Update 4-ply offset (SF: bonus * 68 / 128)
+                        if ply >= 4:
+                            m_4 = search_context.move_stack[ply - 4]
+                            pc_4 = search_context.piece_stack[ply - 4]
+                            if m_4 != NO_MOVE and pc_4 != -1:
+                                bonus_4 = trunc_div(bonus * 68, 128)
+                                curr_val = search_context.continuation_correction_history[pc_4, get_to_square(m_4), pc_prev, to_prev]
+                                search_context.continuation_correction_history[pc_4, get_to_square(m_4), pc_prev, to_prev] = \
+                                    curr_val + bonus_4 - trunc_div(curr_val * abs(bonus_4), CORRECTION_HISTORY_LIMIT)
 
     tt_score = max_eval
     if tt_score > MATE_IN_MAX_PLY: tt_score += ply

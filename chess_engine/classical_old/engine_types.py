@@ -72,6 +72,7 @@ search_context_spec = [
     ('minor_correction_history', numba.int16[:]),
     ('non_pawn_correction_history_white', numba.int16[:]),
     ('non_pawn_correction_history_black', numba.int16[:]),
+    ('continuation_correction_history', numba.int16[:, :, :, :]),
     ('butterfly_history', numba.int32[:, :]),
     ('capture_history', numba.int32[:, :, :]),
     ('capture_moves_tried', numba.uint16[:, :]),
@@ -142,7 +143,7 @@ class _SearchContextJIT:
         non_pawn_correction_history_white (numba.int16[:]): 白方非兵修正歷史表。
         non_pawn_correction_history_black (numba.int16[:]): 黑方非兵修正歷史表。
     """
-    def __init__(self, transposition_table, killer_moves, pv_table, history_table, butterfly_history, continuation_history, capture_history, pawn_history, pawn_correction_history, minor_correction_history, non_pawn_correction_history_white, non_pawn_correction_history_black):
+    def __init__(self, transposition_table, killer_moves, pv_table, history_table, butterfly_history, continuation_history, capture_history, pawn_history, pawn_correction_history, minor_correction_history, non_pawn_correction_history_white, non_pawn_correction_history_black, continuation_correction_history):
         """
         初始化搜尋上下文。
 
@@ -172,6 +173,7 @@ class _SearchContextJIT:
         self.minor_correction_history = minor_correction_history
         self.non_pawn_correction_history_white = non_pawn_correction_history_white
         self.non_pawn_correction_history_black = non_pawn_correction_history_black
+        self.continuation_correction_history = continuation_correction_history
         self.low_ply_history = np.zeros((5, 65536), dtype=np.int16)
         # accumulator_stack removed — not used in Classical engine
         self.nodes_searched = np.uint64(0)
@@ -252,7 +254,8 @@ search_context_type = _SearchContextJIT.class_type.instance_type
 def SearchContext(
     transposition_table, killer_moves, pv_table, history_table, butterfly_history,
     continuation_history, capture_history, pawn_history, pawn_correction_history,
-    minor_correction_history, non_pawn_correction_history_white, non_pawn_correction_history_black
+    minor_correction_history, non_pawn_correction_history_white, non_pawn_correction_history_black,
+    continuation_correction_history=None
 ):
     if continuation_history.shape[0] < 5:
         new_shape = (5,) + continuation_history.shape[1:]
@@ -260,9 +263,13 @@ def SearchContext(
         new_continuation_history[0:continuation_history.shape[0]] = continuation_history
         continuation_history = new_continuation_history
 
+    if continuation_correction_history is None:
+        continuation_correction_history = np.zeros((12, 64, 12, 64), dtype=np.int16)
+
     return _SearchContextJIT(
         transposition_table, killer_moves, pv_table, history_table,
         butterfly_history, continuation_history, capture_history, pawn_history,
         pawn_correction_history, minor_correction_history,
-        non_pawn_correction_history_white, non_pawn_correction_history_black
+        non_pawn_correction_history_white, non_pawn_correction_history_black,
+        continuation_correction_history
     )

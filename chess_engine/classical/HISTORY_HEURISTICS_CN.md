@@ -74,16 +74,17 @@ def update_history(history_table, piece_type, to_square, bonus):
 *   `pawn_correction_history`: 基於當前兵鍵值 (Pawn Key)。修正長期兵型特徵引起的估值偏頗。
 *   `minor_correction_history`: 基於輕子鍵值 (Minor Key)。
 *   `non_pawn_correction_history`: 分白黑兩方，基於非兵棋子鍵值。
+*   **連續糾錯歷史 (Continuation Correction History)**：基於動態走法關聯。記錄「我方前一手棋 (`ply - 2`) + 對手回應 (`ply - 1`)」與當前靜態評估誤差的關聯。
 
 ### 應用方式
 在 `_search` 的開頭，獲取靜態評估分值後，會根據當前的各種 Key 查表並疊加修正：
 ```python
 correction_sum = (global_pawn * CORRECTION_HISTORY_PAWN_WEIGHT +
                  global_minor * CORRECTION_HISTORY_MINOR_WEIGHT +
-                 non_pawn_weight)
+                 non_pawn_weight + cntcv)
 static_score = raw_static_eval + (correction_sum // CORRECTION_HISTORY_DIVISOR)
 ```
-這使得引擎即使在靜態評估偏低時，也能通過搜尋歷史學會「這類局面其實很好」，從而避免過早剪枝或錯誤選擇路徑。
+其中 `cntcv` 即為連續糾錯歷史分量，當上一手棋有效時，會查詢與疊加 $2\text{-ply}$ 與 $4\text{-ply}$ 偏移處的歷史偏差值，乘上 HCE 專屬權重 `10000`。這使得引擎即使在靜態評估偏低時，也能通過搜尋歷史學會「這類著法序列後其實很好」，從而避免過早剪枝或錯誤選擇路徑。
 
 ---
 

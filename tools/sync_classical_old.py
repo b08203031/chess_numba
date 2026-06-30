@@ -88,10 +88,8 @@ if __name__ == '__main__':
     src_dir = os.path.join(base_dir, 'chess_engine', 'classical')
     dest_dir = os.path.join(base_dir, 'chess_engine', 'classical_old')
     
-    if args.diff:
-        do_diff(src_dir, dest_dir)
-    elif args.sync:
+    if args.sync:
         do_sync(src_dir, dest_dir)
     else:
-        parser.print_help()
-        sys.exit(1)
+        # Default to diff when --diff is specified or no options are provided
+        do_diff(src_dir, dest_dir)

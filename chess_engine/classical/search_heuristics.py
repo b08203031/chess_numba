@@ -84,7 +84,7 @@ def update_continuation_history(context, ply_offset, prev_move, prev_piece, curr
     current_val = context.continuation_history[ply_offset, prev_piece, prev_to, curr_piece, curr_to]
     clamped_bonus = min(max(bonus, -HISTORY_MAX_CONTINUATION), HISTORY_MAX_CONTINUATION)
     
-    new_val = current_val + clamped_bonus - (current_val * abs(clamped_bonus)) // HISTORY_MAX_CONTINUATION
+    new_val = np.int32(current_val) + clamped_bonus - (np.int32(current_val) * abs(clamped_bonus)) // HISTORY_MAX_CONTINUATION
     context.continuation_history[ply_offset, prev_piece, prev_to, curr_piece, curr_to] = new_val
 
 @numba.njit(cache=True, boundscheck=False, fastmath=True)
