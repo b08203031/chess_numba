@@ -16,8 +16,8 @@ def parse_pgn(file_path, name1, name2):
     # Split by games
     game_blocks = content.split('[Event "')
     
-    new_stats = {'depth': [], 'nodes': [], 'time': []}
-    old_stats = {'depth': [], 'nodes': [], 'time': []}
+    new_stats = {'depth': [], 'nodes': [], 'time': [], 'move_num': []}
+    old_stats = {'depth': [], 'nodes': [], 'time': [], 'move_num': []}
 
     # Regex patterns
     # Matches white moves: 1. Qxe4+ { d=11, eval=+0.07, n=332609, t=528ms }
@@ -53,6 +53,7 @@ def parse_pgn(file_path, name1, name2):
         
         # Parse white moves
         for move in white_moves:
+            move_num = int(move[0])
             depth = int(move[2])
             nodes = int(move[4])
             time_ms = int(move[5])
@@ -61,13 +62,16 @@ def parse_pgn(file_path, name1, name2):
                 new_stats['depth'].append(depth)
                 new_stats['nodes'].append(nodes)
                 new_stats['time'].append(time_ms)
+                new_stats['move_num'].append(move_num)
             else:
                 old_stats['depth'].append(depth)
                 old_stats['nodes'].append(nodes)
                 old_stats['time'].append(time_ms)
+                old_stats['move_num'].append(move_num)
                 
         # Parse black moves
         for move in black_moves:
+            move_num = int(move[0])
             depth = int(move[2])
             nodes = int(move[4])
             time_ms = int(move[5])
@@ -76,13 +80,42 @@ def parse_pgn(file_path, name1, name2):
                 new_stats['depth'].append(depth)
                 new_stats['nodes'].append(nodes)
                 new_stats['time'].append(time_ms)
+                new_stats['move_num'].append(move_num)
             else:
                 old_stats['depth'].append(depth)
                 old_stats['nodes'].append(nodes)
                 old_stats['time'].append(time_ms)
+                old_stats['move_num'].append(move_num)
 
     print(f"Successfully parsed {games_parsed} games.")
     return new_stats, old_stats
+
+def plot_line_metric(new_moves, new_means, new_sems, old_moves, old_means, old_sems, 
+                     title, xlabel, ylabel, filename, name1, name2, use_log=False):
+    plt.figure(figsize=(10, 5.5))
+    
+    # Plot New Engine
+    plt.plot(new_moves, new_means, color='#1f77b4', label=f'{name1} (Avg)', linewidth=2.0, marker='o', markersize=4)
+    if len(new_sems) > 0:
+        plt.fill_between(new_moves, new_means - new_sems, new_means + new_sems, color='#1f77b4', alpha=0.15, label=f'{name1} SEM')
+        
+    # Plot Old Engine
+    plt.plot(old_moves, old_means, color='#ff7f0e', label=f'{name2} (Avg)', linewidth=2.0, marker='s', markersize=4)
+    if len(old_sems) > 0:
+        plt.fill_between(old_moves, old_means - old_sems, old_means + old_sems, color='#ff7f0e', alpha=0.15, label=f'{name2} SEM')
+        
+    plt.title(title, fontsize=12, fontweight='bold', pad=12)
+    plt.xlabel(xlabel, fontsize=10)
+    plt.ylabel(ylabel, fontsize=10)
+    
+    if use_log:
+        plt.yscale('log')
+        
+    plt.grid(True, which="both", linestyle='--', alpha=0.5)
+    plt.legend(loc='best', frameon=True, facecolor='white', edgecolor='none')
+    plt.tight_layout()
+    plt.savefig(filename, dpi=150)
+    plt.close()
 
 def analyze_and_plot(new_stats, old_stats, output_dir, name1, name2):
     if not os.path.exists(output_dir):
@@ -91,10 +124,12 @@ def analyze_and_plot(new_stats, old_stats, output_dir, name1, name2):
     new_depths = np.array(new_stats['depth'])
     new_nodes = np.array(new_stats['nodes'])
     new_times = np.array(new_stats['time'])
+    new_move_nums = np.array(new_stats.get('move_num', []))
     
     old_depths = np.array(old_stats['depth'])
     old_nodes = np.array(old_stats['nodes'])
     old_times = np.array(old_stats['time'])
+    old_move_nums = np.array(old_stats.get('move_num', []))
     
     if len(new_depths) == 0 or len(old_depths) == 0:
         print(f"Error: Not enough move data to analyze. {name1} moves: {len(new_depths)}, {name2} moves: {len(old_depths)}")
@@ -193,25 +228,84 @@ def analyze_and_plot(new_stats, old_stats, output_dir, name1, name2):
     with open(os.path.join(output_dir, "search_stats_report.txt"), "w", encoding="utf-8") as rf:
         rf.write(report_text)
 
-    # Plot 1: Depth Distribution Comparison
-    plt.figure(figsize=(10, 5))
-    min_d = min(np.min(new_depths), np.min(old_depths))
-    max_d = max(np.max(new_depths), np.max(old_depths))
-    bins = np.arange(min_d, max_d + 2) - 0.5
-    
-    plt.hist([new_depths, old_depths], bins=bins, label=[f'{name1} Engine', f'{name2} Engine'], 
-             alpha=0.8, color=['#1f77b4', '#ff7f0e'], density=True)
-    plt.title(f"Search Depth Distribution Comparison ({name1} vs {name2})")
-    plt.xlabel("Search Depth (Plies)")
-    plt.ylabel("Proportion of Moves")
-    plt.xticks(np.arange(min_d, max_d + 1))
-    plt.grid(axis='y', linestyle='--', alpha=0.7)
-    plt.legend()
-    plt.tight_layout()
-    plt.savefig(os.path.join(output_dir, "depth_distribution.png"), dpi=150)
-    plt.close()
-    
-    # Plot 2: Average Nodes vs Depth
+    # Clean up old distribution plots if they exist
+    for old_file in ["depth_distribution.png", "nps_distribution.png"]:
+        file_path = os.path.join(output_dir, old_file)
+        if os.path.exists(file_path):
+            try:
+                os.remove(file_path)
+            except Exception as e:
+                print(f"Warning: could not remove old file {file_path}: {e}")
+
+    # Calculate statistics per move number
+    def get_metric_per_move(move_nums, values, max_move=100, min_samples=5):
+        if len(move_nums) == 0:
+            return np.array([]), np.array([]), np.array([])
+        unique_moves = np.unique(move_nums)
+        unique_moves = unique_moves[unique_moves <= max_move]
+        
+        m_list, mean_list, sem_list = [], [], []
+        for m in unique_moves:
+            mask = (move_nums == m)
+            samples = values[mask]
+            if len(samples) >= min_samples:
+                m_list.append(m)
+                mean_list.append(np.mean(samples))
+                sem_list.append(np.std(samples, ddof=1) / np.sqrt(len(samples)) if len(samples) > 1 else 0.0)
+        return np.array(m_list), np.array(mean_list), np.array(sem_list)
+
+    # Group metrics by move number
+    new_m_depth, new_mean_depth, new_sem_depth = get_metric_per_move(new_move_nums, new_depths)
+    old_m_depth, old_mean_depth, old_sem_depth = get_metric_per_move(old_move_nums, old_depths)
+
+    new_m_nodes, new_mean_nodes, new_sem_nodes = get_metric_per_move(new_move_nums, new_nodes)
+    old_m_nodes, old_mean_nodes, old_sem_nodes = get_metric_per_move(old_move_nums, old_nodes)
+
+    new_m_time, new_mean_time, new_sem_time = get_metric_per_move(new_move_nums, new_times)
+    old_m_time, old_mean_time, old_sem_time = get_metric_per_move(old_move_nums, old_times)
+
+    # Plot Line Charts per Move
+    # 1. Depth per Move
+    if len(new_m_depth) > 0 and len(old_m_depth) > 0:
+        plot_line_metric(
+            new_m_depth, new_mean_depth, new_sem_depth,
+            old_m_depth, old_mean_depth, old_sem_depth,
+            title=f"Average Search Depth per Move ({name1} vs {name2})",
+            xlabel="Move Number",
+            ylabel="Average Depth (Plies)",
+            filename=os.path.join(output_dir, "depth_per_move.png"),
+            name1=name1,
+            name2=name2
+        )
+
+    # 2. Nodes per Move
+    if len(new_m_nodes) > 0 and len(old_m_nodes) > 0:
+        plot_line_metric(
+            new_m_nodes, new_mean_nodes, new_sem_nodes,
+            old_m_nodes, old_mean_nodes, old_sem_nodes,
+            title=f"Average Nodes Searched per Move ({name1} vs {name2})",
+            xlabel="Move Number",
+            ylabel="Average Nodes Searched",
+            filename=os.path.join(output_dir, "nodes_per_move.png"),
+            name1=name1,
+            name2=name2,
+            use_log=True
+        )
+
+    # 3. Time per Move
+    if len(new_m_time) > 0 and len(old_m_time) > 0:
+        plot_line_metric(
+            new_m_time, new_mean_time, new_sem_time,
+            old_m_time, old_mean_time, old_sem_time,
+            title=f"Average Search Time per Move ({name1} vs {name2})",
+            xlabel="Move Number",
+            ylabel="Average Search Time (ms)",
+            filename=os.path.join(output_dir, "time_per_move.png"),
+            name1=name1,
+            name2=name2
+        )
+
+    # Plot 4: Average Nodes vs Depth
     plt.figure(figsize=(10, 5))
     common_depths = sorted(list(set(new_depths).intersection(set(old_depths))))
     # Filter common depths to reasonable range
@@ -231,20 +325,6 @@ def analyze_and_plot(new_stats, old_stats, output_dir, name1, name2):
         plt.legend()
         plt.tight_layout()
         plt.savefig(os.path.join(output_dir, "avg_nodes_vs_depth.png"), dpi=150)
-        plt.close()
-    
-    # Plot 3: Cumulative NPS distribution
-    if len(new_nps_clean) > 0 and len(old_nps_clean) > 0:
-        plt.figure(figsize=(10, 5))
-        plt.hist([new_nps_clean / 1000.0, old_nps_clean / 1000.0], bins=30, label=[f'{name1} NPS', f'{name2} NPS'],
-                 alpha=0.7, color=['#2ca02c', '#d62728'], density=True)
-        plt.title(f"NPS Distribution Comparison ({name1} vs {name2})")
-        plt.xlabel("NPS (Kilo Nodes Per Second)")
-        plt.ylabel("Density")
-        plt.grid(True, alpha=0.5)
-        plt.legend()
-        plt.tight_layout()
-        plt.savefig(os.path.join(output_dir, "nps_distribution.png"), dpi=150)
         plt.close()
     
     print(f"Visualizations saved to {output_dir}")

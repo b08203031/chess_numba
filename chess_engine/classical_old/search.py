@@ -22,6 +22,7 @@ from chess_engine.classical_old.move import (
 )
 from chess_engine.classical_old.constants import (
     BB_SQUARES, MG_MATERIAL_VALUES, INFINITY, MAX_QUIESCENCE_DEPTH, ASPIRATION_WINDOW_SIZE,
+    ASPIRATION_WINDOW_MIN, ASPIRATION_WINDOW_BASE, ASPIRATION_WINDOW_SCALE_DIV,
     NULL_MOVE_REDUCTION, MAX_PLY, LMR_MIN_DEPTH, LMR_MIN_QUIET_MOVE_INDEX, LMR_REDUCTION, SEE_THRESHOLD, QS_SEE_THRESHOLD,
     ENABLE_SEE_IN_QUIESCENCE, MATE_SCORE, MATE_IN_MAX_PLY, VALUE_KNOWN_WIN, NO_MOVE,
     RAZORING_MARGIN, FP_BASE, FP_MULTIPLIER, RFP_BASE_MULT, RFP_MAX_DEPTH, RFP_NO_TT_PENALTY,
@@ -196,6 +197,7 @@ def quiescence_search(piece_bbs, occupancy_bbs, game_state, alpha, beta, ply, se
     original_alpha = alpha
     best_move = NO_MOVE
     stand_pat = np.int32(32767)
+    best_eval = np.int32(-32767)
 
 
 
@@ -260,13 +262,20 @@ def quiescence_search(piece_bbs, occupancy_bbs, game_state, alpha, beta, ply, se
         else:
             stand_pat_val, _, _ = _evaluate_position_jit(piece_bbs, occupancy_bbs, game_state, False, search_context)
             stand_pat = np.int32(stand_pat_val)
+        
+        best_eval = stand_pat
 
         if stand_pat >= beta:
-            tt_score = np.int32(beta)
+            # B1: QSearch Stand-pat smoothing
+            val = stand_pat
+            if abs(val) < MATE_IN_MAX_PLY:
+                val = np.int32(trunc_div(467 * val + 557 * beta, 1024))
+            
+            tt_score = val
             if tt_score > MATE_IN_MAX_PLY: tt_score += ply
             elif tt_score < -MATE_IN_MAX_PLY: tt_score -= ply
             store_tt(search_context.transposition_table, tt_key, 0, tt_score, np.int16(stand_pat), TT_FLAG_BETA, NO_MOVE, search_context.tt_generation, False)
-            return beta, q_nodes
+            return val, q_nodes
         alpha = max(alpha, stand_pat)
 
         move_count = generate_pseudo_legal_captures_buffer(piece_bbs, occupancy_bbs, game_state, search_context.moves_buffer, ply)
@@ -363,32 +372,33 @@ def quiescence_search(piece_bbs, occupancy_bbs, game_state, alpha, beta, ply, se
         q_nodes += child_q_nodes
         score = -score
 
-        if score >= beta:
-            tt_score = np.int32(beta)
-            if tt_score > MATE_IN_MAX_PLY: tt_score += ply
-            elif tt_score < -MATE_IN_MAX_PLY: tt_score -= ply
-            tt_static_eval_to_store = np.int16(32767)
-            if not is_currently_in_check and stand_pat != 32767:
-                tt_static_eval_to_store = np.int16(stand_pat)
-            store_tt(search_context.transposition_table, tt_key, 0, tt_score, tt_static_eval_to_store, TT_FLAG_BETA, move, search_context.tt_generation, False)
-            return beta, q_nodes
-        if score > alpha:
-            alpha = score
-            best_move = move
+        if score > best_eval:
+            best_eval = score
+            if score > alpha:
+                best_move = move
+                if score >= beta:
+                    break
+                alpha = score
 
     if is_currently_in_check and legal_moves_tried == 0:
         return np.int32(-MATE_SCORE + ply), q_nodes
 
-    tt_flag = TT_FLAG_ALPHA if alpha <= original_alpha else TT_FLAG_EXACT
-    tt_score = np.int32(alpha)
+    # C1: QSearch Move Loop fail-high smoothing
+    if not is_currently_in_check and best_eval > beta and abs(best_eval) < MATE_IN_MAX_PLY:
+        best_eval = np.int32(trunc_div(481 * best_eval + 543 * beta, 1024))
+
+    tt_score = best_eval
     if tt_score > MATE_IN_MAX_PLY: tt_score += ply
     elif tt_score < -MATE_IN_MAX_PLY: tt_score -= ply
+
+    tt_flag = TT_FLAG_BETA if best_eval >= beta else (TT_FLAG_ALPHA if alpha <= original_alpha else TT_FLAG_EXACT)
+
     tt_static_eval_to_store = np.int16(32767)
     if not is_currently_in_check and stand_pat != 32767:
         tt_static_eval_to_store = np.int16(stand_pat)
     store_tt(search_context.transposition_table, tt_key, 0, tt_score, tt_static_eval_to_store, tt_flag, best_move, search_context.tt_generation, False)
 
-    return alpha, q_nodes
+    return best_eval, q_nodes
 
 
 get_next_move_return_type = numba.uint16
@@ -1259,17 +1269,18 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
 
         if is_quiet_move:
             quiet_move_counter += 1
-            
-            # Late Move Pruning (LMP) - Disabled in PV nodes
-            if (can_prune_quiet and search_context.enable_lmp and not is_exclusion_search
-                    and not is_currently_in_check and not is_pv and not low_material_pruning_guard):
-                limit = LMP_MOVE_COUNT[min(depth, MAX_PLY - 1)]
-                if not improving: limit = limit // 2
-                limit = max(limit, 2)
+            if not is_giving_check_after_move:
+                
+                # Late Move Pruning (LMP) - Disabled in PV nodes
+                if (search_context.enable_lmp and not is_exclusion_search
+                        and not is_currently_in_check and not is_pv and not low_material_pruning_guard):
+                    # Table lookup with dynamic division
+                    limit = LMP_MOVE_COUNT[min(depth, MAX_PLY - 1)] // (2 - (1 if improving else 0))
+                    limit = max(limit, 2)
 
-                if quiet_move_counter >= limit:
-                    unmake_move(piece_bbs, occupancy_bbs, game_state, move, unmake_info)
-                    continue  # H7: was 'break', changed to 'continue' to not skip bad captures
+                    if quiet_move_counter >= limit:
+                        unmake_move(piece_bbs, occupancy_bbs, game_state, move, unmake_info)
+                        continue
 
         # Futility Pruning (FP) - Disabled in PV nodes
         if (search_context.enable_fp and not is_exclusion_search and can_prune_quiet and depth <= 8 and not is_currently_in_check
@@ -1786,6 +1797,11 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
     if fifty_move_scale < FIFTY_MOVE_MAX_SCALE and abs(max_eval) < MATE_IN_MAX_PLY:
         max_eval = max_eval * fifty_move_scale // FIFTY_MOVE_MAX_SCALE
 
+    # A1: SF18 Fail-High Smoothing (主搜尋深度加權平滑)
+    # 只有在 fail-high 且非 decisive (非將死分數) 時才進行平滑
+    if max_eval >= beta and abs(max_eval) < MATE_IN_MAX_PLY and abs(alpha) < MATE_IN_MAX_PLY:
+        max_eval = np.int32(trunc_div(max_eval * depth + beta, depth + 1))
+
     final_flag = TT_FLAG_ALPHA if max_eval <= original_alpha else (TT_FLAG_BETA if max_eval >= beta else TT_FLAG_EXACT)
 
     # --- NEW: Opponent Move Bonus (Fail-Low / Alpha Flag Bonus) ---
@@ -2057,41 +2073,42 @@ def iterative_deepening_search(piece_bbs, occupancy_bbs, game_state, max_depth, 
         # Aspiration Window Logic
         alpha = -INFINITY
         beta = INFINITY
-        delta = ASPIRATION_WINDOW_SIZE
+        delta = ASPIRATION_WINDOW_MIN
         
         if current_depth > 1:
+            # HCE-tuned SF11 Dynamic Delta (等比縮放到 Centipawn)
+            delta = max(ASPIRATION_WINDOW_MIN, ASPIRATION_WINDOW_BASE + abs(last_score) // ASPIRATION_WINDOW_SCALE_DIV)
             alpha = max(-INFINITY, last_score - delta)
             beta = min(INFINITY, last_score + delta)
 
         search_context.nodes_searched = np.uint64(0)
+        failed_high_cnt = 0
         
         while True:
             search_context.reduction_stack[0] = 0
-            res = _search(piece_bbs, occupancy_bbs, game_state, current_depth, alpha, beta, search_context, 0, NO_MOVE, True, False)
+            # Fail-High 降深重搜策略
+            adjusted_depth = max(1, current_depth - failed_high_cnt)
+            res = _search(piece_bbs, occupancy_bbs, game_state, adjusted_depth, alpha, beta, search_context, 0, NO_MOVE, True, False)
             score = res[0]
             
             # Always accumulate stats from the search (even if stopped or failed window)
-            # Note: search_context.nodes_searched is reset per depth loop but accumulates inside the while loop effectively
-            # Actually, to get correct NPS, we should probably accumulate into totals here.
-            # But search_context.nodes_searched is reset at the top of the FOR loop, not the WHILE loop.
-            # So if we re-search, search_context.nodes_searched will increase.
-            # We just need to make sure we don't double count if we add to 'total_nodes' inside the loop?
-            # The original code added search_context.nodes_searched to total_nodes AFTER the search call.
-            # Here, we might search multiple times.
-            
-            # Let's accumulate non-node stats here immediately to safe-keep them.
             total_q_nodes += res[3]; total_tt_hits += res[4]
 
             if search_context.stop_flag[0]:
                 break
             
             if score <= alpha:
-                alpha = max(-INFINITY, alpha - delta)
-                delta += delta // 2
+                # Fail-Low: Beta 收縮，Alpha 基於回傳分數擴張
+                beta = (alpha + beta) // 2
+                alpha = max(-INFINITY, score - delta)
+                failed_high_cnt = 0
+                delta = delta + delta // 3 + 3
                 # log_info(f"depth {current_depth} fail low ({score} <= {alpha}), widening to [{alpha}, {beta}]")
             elif score >= beta:
-                beta = min(INFINITY, beta + delta)
-                delta += delta // 2
+                # Fail-High: Beta 基於回傳分數擴張，Alpha 保持不變 (與 SF11 原生對齊)
+                beta = min(INFINITY, score + delta)
+                failed_high_cnt += 1
+                delta = delta + delta // 3 + 3
                 # log_info(f"depth {current_depth} fail high ({score} >= {beta}), widening to [{alpha}, {beta}]")
             else:
                 # Score is within window, we are done with this depth

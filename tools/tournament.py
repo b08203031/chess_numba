@@ -297,7 +297,9 @@ def play_game(white_engine, black_engine, time_limit_ms, game_number, start_fen=
             move, info_str = mover.get_move(moves_history, time_limit_ms, start_fen, depth=depth, nodes=nodes)
         except Exception as e:
             log(f"Error getting move from {mover.name}: {e}")
-            break
+            result = "0-1" if board.turn == chess.WHITE else "1-0"
+            pgn_game.headers["Result"] = result
+            return result, pgn_game, "".join(log_lines)
 
         if move is None:
             log(f"No move returned by {mover.name}. Forfeiting.")

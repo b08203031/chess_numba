@@ -398,6 +398,18 @@ class ChessVisionApp(tk.Tk):
         ToolTip(cb_time, "秒 (1 = 1秒)\nSeconds (1 = 1s)")
         row_idx += 1
 
+        # Limit by Nodes Option
+        self.limit_by_nodes_var = tk.BooleanVar(value=False)
+        chk_limit_nodes = ttk.Checkbutton(self.tab_auto, text="限定節點數 (Limit Nodes)", variable=self.limit_by_nodes_var)
+        chk_limit_nodes.grid(row=row_idx, column=0, sticky="w", pady=2)
+        ToolTip(chk_limit_nodes, "開啟時以設定的節點數為搜尋上限\nWhen enabled, limit search by node count")
+        
+        self.nodes_limit_var = tk.StringVar(value="100000")
+        self.entry_nodes_limit = ttk.Entry(self.tab_auto, textvariable=self.nodes_limit_var, width=8)
+        self.entry_nodes_limit.grid(row=row_idx, column=1, columnspan=2, sticky="w")
+        ToolTip(self.entry_nodes_limit, "節點數上限 (預設 100000)\nMaximum node count (default 100000)")
+        row_idx += 1
+
         # Always on top Checkbox
         self.always_on_top_var = tk.BooleanVar(value=True)
         chk_top = ttk.Checkbutton(self.tab_auto, text="視窗置頂 (Always on Top)", variable=self.always_on_top_var, command=self.toggle_topmost)
@@ -1090,16 +1102,20 @@ class ChessVisionApp(tk.Tk):
                 return
 
             # Send to Engine
-            try:
-                time_limit = int(float(self.time_var.get()) * 1000)
-            except:
-                time_limit = 10000
-
-            # Removed automatic ucinewgame to preserve TT across moves
-            # self.engine.send_command("ucinewgame")
-            
             self.engine.send_command(f"position fen {fen_final}")
-            self.engine.send_command(f"go movetime {time_limit}")
+            
+            if hasattr(self, 'limit_by_nodes_var') and self.limit_by_nodes_var.get():
+                try:
+                    nodes_limit = int(self.nodes_limit_var.get())
+                except:
+                    nodes_limit = 100000
+                self.engine.send_command(f"go nodes {nodes_limit}")
+            else:
+                try:
+                    time_limit = int(float(self.time_var.get()) * 1000)
+                except:
+                    time_limit = 10000
+                self.engine.send_command(f"go movetime {time_limit}")
 
             # Note: We do NOT send "analysis_finished" here. 
             # We wait for "bestmove" from the engine to signal completion.
@@ -1589,11 +1605,18 @@ class ChessVisionApp(tk.Tk):
         # Send FEN to engine
         fen = self.board.fen()
         self.engine.send_command(f"position fen {fen}")
-        try:
-            time_limit = int(float(self.time_var.get()) * 1000)
-        except:
-            time_limit = 10000
-        self.engine.send_command(f"go movetime {time_limit}")
+        if hasattr(self, 'limit_by_nodes_var') and self.limit_by_nodes_var.get():
+            try:
+                nodes_limit = int(self.nodes_limit_var.get())
+            except:
+                nodes_limit = 100000
+            self.engine.send_command(f"go nodes {nodes_limit}")
+        else:
+            try:
+                time_limit = int(float(self.time_var.get()) * 1000)
+            except:
+                time_limit = 10000
+            self.engine.send_command(f"go movetime {time_limit}")
 
     def manual_undo(self):
         current_tab = self.notebook.index("current")

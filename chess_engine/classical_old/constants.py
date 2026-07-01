@@ -796,6 +796,9 @@ NON_PAWN_KEY_BLACK_INDEX = 8
 
 # --- Aspiration Windows / 期望窗口 ---
 ASPIRATION_WINDOW_SIZE = 25 # centipawns (H8: tightened from 100 to detect score instability)
+ASPIRATION_WINDOW_MIN = 15         # HCE 適配最低初始窗口
+ASPIRATION_WINDOW_BASE = 20        # 動態基礎窗口
+ASPIRATION_WINDOW_SCALE_DIV = 120  # 分數縮放除數，數值越小，分數高時窗口擴張越快
 
 # --- Pruning Techniques / 剪枝技術 ---
 # Master switches for new pruning techniques / 新剪枝技術的總開關
@@ -842,13 +845,13 @@ MAX_QUIESCENCE_DEPTH = 5
 RAZORING_MARGIN = 600 # Tightened from 700
 
 # Futility Pruning
-FP_BASE = 150      # Reduced base
-FP_MULTIPLIER = 180 # Reduced multiplier
+FP_BASE = 150      # aligned with SF11 HCE (78 cp)
+FP_MULTIPLIER = 150 # aligned with SF11 HCE (57 cp)
 
 # Reverse Futility Pruning
-RFP_MAX_DEPTH = 12           # V4: Extended from 9 to 12 based on parameter analysis
-RFP_BASE_MULT = 170           # V3: Reduced from 180 to 170 for deeper RFP reach
-RFP_NO_TT_PENALTY = 40       # Extra margin multiplier if TT info is missing
+RFP_MAX_DEPTH = 10            # aligned with SF11 HCE (SF11 is 5, 8 is safe for HCE)
+RFP_BASE_MULT = 150           # aligned with SF11 HCE (72 cp)
+RFP_NO_TT_PENALTY = 40       # Adjusted penalty
 
 NMP_STATIC_MARGIN = 150
 NMP_MIN_SIDE_NON_PAWNS = 2
