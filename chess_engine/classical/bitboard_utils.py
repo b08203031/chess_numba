@@ -161,6 +161,54 @@ def _init_rays():
 
 ROOK_RAYS, BISHOP_RAYS = _init_rays()
 
+def _init_line_bb():
+    """
+    Pre-computes LINE_BB[64][64] for O(1) pin legality checks.
+    
+    LINE_BB[sq1][sq2] returns the full line (rank, file, or diagonal) containing
+    both sq1 and sq2 if they are collinear, or 0 if not.
+    
+    This differs from SQUARES_BETWEEN which only contains squares strictly between
+    two endpoints (excluding endpoints themselves).
+    
+    Used in SF18-style Position::legal():
+        !(blockers_for_king(us) & from) || line_bb(from, to) & pieces(us, KING)
+    """
+    line_bb = np.zeros((64, 64), dtype=np.uint64)
+    for sq1 in range(64):
+        r1, f1 = sq1 // 8, sq1 % 8
+        for sq2 in range(64):
+            if sq1 == sq2:
+                continue
+            r2, f2 = sq2 // 8, sq2 % 8
+            
+            if r1 == r2:
+                # Same rank — full rank line
+                for f in range(8):
+                    line_bb[sq1, sq2] |= BB_SQUARES[r1 * 8 + f]
+            elif f1 == f2:
+                # Same file — full file line
+                for r in range(8):
+                    line_bb[sq1, sq2] |= BB_SQUARES[r * 8 + f1]
+            elif abs(r1 - r2) == abs(f1 - f2):
+                # Same diagonal — full diagonal line
+                dr = 1 if r2 > r1 else -1
+                df = 1 if f2 > f1 else -1
+                # Walk in both directions from sq1 along the diagonal
+                r, f = r1, f1
+                while 0 <= r < 8 and 0 <= f < 8:
+                    line_bb[sq1, sq2] |= BB_SQUARES[r * 8 + f]
+                    r += dr
+                    f += df
+                r, f = r1 - dr, f1 - df
+                while 0 <= r < 8 and 0 <= f < 8:
+                    line_bb[sq1, sq2] |= BB_SQUARES[r * 8 + f]
+                    r -= dr
+                    f -= df
+    return line_bb
+
+LINE_BB = _init_line_bb()
+
 @nb.njit(nb.int8(piece_bbs_signature, nb.uint8), cache=True)
 def find_piece_type_on_square(piece_bbs, square):
     """

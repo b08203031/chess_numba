@@ -1605,7 +1605,7 @@ def _evaluate_position_jit(piece_bbs, occupancy_bbs, game_state, lazy: bool, sea
     if lazy:
         final_score = (mg_score * phase + eg_score * (MAX_PHASE - phase)) // MAX_PHASE
         val = np.int32(final_score) if side_to_move == 0 else np.int32(-final_score)
-        return val, np.uint64(0), np.uint64(0)
+        return val, np.uint64(18446744073709551615), np.uint64(18446744073709551615)
 
     # --- 4. Pawn Structure (Cached or Uncached) ---
     if search_context is not None:
@@ -1639,7 +1639,7 @@ def _evaluate_position_jit(piece_bbs, occupancy_bbs, game_state, lazy: bool, sea
         if abs(v) > LAZY_EVAL_THRESHOLD + npm // 64:
             final_score = (mg_score * phase + eg_score * (MAX_PHASE - phase)) // MAX_PHASE
             val = np.int32(final_score) if side_to_move == 0 else np.int32(-final_score)
-            return val, np.uint64(0), np.uint64(0)
+            return val, np.uint64(18446744073709551615), np.uint64(18446744073709551615)
 
     # --- Compute Attacks, Mobility, Threats (Optimized Single Pass) ---
     (white_attacks, black_attacks, white_pawn_attacks, black_pawn_attacks,

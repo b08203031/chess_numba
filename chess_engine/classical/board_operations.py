@@ -105,6 +105,7 @@ def make_move(piece_bbs: np.ndarray, occupancy_bbs: np.ndarray, game_state: np.n
     key ^= PIECE_SQUARE_KEYS[moving_piece_bb_idx, to_sq]
     piece_bbs[moving_piece_bb_idx] ^= move_mask
     occupancy_bbs[side] ^= move_mask
+    occupancy_bbs[2] ^= move_mask
 
     # --- Pawn/Minor/Non-Pawn Key Update (Movement) ---
     pawn_key = game_state[PAWN_KEY_INDEX]
@@ -146,6 +147,7 @@ def make_move(piece_bbs: np.ndarray, occupancy_bbs: np.ndarray, game_state: np.n
         occupancy_bbs[opponent_color] &= ~capture_mask
         # Update Zobrist key for captured piece (remove) / 更新被吃棋子的 Zobrist 鍵（移除）
         key ^= PIECE_SQUARE_KEYS[captured_piece_bb_idx, to_sq]
+        occupancy_bbs[2] ^= capture_mask
         
         # --- Pawn/Minor/Non-Pawn Key Update (Capture) ---
         if captured_piece_type == PAWN:
@@ -205,6 +207,7 @@ def make_move(piece_bbs: np.ndarray, occupancy_bbs: np.ndarray, game_state: np.n
         # --- Pawn Key Update (En Passant) ---
         # Captured pawn removed from captured_pawn_sq
         pawn_key ^= PIECE_SQUARE_KEYS[captured_pawn_bb_idx, captured_pawn_sq]
+        occupancy_bbs[2] ^= capture_mask
 
     elif flag == SPECIAL_MOVE_FLAG_CASTLING:
         king_side_castle = to_sq > from_sq
@@ -226,9 +229,7 @@ def make_move(piece_bbs: np.ndarray, occupancy_bbs: np.ndarray, game_state: np.n
         else:
             np_black_key ^= PIECE_SQUARE_KEYS[rook_bb_idx, rook_from_sq]
             np_black_key ^= PIECE_SQUARE_KEYS[rook_bb_idx, rook_to_sq]
-
-    # --- Recalculate Combined Occupancy (Robust Fix) / 重新計算組合佔用位元棋盤（穩健修復） ---
-    occupancy_bbs[2] = occupancy_bbs[0] | occupancy_bbs[1]
+        occupancy_bbs[2] ^= rook_move_mask
 
     # --- Update Game State (Castling, EP, etc.) / 更新遊戲狀態 ---
     new_castling_rights = current_castling_rights & CASTLING_UPDATE_MASK[from_sq] & CASTLING_UPDATE_MASK[to_sq]
@@ -311,6 +312,7 @@ def unmake_move(piece_bbs: np.ndarray, occupancy_bbs: np.ndarray, game_state: np
     if flag != SPECIAL_MOVE_FLAG_PROMOTION:
         piece_bbs[moving_piece_bb_idx] ^= move_mask
         occupancy_bbs[side] ^= move_mask
+        occupancy_bbs[2] ^= move_mask
 
     # --- Restore Special Moves / 恢復特殊移動 ---
     if flag == SPECIAL_MOVE_FLAG_PROMOTION:
@@ -333,6 +335,12 @@ def unmake_move(piece_bbs: np.ndarray, occupancy_bbs: np.ndarray, game_state: np
         # 3. 相應更新佔用位元棋盤。
         occupancy_bbs[side] &= ~promo_mask  # The bit for the 'to' square is removed
         occupancy_bbs[side] |= pawn_mask   # The bit for the 'from' square is added
+        
+        # For occupancy_bbs[2]: if it was a capture promotion, to_sq remains occupied. Else it is quiet.
+        if captured_piece_type != -1:
+            occupancy_bbs[2] ^= pawn_mask
+        else:
+            occupancy_bbs[2] ^= move_mask
 
     elif flag == SPECIAL_MOVE_FLAG_EN_PASSANT:
         opponent_color = 1 - side
@@ -342,6 +350,7 @@ def unmake_move(piece_bbs: np.ndarray, occupancy_bbs: np.ndarray, game_state: np
 
         piece_bbs[captured_pawn_bb_idx] |= capture_mask
         occupancy_bbs[opponent_color] |= capture_mask
+        occupancy_bbs[2] ^= capture_mask
 
     elif flag == SPECIAL_MOVE_FLAG_CASTLING:
         king_side_castle = to_sq > from_sq
@@ -351,6 +360,7 @@ def unmake_move(piece_bbs: np.ndarray, occupancy_bbs: np.ndarray, game_state: np
 
         piece_bbs[rook_bb_idx] ^= rook_move_mask
         occupancy_bbs[side] ^= rook_move_mask
+        occupancy_bbs[2] ^= rook_move_mask
 
     # --- Restore Captured Piece / 恢復被吃棋子 ---
     if captured_piece_type != -1 and flag != SPECIAL_MOVE_FLAG_EN_PASSANT:
@@ -360,9 +370,8 @@ def unmake_move(piece_bbs: np.ndarray, occupancy_bbs: np.ndarray, game_state: np
 
         piece_bbs[captured_piece_bb_idx] |= capture_mask
         occupancy_bbs[opponent_color] |= capture_mask
-
-    # --- Recalculate Combined Occupancy (Robust Fix) / 重新計算組合佔用位元棋盤 ---
-    occupancy_bbs[2] = occupancy_bbs[0] | occupancy_bbs[1]
+        if flag != SPECIAL_MOVE_FLAG_PROMOTION:
+            occupancy_bbs[2] ^= capture_mask
 
     # --- Restore Game State / 恢復遊戲狀態 ---
     game_state[0] = side
