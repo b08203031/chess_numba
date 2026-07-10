@@ -476,36 +476,30 @@ def evaluate_piece_coordination(piece_bbs, piece_counts):
     # (compute_imbalance). The standalone bonus has been removed to avoid double-counting.
     # See SF11 material.cpp QuadraticOurs[0][0] = 1438.
 
-    # --- 2. Rooks on Open and Semi-Open Files / 車在開放線和半開放線 ---
+    # --- 2. Rooks on Open and Semi-Open Files (SF11: per-rook, not per-file) ---
     for f in range(8):
         file_mask = FILE_MASKS[f]
         
         white_pawns_on_file = (white_pawns & file_mask) != 0
         black_pawns_on_file = (black_pawns & file_mask) != 0
 
-        # White rooks
-        if (white_rooks & file_mask):
-            if not white_pawns_on_file:
-                if not black_pawns_on_file:
-                    # Open file for White / 白方開放線
-                    mg_score += ROOK_ON_OPEN_FILE_BONUS[0]
-                    eg_score += ROOK_ON_OPEN_FILE_BONUS[1]
-                else:
-                    # Semi-open file for White / 白方半開放線
-                    mg_score += ROOK_ON_SEMI_OPEN_FILE_BONUS[0]
-                    eg_score += ROOK_ON_SEMI_OPEN_FILE_BONUS[1]
-        
-        # Black rooks
-        if (black_rooks & file_mask):
+        w_rooks_on_file = count_bits(white_rooks & file_mask)
+        if w_rooks_on_file > 0 and not white_pawns_on_file:
             if not black_pawns_on_file:
-                if not white_pawns_on_file:
-                    # Open file for Black / 黑方開放線
-                    mg_score -= ROOK_ON_OPEN_FILE_BONUS[0]
-                    eg_score -= ROOK_ON_OPEN_FILE_BONUS[1]
-                else:
-                    # Semi-open file for Black / 黑方半開放線
-                    mg_score -= ROOK_ON_SEMI_OPEN_FILE_BONUS[0]
-                    eg_score -= ROOK_ON_SEMI_OPEN_FILE_BONUS[1]
+                mg_score += ROOK_ON_OPEN_FILE_BONUS[0] * w_rooks_on_file
+                eg_score += ROOK_ON_OPEN_FILE_BONUS[1] * w_rooks_on_file
+            else:
+                mg_score += ROOK_ON_SEMI_OPEN_FILE_BONUS[0] * w_rooks_on_file
+                eg_score += ROOK_ON_SEMI_OPEN_FILE_BONUS[1] * w_rooks_on_file
+        
+        b_rooks_on_file = count_bits(black_rooks & file_mask)
+        if b_rooks_on_file > 0 and not black_pawns_on_file:
+            if not white_pawns_on_file:
+                mg_score -= ROOK_ON_OPEN_FILE_BONUS[0] * b_rooks_on_file
+                eg_score -= ROOK_ON_OPEN_FILE_BONUS[1] * b_rooks_on_file
+            else:
+                mg_score -= ROOK_ON_SEMI_OPEN_FILE_BONUS[0] * b_rooks_on_file
+                eg_score -= ROOK_ON_SEMI_OPEN_FILE_BONUS[1] * b_rooks_on_file
     
     # --- 3. Rooks on 7th Rank / 車在第 7 橫排 ---
     # White Rooks on Rank 7 (Index 6)

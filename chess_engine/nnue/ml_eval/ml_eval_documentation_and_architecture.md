@@ -1,88 +1,97 @@
-# 神經網路評估 (NNUE) 系統：使用說明書、架構表與未來展望
+# 神經網路評估 (NNUE) 系統：使用說明書
 
-本文件詳細說明了在 `chess_engine/nnue/ml_eval/` 底下已實作的機器學習評估系統架構、如何使用您的 RTX 4050 進行訓練，以及引擎的推理效能設計。
-
----
-
-## 一、 實作系統架構
-
-詳細的神經網路架構（8 分桶 LayerStackNNUE）、HalfKA 特徵定義與結構重參數化數學，請參閱上一層的核心說明：**[ARCHITECTURE.md](../ARCHITECTURE.md)**。
-
-本手冊將專注於離線訓練管線的操作與資料準備。
+本文件說明 `chess_engine/nnue/ml_eval/` 的**離線訓練、量化與推理操作**。網路拓撲與數學細節見 **[ARCHITECTURE.md](../ARCHITECTURE.md)**；資料管線與 SPSA 總覽見 **[tuner/README.md](../../../../tuner/README.md)**。
 
 ---
 
-## 二、 使用說明書 (User Manual)
+## 一、目錄分工
 
-目前這個 workspace 的 NNUE 腳本位於根目錄；所有命令請從 workspace 根目錄執行。完整流程分為：**資料生成 → GPU 離線訓練 → 量化導出 → Numba 推理測試**。
+| 位置 | 角色 |
+| :--- | :--- |
+| `chess_engine/nnue/ml_eval/train.py` | PyTorch 訓練 LayerStackNNUE |
+| `chess_engine/nnue/ml_eval/quantize_weights.py` | `.pth` → 推理用 `.npy` |
+| `chess_engine/nnue/ml_eval/inference.py` | Numba 整數前向與暖機 |
+| `chess_engine/nnue/ml_eval/weights/` | `*.pth` / `*.npy` / `metadata.json` |
+| `tuner/nnue_pipeline/` | 下載 binpack、Primer、轉 HalfKA NPZ、合併資料集 |
+| `tuner/ultimate_halfka_farseerT75.npz` | 預設訓練資料集（由管線產生） |
 
-### 階段 0：確認外部工具
+**所有命令皆在專案根目錄執行。**
 
-`fetch_official_data.py` 會呼叫 `external/primer.exe`。如果只有 Primer 原始碼，請先自行編譯或把可執行檔放到 `external/primer.exe`；否則可先手動準備 Bullet `.bin`，再直接跑 `convert_bullet_bin.py`。
+---
+
+## 二、流程：資料 → 訓練 → 量化 → 推理
+
+### 階段 0：外部工具
+
+`tuner/nnue_pipeline/fetch_official_data.py` 會呼叫 `external/primer.exe`。若只有 Primer 原始碼，請先編譯或將執行檔放到 `external/primer.exe`；也可手動準備 Bullet `.bin`，再只跑轉換腳本。
 
 ### 階段 1：生成 HalfKAv2_hm 訓練資料
 
-推薦使用官方 Stockfish binpack 資料。預設設定針對 16GB RAM / 6GB VRAM：下載 `1024MB` binpack，Primer 最多輸出 `32,000,000` 筆 Bullet positions，轉出的未壓縮訓練陣列約 `3.96 GiB`。
+推薦官方 Stockfish binpack。預設面向約 16GB RAM / 6GB VRAM：下載 1024MB binpack、Primer 上限約 32M 局面。
 
 ```bash
-python fetch_official_data.py --target-mb 1024 --limit 32000000
+python tuner/nnue_pipeline/fetch_official_data.py --target-mb 1024 --limit 32000000
 ```
 
-流程會依序產生：
+典型產物：
 
-- `tuner/official_data_farseerT75.binpack`：截斷下載的官方來源資料。
-- `tuner/official_data_farseerT75.bin`：Primer 輸出的 Bullet 32-byte records。
-- `tuner/ultimate_halfka_farseerT75.npz`：`train.py` 實際使用的 HalfKAv2_hm sparse feature dataset。
+- `tuner/official_data_farseerT75.binpack`
+- `tuner/official_data_farseerT75.bin`（Primer Bullet records）
+- `tuner/ultimate_halfka_farseerT75.npz`（`train.py` 讀取）
 
-`convert_bullet_bin.py` 會使用 Stockfish 官方 HalfKAv2_hm feature order（每個視角 22,528 個索引，白/黑兩個 accumulator 共用同一張 FC1 表），並把 Primer raw `Value` 先轉成 UCI centipawns：`cp = value * 100 / 208`，再套用 `sigma(0.0025 * cp)` 生成 WDL target。
+轉換細節（特徵順序、WDL target）由 `tuner/nnue_pipeline/convert_bullet_bin.py` 處理：Primer raw `Value` → UCI cp（`cp = value * 100 / 208`）→ `sigma(0.0025 * cp)`。
 
 > [!IMPORTANT]
-> **數據特徵提取中的國王格子視角歸一化 (King Square Perspective Normalization)**：
-> - **Bullet 二進位格式**：由 `primer.exe` 輸出的 32 節點結構中，`king_square` 與 `opp_king_square` 分別代表行棋方（STM）與非行棋方（NSTM）的國王格子。
-> - **Primer 預先歸一化設計**：為了加速推理與簡化計算，`primer` 寫入 `.bin` 時，已將 `opp_king_square` 預先映射至 NSTM 自己的視角。
->   - *白方行棋時*：白王（STM）正常儲存，黑王（NSTM）則寫入垂直翻轉後的座標：`opp_king_square = blackKing.flippedVertically()` (即 `bk_sq_board ^ 56`)。
->   - *黑方行棋時*：黑王（STM）寫入垂直翻轉座標：`king_square = blackKing.flippedVertically()`，白王（NSTM）直接寫入原始座標：`opp_king_square = whiteKing`。
-> - **轉換器設計**：因此 `convert_bullet_bin.py` 在提取 NSTM 特徵時，直接讀取 `bk_sq_sym = bk_sq` 即可（無須在轉換器中重複進行 `^ 56`）。
-> - **測試驗證**：若要進行特徵提取的一致性比對測試，模擬輸入必須重現此歸一化邏輯，否則會使 NSTM King 的分桶索引偏移 28 個桶（差值 `19712`）。
+> **國王格子視角歸一化**：Primer 寫入 `.bin` 時，非行棋方國王座標已映到 NSTM 自身視角。轉換器讀 NSTM 時不必再對國王做 `^ 56`。一致性測試必須重現此歸一化，否則特徵桶會偏移。
 
-
-### 階段 2：從零訓練 NNUE
-
-改過 feature order 或 target scale 後，不要沿用舊 `.npz` 或舊 `best_model.pth`。測試 VRAM 是否足夠時，先保留目前 `BATCH_SIZE = 8192`；若 CUDA OOM，再降到 `4096`。
+其他管線工具（見 `tuner/README.md`）：
 
 ```bash
-python train.py
+python tuner/nnue_pipeline/convert_bullet_bin.py
+python tuner/nnue_pipeline/merge_datasets.py
+python tuner/nnue_pipeline/merge_tactical.py
+```
+
+### 階段 2：訓練
+
+改過 feature order 或 target scale 後，不要沿用舊 `.npz` / 舊 `best_model.pth`。VRAM 不足時可將 `BATCH_SIZE` 自 8192 降到 4096。
+
+```bash
+python chess_engine/nnue/ml_eval/train.py
 ```
 
 訓練會：
 
-- 讀取 `tuner/ultimate_halfka_farseerT75.npz`。
-- 使用 `BCEWithLogitsLoss`、AMP、gradient clipping。
-- 對 FC1 使用 `weight_decay=0`，dense/factorizer/delta 使用 `weight_decay=0.001`。
-- 儲存 `weights/latest_model.pth`、`weights/best_model.pth`。
-- 驗證集創新高時自動呼叫 `export_weights(model)`，輸出推理用 `.npy`。
+- 讀取 `tuner/ultimate_halfka_farseerT75.npz`（或腳本內相對路徑回退）
+- 使用 `BCEWithLogitsLoss`、AMP、gradient clipping
+- FC1：`weight_decay=0`；dense / factorizer / delta：`weight_decay=0.001`
+- 寫入 `chess_engine/nnue/ml_eval/weights/latest_model.pth`、`best_model.pth`
+- 驗證集創新高時自動導出推理用 `.npy`
 
-### 階段 3：必要時手動重新量化
-
-若已有 `weights/best_model.pth`，但想重新輸出 `.npy` 權重：
+### 階段 3：手動重新量化（可選）
 
 ```bash
-python quantize_weights.py
+python chess_engine/nnue/ml_eval/quantize_weights.py
 ```
 
-### 階段 4：測試 Numba 推理
+### 階段 4：Numba 推理自檢
 
 ```bash
-python inference.py
+python chess_engine/nnue/ml_eval/inference.py
 ```
 
-推理核心目前關閉 Numba `cache=True`，避免全域 NumPy 權重被 stale cache 固定；`warmup_numba_kernels()` 會在權重載入後集中完成 JIT 編譯。最終 cp divisor 使用與 `sigma(0.0025 * cp)` 數學對齊的 `41`（`127 × 128 × 0.0025 ≈ 40.64`）。
+推理路徑對全域 NumPy 權重通常關閉長期 `cache=True` 固定，改以 `warmup_numba_kernels()` 在載入後集中 JIT。輸出 cp 除數與 `sigma(0.0025 * cp)` 對齊為 **41**（`127 × 128 × 0.0025 ≈ 40.64`）。
+
+單元測試：
+
+```bash
+python -m unittest tests.test_nnue_validation
+```
 
 ---
 
-## 三、 展望與調優
+## 三、量化與調優備註
 
-1. **數據庫擴充**：
-    可透過 `fetch_official_data.py`、`convert_bullet_bin.py` 與後續合併工具，將官方 binpack、大師棋譜與戰術題進行聯集，擴增模型的泛化能力。
-2. **參數微調**：
-    網路各層的量化縮放係數 $Q_1=127$, $Q_{hidden}=128$ 已經過優化，既可防止溢出，又可完全利用二進位位移 (Bit-Shift) 加速乘除法運算；最終 cp divisor 採用與 $\sigma(0.0025 \times \text{cp})$ 數學對齊的 `41`。
+1. **資料擴充**：可合併官方 binpack、HF 資料與戰術題（`tuner/nnue_pipeline/`、`tuner/diagnostics/`）。
+2. **量化係數**：$Q_1=127$、$Q_{\text{hidden}}=128$；最終 cp divisor = 41。
+3. **架構不變性**：訓練期 Factorizer + 分桶殘差，導出期融合為 8 組獨立權重；細節見 [ARCHITECTURE.md](../ARCHITECTURE.md)。

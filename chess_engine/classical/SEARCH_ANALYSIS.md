@@ -116,11 +116,18 @@
     *   調整：受歷史分數調節（歷史表現好的移動減少歸約，表現差的增加歸約）。
     *   例外：給予將軍、升變等強迫性移動通常不進行歸約。
 
-### 4.8 單一擴展 (Singular Extensions, SE)
-*   **理念**：如果 TT 移動顯著好於其他所有候選移動（單一優勢），則將該節點的搜尋深度擴展 1 層，以確保計算精準度。
+### 4.8 奇異延展 (Singular Extensions, SE)
+*   **理念**：如果 TT 移動顯著好於其他所有候選移動（單一優勢），則加深該著法的搜尋，以確保強迫線計算精準。
+*   **細節**（HCE 調參，結構對齊 SF11 / SF18）：
+    *   門檻：`depth >= MIN_SINGULAR_DEPTH (+1 if ttPv)`，預設 `MIN_SINGULAR_DEPTH = 7`；TT bound 為 Lower/Exact 且 TT depth 足夠。
+    *   排除 TT 著後以 `depth//2` 搜尋；若分數 `< exclusion_beta` 則判定奇異。
+    *   **單 / 雙 / 三延展**：依與 `exclusion_beta` 的 margin 差距（含 PV、非 TT 吃子、correction 調整）。
+    *   **Depth boost**：奇異成立時節點 `depth += 1`（`ENABLE_SINGULAR_DEPTH_BOOST`）。**HCE fixed-time 預設關閉**——開啟後同深度節點成本上升、名義深度中位數下降，對局測試呈負 Elo。
+    *   **Multi-Cut（SF11 softbound）**：非奇異且 `exclusion_beta >= beta` 時回傳 `exclusion_beta`（禁止 mate / known-win）。**HCE 預設 `ENABLE_MULTICUT = False`**（曾測得 regression；depth boost 關閉後若仍負 Elo，優先保持關閉）。
+    *   **負延展**：`ttValue >= beta` → -3；`cutNode` → -2。
 
-### 4.9 內部迭代加深 (Internal Iterative Deepening, IID)
-*   **理念**：如果當前節點沒有 TT 移動（例如是新節點），則先以較淺的深度搜尋該節點，以獲得一個合適的移動進行排序，再進行完整搜尋。
+### 4.9 內部迭代加深 (Internal Iterative Deepening, IID) / IIR
+*   **理念**：如果當前節點沒有 TT 移動（例如是新節點），則先以較淺的深度搜尋該節點，以獲得一個合適的移動進行排序，再進行完整搜尋。現行實作為 **IIR**（直接減深），而非昂貴的子搜尋 IID。
 
 ---
 

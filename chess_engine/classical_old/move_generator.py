@@ -72,7 +72,7 @@ ROOK_MAGIC_NUMBERS = np.array([
     0x8220020041009aa, 0x201000208040041, 0x8006010850008204, 0x1094004093002402,
 ], dtype=np.uint64)
 
-from chess_engine.classical_old.bitboard_utils import get_lsb_index, count_bits, SQUARES_BETWEEN, ROOK_RAYS, BISHOP_RAYS
+from chess_engine.classical_old.bitboard_utils import get_lsb_index, count_bits, SQUARES_BETWEEN, ROOK_RAYS, BISHOP_RAYS, LINE_BB
 
 @numba.njit(numba.uint64(numba.uint8), cache=True, boundscheck=False, fastmath=True)
 def mask_bishop_attacks(sq):
@@ -153,10 +153,8 @@ def init_sliders_attacks():
     return bishop_attacks, rook_attacks
 
 BISHOP_ATTACKS, _rook_attacks_temp = init_sliders_attacks()
-ROOK_ATTACKS_1 = np.ascontiguousarray(_rook_attacks_temp[:16])
-ROOK_ATTACKS_2 = np.ascontiguousarray(_rook_attacks_temp[16:32])
-ROOK_ATTACKS_3 = np.ascontiguousarray(_rook_attacks_temp[32:48])
-ROOK_ATTACKS_4 = np.ascontiguousarray(_rook_attacks_temp[48:])
+# Flatten rook attacks into 1D array for zero-branch lookup: ROOK_ATTACKS_FLAT[sq * 4096 + index]
+ROOK_ATTACKS_FLAT = np.ascontiguousarray(_rook_attacks_temp.reshape(-1))
 # BISHOP_ATTACKS = np.empty((64, 512), dtype=np.uint64)
 # ROOK_ATTACKS = np.empty((64, 4096), dtype=np.uint64)
 
@@ -174,18 +172,15 @@ def get_bishop_attacks(sq, occ):
 def get_rook_attacks(sq, occ):
     """
     使用魔法位元棋盤查表獲取城堡的攻擊。
+    Zero-branch flat 1D lookup.
     """
     occ &= ROOK_MASKS[sq]
     occ *= ROOK_MAGIC_NUMBERS[sq]
     occ >>= np.uint64(64-ROOK_RELEVANT_BITS[sq])
-    if sq < 16:
-        return ROOK_ATTACKS_1[sq, occ]
-    elif sq < 32:
-        return ROOK_ATTACKS_2[sq - 16, occ]
-    elif sq < 48:
-        return ROOK_ATTACKS_3[sq - 32, occ]
-    else:
-        return ROOK_ATTACKS_4[sq - 48, occ]
+    return ROOK_ATTACKS_FLAT[sq * 4096 + occ]
+
+
+
 
 @numba.njit(cache=True, boundscheck=False, fastmath=True)
 def get_queen_attacks(sq, occ): return get_rook_attacks(sq, occ) | get_bishop_attacks(sq, occ)
@@ -214,9 +209,11 @@ GLOBAL_ATTACK_TABLES = (
     PAWN_ATTACKS, KNIGHT_ATTACKS, KING_ATTACKS,
     BISHOP_MASKS, ROOK_MASKS, BISHOP_MAGIC_NUMBERS, ROOK_MAGIC_NUMBERS,
     BISHOP_RELEVANT_BITS, ROOK_RELEVANT_BITS,
-    BISHOP_ATTACKS, ROOK_ATTACKS_1, ROOK_ATTACKS_2, ROOK_ATTACKS_3, ROOK_ATTACKS_4,
+    BISHOP_ATTACKS, ROOK_ATTACKS_FLAT,
     SQUARES_BETWEEN, ROOK_RAYS, BISHOP_RAYS
 )
+
+
 
 
 @numba.njit(cache=True, boundscheck=False, fastmath=True)
@@ -370,6 +367,111 @@ def get_pinned_pieces(piece_bbs, occupancy_bbs, side):
         pinners &= pinners - np.uint64(1)
 
     return pinned
+
+@numba.njit(cache=True, boundscheck=False, fastmath=True)
+def is_square_attacked_with_occ(piece_bbs, sq, occ, attacker_side):
+    """
+    Checks if a given square is attacked by the specified side,
+    using a CUSTOM occupancy bitboard instead of the actual occupancy.
+    
+    This is equivalent to SF18's attackers_to_exist(sq, occ, attacker_side).
+    Used for king move legality: check if the destination square is attacked
+    when the king's origin square is removed from the occupancy.
+    
+    Args:
+        piece_bbs: 12-element piece bitboard array
+        sq: target square index (0-63)
+        occ: custom occupancy bitboard (e.g. pieces() ^ from_sq for king moves)
+        attacker_side: side to check attacks from (WHITE=0 or BLACK=1)
+    
+    Returns:
+        bool: True if the square is attacked
+    """
+    if attacker_side == WHITE:
+        wp, wn, wb, wr, wq, wk = piece_bbs[0], piece_bbs[1], piece_bbs[2], piece_bbs[3], piece_bbs[4], piece_bbs[5]
+        if PAWN_ATTACKS[WHITE, sq] & wp: return True
+        if KING_ATTACKS[sq] & wk: return True
+        if KNIGHT_ATTACKS[sq] & wn: return True
+        if (wb | wq):
+            if get_bishop_attacks(sq, occ) & (wb | wq): return True
+        if (wr | wq):
+            if get_rook_attacks(sq, occ) & (wr | wq): return True
+    else:
+        bp, bn, bb, br, bq, bk = piece_bbs[6], piece_bbs[7], piece_bbs[8], piece_bbs[9], piece_bbs[10], piece_bbs[11]
+        if PAWN_ATTACKS[BLACK, sq] & bp: return True
+        if KING_ATTACKS[sq] & bk: return True
+        if KNIGHT_ATTACKS[sq] & bn: return True
+        if (bb | bq):
+            if get_bishop_attacks(sq, occ) & (bb | bq): return True
+        if (br | bq):
+            if get_rook_attacks(sq, occ) & (br | bq): return True
+    
+    return False
+
+@numba.njit(cache=True, boundscheck=False, fastmath=True)
+def get_blockers_for_king(piece_bbs, occupancy_bbs, king_side):
+    """
+    Computes all pieces (of EITHER side) that block slider attacks toward
+    king_side's king, plus the enemy pinners themselves.
+    
+    Equivalent to SF18's update_slider_blockers(Color c).
+    
+    Key difference from get_pinned_pieces():
+    - get_pinned_pieces() returns ONLY friendly pieces that are pinned.
+    - get_blockers_for_king() returns ALL single blockers on any slider ray
+      to the king, regardless of color. This is needed for discovered check
+      detection (a friendly piece can be a blocker for the ENEMY king).
+    
+    Args:
+        piece_bbs: 12-element piece bitboard array
+        occupancy_bbs: 3-element occupancy array [white, black, all]
+        king_side: the side whose king we're computing blockers for
+    
+    Returns:
+        (blockers, pinners) where:
+        - blockers: uint64 bitboard of all single-piece ray blockers
+        - pinners: uint64 bitboard of enemy sliders that pin through blockers
+    """
+    king_idx = KING if king_side == WHITE else (KING + 6)
+    king_bb = piece_bbs[king_idx]
+    if not king_bb:
+        return np.uint64(0), np.uint64(0)
+    king_sq = get_lsb_index(king_bb)
+
+    blockers = np.uint64(0)
+    pinners_bb = np.uint64(0)
+    occupied = occupancy_bbs[2]
+    own_pieces = occupancy_bbs[king_side]
+    enemy_offset = 6 if king_side == WHITE else 0
+
+    enemy_rooks = piece_bbs[ROOK + enemy_offset] | piece_bbs[QUEEN + enemy_offset]
+    enemy_bishops = piece_bbs[BISHOP + enemy_offset] | piece_bbs[QUEEN + enemy_offset]
+
+    # Orthogonal snipers
+    snipers = ROOK_RAYS[king_sq] & enemy_rooks
+    while snipers:
+        sniper_sq = get_lsb_index(snipers)
+        between = SQUARES_BETWEEN[king_sq, sniper_sq]
+        b = between & occupied
+        if b and count_bits(b) == 1:
+            blockers |= b
+            if b & own_pieces:
+                pinners_bb |= BB_SQUARES[sniper_sq]
+        snipers &= snipers - np.uint64(1)
+
+    # Diagonal snipers
+    snipers = BISHOP_RAYS[king_sq] & enemy_bishops
+    while snipers:
+        sniper_sq = get_lsb_index(snipers)
+        between = SQUARES_BETWEEN[king_sq, sniper_sq]
+        b = between & occupied
+        if b and count_bits(b) == 1:
+            blockers |= b
+            if b & own_pieces:
+                pinners_bb |= BB_SQUARES[sniper_sq]
+        snipers &= snipers - np.uint64(1)
+
+    return blockers, pinners_bb
 
 @numba.njit(cache=True, boundscheck=False, fastmath=True)
 def is_move_pseudo_legal(piece_bbs, occupancy_bbs, game_state, move):

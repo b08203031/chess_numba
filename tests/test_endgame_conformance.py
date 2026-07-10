@@ -1,3 +1,12 @@
+"""
+Specialized endgame unit tests (daily / CI-friendly).
+
+Win/draw/loss labels were cross-checked with Stockfish search via
+tools/verify_endgame_vs_sf.py (optional oracle). Scores use SF11 HCE scale
+(VALUE_KNOWN_WIN ≈ 10000), not NNUE centipawns.
+
+See also: tests/test_phase_a_eval.py (A1–A4 + extra KPK edges).
+"""
 import sys
 import os
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
@@ -6,140 +15,117 @@ import unittest
 import numpy as np
 from chess_engine.classical.fen_parser import parse_fen
 from chess_engine.classical.endgame import evaluate_special_endgame
+from chess_engine.classical.evaluation import evaluate_position
+
 
 class TestEndgameConformance(unittest.TestCase):
     def setUp(self):
-        # game_state layout: [castling_rights, en_passant_sq, active_color, halfmove_clock, fullmove_number]
-        self.game_state = np.array([15, -1, 0, 0, 1], dtype=np.int32)
-        self.phase = np.int32(0) # Endgame phase
+        self.phase = np.int32(0)
 
-    def test_evaluate_special_endgame_basic_mates_and_draws(self):
-        # White KB vs Black K (draw)
-        fen = "2b1k3/8/8/8/8/8/8/4K3 w - - 0 1"
-        piece_bbs, occupancy_bbs, active_color = parse_fen(fen)
-        is_special, score = evaluate_special_endgame(piece_bbs, occupancy_bbs, self.game_state, self.phase)
-        self.assertFalse(is_special)
+    def _special(self, fen):
+        piece_bbs, occupancy_bbs, game_state = parse_fen(fen)
+        hit, score = evaluate_special_endgame(piece_bbs, occupancy_bbs, game_state, self.phase)
+        val, _, _ = evaluate_position(piece_bbs, occupancy_bbs, game_state)
+        return hit, int(score), int(val), piece_bbs, occupancy_bbs, game_state
 
-        # White KN vs Black K (draw)
-        fen = "4k3/8/8/8/8/2N5/8/4K3 w - - 0 1"
-        piece_bbs, occupancy_bbs, active_color = parse_fen(fen)
-        is_special, score = evaluate_special_endgame(piece_bbs, occupancy_bbs, self.game_state, self.phase)
-        self.assertFalse(is_special)
-
-        # White KNN vs Black K (draw)
-        fen = "4k3/8/8/8/8/2N1N3/8/4K3 w - - 0 1"
-        piece_bbs, occupancy_bbs, active_color = parse_fen(fen)
-        is_special, score = evaluate_special_endgame(piece_bbs, occupancy_bbs, self.game_state, self.phase)
-        self.assertFalse(is_special)
-
-        # White KQ vs Black K (win)
-        fen = "4k3/8/8/8/3Q4/8/8/7K w - - 0 1"
-        piece_bbs, occupancy_bbs, active_color = parse_fen(fen)
-        is_special, score = evaluate_special_endgame(piece_bbs, occupancy_bbs, self.game_state, self.phase)
-        self.assertFalse(is_special)
-
-        # Black KQ vs White K (win)
-        fen = "4k3/8/8/8/3q4/8/8/7K w - - 0 1"
-        piece_bbs, occupancy_bbs, active_color = parse_fen(fen)
-        is_special, score = evaluate_special_endgame(piece_bbs, occupancy_bbs, self.game_state, self.phase)
-        self.assertFalse(is_special)
-
-        # White KR vs Black K (win)
-        fen = "4k3/8/8/8/3R4/8/8/7K w - - 0 1"
-        piece_bbs, occupancy_bbs, active_color = parse_fen(fen)
-        is_special, score = evaluate_special_endgame(piece_bbs, occupancy_bbs, self.game_state, self.phase)
-        self.assertFalse(is_special)
-
-        # White KBB vs Black K (win)
-        fen = "4k3/8/8/8/3BB3/8/8/7K w - - 0 1"
-        piece_bbs, occupancy_bbs, active_color = parse_fen(fen)
-        is_special, score = evaluate_special_endgame(piece_bbs, occupancy_bbs, self.game_state, self.phase)
-        self.assertFalse(is_special)
-
-        # White KBN vs Black K (win)
-        # bishop = 27 (d4), knight = 28 (e4), wk_sq = 7 (h1), bk_sq = 60 (e8)
-        # PUSH_TO_CORNERS[60] = 5440.
-        # PUSH_CLOSE[7] = 10.
-        # mate_kbnk = 10000 + 10 + 5440 = 15450.
+    # ----- KBNK (SF d40: mate) -----
+    def test_kbnk_white(self):
+        # SF: mate in ~34 from this setup
         fen = "4k3/8/8/8/3BN3/8/8/7K w - - 0 1"
-        piece_bbs, occupancy_bbs, active_color = parse_fen(fen)
-        is_special, score = evaluate_special_endgame(piece_bbs, occupancy_bbs, self.game_state, self.phase)
-        self.assertTrue(is_special)
-        self.assertEqual(score, 15450)
+        hit, score, val, *_ = self._special(fen)
+        self.assertTrue(hit)
+        self.assertGreater(score, 10000)
+        self.assertEqual(val, score)  # white to move
 
-    def test_evaluate_special_endgame_krkb_krkn_kqkr(self):
-        # White KR vs Black KB (KRKB)
-        fen = "4k3/8/8/5b2/3R4/8/8/7K w - - 0 1"
-        piece_bbs, occupancy_bbs, active_color = parse_fen(fen)
-        is_special, score = evaluate_special_endgame(piece_bbs, occupancy_bbs, self.game_state, self.phase)
-        self.assertFalse(is_special)
+    def test_kbnk_black(self):
+        fen = "7k/8/8/3bn3/8/8/8/4K3 w - - 0 1"
+        hit, score, val, *_ = self._special(fen)
+        self.assertTrue(hit)
+        self.assertLess(score, -10000)
+        # White to move: STM score == white-perspective score (negative = black winning)
+        self.assertEqual(val, score)
 
-        # Black KR vs White KB (KRKB)
-        fen = "4k3/8/8/5B2/3r4/8/8/7K w - - 0 1"
-        piece_bbs, occupancy_bbs, active_color = parse_fen(fen)
-        is_special, score = evaluate_special_endgame(piece_bbs, occupancy_bbs, self.game_state, self.phase)
-        self.assertFalse(is_special)
+    # ----- KXK (SF: mate) -----
+    def test_kxk_krk(self):
+        fen = "4k3/8/8/8/3R4/8/8/7K w - - 0 1"
+        hit, score, val, *_ = self._special(fen)
+        self.assertTrue(hit)
+        self.assertGreater(score, 10000)
+        self.assertGreater(val, 10000)
 
-        # White KR vs Black KN (KRKN)
-        fen = "4k3/8/6n1/8/3R4/8/8/7K w - - 0 1"
-        piece_bbs, occupancy_bbs, active_color = parse_fen(fen)
-        is_special, score = evaluate_special_endgame(piece_bbs, occupancy_bbs, self.game_state, self.phase)
-        self.assertFalse(is_special)
+    def test_kxk_kqk(self):
+        fen = "4k3/8/8/8/3Q4/8/8/7K w - - 0 1"
+        hit, score, val, *_ = self._special(fen)
+        self.assertTrue(hit)
+        self.assertGreater(score, 10000)
 
-        # Black KR vs White KN (KRKN)
-        fen = "4k3/8/6N1/8/3r4/8/8/7K w - - 0 1"
-        piece_bbs, occupancy_bbs, active_color = parse_fen(fen)
-        is_special, score = evaluate_special_endgame(piece_bbs, occupancy_bbs, self.game_state, self.phase)
-        self.assertFalse(is_special)
+    # ----- KPK (SF-verified) -----
+    def test_kpk_draw_opposition(self):
+        # SF d40: cp 0 — black king blocks pawn path with opposition
+        fen = "8/8/8/4k3/8/4K3/4P3/8 w - - 0 1"
+        hit, score, val, *_ = self._special(fen)
+        self.assertTrue(hit)
+        self.assertEqual(score, 0)
+        self.assertEqual(val, 0)
 
-        # White KQ vs Black KR (KQKR)
-        fen = "4k3/8/r7/8/3Q4/8/8/7K w - - 0 1"
-        piece_bbs, occupancy_bbs, active_color = parse_fen(fen)
-        is_special, score = evaluate_special_endgame(piece_bbs, occupancy_bbs, self.game_state, self.phase)
-        self.assertFalse(is_special)
+    def test_kpk_draw_front_of_pawn(self):
+        # SF d40: cp 0
+        fen = "8/8/8/8/4k3/8/4P3/4K3 w - - 0 1"
+        hit, score, val, *_ = self._special(fen)
+        self.assertTrue(hit)
+        self.assertEqual(score, 0)
 
-        # Black KQ vs White KR (KQKR)
-        fen = "4k3/8/8/4q3/3R4/8/8/7K w - - 0 1"
-        piece_bbs, occupancy_bbs, active_color = parse_fen(fen)
-        is_special, score = evaluate_special_endgame(piece_bbs, occupancy_bbs, self.game_state, self.phase)
-        self.assertFalse(is_special)
+    def test_kpk_win_h_pawn_corner(self):
+        # SF d40: mate in 16 — previously mis-labeled as draw in our tests
+        fen = "8/8/8/8/8/8/7P/5k1K w - - 0 1"
+        hit, score, val, *_ = self._special(fen)
+        self.assertTrue(hit)
+        self.assertGreater(score, 10000)
+        self.assertGreater(val, 10000)
 
-    def test_evaluate_special_endgame_krkp_kqkp_knnkp(self):
-        # White KR vs Black KP (KRKP, strong side in front of pawn win)
-        fen = "8/8/8/3k4/8/3p4/3K4/3R4 w - - 0 1"
-        piece_bbs, occupancy_bbs, active_color = parse_fen(fen)
-        is_special, score = evaluate_special_endgame(piece_bbs, occupancy_bbs, self.game_state, self.phase)
-        self.assertFalse(is_special)
+    def test_kpk_draw_rook_pawn_a_file(self):
+        # Classic a-pawn draw: defending king in front of rook pawn
+        # SF should be ~0; bitbase draw
+        fen = "8/8/8/8/8/k7/P7/K7 w - - 0 1"
+        hit, score, val, *_ = self._special(fen)
+        self.assertTrue(hit)
+        self.assertEqual(score, 0)
 
-        # Black KR vs White KP (KRKP)
-        fen = "3r4/3k4/3P4/8/3K4/8/8/8 b - - 0 1"
-        piece_bbs, occupancy_bbs, active_color = parse_fen(fen)
-        is_special, score = evaluate_special_endgame(piece_bbs, occupancy_bbs, self.game_state, self.phase)
-        self.assertFalse(is_special)
+    def test_kpk_win_advanced(self):
+        # White king in front of pawn, black king displaced — should be win
+        fen = "4k3/8/4K3/4P3/8/8/8/8 w - - 0 1"
+        hit, score, val, *_ = self._special(fen)
+        self.assertTrue(hit)
+        self.assertGreater(score, 10000)
 
-        # White KQ vs Black KP (KQKP, pawn on 7th rank / file C bishop pawn draw)
-        fen = "3Q3K/8/8/8/8/8/2p5/1k6 w - - 0 1"
-        piece_bbs, occupancy_bbs, active_color = parse_fen(fen)
-        is_special, score = evaluate_special_endgame(piece_bbs, occupancy_bbs, self.game_state, self.phase)
-        self.assertFalse(is_special)
+    # ----- KRKP / KQKP (SF: white better / mate) -----
+    def test_krkp(self):
+        # SF d22: ~+500 cp for white
+        fen = "4k3/8/8/8/3R4/8/4p3/4K3 w - - 0 1"
+        hit, score, val, *_ = self._special(fen)
+        self.assertTrue(hit)
+        self.assertGreater(score, 0)
+        self.assertGreater(val, 0)
 
-        # Black KQ vs White KP (KQKP)
-        fen = "1K6/2P5/8/8/8/8/8/3q3k w - - 0 1"
-        piece_bbs, occupancy_bbs, active_color = parse_fen(fen)
-        is_special, score = evaluate_special_endgame(piece_bbs, occupancy_bbs, self.game_state, self.phase)
-        self.assertFalse(is_special)
+    def test_kqkp(self):
+        # SF d22: mate
+        fen = "4k3/4p3/8/8/8/8/8/3QK3 w - - 0 1"
+        hit, score, val, *_ = self._special(fen)
+        self.assertTrue(hit)
+        self.assertGreater(score, 0)
 
-        # White KNN vs Black KP (KNNKP)
-        fen = "8/8/8/8/8/2N5/1p6/1K2N2k w - - 0 1"
-        piece_bbs, occupancy_bbs, active_color = parse_fen(fen)
-        is_special, score = evaluate_special_endgame(piece_bbs, occupancy_bbs, self.game_state, self.phase)
-        self.assertFalse(is_special)
+    # ----- Non-special -----
+    def test_not_special_kbk(self):
+        # SF d22: cp 0 theoretical draw; npm < rook so not KXK
+        fen = "4k3/8/8/8/3B4/8/8/4K3 w - - 0 1"
+        hit, score, *_ = self._special(fen)
+        self.assertFalse(hit)
 
-        # Black KNN vs White KP (KNNKP)
-        fen = "1k2n2K/1P6/2n5/8/8/8/8/8 b - - 0 1"
-        piece_bbs, occupancy_bbs, active_color = parse_fen(fen)
-        is_special, score = evaluate_special_endgame(piece_bbs, occupancy_bbs, self.game_state, self.phase)
-        self.assertFalse(is_special)
+    def test_not_special_opening(self):
+        fen = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
+        hit, score, *_ = self._special(fen)
+        self.assertFalse(hit)
+
 
 if __name__ == "__main__":
     unittest.main()

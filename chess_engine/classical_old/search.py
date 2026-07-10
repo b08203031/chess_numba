@@ -12,13 +12,16 @@ from chess_engine.classical_old.move_generator import (
     generate_legal_moves_buffer, generate_captures_buffer,
     generate_pseudo_legal_moves_buffer, generate_pseudo_legal_captures_buffer,
     generate_pseudo_legal_quiets_buffer,
-    is_square_attacked, is_move_pseudo_legal, check_legality_and_gives_check
+    is_square_attacked, is_square_attacked_with_occ, is_move_pseudo_legal,
+    get_blockers_for_king,
+    PAWN_ATTACKS, KNIGHT_ATTACKS, get_bishop_attacks, get_rook_attacks
 )
-from chess_engine.classical_old.bitboard_utils import get_lsb_index, count_bits
+from chess_engine.classical_old.bitboard_utils import get_lsb_index, count_bits, LINE_BB
 from chess_engine.classical_old.board_operations import make_move, unmake_move, make_null_move
 from chess_engine.classical_old.move import (
-    get_to_square, get_from_square, get_special_move_flag,
-    SPECIAL_MOVE_FLAG_PROMOTION, SPECIAL_MOVE_FLAG_EN_PASSANT
+    get_to_square, get_from_square, get_special_move_flag, get_promotion_piece,
+    SPECIAL_MOVE_FLAG_PROMOTION, SPECIAL_MOVE_FLAG_EN_PASSANT, SPECIAL_MOVE_FLAG_CASTLING,
+    PROMO_KNIGHT, PROMO_BISHOP, PROMO_ROOK, PROMO_QUEEN
 )
 from chess_engine.classical_old.constants import (
     BB_SQUARES, MG_MATERIAL_VALUES, INFINITY, MAX_QUIESCENCE_DEPTH, ASPIRATION_WINDOW_SIZE,
@@ -136,32 +139,7 @@ def apply_correction_history_score(game_state, search_context, raw_static_eval, 
             # HCE-specific tuning: weight = 10000 (larger than SF18's 8363)
             cntcv = 10000 * (val_2 + val_4)
 
-    correction_sum += cntcv
 
-    # Continuation Correction Heuristic (cntcv)
-    cntcv = 0
-    if ply > 0:
-        m_prev = search_context.move_stack[ply - 1]
-        pc_prev = search_context.piece_stack[ply - 1]
-        if m_prev != NO_MOVE and pc_prev != -1:
-            to_prev = get_to_square(m_prev)
-            val_2 = 0
-            if ply >= 2:
-                m_2 = search_context.move_stack[ply - 2]
-                pc_2 = search_context.piece_stack[ply - 2]
-                if m_2 != NO_MOVE and pc_2 != -1:
-                    val_2 = search_context.continuation_correction_history[pc_2, get_to_square(m_2), pc_prev, to_prev]
-            
-            val_4 = 0
-            if ply >= 4:
-                m_4 = search_context.move_stack[ply - 4]
-                pc_4 = search_context.piece_stack[ply - 4]
-                if m_4 != NO_MOVE and pc_4 != -1:
-                    val_4 = search_context.continuation_correction_history[pc_4, get_to_square(m_4), pc_prev, to_prev]
-            
-            # HCE-specific tuning: weight = 10000 (larger than SF18's 8363)
-            cntcv = 10000 * (val_2 + val_4)
-            
     correction_sum += cntcv
 
     corrected = np.int32(raw_static_eval) + np.int32(trunc_div(correction_sum, CORRECTION_HISTORY_DIVISOR))
@@ -198,8 +176,9 @@ def quiescence_search(piece_bbs, occupancy_bbs, game_state, alpha, beta, ply, se
     best_move = NO_MOVE
     stand_pat = np.int32(32767)
     best_eval = np.int32(-32767)
-
-
+    pinned_white = np.uint64(0)
+    pinned_black = np.uint64(0)
+    pinned_computed = False
 
     # Check for stop flag every 32768 nodes (at ~950k NPS this fires ~29x/sec)
     if (search_context.nodes_searched & 32767) == 0:
@@ -260,8 +239,12 @@ def quiescence_search(piece_bbs, occupancy_bbs, game_state, alpha, beta, ply, se
         if tt_entry['flag'] != TT_FLAG_NONE and tt_entry['static_eval'] != 32767:
             stand_pat = np.int32(tt_entry['static_eval'])
         else:
-            stand_pat_val, _, _ = _evaluate_position_jit(piece_bbs, occupancy_bbs, game_state, False, search_context)
+            stand_pat_val, p_w, p_b = _evaluate_position_jit(piece_bbs, occupancy_bbs, game_state, False, search_context)
             stand_pat = np.int32(stand_pat_val)
+            if p_w != np.uint64(18446744073709551615):
+                pinned_white = p_w
+                pinned_black = p_b
+                pinned_computed = True
         
         best_eval = stand_pat
 
@@ -294,11 +277,11 @@ def quiescence_search(piece_bbs, occupancy_bbs, game_state, alpha, beta, ply, se
     qs_tt_move = tt_entry['best_move'] if tt_entry['flag'] != TT_FLAG_NONE else NO_MOVE
 
     # Delay and conditionally compute pinned pieces (only if we have moves that need SEE scoring)
-    pinned_white = np.uint64(0)
-    pinned_black = np.uint64(0)
     if move_count > 1 or (move_count == 1 and moves[0] != qs_tt_move):
-        pinned_white = get_pinned_pieces(piece_bbs, occupancy_bbs, WHITE)
-        pinned_black = get_pinned_pieces(piece_bbs, occupancy_bbs, BLACK)
+        if not pinned_computed:
+            pinned_white = get_pinned_pieces(piece_bbs, occupancy_bbs, WHITE)
+            pinned_black = get_pinned_pieces(piece_bbs, occupancy_bbs, BLACK)
+            pinned_computed = True
 
     score_captures_with_tt_lazy(
         piece_bbs, occupancy_bbs, game_state,
@@ -311,6 +294,15 @@ def quiescence_search(piece_bbs, occupancy_bbs, game_state, alpha, beta, ply, se
         search_context,
         ply
     )
+
+    # --- Pre-compute king info for pre-make legality (Phase 3: QSearch Pre-make Legality) ---
+    side_to_move_qs = game_state[0]
+    opponent_side_qs = np.uint8(1 - side_to_move_qs)
+    our_king_bb_qs = piece_bbs[5] if side_to_move_qs == WHITE else piece_bbs[11]
+    our_king_sq_qs = get_lsb_index(our_king_bb_qs) if our_king_bb_qs else np.int8(0)
+
+    # Pinned pieces for pre-make legality (reuse from evaluation if available)
+    pinned_us_qs = pinned_white if side_to_move_qs == WHITE else pinned_black
 
     legal_moves_tried = 0
     for i in range(move_count):
@@ -350,14 +342,43 @@ def quiescence_search(piece_bbs, occupancy_bbs, game_state, alpha, beta, ply, se
                 if not _see_ge_jit(piece_bbs, occupancy_bbs, game_state[0], c_from, c_to, QS_SEE_THRESHOLD, pinned_white, pinned_black):
                     continue
 
+        # --- Pre-make Legality Fast Path (SF18-style) ---
+        qs_from_sq = get_from_square(move)
+        qs_to_sq = get_to_square(move)
+        qs_special_flag = get_special_move_flag(move)
+        skip_post_legality = False
+
+        if not is_currently_in_check:
+            if qs_from_sq != our_king_sq_qs and qs_special_flag != SPECIAL_MOVE_FLAG_EN_PASSANT:
+                # Non-king, non-EP move: use pin-based O(1) legality if pins are computed
+                if pinned_computed:
+                    from_bb = BB_SQUARES[qs_from_sq]
+                    if not (pinned_us_qs & from_bb):
+                        # Not pinned → guaranteed legal
+                        skip_post_legality = True
+                    elif LINE_BB[qs_from_sq, qs_to_sq] & our_king_bb_qs:
+                        # Pinned but moving along pin ray → still legal
+                        skip_post_legality = True
+                    else:
+                        # Pinned and moving off pin ray → illegal, skip make/unmake entirely
+                        continue
+            elif qs_from_sq == our_king_sq_qs:
+                # King move: check destination with king removed from occupancy
+                occ_without_king = occupancy_bbs[2] ^ our_king_bb_qs
+                if is_square_attacked_with_occ(piece_bbs, qs_to_sq, occ_without_king, opponent_side_qs):
+                    continue  # King walks into attack
+                skip_post_legality = True
+            # else: EP — fall through to post-make check
+
         unmake_info = make_move(piece_bbs, occupancy_bbs, game_state, move)
         
-        # --- Lazy Legality Check ---
-        king_bb_after_move = piece_bbs[5] if (1 - game_state[0]) == 0 else piece_bbs[11]
-        king_sq = get_lsb_index(king_bb_after_move) if king_bb_after_move else 0
-        if is_square_attacked(piece_bbs, occupancy_bbs, king_sq, game_state[0]):
-            unmake_move(piece_bbs, occupancy_bbs, game_state, move, unmake_info)
-            continue
+        # --- Post-make Legality Fallback (in-check evasions and EP only) ---
+        if not skip_post_legality:
+            king_bb_after_move = piece_bbs[5] if (1 - game_state[0]) == 0 else piece_bbs[11]
+            king_sq = get_lsb_index(king_bb_after_move) if king_bb_after_move else 0
+            if is_square_attacked(piece_bbs, occupancy_bbs, king_sq, game_state[0]):
+                unmake_move(piece_bbs, occupancy_bbs, game_state, move, unmake_info)
+                continue
             
         legal_moves_tried += 1
 
@@ -1150,6 +1171,31 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
         pinned_white = get_pinned_pieces(piece_bbs, occupancy_bbs, WHITE)
         pinned_black = get_pinned_pieces(piece_bbs, occupancy_bbs, BLACK)
 
+    # --- Phase 2: Pre-compute check info for Pre-make Legality + O(1) Gives-Check ---
+    side_to_move_s = game_state[0]
+    opponent_side_s = np.uint8(1 - side_to_move_s)
+    
+    # Our king info (for pre-make legality)
+    our_king_bb_s = piece_bbs[5] if side_to_move_s == WHITE else piece_bbs[11]
+    our_king_sq_s = get_lsb_index(our_king_bb_s) if our_king_bb_s else np.int8(0)
+    pinned_us_s = pinned_white if side_to_move_s == WHITE else pinned_black
+    
+    # Their king info (for O(1) gives-check detection)
+    their_king_bb_s = piece_bbs[11] if side_to_move_s == WHITE else piece_bbs[5]
+    their_king_sq_s = get_lsb_index(their_king_bb_s) if their_king_bb_s else np.int8(0)
+    
+    # Pre-compute check_squares: squares from which each piece type gives check
+    # Equivalent to SF18's set_check_info(): checkSquares[Pt] = attacks_bb<Pt>(ksq)
+    all_occ_s = occupancy_bbs[2]
+    check_sq_pawn_s = PAWN_ATTACKS[side_to_move_s, their_king_sq_s]
+    check_sq_knight_s = KNIGHT_ATTACKS[their_king_sq_s]
+    check_sq_bishop_s = get_bishop_attacks(their_king_sq_s, all_occ_s)
+    check_sq_rook_s = get_rook_attacks(their_king_sq_s, all_occ_s)
+    check_sq_queen_s = check_sq_bishop_s | check_sq_rook_s
+    
+    # Pre-compute blockers_for_their_king (for discovered check detection)
+    blockers_for_their_king_s, _ = get_blockers_for_king(piece_bbs, occupancy_bbs, opponent_side_s)
+
     best_move, max_eval = NO_MOVE, -INFINITY
     quiet_move_counter, searched_move_count = 0, 0
     legal_moves_tried = 0
@@ -1218,7 +1264,29 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                     pruned_moves += 1
                     continue
                   
-        # Removed unconditional pre_see_check_ok to prevent massive performance waste (Lazy Evaluation)
+        # --- Pre-make Legality Fast Path (SF18-style Phase 2) ---
+        skip_post_legality_s = False
+        
+        if not is_currently_in_check:
+            if from_sq != our_king_sq_s and flag != SPECIAL_MOVE_FLAG_EN_PASSANT:
+                # Non-king, non-EP move: use pin-based O(1) legality
+                from_bb_s = BB_SQUARES[from_sq]
+                if not (pinned_us_s & from_bb_s):
+                    # Not pinned → guaranteed legal
+                    skip_post_legality_s = True
+                elif LINE_BB[from_sq, to_sq] & our_king_bb_s:
+                    # Pinned but moving along pin ray → still legal
+                    skip_post_legality_s = True
+                else:
+                    # Pinned and moving off pin ray → illegal, skip make/unmake entirely
+                    continue
+            elif from_sq == our_king_sq_s and flag != SPECIAL_MOVE_FLAG_CASTLING:
+                # King move (non-castling): check destination with king removed from occupancy
+                occ_without_king_s = occupancy_bbs[2] ^ our_king_bb_s
+                if is_square_attacked_with_occ(piece_bbs, to_sq, occ_without_king_s, opponent_side_s):
+                    continue  # King walks into attack
+                skip_post_legality_s = True
+            # else: EP or Castling — fall through to post-make check
 
         # --- Make the move ---
         unmake_info = make_move(piece_bbs, occupancy_bbs, game_state, move)
@@ -1226,21 +1294,81 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
         if moved_piece_type != -1 and original_side == BLACK:
             moved_piece_type += 6
         
-        # --- Integrated Legality & Check Detection (R3) ---
-        our_side = 1 - game_state[0] # game_state[0] is now the opponent
-        our_king_bb = piece_bbs[5] if our_side == WHITE else piece_bbs[11]
-        our_king_sq = get_lsb_index(our_king_bb) if our_king_bb else 0
+        # --- Post-make Legality Fallback (in-check evasions, EP, Castling) ---
+        if not skip_post_legality_s:
+            post_king_bb = piece_bbs[5] if (1 - game_state[0]) == 0 else piece_bbs[11]
+            post_king_sq = get_lsb_index(post_king_bb) if post_king_bb else 0
+            if is_square_attacked(piece_bbs, occupancy_bbs, post_king_sq, game_state[0]):
+                unmake_move(piece_bbs, occupancy_bbs, game_state, move, unmake_info)
+                continue
         
-        their_king_bb = piece_bbs[11] if our_side == WHITE else piece_bbs[5]
-        their_king_sq = get_lsb_index(their_king_bb) if their_king_bb else 0
+        # --- O(1) Gives-Check Detection (SF18-style) ---
+        is_giving_check_after_move = False
         
-        is_legal, is_giving_check_after_move = check_legality_and_gives_check(
-            piece_bbs, occupancy_bbs, our_king_sq, their_king_sq, our_side
-        )
+        # 1. Direct check: does the moved piece land on a check square?
+        to_bb_s = BB_SQUARES[to_sq]
+        base_piece_type = moved_piece_type % 6 if moved_piece_type != -1 else -1
         
-        if not is_legal:
-            unmake_move(piece_bbs, occupancy_bbs, game_state, move, unmake_info)
-            continue
+        if base_piece_type == PAWN:
+            if is_promotion:
+                # Promotion changes occupancy (pawn removed, new piece appears),
+                # so pre-computed slider check_squares may be inaccurate.
+                # Knight promotion is a leaper — always correct with O(1).
+                # For slider promotions, use post-make is_square_attacked.
+                promo_piece = get_promotion_piece(move)
+                if promo_piece == PROMO_KNIGHT:
+                    if check_sq_knight_s & to_bb_s:
+                        is_giving_check_after_move = True
+                else:
+                    # Queen/Rook/Bishop promotion: post-make check for correctness
+                    their_king_bb_promo = piece_bbs[11] if original_side == WHITE else piece_bbs[5]
+                    their_king_sq_promo = get_lsb_index(their_king_bb_promo) if their_king_bb_promo else 0
+                    if is_square_attacked(piece_bbs, occupancy_bbs, their_king_sq_promo, original_side):
+                        is_giving_check_after_move = True
+            else:
+                if check_sq_pawn_s & to_bb_s:
+                    is_giving_check_after_move = True
+        elif base_piece_type == KNIGHT:
+            if check_sq_knight_s & to_bb_s:
+                is_giving_check_after_move = True
+        elif base_piece_type == BISHOP:
+            if check_sq_bishop_s & to_bb_s:
+                is_giving_check_after_move = True
+        elif base_piece_type == ROOK:
+            if check_sq_rook_s & to_bb_s:
+                is_giving_check_after_move = True
+        elif base_piece_type == QUEEN:
+            if check_sq_queen_s & to_bb_s:
+                is_giving_check_after_move = True
+        
+        # 2. Discovered check: if the moved piece was blocking a slider ray to their king
+        if not is_giving_check_after_move:
+            from_bb_dc = BB_SQUARES[from_sq]
+            if blockers_for_their_king_s & from_bb_dc:
+                # The piece was blocking a ray to their king.
+                # If it moved off that ray, it's a discovered check.
+                if not (LINE_BB[from_sq, to_sq] & their_king_bb_s):
+                    is_giving_check_after_move = True
+        
+        # 3. Special case: EP discovered check through the captured pawn
+        if not is_giving_check_after_move and flag == SPECIAL_MOVE_FLAG_EN_PASSANT:
+            # The captured pawn is removed — this could open a rank for slider attacks
+            # Use a post-make check for this rare case
+            # Note: after make_move, game_state[0] has flipped to opponent.
+            # We want to check if THEIR king is attacked by OUR side (original_side).
+            their_king_bb_post = piece_bbs[11] if original_side == WHITE else piece_bbs[5]
+            their_king_sq_post = get_lsb_index(their_king_bb_post) if their_king_bb_post else 0
+            if is_square_attacked(piece_bbs, occupancy_bbs, their_king_sq_post, original_side):
+                is_giving_check_after_move = True
+        
+        # 4. Special case: Castling gives check via the rook's final position
+        #    Use post-make is_square_attacked since occupancy changes after castling
+        #    (both king and rook move). Castling is rare so this is negligible overhead.
+        if not is_giving_check_after_move and flag == SPECIAL_MOVE_FLAG_CASTLING:
+            their_king_bb_castle = piece_bbs[11] if original_side == WHITE else piece_bbs[5]
+            their_king_sq_castle = get_lsb_index(their_king_bb_castle) if their_king_bb_castle else 0
+            if is_square_attacked(piece_bbs, occupancy_bbs, their_king_sq_castle, original_side):
+                is_giving_check_after_move = True
             
         legal_moves_tried += 1
 

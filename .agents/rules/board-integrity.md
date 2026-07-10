@@ -1,59 +1,59 @@
 ---
-description: "Chess board integrity, state representation, and Make/Unmake correctness invariants."
+description: "Bitboard occupancy sync, make/unmake reversibility, incremental Zobrist; perft recommendation."
 trigger: glob
-glob: "**/{board_operations,move_generator,board,zobrist}.py"
+glob: "**/chess_engine/**/{board_operations,move_generator,zobrist,bitboard_utils,move,fen_parser}.py"
 ---
 
-# Board Integrity & State Invariants
+# Board Integrity Invariants
 
-When designing or modifying the board state representation, move generator, or move execution scripts, the AI assistant **MUST** ensure the mathematical and logical consistency of all board invariants.
+When changing board state, movegen, or hashing, preserve these invariants.
 
----
-
-## 1. Board Representation Invariants
-
-*   **Perfect Synchronization of Bitboards and Occupancy**:
-    *   `piece_bbs` (length 12) stores the 6 piece types for White (0-5) and Black (6-11) independently.
-    *   `occupancy_bbs[0]` (WHITE) **must** be the bitwise OR union of `piece_bbs[0:6]`.
-    *   `occupancy_bbs[1]` (BLACK) **must** be the bitwise OR union of `piece_bbs[6:12]`.
-    *   `occupancy_bbs[2]` (ALL) **must** be exactly `occupancy_bbs[0] | occupancy_bbs[1]`.
-    *   **This relationship must hold perfectly after any move execution (Make) or retraction (Unmake). Otherwise, sliding piece attack masks and move generation will completely fail.**
+Details: `chess_engine/README.md`, classical `board_operations.py` / `zobrist.py`.
 
 ---
 
-## 2. In-Place Modifications & Reversibility of Unmake
+## 1. Occupancy sync (MUST hold after every make/unmake)
 
-The engine utilizes highly optimized in-place state modifications rather than cloning the board structure.
+* `piece_bbs[0:6]` = White pieces; `piece_bbs[6:12]` = Black
+* `occupancy_bbs[0]` = OR of White piece BBs
+* `occupancy_bbs[1]` = OR of Black piece BBs
+* `occupancy_bbs[2]` = `occupancy_bbs[0] | occupancy_bbs[1]`
 
-*   **Responsibilities of `make_move`**:
-    1.  Update the piece placements within `piece_bbs` and `occupancy_bbs`.
-    2.  Handle specialized moves: **Captures** (remove opponent piece, update occupancy), **Promotions** (remove pawn, place new piece), **En Passant** (remove target pawn on adjacent square), and **Castling** (move both King and Rook atomically).
-    3.  Compute new state attributes: toggle side-to-move, update castling rights, set new en passant target squares, and update the halfmove clock.
-    4.  **Preserve Irreversible State**: Package pre-move metadata (castling rights, en passant file, halfmove clock, old Zobrist key, evaluation keys) into an `unmake_info` tuple and return it.
-*   **Responsibilities of `unmake_move`**:
-    *   `unmake_move` **must** represent the mathematically exact inverse of `make_move`.
-    *   Use the preserved metadata in `unmake_info` to restore all irreversible states.
-    *   Reverse sliding operations (e.g., castling, promotion, en passant) using precise bitwise masks to ensure no orphaned bits or missing pieces remain.
+Broken occupancy → wrong sliders, legality, SEE, and eval.
 
 ---
 
-## 3. Zobrist Hash & Incremental Key Invariants
+## 2. Make / unmake (MUST)
 
-To prevent catastrophic collision errors and missed moves in the Transposition Table (TT):
+**`make_move`:**
 
-*   **Strictly Incremental Zobrist Updates**:
-    *   **Never** recalculate the entire Zobrist key from scratch during search.
-    *   Use bitwise XOR operations to incrementally update the hash key:
-        *   Piece movement: `key ^= PIECE_SQUARE_KEYS[piece, from] ^ PIECE_SQUARE_KEYS[piece, to]`
-        *   Capture: `key ^= PIECE_SQUARE_KEYS[captured_piece, to]`
-        *   Castling rights, en passant, or active color changes: XOR with the corresponding feature key.
-*   **Incremental Evaluation Keys**:
-    *   The pawn structure key (`pawn_key`), minor piece key (`minor_key`), and non-pawn keys (`non_pawn_key_white/black`) **must** also be incrementally updated via XOR operations during make/unmake.
-    *   `unmake_move` **must** restore these keys directly from `unmake_info` rather than running any full-board scanning.
+1. Update `piece_bbs` + `occupancy_bbs` in place
+2. Handle captures, promotions, en passant (remove pawn on **capture** square), castling (king + rook)
+3. Toggle STM; update castling rights, EP, halfmove clock
+4. Return `unmake_info` with all irreversible fields (rights, EP, halfmove, old Zobrist / eval keys, captured piece, etc.)
+
+**`unmake_move`:**
+
+* Exact inverse of make; restore irreversible state **only** from `unmake_info`
+* No orphan bits, no full-board rebuild
 
 ---
 
-## 4. Perft Verification Mandatory Recommendation
+## 3. Zobrist & eval keys (MUST)
 
-*   **Verification Safeguard**: Any modification touching `make_move`, `unmake_move`, `move_generator.py`, or bitwise helper routines **must** recommend that the user executes a Perft (performance test) suite.
-*   The AI assistant **must** supply specific terminal commands to run a Perft up to Depth 5 on multiple positions (including the Start Position, Kiwipete, and highly tactical en-passant/promotion setups) to be manually run by the user.
+* **Incremental XOR only** during search — never full rehash on the hot path
+* Piece move / capture / rights / EP / color: XOR corresponding keys
+* `pawn_key`, `minor_key`, non-pawn keys: incremental on make; restore from `unmake_info` on unmake
+
+---
+
+## 4. After changes (recommend to user)
+
+Do not auto-run heavy perft. Suggest:
+
+```bash
+python -m tests.perft perft --depth 5
+python -m tests.perft perft --depth 4 --fen "r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1"
+```
+
+Include EP/promotion positions if those paths changed.

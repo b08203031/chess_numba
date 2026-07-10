@@ -1,88 +1,99 @@
-# 引擎對戰與測試框架 (Tournament Framework) 說明文檔
+# 引擎對戰與測試框架 (Tournament Framework)
 
-本資料夾與外層的 `tournament.py` 腳本，構成了 `chess_numba` 專案用來驗證西洋棋引擎棋力是否有實質進步的測試框架。本測試框架的設計理念參考了 Stockfish 所使用的分散式測試平台 **Fishtest** 的嚴謹統計方法論。
+本目錄存放**對戰勝果、統計腳本與分析報告**。對戰執行器在 `tools/tournament.py`，設計理念參考 Fishtest 的 SPRT / 成對換先方法。
 
-## 現代化測試機制介紹
-
-為了能以最少的算力得出最精準的 Elo 變化結論，本測試框架具備以下三大核心機制：
-
-### 1. 序貫機率比例檢定 (SPRT - Sequential Probability Ratio Test)
-傳統的對弈測試通常是設定「固定盤數」（例如 500 盤），然後觀察最終勝率。這種作法不僅浪費算力（可能在第 50 盤就明顯看出大翻車），也容易產生偽陽性。
-SPRT 是一種**動態樣本大小**的假設檢定方法：
-- **H0 (原假設)**：新版本沒有進步 (增益為 0 Elo)。
-- **H1 (對立假設)**：新版本有進步 (增益達到目標，預設為 5 Elo)。
-
-系統會隨對弈結果不斷計算 **對數概似比 (LLR)**。當 LLR 突破上限邊界時，代表測試通過 (引擎變強了)；當 LLR 跌破下限邊界時，代表測試失敗 (改動無效或變弱)。這讓我們能**提早中斷**沒有懸念的測試。
-
-### 2. 成對起手交換 (Match-Pair & Pentanomial Statistics)
-由於西洋棋中「白方」具有先天優勢，單純計算勝率會混入統計雜訊。
-本腳本會在測試開始前讀取 `openings.epd` (若存在)，並在每一輪 (Pair) 中：
-1. 隨機選定一個起手開局（例如西西里防禦）。
-2. 第一局：引擎 A 執白，引擎 B 執黑。
-3. 第二局：引擎 A 執黑，引擎 B 執白。
-
-將這兩盤的總得分作為一個獨立的統計樣本（0, 0.5, 1, 1.5, 2 分），這完美排除了執白執黑的干擾。
-
-### 3. 強制純算力對決 (Disable OwnBook)
-引擎如果內建了開局庫 (Opening Book)，在測試時會因為「背譜」而掩蓋了真實的搜尋 (Search) 與評估 (Evaluation) 能力。腳本會在引擎準備階段發送 `setoption name OwnBook value false`，強迫引擎在所有的局面上都必須自己算棋。
+完整操作參數見 **[tools/TOURNAMENT_TUTORIAL.md](../tools/TOURNAMENT_TUTORIAL.md)**。
 
 ---
 
-## 如何執行測試
+## 核心機制（摘要）
 
-回到專案根目錄，執行 `tournament.py` 腳本：
+1. **SPRT**：動態樣本數，LLR 觸界即停（進步 / 無進步）。
+2. **Match-Pair**：同一開局換先各一局，降低白先偏差。
+3. **關閉開局書**：`OwnBook false`，比的是搜尋與評估，不是背譜。
+
+開局庫預設路徑：`data/openings.epd`（專案根目錄下）。
+
+---
+
+## 如何執行
+
+在**專案根目錄**：
 
 ```bash
-python tournament.py --time 50 --games 500
+python tools/tournament.py --time 1000 --games 100
 ```
 
-### 常用參數說明
-- `--engine1`: 基準引擎 (舊版) 的起點程式，預設 `main.py`
-- `--engine2`: 測試引擎 (新版) 的起點程式，預設 `chess_engine_v2/main.py`
-- `--name1`, `--name2`: 引擎名稱標籤，用於 PGN 與終端機輸出顯示。
-- `--games`: 最大測試局數 (預設 500)。若 SPRT 提早觸發，將不會跑滿。請注意，由於是 Match-Pair 測試，輸入 500 代表最多會跑 250 個 Pair (共 500 盤)。
-- `--time`: 每步棋的思考時間限制 (預設 50 毫秒)。
+### 常用參數（與 `tools/tournament.py` 預設一致）
 
-### 自訂開局庫
-若希望使用不同的開局庫進行測試，請在根目錄準備一個 `openings.epd` 檔案，裡面每一行是一個符合 EPD 格式的西洋棋局面。腳本啟動時會自動載入並洗牌。
+| 參數 | 預設 | 說明 |
+| :--- | :--- | :--- |
+| `--engine1` | `main.py` | New（現行 `classical`） |
+| `--engine2` | `main_old.py` | Old（`classical_old` 基準） |
+| `--name1` / `--name2` | `New` / `Old` | PGN 標籤 |
+| `--games` | `100` | 最大局數（偶數；成對換先） |
+| `--time` | `1000` | 每步毫秒 |
+| `--depth` / `--nodes` | 無 | 固定深度或節點（會覆蓋時間） |
+| `-c` / `--concurrency` | `1` | 並行 worker 數 |
+
+同步 Old 程式碼（僅 `.py`）：
+
+```bash
+python tools/sync_classical_old.py --diff
+```
 
 ---
 
-## 輸出結果判讀與 SPRT 狀態解析
+## 對戰結果分析腳本
 
-系統會在每完成一個 Match-Pair (兩盤換先手的對局) 後，根據累積的對弈結果更新並輸出目前的 SPRT 狀態：
+在**專案根目錄**對 `tournament_results.pgn` 跑：
+
+```bash
+# 局級：WDL / Elo / 執色 / 長度分桶 / 對局對 / 升變 / 累積得分
+python tournament_analysis/統計數據.py
+python tournament_analysis/統計數據.py --target New --peek   # 只看 PGN 摘要
+
+# 著法級：深度 / 節點 / 時間 / NPS、分執色、深度直方、同深度節點比 + 圖表
+python tournament_analysis/parse_search_stats.py
+python tournament_analysis/parse_search_stats.py --name1 New --name2 Old
+```
+
+| 腳本 | 產出 |
+| :--- | :--- |
+| `統計數據.py` | 終端報告、`game_stats_report.txt`、`cumulative_wins.png` |
+| `parse_search_stats.py` | `search_stats_report.txt`、`depth_per_move.png`、`nodes_per_move.png`、`time_per_move.png`、`avg_nodes_vs_depth.png` |
+
+（舊的 `scratch/analyze_tournament_phase_*.py`、`_extra_analysis.py`、`inspect_pgn.py` 已併入上述兩支腳本並刪除。）
+
+---
+
+## 本目錄內容
+
+| 檔案 | 用途 |
+| :--- | :--- |
+| `tournament_results.pgn` | 最近一輪（或累積）對戰棋譜 |
+| `統計數據.py` | 局級統計（WDL / Elo / 分桶 / pair…） |
+| `parse_search_stats.py` | 著法級搜尋統計與圖表 |
+| `sprt_tutorial.md` | SPRT 原理補充 |
+| `pair_outcomes_meaning.md` | 成對結果語意 |
+
+HCE 對齊與階段總覽仍以 [HCE_SF11_GAP_AUDIT.md](../chess_engine/classical/HCE_SF11_GAP_AUDIT.md) 為主。
+
+---
+
+## SPRT 輸出判讀（摘要）
+
 ```text
 After 10 pairs (20 games):
-Engine_A: 10.5
-Engine_B: 9.5
+...
 SPRT LLR: 0.85 bounds: [-2.94, 2.94]
 SPRT Status: Continue
 ```
 
-### 關鍵數據解讀
+| 狀態 | 意義 |
+| :--- | :--- |
+| **Continue** | 尚未觸界，繼續測 |
+| **H1 Accepted** | 判定 New 相對 Old 有目標水準的進步 |
+| **H0 Accepted** | 判定無進步或退步，可提前中止 |
 
-1. **SPRT LLR (Log-Likelihood Ratio，對數概似比)**： 
-   - 這是 SPRT 檢定的核心數值，代表著「目前收集到的比賽結果，有多**傾向**支持新引擎確實有進步 (達到設定的 Elo 增幅)」。
-   - 數值大於 0 表示賽果傾斜向「有進步」；小於 0 則傾斜向「無進步或退步」。
-
-2. **bounds (檢定邊界 $[B, A]$)**： 
-   - 由我們設定的容忍率 ($\alpha$ 偽陽性率 = 0.05, $\beta$ 偽陰性率 = 0.05) 所推導出來的停止線。預設大約為 `[-2.94, 2.94]`。
-   - 這兩條線就像拔河的底線，只要 LLR 的數值撞到任何一邊的邊界，系統就有足夠的數學信心做出最終判斷。
-
-### SPRT Status 狀態意義
-
-- **Continue (繼續測試)**： 
-  - `B < LLR < A`。
-  - 目前的比賽結果還不夠明確，無法得出具有 95% 統計信心的結論（可能是樣本數太少，或者兩者的實力真的太接近）。系統會繼續分配算力進行下一對比賽。
-
-- **H1 Accepted (接受對立假設：有進步)**： 
-  - `LLR >= A` (例如 LLR 突破了 2.94)。
-  - **恭喜！** 新引擎 (Engine 1) 證明了自己**顯著**比舊引擎強，且勝率提升達到了我們設定的目標（預設是 +5 Elo）。這個改動非常有價值，可以放心合併進主分支。測試會在這裡以「成功」為由提早終止。
-
-- **H0 Accepted (接受原假設：無進步或退步)**： 
-  - `LLR <= B` (例如 LLR 跌破了 -2.94)。
-  - 這表示目前的改動**未能**帶來預期的強度提升，甚至可能讓引擎變弱了。系統有極高的信心確認這個修改是無效或有害的。測試會在這裡以「失敗」為由提早終止，為您省下原本要跑滿 500 盤的算力。這時應果斷放棄此改動，或重新檢視程式碼邏輯。
-
----
-
-對弈的完整棋譜會被儲存在本資料夾內的 `tournament_results.pgn` 檔案中，您可以使用 ChessBase、Lichess 或其他 GUI 軟體開啟並回顧這批對局的具體內容。
+棋譜可用 Lichess / ChessBase 等開啟 `tournament_results.pgn` 複盤。

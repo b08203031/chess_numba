@@ -1,49 +1,49 @@
-# Chess Numba Engine — AI Agent Instructions & Guidelines
+# Chess Numba Engine — AI Agent Instructions
 
-歡迎來到本專案！此檔案是 AI 助手在進入工作區時的首要導覽指南。旨在為各種 AI 助理（如 Google Antigravity、Gemini、Cursor、Claude Code 等）提供專案背景與開發導引。
+專案入口：Python / Numba 西洋棋引擎，雙評估架構 **Classical HCE** 與 **NNUE**。
 
----
-
-## 專案簡介 (Project Overview)
-
-本專案是一個採用 **Python** 開發的高性能西洋棋引擎，核心運算透過 **Numba JIT** 靜態編譯為機器碼，以發揮極致效能。引擎具備兩個主要評估架構：
-
-1. **Classical 模組**：傳統手工評估與精心調優的 Alpha-Beta 搜尋。
-2. **NNUE 模組**：半精緻神經網路評估，包含 PyTorch 訓練模型與 Numba 高速推理引擎。
-
-### 核心技術棧 (Technology Stack)
-
-* **語言環境**：Python 3.10
-* **編譯加速**：Numba JIT Compiler (`@numba.njit`)
-* **資料儲存**：NumPy Arrays（強烈類型約束，如 `np.uint64` 位元棋盤）
-* **神經網路**：PyTorch (NNUE 訓練、驗證與導出)
-* **通訊協定**：UCI (Universal Chess Interface)
+| 項目 | 內容 |
+| :--- | :--- |
+| 語言 | Python **3.10** |
+| 加速 | Numba `@njit` |
+| 資料 | NumPy（含 `np.uint64` 位元棋盤） |
+| NNUE 訓練 | PyTorch |
+| 協定 | UCI |
 
 ---
 
-## 模組化規則指引 (Workspace Rules Directory)
+## 必讀索引
 
-為避免上下文污染並提高任務的精準度，本專案的詳細開發限制已拆分為**模組化規則檔案**，並儲存於 `.agents/rules/` 目錄下。
+1. **文件地圖**：根目錄 [`README.md`](README.md) →「📂 專案文件導覽」
+2. **模組規則**：下方 `.agents/rules/`（有 frontmatter 的工具會自動載入；否則**手動開啟**與當前檔案對應的規則）
 
-AI 助手在執行任務時，應依據觸發條件自動載入並遵循以下特定檔案中的規範：
+### Always-on
 
-1. **工作流程與測試規範**：參見 [workflow.md](file:///.agents/rules/workflow.md) (Always-on)
-    * *重要提醒*：
-        * **工作前讀文檔**：修改任何檔案前，必須先閱讀 `README.md` 的「📂 專案文件導覽 (Documentation Map)」以檢索相關背景。
-        * **工作後更新文檔**：新增功能或重構後，必須主動更新技術文檔並同步 `README.md` 中的導覽索引。
-        * **讀取 Stockfish 原始碼**：為對齊演算法與數值細節，本專案設有對應的原始碼目錄。AI 助手可以使用 `grep_search` 或開啟 `research` 子代理 (Subagent) 在背景閱讀與分析這些目錄下的 C++ 原始碼。
-            * **分析搜尋函數**要參考 [stockfish_repo](file:///c:/Users/ren%20cian/OneDrive/桌面/chess/chess_numba/chess_numba/stockfish_repo) (SF 18)。
-            * **分析 HCE 評估函數**要參考 [stockfish_11](file:///c:/Users/ren%20cian/OneDrive/桌面/chess/chess_numba/chess_numba/stockfish_11) (SF 11)。
-        * **允許輕量自動測試**：對於不需要或僅需輕度 Numba 編譯的單元測試（例如 `unittest`），AI 助手可以主動在背景執行以驗證代碼正確性。但重型測試（如 Elo 對局、大型 Benchmark 或大規模 Perft 測試）仍需取得使用者指示或核准後始可執行。
-        * **編譯時間警示**：由於 Numba JIT 靜態編譯計算密集型函數可能耗時較長，首次執行測試或搜尋（編譯期）可能需要超過 5 分鐘，請耐心等候，切勿頻繁輪詢或重複啟動任務。
-2. **Numba 編譯相容性限制**：參見 [numba-jit.md](file:///.agents/rules/numba-jit.md) (Always-on)
-    * 標準 Numba `nopython` 限制（禁止 Class, dynamic types, dict/set comprehensions, try/except）與專案數組規範。
-3. **棋盤完整性與可逆性**：參見 [board-integrity.md](file:///.agents/rules/board-integrity.md) (Glob: `board_operations.py`, `board.py`, `move_generator.py`, `zobrist.py`)
-    * 位元棋盤佔用同步、Make/Unmake 原地修改約束與 Zobrist 增量維護。
-4. **搜尋演算法正確性**：參見 [search-constraints.md](file:///.agents/rules/search-constraints.md) (Glob: `search.py`, `search_heuristics.py`)
-    * Negamax 對稱性、將死分數 ply 調整、重複/50步和局判定與剪枝安全防護。
-5. **NNUE 自定義架構開發與推理**：參見 [nnue-specification.md](file:///.agents/rules/nnue-specification.md) (Glob: `nnue/**/*.py`)
-    * 包含 HalfKA 特徵編碼、8分桶架構、ClippedReLU與整數化量化推理的極致效能約束。
-6. **NNUE 離線訓練與權重導出**：參見 [nnue-training.md](file:///.agents/rules/nnue-training.md) (Glob: `nnue/ml_eval/**/*.py`)
-    * 包含 Factorizer與分桶殘差的重參數化（Structural Re-parameterization）、差異化學習率與Weight Decay、分桶平衡採樣與 physical 物理防爆極限約束。
+| 規則 | 內容 |
+| :--- | :--- |
+| [`.agents/rules/workflow.md`](.agents/rules/workflow.md) | 改前讀文件、改後同步導覽、輕/重測試、JIT 耐心、Stockfish 參考路徑 |
+| [`.agents/rules/numba-jit.md`](.agents/rules/numba-jit.md) | nopython 禁令、棋盤陣列型別、`cache` 預設與 NNUE 例外 |
 
+### Glob（依編輯路徑）
+
+| 規則 | 觸發（摘要） | 內容 |
+| :--- | :--- | :--- |
+| [board-integrity.md](.agents/rules/board-integrity.md) | `board_operations` / `move_generator` / `zobrist` / `bitboard_utils` / `move` / `fen_parser` | 佔用同步、make/unmake、Zobrist |
+| [search-constraints.md](.agents/rules/search-constraints.md) | `search` / `search_heuristics` / `time_manager` / `transposition_table` | Negamax、將死距離、重複/50 步、剪枝安全 |
+| [hce-evaluation.md](.agents/rules/hce-evaluation.md) | `evaluation` / `pawns` / `material` / `endgame` / `constants` | HCE↔SF11、殘局尺度 |
+| [nnue-specification.md](.agents/rules/nnue-specification.md) | `chess_engine/nnue/**/*.py` | 拓撲、HalfKA、累加器、整數推理 |
+| [nnue-training.md](.agents/rules/nnue-training.md) | `chess_engine/nnue/ml_eval/**/*.py` | Factorizer 導出、loss、LR、採樣 |
+
+### 參考原始碼（倉庫相對路徑）
+
+* 搜尋：`stockfish_repo/`（SF 18）
+* HCE：`stockfish_11/`（SF 11）
+
+---
+
+## 文件與目錄政策
+
+* 技術 Markdown **唯一索引** = `README.md` 文件導覽；增刪更名必須同步。
+* **禁止**在根目錄堆積 session / 一次性計畫；考古放 `archive/`。
+* `classical_old/` 僅 `tools/sync_classical_old.py` 同步 **`.py`**，不維護 md。
+* 詳細約束以 `.agents/rules/*.md` 為準；本檔只做導覽，不重複貼全文。

@@ -1,90 +1,57 @@
 ---
+description: "NNUE train/export MUST: factorizer fusion, loss, LR groups, sampling, clamps."
 trigger: glob
-description: "NNUE offline training pipeline conventions, hyperparameter defaults, and model re-parameterization invariants."
+glob: "**/chess_engine/nnue/ml_eval/**/*.py"
 ---
 
----
+# NNUE Training Pipeline — Hard Constraints
 
-description: "NNUE offline training pipeline conventions, hyperparameter defaults, and model re-parameterization invariants."
-trigger: glob
-glob: "**/nnue/ml_eval/**/*.py"
----
-
-# NNUE Training Pipeline Specifications
-
-This rule outlines the training conventions, structural constraints, and hyperparameter standards for optimization of the `LayerStackNNUE` model. All modifications to the training scripts (`train.py`, `quantize_weights.py`, etc.) **MUST** comply with these requirements.
+Ops manual: **`chess_engine/nnue/ml_eval/ml_eval_documentation_and_architecture.md`**  
+Data pipeline: **`tuner/README.md`** / `tuner/nnue_pipeline/`  
+Architecture: **`chess_engine/nnue/ARCHITECTURE.md`**
 
 ---
 
-## 1. Structural Re-Parameterization (Factorizer & Deltas)
+## 1. Structural re-parameterization (MUST)
 
-To prevent underfitting while training on large-scale datasets, the model implements **Structural Re-parameterization (SF18-style)** during training and collapses to pure single-bucket inference weights at export time.
-
-* **Global Base Manifold (Factorizer)**:
-  * Shared weights: `fact_fc2` ($1024 \to 32$), `fact_fc3` ($32 \to 32$), `fact_fc4` ($32 \to 1$).
-  * Factorizer parameters accumulate gradients from **all** data samples across all game phases.
-* **Per-Bucket Residuals ($\Delta W$, $\Delta b$)**:
-  * Specific sub-layers: `delta_fc2[b]`, `delta_fc3[b]`, `delta_fc4[b]` for $b \in [0, 7]$.
-  * **In-Place Zero Initialization**: All residual weights and biases **must** be initialized to $0.0$. This ensures the global Factorizer dominates early training, avoiding random gradients in sparsely populated buckets.
-* **Forward Flow**:
-  * Add weights and biases **prior** to non-linear activations to ensure mathematically exact fusion:
-        $$W_{\text{eff}} = W_{\text{fact}} + \Delta W_b$$
-        $$b_{\text{eff}} = b_{\text{fact}} + \Delta b_b$$
-* **Algebraic Export Fusion**:
-  * Exported inference files (`weights/fc2_weight_b{b}.npy`, etc.) **must** perform this sum statically. The JIT inference engine has no awareness of Factorizers or delta structures.
+* Train with **global factorizer** + **per-bucket deltas** (\(\Delta W, \Delta b\)), \(b \in [0,7]\)
+* Deltas **initialize to 0**
+* Forward: \(W_{\mathrm{eff}} = W_{\mathrm{fact}} + \Delta W_b\) (same for bias) **before** activation
+* Export **fuses** factorizer + delta into plain `fc*_b{b}.npy` — JIT inference has **no** factorizer
 
 ---
 
-## 2. Loss Functions & Dataset Schema
+## 2. Loss & dataset (MUST)
 
-* **WDL Target Boundary**:
-  * Targets represent Win/Draw/Loss probabilities in the range $[0, 1]$.
-  * To prevent infinite gradients in Binary Cross Entropy and protect INT16 quantization limits, target probabilities must be clamped:
-        $$\text{target}_{\text{clamped}} = \text{clamp}(\text{target}, 0.001, 0.999)$$
-* **Loss Criterion**:
-  * Model outputs raw logits. Use `torch.nn.BCEWithLogitsLoss()` to compute standard entropy.
-* **NPZ Dataset Layout**:
-  * `features_stm`: UINT16 list of sparse HalfKA indices for STM, padded with index `22528`.
-  * `features_nstm`: UINT16 list of sparse HalfKA indices for NSTM, padded with index `22528`.
-  * `targets`: Float32 array containing target WDL values. When using Primer Bullet `.bin` files, convert raw Stockfish `Value` scores to UCI-style centipawns first with `cp = value * 100 / PawnValueEg` (`PawnValueEg = 208` in the bundled Stockfish source) before applying the sigmoid target transform.
-  * `piece_counts`: Int8 array containing the active piece counts (for bucket index selection).
-  * The inference-side output divisor is tied to this target transform: $127 \times 128 \times 0.0025 \approx 40.64$, rounded to `41`. Changing this divisor requires changing the target transform and retraining/exporting the model together.
+* Targets WDL in \([0,1]\); clamp to **`[0.001, 0.999]`** before BCE
+* Criterion: `BCEWithLogitsLoss` on raw logits
+* NPZ: `features_stm` / `features_nstm` uint16 sparse indices, pad **22528**; `targets` float32; `piece_counts` for buckets
+* Primer `Value` → UCI cp: `cp = value * 100 / 208`, then \(\sigma(0.0025 \cdot cp)\); inference divisor **41** is tied to this — change only as a coordinated set
 
 ---
 
-## 3. Layerwise Learning Rate & Weight Decay
+## 3. Optimizers (MUST)
 
-Due to the extreme sparsity of the first layer (FC1) compared to the dense layers (FC2-FC4), optimization parameters **must** be segregated into independent parameter groups.
+| Group | Weight decay | LR (typical) |
+| :--- | ---: | :--- |
+| FC1 sparse | **0** | lower (~4e-5 … 1e-4) |
+| Dense (factorizer + deltas) | **0.001** | higher (~5e-4 … 1e-3) |
 
-* **FC1 Parameter Group**:
-  * **Weight Decay ($WD$)**: Must be **exactly** $0.0$. Applying weight decay to the sparse embedding layer triggers "information heat-death," where rare feature weights (such as complex pawn promotion setups) are decayed to zero before receiving enough training gradients.
-  * **Learning Rate ($LR$)**: Lower than dense parameters (typically $0.00004$ or $0.0001$).
-* **Dense Layer Parameter Group (Factorizer + Deltas)**:
-  * **Weight Decay ($WD$)**: Set to $0.001$ to regularize dense mapping and prevent extreme weight bounds that would overflow INT16 quantization limits.
-  * **Learning Rate ($LR$)**: Higher than sparse parameters (typically $0.001$ or $0.0005$, decaying via `ExponentialLR` with $\gamma=0.99$).
-
----
-
-## 4. Balanced Sampling via Fractional Power Smoothing
-
-To prevent highly populated middle-game positions from overwhelming rare endgame samples, you **must** apply a weighted sampling filter on piece counts.
-
-* **Fractional Weight Formula**:
-    $$w_i = \frac{1}{p_i^{\tau}}$$
-  * $p_i$: Empirical probability of a sample falling into bucket $i$.
-  * $\tau$: Power smoothing constant. The project standard is $\tau = 0.25$.
-* **Sampling Strategy**:
-  * Use the **NumPy Alias Method** (`np.random.default_rng().choice`) with the normalized bucket weights. This delivers $O(1)$ sampling speeds identical to uniform random indices while ensuring representation of rare endgames.
+* **MUST NOT** apply weight decay on FC1 (kills rare features)
+* AMP + `GradScaler` on CUDA; `clip_grad_norm_(..., max_norm=20.0)` for large batches
 
 ---
 
-## 5. Numerical Safeguards (AMP & Physical Clamping)
+## 4. Sampling & physical clamps (MUST)
 
-* **Mixed Precision (AMP)**:
-  * Always utilize `torch.amp.autocast('cuda')` and `torch.amp.GradScaler('cuda')` during CUDA execution to maintain high throughput on modern tensor-core GPUs (like RTX 4050).
-* **Gradient Clipping**:
-  * Apply `torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=20.0)` to stabilize training under large batch sizes (e.g., 8192).
-* **Physical Accumulator Clamping**:
-  * To prevent accumulator overflow under severe piece pile-ups, clamp FC1 weights within `torch.no_grad()` at the end of every optimization step:
-        $$\text{FC1\_MAX\_WEIGHT} = \frac{127.0}{Q_1} \times 4.0 \approx 4.0$$
-        $$\text{model.fc1.weight.clamp\_}(-\text{FC1\_MAX\_WEIGHT}, \text{FC1\_MAX\_WEIGHT})$$
+* Bucket balance: weights \(w_i = 1 / p_i^{\tau}\) with project \(\tau = 0.25\) (or document a deliberate change)
+* After each step: clamp FC1 weights in `no_grad` to physical INT16-safe bounds (see train script / ARCHITECTURE; ~±4.0 scale convention)
+
+---
+
+## 5. After changes
+
+```bash
+python -m unittest tests.test_nnue_validation
+# Full train only with user OK and GPU ready
+```

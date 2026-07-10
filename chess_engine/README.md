@@ -1,101 +1,112 @@
 # 西洋棋引擎架構說明文件
 
-本文件詳細介紹了本西洋棋引擎的各個組件、檔案功能以及它們之間的相互關聯。本引擎採用 **Python** 編寫，並利用 **Numba** 進行即時編譯 (JIT) 加速，核心數據結構基於 **位元棋盤 (Bitboards)**。
+本文件說明本倉庫引擎核心的模組分工與關聯。語言為 **Python**，核心熱路徑以 **Numba JIT** 編譯，棋盤以 **位元棋盤 (Bitboards)** 表示。
+
+完整文件索引見專案根目錄 [README.md](../README.md) 的「專案文件導覽」。
 
 ---
 
-## 1. 專案整體架構
+## 1. 套件三分法
 
-引擎遵循典型的西洋棋引擎設計架構，主要分為以下幾個層次：
-1.  **介面層 (UCI)**：負責與外部 GUI 通訊。
-2.  **搜尋層 (Search)**：驅動博弈樹搜尋與剪枝。
-3.  **評估層 (Evaluation)**：對靜態局面進行評分。
-4.  **移動生成層 (Move Generation)**：計算合法移動。
-5.  **棋盤表示層 (Board Representation)**：維護棋盤狀態、處理移動（Make/Unmake）。
+| 目錄 | 進入點 | 角色 |
+| :--- | :--- | :--- |
+| `classical/` | `main.py`、`assistant.py` | **現行** 手工評估 (HCE) + 搜尋 |
+| `classical_old/` | `main_old.py` | **對戰基準快照**；僅 `.py` 由 `tools/sync_classical_old.py` 同步，**不維護 markdown** |
+| `nnue/` | `main_nn.py`、`assistant_nn.py` | NNUE 評估 + 共用搜尋架構變體；`ml_eval/` 負責訓練與量化 |
 
----
-
-## 2. 核心檔案與功能說明
-
-### 2.1 進入點與通訊
-*   **[main.py](../main.py)**
-    *   **功能**：引擎的主進入點。實現了 **UCI 協議** 循環，解析來自 GUI 的命令（如 `uci`, `isready`, `position`, `go`）。
-    *   **關鍵邏輯**：管理搜尋線程，初始化 [開局書](classical/opening_book.py) 和 [置換表](classical/transposition_table.py)。當收到 `go` 命令時，會調用 [搜尋模組](classical/search.py)。
-
-### 2.2 搜尋與剪枝 ([search.py](classical/search.py))
-*   **功能**：引擎的大腦，負責在博弈樹中尋找最佳移動。
-*   **核心技術**：
-    *   **迭代加深搜尋 (Iterative Deepening)**：逐步增加深度直到時間耗盡。
-    *   **主要變例搜尋 (PVS)**：優化 Alpha-Beta 搜尋。
-    *   **剪枝技術**：包括 [SEE 剪枝](classical/see.py)、空著剪枝 (NMP)、晚期移動歸約 (LMR)、徒勞剪枝 (Futility Pruning) 等。
-    *   **靜態搜尋 (Quiescence Search)**：解決「當前局面不穩定」問題，僅處理吃子和升變。
-*   **關聯**：調用 [evaluation.py](classical/evaluation.py) 評估局面，調用 [move_generator.py](classical/move_generator.py) 獲取移動，並使用 [transposition_table.py](classical/transposition_table.py) 緩存結果。
-
-### 2.3 評估函數 ([evaluation.py](classical/evaluation.py))
-*   **功能**：對不含搜尋的靜態局面進行評分。
-*   **評估維度**：
-    *   **材質 (Material)** 與 **位置分數 (PST)**。
-    *   **國王安全 (King Safety)**：考慮兵盾、攻擊者數量與國王區域威脅。
-    *   **兵型結構 (Pawn Structure)**：通路兵、孤兵、重疊兵。
-    *   **機動性 (Mobility)** 與 **協同性 (Coordination)**。
-    *   **漸進式評估 (Tapered Evaluation)**：平滑過渡中局與殘局權重。
-*   **關聯**：定義於 [constants.py](classical/constants.py) 中的參數決定了各項分數。
-
-### 2.4 移動生成 ([move_generator.py](classical/move_generator.py))
-*   **功能**：計算給定局面的所有偽合法與合法移動。
-*   **技術特點**：使用 **魔法位元棋盤 (Magic Bitboards)** 高效計算滑行棋子（車、象、后）的攻擊。
-*   **關鍵函數**：`generate_legal_moves()` (搜尋主循環使用) 與 `generate_captures()` (靜態搜尋使用)。
-*   **關聯**：依賴 [bitboard_utils.py](classical/bitboard_utils.py) 的位元運算與 [move.py](classical/move.py) 的編碼格式。
-
-### 2.5 棋盤操作與狀態管理
-*   **[board_operations.py](classical/board_operations.py)**
-    *   **功能**：執行與撤銷移動 (`make_move` / `unmake_move`)。
-    *   **關鍵邏輯**：增量更新 [Zobrist Hash](classical/zobrist.py)，處理易位權限、吃過路兵方格與半步鐘計數。
-*   **[move.py](classical/move.py)**
-    *   **功能**：將移動編碼為 16 位整數 (uint16) 以節省內存。包含提取起始格、目標格、升變標記的函數。
-*   **[zobrist.py](classical/zobrist.py)**
-    *   **功能**：生成隨機鍵值用於哈希棋盤狀態，支持快速增量更新。
-*   **[transposition_table.py](classical/transposition_table.py)**
-    *   **功能**：實現置換表（快取），存儲已搜尋過的節點評分、深度與最佳移動，極大提升搜尋效率。
-
-### 2.6 輔助模組
-*   **[constants.py](classical/constants.py)**：存儲所有靜態常量，如棋子價值、PST 矩陣、搜尋閾值等。
-*   **[bitboard_utils.py](classical/bitboard_utils.py)**：底層位元運算工具（如 `count_bits`, `get_lsb_index`）。
-*   **[engine_types.py](classical/engine_types.py)**：定義 Numba 兼容的類型與 `SearchContext` 數據類。
-*   **[time_manager.py](classical/time_manager.py)**：根據剩餘時間計算搜尋應花費的時長。
-*   **[opening_book.py](classical/opening_book.py)**：讀取 Polyglot 格式的二進制開局書檔案。
-*   **[fen_parser.py](classical/fen_parser.py)**：將 FEN 字串解析為位元棋盤格式。
+共享資源：`chess_engine/polyglot.bin`（開局書）。
 
 ---
 
-## 3. 自我對戰與測試功能詳解
+## 2. 分層架構
 
-為了驗證引擎的強度與穩定性，專案包含了兩個主要的對戰工具：
-
-### 3.1 錦標賽執行器 ([tournament.py](../tools/tournament.py))
-*   **功能**：在兩個不同版本的引擎（或不同參數 of the same engine）之間進行多局對戰，並計算 Elo 分差。
-*   **運作邏輯**：
-    1.  啟動兩個引擎作為子進程。
-    2.  交替讓雙方執白/執黑進行對局。
-    3.  自動記錄所有對局到 `tournament_analysis/tournament_results.pgn`。
-*   **統計分析**：使用得分率與 95% 信賴區間來計算 **Estimated ELO Difference**，這對於評估代碼修改是否真的帶來了提升至關重要。
-*   **使用方式**：`python tools/tournament.py --engine1 main.py --engine2 archive/main_old.py --games 100 --time 100`
-
-### 3.2 對戰執行器 ([match_runner.py](../tools/match_runner.py))
-*   **功能**：主要用於將本引擎與強大的 **Stockfish** 進行基準測試對戰。
-*   **特色功能**：
-    *   **PV 驗證 (Principal Variation Verification)**：在對戰過程中，它會檢查本引擎返回的「最佳路徑 (PV)」是否真的合法。如果引擎算出的後續移動序列包含非法動作，會記錄在 `pv_analysis.txt` 中。
-    *   **時間控制**：可以分別為 Stockfish 和本引擎設置不同的思考時間。
-*   **輸出結果**：產生 `game_history.pgn` 和詳細的 `pv_analysis.txt`。
-
-### 3.3 其他測試工具
-*   **[benchmark.py](../tests/benchmark.py)**：測量每秒搜尋節點數 (NPS)。包含預熱 (Warmup) 階段以觸發 Numba 的 JIT 編譯。
-*   **[perft.py](../tests/perft.py)**：性能測試 (Performance Test)，用於驗證移動生成器在各個深度下的正確性（與已知標準對比節點數）。
-*   **[test_puzzle.py](../tests/test_puzzle.py)**：加載西洋棋謎題集，測試引擎在限時內找到最佳戰術解的能力。
+1. **介面層 (UCI)**：解析 GUI 命令（`uci` / `position` / `go` 等）。
+2. **搜尋層 (Search)**：迭代加深、PVS、剪枝、靜態搜尋。
+3. **評估層 (Evaluation)**：Classical HCE 或 NNUE 前向。
+4. **移動生成層 (Move Generation)**：偽合法 / 合法著法、Magic Bitboards。
+5. **棋盤表示層 (Board)**：`make_move` / `unmake_move`、Zobrist、FEN。
 
 ---
 
-## 4. 系統關聯 Wiki 地圖
+## 3. Classical 核心模組
+
+路徑皆相對 `chess_engine/classical/`。
+
+### 3.1 進入點
+
+* **[main.py](../main.py)**：Classical UCI 循環；開局書、置換表、時間管理，`go` 時呼叫搜尋。
+* **[main_old.py](../main_old.py)**：同上，但 import `classical_old`（對戰 Old 側）。
+
+### 3.2 搜尋與剪枝
+
+* **[search.py](classical/search.py)**：迭代加深、PVS/Negamax、QS、NMP/LMR/RFP/…、奇異延展等。
+* **[search_heuristics.py](classical/search_heuristics.py)**：殺手步、歷史表、吃子/安靜排序、LMR 表。
+* **[see.py](classical/see.py)**：靜態交換評估（SEE），用於排序與剪枝。
+* **[transposition_table.py](classical/transposition_table.py)**：置換表。
+* **[time_manager.py](classical/time_manager.py)**：時限分配。
+
+技術細節見 [SEARCH_ANALYSIS.md](classical/SEARCH_ANALYSIS.md)、[SEE_ANALYSIS.md](classical/SEE_ANALYSIS.md)、[HISTORY_HEURISTICS_CN.md](classical/HISTORY_HEURISTICS_CN.md)。
+
+### 3.3 評估 (HCE)
+
+* **[evaluation.py](classical/evaluation.py)**：主評估入口（材質、機動性、威脅、王安全、initiative、空間等）。
+* **[pawns.py](classical/pawns.py)**：兵型結構、兵盾、車線等。
+* **[material.py](classical/material.py)**：材質不平衡多項式。
+* **[endgame.py](classical/endgame.py)**：專用殘局（KXK / KPK / …）與殘局縮放。
+* **[constants.py](classical/constants.py)**：權重、PST、搜尋閾值、歷史上限等。
+
+對齊 Stockfish 11 的現況總表見 [HCE_SF11_GAP_AUDIT.md](classical/HCE_SF11_GAP_AUDIT.md)；殘局驗證見 [ENDGAME_SF_VERIFICATION.md](classical/ENDGAME_SF_VERIFICATION.md)。
+
+### 3.4 移動與棋盤
+
+* **[move_generator.py](classical/move_generator.py)**：攻擊表、偽合法/合法生成、`is_square_attacked`。
+* **[board_operations.py](classical/board_operations.py)**：`make_move` / `unmake_move`、增量 Zobrist。
+* **[move.py](classical/move.py)**：16-bit 著法編碼。
+* **[zobrist.py](classical/zobrist.py)**：Zobrist 鍵。
+* **[fen_parser.py](classical/fen_parser.py)**：FEN → 位元棋盤。
+* **[bitboard_utils.py](classical/bitboard_utils.py)**：LSB/popcount、射線等。
+* **[engine_types.py](classical/engine_types.py)**：Numba 簽名與 `SearchContext`。
+* **[opening_book.py](classical/opening_book.py)**：Polyglot 開局書。
+
+---
+
+## 4. NNUE 模組（摘要）
+
+* **[nnue/ARCHITECTURE.md](nnue/ARCHITECTURE.md)**：HalfKAv2_hm、512 累積層、8 分桶 LayerStack、量化推理。
+* **[nnue/ml_eval/](nnue/ml_eval/)**：`train.py`、`quantize_weights.py`、`inference.py`、`weights/`。
+* 訓練資料管線在 **`tuner/nnue_pipeline/`**（見 [tuner/README.md](../tuner/README.md) 與 [ml_eval 操作說明](nnue/ml_eval/ml_eval_documentation_and_architecture.md)）。
+
+---
+
+## 5. 對戰與測試工具
+
+### 5.1 錦標賽（New vs Old）
+
+* **[tools/tournament.py](../tools/tournament.py)**：多局 UCI 對戰、SPRT、成對換先、可併發。
+* 預設：`--engine1 main.py`（New）、`--engine2 main_old.py`（Old）。
+* 開局庫：`data/openings.epd`。
+* 棋譜輸出：`tournament_analysis/tournament_results.pgn`。
+* 操作詳見 [tools/TOURNAMENT_TUTORIAL.md](../tools/TOURNAMENT_TUTORIAL.md)。
+
+```bash
+python tools/tournament.py --engine1 main.py --engine2 main_old.py --games 100 --time 1000
+```
+
+同步 Old 基準（只複製 `.py` 並改 import）：
+
+```bash
+python tools/sync_classical_old.py --diff
+# python tools/sync_classical_old.py --sync   # 確認後再執行
+```
+
+### 5.2 其他
+
+* **[tools/match_runner.py](../tools/match_runner.py)**：對 Stockfish 等外部引擎；可做 PV 合法性檢查。
+* **[tests/benchmark.py](../tests/benchmark.py)**、**[tests/perft.py](../tests/perft.py)**、**[tests/test_puzzle.py](../tests/test_puzzle.py)**、**[tests/test_endgame_conformance.py](../tests/test_endgame_conformance.py)**。
+
+---
+
+## 6. 模組關聯（Classical 路徑）
 
 ```mermaid
 graph TD
@@ -104,31 +115,26 @@ graph TD
     main.py --> transposition_table.py
 
     search.py --> evaluation.py
+    search.py --> endgame.py
     search.py --> move_generator.py
     search.py --> board_operations.py
     search.py --> see.py
+    search.py --> search_heuristics.py
 
+    evaluation.py --> pawns.py
+    evaluation.py --> material.py
     evaluation.py --> constants.py
-    evaluation.py --> bitboard_utils.py
 
     move_generator.py --> bitboard_utils.py
-    move_generator.py --> move.py
-
     board_operations.py --> zobrist.py
-    board_operations.py --> move.py
-
-    tournament.py --> main.py
-    match_runner.py --> main.py
-    match_runner.py --> stockfish_binary
 ```
 
 ---
 
-## 5. 搜尋流程簡述
-1.  **main.py** 接收到 `go` 命令，啟動 **search.py**。
-2.  **search.py** 開始迭代加深，每一層調用 `_search` 進行 Alpha-Beta 遞迴。
-3.  在搜尋節點時，調用 **move_generator.py** 生成移動，並按優先級排序（使用歷史啟發、殺手步等）。
-4.  調用 **board_operations.py** 的 `make_move` 進入下一層。
-5.  到達葉子節點或深度限制時，調用 **evaluation.py** 獲取局面評分。
-6.  結果回傳並緩存在 **transposition_table.py** 中。
-7.  最終最佳移動通過 UCI `bestmove` 輸出給 GUI。
+## 7. 搜尋流程簡述
+
+1. `main.py` 收到 `go`，進入 `search.py` 的迭代加深。
+2. 每層以 PVS / 零窗口擴展；置換表與歷史啟發改善排序。
+3. 節點內生成著法 → `make_move` → 合法性 / 將軍資訊 → 遞迴。
+4. 葉節點或深度 0 進入靜態搜尋或評估（HCE 或 NNUE）。
+5. 結果寫入置換表；根節點輸出 UCI `bestmove`。

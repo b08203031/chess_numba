@@ -40,12 +40,19 @@ MG_MATERIAL_VALUES = np.array([100, 320, 330, 500, 900, 0], dtype=np.int32)
 EG_MATERIAL_VALUES = np.array([120, 310, 340, 530, 950, 0], dtype=np.int32)
 
 # =============================================================================
-# --- Game Phase Calculation / 遊戲階段計算 ---
+# --- Game Phase Calculation (SF11 npm taper) / 遊戲階段計算 ---
 # =============================================================================
-# Weights for each piece type to determine the game phase / 每個棋子類型的權重，用於確定遊戲階段
+# SF11: phase = ((clamp(npm, EndgameLimit, MidgameLimit) - EndgameLimit) * 128)
+#              / (MidgameLimit - EndgameLimit)
+# Scaled limits for our MG material (N/B/R/Q = 320/330/500/900):
+#   full both-side npm ≈ 6400  (SF ~15258 MidgameLimit)
+#   EndgameLimit ≈ 3915 * 6400/15258 ≈ 1641
+PHASE_MIDGAME = np.int32(128)
+MAX_PHASE = PHASE_MIDGAME  # alias used by tapered blend
+MIDGAME_LIMIT = np.int32(6400)
+ENDGAME_LIMIT = np.int32(1641)
+# Legacy piece-count weights (kept for reference / any external tools)
 PHASE_WEIGHTS = np.array([0, 1, 1, 2, 4, 0], dtype=np.int32)
-# 最大階段值（初始局面所有非兵棋子的權重總和）
-MAX_PHASE = np.sum(PHASE_WEIGHTS * np.array([8, 2, 2, 2, 1, 1])) * 2 # Pawns are not counted
 
 # =============================================================================
 # --- Piece-Square Tables (PSTs) / 棋子位置分數表 ---
@@ -351,12 +358,12 @@ PASSED_PAWN_BONUS = np.array([
 PASSED_FILE_BONUS = np.array([7, 5], dtype=np.int32) # MG, EG
 
 # --- Passed Pawn Evaluation Refinements / 通路兵動態安全與比例評估參數 ---
-PASSED_SCALE_FULL = np.int32(4)          # 材質充足時的完整加成比例 / Full scale when material is sufficient
-PASSED_SCALE_HALF = np.int32(2)          # 材質較少時的減半加成比例 / Half scale when material is less
-PASSED_SCALE_MIN = np.int32(1)           # 極少材質時的最低加成比例 / Minimum scale when material is very scarce
+# PASSED_SCALE_FULL/HALF/MIN removed (aligned with SF11): SF11 passed() does not
+# down-scale passer bonuses by non-pawn material deficit. Candidate /2 remains.
 CANDIDATE_PASSER_DIVISOR = np.int32(2)    # 候選通路兵（非真正通路兵）的加成折半除數 / Divisor for candidate passed pawn bonus
 
-# Path Safety coefficients (SF11 dynamic bonus) / 推進路徑安全性係數
+# Path Safety coefficients (SF11 dynamic bonus, *3/5 for our ~100cp material scale)
+# SF11 raw: 35 / 20 / 9 / +5  →  ours: 21 / 12 / 5 / +3
 PASSED_PATH_SAFE_NONE_ATTACK = np.int32(21)  # 前進路徑無人控制 / Safe path weight (no enemy attacks)
 PASSED_PATH_SAFE_EDGE_ATTACK = np.int32(12)  # 僅路徑邊緣受控 / Safe path weight (attacks on adjacent files only)
 PASSED_PATH_SAFE_BLOCK_ONLY = np.int32(5)    # 僅前方阻擋格安全 / Safe path weight (attacks on blocker square only)
@@ -443,74 +450,80 @@ REACHABLE_OUTPOST_BONUS = np.array([16, 5], dtype=np.int32) # MG, EG (SF11: S(32
 # --- King Safety Constants (NEW - based on Chessprogramming Wiki) / 王的安全常量 ---
 # =============================================================================
 
-# --- Phase 2: Attacking the King Zone (Non-Linear Model) / 攻擊王翼區域（非線性模型） ---
-# Attack units for each piece type. Order: P, N, B, R, Q
-# 每個棋子類型的攻擊單位。順序：兵、馬、象、車、后
-KING_SAFETY_ATTACK_UNITS = np.array([1, 4, 3, 3, 5], dtype=np.int32) # P, N, B, R, Q
+# --- King danger (SF11 structure, OUR ~100cp score space) ---
+#
+# SF11 builds kingDanger in an intermediate unit space where attack weights
+# (81, 1080, 185, ...) were co-tuned with SF internal S() scores (pawn MG=128).
+# Our engine uses ~100cp material/mobility/shelter. To avoid mixing units:
+#
+#   1. Scale ALL pure SF danger coefficients by MG_SCORE_SCALE = 100/128.
+#   2. Feed pure mobility MG and shelter MG already in our score units (no lift).
+#   3. Convert kd -> penalty with algebra for kd_us = (100/128)*kd_sf:
+#        pen_mg = kd² * 128 / (4096 * 100)
+#        pen_eg = kd * 120 * 128 / (16 * 213 * 100)
+#        threshold = 100 * 100 / 128
+#
+# Product term: attackersCount * attackersWeight (pawns seed count only, weight 0).
+# Indices: NO_PIECE, PAWN, KNIGHT, BISHOP, ROOK, QUEEN  (SF KingAttackWeights)
 
-# --- kingDanger Linear Formula Weights (Inspired by Stockfish 11) ---
-# These contribute to a kingDanger score that is then squared.
-# 這些值貢獻到 kingDanger 分數，最後進行二次轉換。
+_MG_SCALE_NUM = 100  # our pawn MG
+_MG_SCALE_DEN = 128  # SF pawn MG
 
-# Weight per weak square in king zone (attacked by enemy, not defended by us except K)
-# 王圈內弱格（被敵攻、只被王守 or 不守）每個的 danger 貢獻
-KING_DANGER_WEAK_SQ = np.int32(3)
+def _sf_danger_to_ours(sf_val: int) -> np.int32:
+    return np.int32((int(sf_val) * _MG_SCALE_NUM) // _MG_SCALE_DEN)
 
-# Weight per pinned piece/blocker in king danger calculation
-# 國王防禦者中牽制/阻擋棋子的 danger 貢獻 (SF11 popcount(blockers_for_king(Us)) scaled)
-KING_DANGER_BLOCKERS = np.int32(2)
+KING_ATTACK_WEIGHTS = np.array([
+    0,
+    0,
+    _sf_danger_to_ours(81),   # Knight
+    _sf_danger_to_ours(52),   # Bishop
+    _sf_danger_to_ours(44),   # Rook
+    _sf_danger_to_ours(10),   # Queen
+], dtype=np.int32)
+KING_SAFETY_ATTACK_UNITS = KING_ATTACK_WEIGHTS[1:].copy()  # legacy alias P,N,B,R,Q
 
-# Flat offset in king danger formula when any danger exists
-# 國王遭受攻擊時的固定 offset
-KING_DANGER_OFFSET = np.int32(1)
+# Safe checks (SF raw -> our danger space)
+SAFE_CHECK_QUEEN = _sf_danger_to_ours(780)
+SAFE_CHECK_ROOK = _sf_danger_to_ours(1080)
+SAFE_CHECK_BISHOP = _sf_danger_to_ours(635)
+SAFE_CHECK_KNIGHT = _sf_danger_to_ours(790)
 
-# Weight per unsafe check square (enemy can check but not safely)
-# 不安全將軍格每個的 danger 貢獻
-KING_DANGER_UNSAFE_CHECK = np.int32(2)
+# Linear kingDanger coefficients (SF raw -> our danger space)
+KING_DANGER_WEAK_SQ = _sf_danger_to_ours(185)
+KING_DANGER_UNSAFE_CHECK = _sf_danger_to_ours(148)
+KING_DANGER_BLOCKERS = _sf_danger_to_ours(98)
+KING_DANGER_ATTACK_ON_KING_SQ = _sf_danger_to_ours(69)
+KING_DANGER_NO_QUEEN = _sf_danger_to_ours(873)
+KING_DANGER_KNIGHT_DEF = _sf_danger_to_ours(100)
+KING_DANGER_OFFSET = _sf_danger_to_ours(37)
+KING_DANGER_THRESHOLD = _sf_danger_to_ours(100)  # ≈ 78
 
-# Weight per enemy attack on squares adjacent to king (KING_ATTACKS[ksq])
-# 敵方攻擊到王鄰格每次的 danger 貢獻
-KING_DANGER_ATTACK_ON_KING_SQ = np.int32(1)
+# kd already in our-scaled danger space:
+#   pen_mg = kd² / (4096 * s) = kd² * 128 / (4096 * 100)
+#   pen_eg = (kd/s)/16 * (120/213) = kd * 128 * 120 / (100 * 16 * 213)
+KING_DANGER_QUAD_DIV = np.int32(4096)
+KING_DANGER_EG_DIV = np.int32(16)
+KING_DANGER_OUT_MG_NUM = np.int32(_MG_SCALE_DEN)          # 128
+KING_DANGER_OUT_MG_DEN = np.int32(4096 * _MG_SCALE_NUM)   # 409600
+KING_DANGER_OUT_EG_NUM = np.int32(_MG_SCALE_DEN * 120)    # 128*120
+KING_DANGER_OUT_EG_DEN = np.int32(_MG_SCALE_NUM * 16 * 213)  # 100*16*213
 
-# Flat deduction from kingDanger when enemy has no queen
-# 敵方無后時的固定 danger 扣除
-KING_DANGER_NO_QUEEN = np.int32(5)
-
-# Penalty per pinned piece on the defending side (SF11-inspired)
-# 防守方被牽制棋子的 danger 懲罰（直接計算成數分數，會乘以材質 scaling factor）
-KING_DANGER_PINNED = np.int32(10)
-
-# Divisor for kingDanger² conversion (controls overall penalty magnitude)
-# kingDanger² 的除數（i²/2 與舊 KING_SAFETY_TABLE 等價）
+# Deprecated aliases
+KING_DANGER_PINNED = np.int32(0)
 KING_DANGER_DIVISOR = np.int32(2)
+KING_DANGER_QUAD_DIVISOR = KING_DANGER_QUAD_DIV
+KING_DANGER_MG_NUM = KING_DANGER_OUT_MG_NUM
+KING_DANGER_MG_DEN = KING_DANGER_OUT_MG_DEN
+KING_DANGER_EG_NUM = KING_DANGER_OUT_EG_NUM
+KING_DANGER_EG_DEN = KING_DANGER_OUT_EG_DEN
 
-# --- Safe Check Penalties (in attack units, added to total_attack_units) ---
-# Represent danger of enemy pieces being able to safely give check.
-# Scaled for our system: SF11 values (780-1080) mapped to our table-index units (~5-7).
-SAFE_CHECK_KNIGHT = np.int32(6)
-SAFE_CHECK_BISHOP = np.int32(5)
-SAFE_CHECK_ROOK = np.int32(7)
-SAFE_CHECK_QUEEN = np.int32(6)
-
-# --- Phase 3: King Tropism / 王的向性 ---
-KING_TROPISM_MAX_DISTANCE = 14 # Max MANHATTAN distance / 最大曼哈頓距離
-KING_TROPISM_WEIGHTS = np.array([0, 1, 1, 2, 3], dtype=np.int32) # P, N, B, R, Q
-
+# King tropism removed (was dead code: computed but never added to final score;
+# kingDanger already captures approach-to-king via ring attacks / safe checks).
 # --- Phase 4: Advanced & Dynamic / 進階與動態 ---
-# REMOVED: Flat penalty
-# PAWN_STORM_PENALTY = -5 
-
-# NEW: Rank-based pawn storm penalty
-# Penalty for enemy pawns on files adjacent to the king, based on their rank relative to the defender's back rank.
-# Index 0: 8th rank (impossible/promotion), Index 1: 7th rank... Index 2: 2nd rank (close).
-# We interpret index as "distance from defender's back rank" or simply "relative rank".
-# For White King (Rank 0), enemy Black pawn at Rank 2 is index 2.
-# For Black King (Rank 7), enemy White pawn at Rank 5 is index 2 (7-5=2).
-# Values: [Dummy, Dummy, Rank2, Rank3, Rank4, Rank5, Rank6, Rank7]
-SCALING_WEIGHTS = np.array([0, 4, 4, 6, 10], dtype=np.int32) # N, B, R, Q - for scaling factor / 用於縮放因子的權重
-MAX_SCALING_MATERIAL = (2*4 + 2*4 + 2*6 + 1*10) # Sum of all weights for one side / 一方所有權重的總和
-
-EG_SAFETY_SCALE = 0.5 # Scale down endgame king safety impact / 縮減殘局王的安全影響
+SCALING_WEIGHTS = np.array([0, 4, 4, 6, 10], dtype=np.int32)  # legacy
+MAX_SCALING_MATERIAL = (2 * 4 + 2 * 4 + 2 * 6 + 1 * 10)
+# Phase B: no extra EG damp after SF kd/16 conversion
+EG_SAFETY_SCALE = 1.0
 
 # --- SF11-aligned King Shelter & Storm Tables ---
 # ShelterStrength: friendly pawn shield defense values (MG)
@@ -535,15 +548,15 @@ SHELTER_BASE_MG = np.int32(4) # SF11: 5 * 0.78 ≈ 4
 SHELTER_BASE_EG = np.int32(3) # SF11: 5 * 0.563 ≈ 3
 KING_PAWN_DIST_PENALTY_EG = np.int32(-9) # SF11: -16 * 0.563 ≈ -9
 
-# --- King Danger Calculation Refinement Constants / 王危險度計算精細化常數 ---
-KING_FLANK_ATTACK_FACTOR = 3.0       # 翼部攻擊強度加權因子 / Flank attack weight factor
-KING_FLANK_ATTACK_DIVISOR = 360.0    # 翼部攻擊強度除數 / Flank attack divisor
-KING_SAFETY_MOBILITY_SCALE = 45.0    # 機動性對王安全影響的縮放比例 / Mobility scale for king safety danger
-KING_DEFENDER_KNIGHT_BONUS = 2       # 守護馬防禦王鄰格的 danger 扣除 / Knight protector danger bonus
-KING_SAFETY_SHIELD_SCALE = 60.0      # 兵盾反饋對王安全危險度的縮放除數 / Shelter shield scale for danger
-KING_SAFETY_FLANK_DEF_SCALE = 11.25  # 翼部防禦子力對王安全危險度的縮放除數 / Flank defense scale for danger
-KING_DANGER_THRESHOLD = 2            # 王危險度二次方懲罰起步閥值 / Danger quadratic penalty start threshold
-KING_DANGER_QUAD_DIVISOR = 2         # 王危險度二次方懲罰除數 / Danger quadratic penalty divisor
+# Flank / shelter terms inside kingDanger (same space as scaled coeffs + our scores)
+# flank: + 3 * fa * fa / 8   (dimensionless popcounts — leave unscaled; matches SF)
+# shelter: - 6 * mg_shield / 8  (mg_shield already ~100cp)
+# flank defense: - 4 * defense
+KING_FLANK_ATTACK_NUM = np.int32(3)
+KING_FLANK_ATTACK_DEN = np.int32(8)
+KING_SHELTER_FEEDBACK_NUM = np.int32(6)
+KING_SHELTER_FEEDBACK_DEN = np.int32(8)
+KING_FLANK_DEFENSE_MULT = np.int32(4)
 
 # --- Pawnless Flank & Flank Attacks (SF11-inspired) ---
 # Penalty when own king flank has no pawns / 己方國王側翼完全無兵時的防禦缺失懲罰（中局與殘局）
@@ -733,7 +746,7 @@ CONTEMPT = 20 # centipawns
 
 PAWN_PUSH_RANK_BONUS = 2000
 PAWN_PUSH_ATTACK_BONUS = 3000
-KING_TROPISM_BONUS = 2500 # Bonus for improving king tropism
+# KING_TROPISM_BONUS removed (unused move-ordering stub; eval tropism also removed)
 KING_ATTACK_BONUS = 2000 # Bonus for quiet moves attacking the opponent's King zone
 ROOK_QUEEN_BATTERY_BONUS = 5000 # Bonus for Rook moving to same file/rank as Queen
 

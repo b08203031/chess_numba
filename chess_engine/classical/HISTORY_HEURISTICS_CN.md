@@ -43,6 +43,20 @@ def update_history(history_table, piece_type, to_square, bonus):
     history_table[piece_type, to_square] = new_value
 ```
 
+### 分級上限 (Tiered Ceilings)
+
+各表使用不同的 `Max_Limit`，避免次級表分數膨脹到與主表同級（見 `constants.py`）：
+
+| 常數 | 典型值 | 用途 |
+| :--- | ---: | :--- |
+| `HISTORY_MAX_MAIN` | 16384 | 主歷史 |
+| `HISTORY_MAX_CONTINUATION` | 12288 | 延續歷史 |
+| `HISTORY_MAX_BUTTERFLY` | 8192 | 蝴蝶歷史 |
+| `HISTORY_MAX_CAPTURE` | 8192 | 吃子歷史 |
+| `HISTORY_MAX_PAWN` | 4096 | 兵歷史 |
+
+Cutoff 時的步長採線性縮放（例如 `bonus = min(120 * depth, 1800)`），而非二次方飽和公式。
+
 ---
 
 ## 3. 延續歷史 (Continuation History)

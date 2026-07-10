@@ -1,34 +1,44 @@
 ---
-description: "AI Assistant workflow guidelines: pre-task checking, post-task documentation maintenance, and user-driven testing execution."
+description: "Pre/post task docs workflow, Stockfish refs, light vs heavy tests, JIT compile patience."
 trigger: always_on
 ---
 
 # Workflow Guidelines
 
-To maintain code cleanliness and documentation consistency across the project, all AI assistants must strictly adhere to the following workflow guidelines when performing development, refactoring, debugging, or documentation tasks.
+Apply on every development, refactor, debug, or documentation task.
 
 ---
 
-## 1. Pre-Task: Documentation Check
+## 1. Pre-task
 
-* **Retrieve Documentation**: Before modifying any files or starting a new design phase, the AI assistant **MUST** read the **📂 Project Documentation Map (📂 專案文件導覽)** section in the project root's `README.md`.
-* **Primary Objective**: Check if the module being modified already has an associated design specification, algorithm analysis report, or configuration guide. This prevents duplicate logic implementation or breaking established architectural invariants.
-* **Analyze Stockfish Reference Source Code**: To align mathematical formulas and algorithmic behaviors with standard chess engine designs, references are located in respective directories:
-    * For analyzing **search functions**, refer to [stockfish_repo](file:///c:/Users/ren%20cian/OneDrive/桌面/chess/chess_numba/chess_numba/stockfish_repo) (SF 18).
-    * For analyzing **HCE evaluation functions**, refer to [stockfish_11](file:///c:/Users/ren%20cian/OneDrive/桌面/chess/chess_numba/chess_numba/stockfish_11) (SF 11).
-    The AI assistant is encouraged to query and read these directories (using search tools or by spawning a background `research` subagent) before planning changes.
-
----
-
-## 2. Post-Task: Documentation Maintenance
-
-* **Update/Create Documents**: Upon implementing major features, refactoring components, or fixing system bugs, the AI assistant **MUST** proactively update existing technical documents or create new ones in the relevant directories (e.g., under `chess_engine/classical/` or `chess_engine/nnue/`).
-* **Synchronize the Index**: If any technical document is added, deleted, or renamed, the AI assistant **MUST** update the **📂 Project Documentation Map (📂 專案文件導覽)** index in the root `README.md` to ensure it remains perfectly synchronized with the actual file structure.
+* **MUST** open root `README.md` → section **專案文件導覽 (Documentation Map)** and load any design/analysis doc for the module you will touch.
+* **MUST NOT** invent parallel designs that contradict indexed docs (e.g. HCE audit, SEARCH_ANALYSIS, NNUE ARCHITECTURE).
+* Align algorithms with reference trees (repo-relative paths only):
+  * Search / modern engine ideas → `stockfish_repo/` (SF 18)
+  * Hand-crafted eval (HCE) → `stockfish_11/` (SF 11)
 
 ---
 
-## 3. Testing Policy: Automated & User-Led Execution
+## 2. Post-task
 
-* **Allowed Automated Light Tests**: AI assistants are allowed to automatically run light unit tests (e.g., `unittest`) that do not require heavy Numba compiling, in order to verify code correctness immediately.
-* **Heavy Tests Restrictions**: Heavy benchmarks, Elo matches, and deep performance profiling tests must not be run automatically and require explicit user instructions.
-* **JIT Compilation Warning**: Because Numba JIT compiling complex mathematical search functions takes substantial resources and time, compilation/first run can take upwards of 5 minutes. The agent must wait patiently and avoid repeatedly executing search commands.
+* Major features, refactors, or invariant fixes → **MUST** update the matching tech doc under `chess_engine/classical/` or `chess_engine/nnue/` (or create one if none exists).
+* Any add / delete / rename of a tech markdown file → **MUST** update the Documentation Map in root `README.md`.
+* **MUST NOT** dump session notes or one-off plans in the repo root; put archaeology under `archive/` (not in the main index).
+* `classical_old/` is a **.py-only** battle baseline via `tools/sync_classical_old.py` — **no markdown maintenance** there.
+
+---
+
+## 3. Testing policy
+
+| Allowed without asking | Requires explicit user approval |
+| :--- | :--- |
+| Light unit tests (`unittest`) with little/no heavy JIT | Elo tournaments, long benchmarks, deep perft mass runs, SPSA games |
+
+* First JIT compile of search/eval can take **several minutes** (>5). Wait for completion; **MUST NOT** spam restarts or re-launch the same compile.
+* When board/make/unmake/movegen change: **recommend** the user run perft (see `board-integrity` rule) rather than auto-running heavy perft.
+
+---
+
+## 4. Cross-tool note
+
+`.agents/rules/*.md` frontmatter (`trigger` / `glob`) is for agents that support modular rules. Tools that only load `AGENTS.md` **MUST** still open the rule file listed for the files being edited.

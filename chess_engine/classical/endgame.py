@@ -1,5 +1,6 @@
-#過去測試發現依舊打不贏象馬殺王，主引擎沒有使用
 # chess_engine/classical/endgame.py
+# Specialized endgame evaluators aligned with Stockfish 11 (KXK, KPK, KRKP, KQKP, KBNK)
+# plus scale-factor catalog for other fortresses.
 import numba
 import numpy as np
 from chess_engine.classical.constants import (
@@ -7,10 +8,11 @@ from chess_engine.classical.constants import (
     SCALE_FACTOR_OCB_TWO_PAWNS, SCALE_FACTOR_OCB_MULTIPLE_PAWNS,
     SCALE_FACTOR_KXK, SCALE_FACTOR_KBNK, SCALE_FACTOR_KBPSK_FORTRESS,
     SCALE_FACTOR_KRPKR_FORTRESS, SCALE_FACTOR_KQKR_FORTRESS, SCALE_FACTOR_KQKRPs_FORTRESS,
-    WHITE, BLACK, PAWN, KNIGHT, BISHOP, ROOK, QUEEN, KING
+    WHITE, BLACK, PAWN, KNIGHT, BISHOP, ROOK, QUEEN, KING,
+    EG_MATERIAL_VALUES, MG_MATERIAL_VALUES, VALUE_KNOWN_WIN, MATE_IN_MAX_PLY,
 )
-from chess_engine.classical.bitboard_utils import get_lsb_index, count_bits, FILE_MASKS
-from chess_engine.classical.move_generator import get_bishop_attacks
+from chess_engine.classical.bitboard_utils import get_lsb_index, count_bits, FILE_MASKS, BB_SQUARES
+from chess_engine.classical.move_generator import get_bishop_attacks, KING_ATTACKS
 
 # --- Helper Distance Tables ---
 def _create_manhattan_distance_table():
@@ -61,6 +63,145 @@ PUSH_TO_CORNERS = np.array([
      4160, 4480, 4800, 5120, 5440, 5760, 6080, 6400
 ], dtype=np.int32)
 
+DARK_SQUARES = np.uint64(0xAA55AA55AA55AA55)
+LIGHT_SQUARES = np.uint64(0x55AA55AA55AA55AA)
+# A/C/F/H files for KQKP exception (SF11)
+ACFH_FILES = np.uint64(0xA5A5A5A5A5A5A5A5)
+
+# =============================================================================
+# KPK Bitbase (SF11 bitbase.cpp) — generated once at import
+# Index: wksq | bksq<<6 | us<<12 | pawn_file<<13 | (7-rank)<<15
+# =============================================================================
+_KPK_MAX_INDEX = 2 * 24 * 64 * 64  # 196608
+_INVALID, _UNKNOWN, _DRAW, _WIN = 0, 1, 2, 4
+
+
+def _kpk_index(us, bksq, wksq, psq):
+    # SF11: bits 15-17 store RANK_7 - rank (rank 2..7 -> 5..0), i.e. 6 - rank_index
+    return (
+        int(wksq)
+        | (int(bksq) << 6)
+        | (int(us) << 12)
+        | ((int(psq) & 7) << 13)
+        | ((6 - (int(psq) // 8)) << 15)
+    )
+
+
+def _kpk_white_pawn_attacks(psq):
+    bb = 0
+    f, r = psq & 7, psq // 8
+    if r < 7:
+        if f > 0:
+            bb |= 1 << ((r + 1) * 8 + (f - 1))
+        if f < 7:
+            bb |= 1 << ((r + 1) * 8 + (f + 1))
+    return bb
+
+
+def _build_kpk_bitbase():
+    """Retrograde generation of KPK win bitbase (SF11-compatible)."""
+    king_att = [int(KING_ATTACKS[s]) for s in range(64)]
+    db = np.full(_KPK_MAX_INDEX, _UNKNOWN, dtype=np.uint8)
+
+    for idx in range(_KPK_MAX_INDEX):
+        wksq = idx & 0x3F
+        bksq = (idx >> 6) & 0x3F
+        us = (idx >> 12) & 1
+        pfile = (idx >> 13) & 3
+        # rank = RANK_7 - encoded = 6 - encoded  (ranks 2..7 -> indices 1..6)
+        prank = 6 - ((idx >> 15) & 7)
+        if prank < 1 or prank > 6:
+            db[idx] = _INVALID
+            continue
+        psq = prank * 8 + pfile
+
+        if (abs((wksq // 8) - (bksq // 8)) <= 1 and abs((wksq & 7) - (bksq & 7)) <= 1
+                or wksq == psq or bksq == psq
+                or (us == 0 and (_kpk_white_pawn_attacks(psq) & (1 << bksq)))):
+            db[idx] = _INVALID
+            continue
+
+        if us == 0 and prank == 6:
+            promo = psq + 8
+            if wksq != promo and (abs((bksq // 8) - (promo // 8)) > 1 or abs((bksq & 7) - (promo & 7)) > 1
+                                  or (king_att[wksq] & (1 << promo))):
+                db[idx] = _WIN
+                continue
+
+        if us == 1:
+            # Black stalemate or captures undefended pawn
+            safe = king_att[bksq] & ~(king_att[wksq] | _kpk_white_pawn_attacks(psq))
+            if safe == 0 or ((king_att[bksq] & (1 << psq)) and not (king_att[wksq] & (1 << psq))):
+                db[idx] = _DRAW
+                continue
+
+        db[idx] = _UNKNOWN
+
+    # Iterate until fixpoint (SF11 needs ~15 cycles)
+    changed = True
+    while changed:
+        changed = False
+        for idx in range(_KPK_MAX_INDEX):
+            if db[idx] != _UNKNOWN:
+                continue
+            wksq = idx & 0x3F
+            bksq = (idx >> 6) & 0x3F
+            us = (idx >> 12) & 1
+            pfile = (idx >> 13) & 3
+            prank = 6 - ((idx >> 15) & 7)
+            psq = prank * 8 + pfile
+
+            r = _INVALID
+            if us == 0:
+                good, bad = _WIN, _DRAW
+                b = king_att[wksq]
+                while b:
+                    to = (b & -b).bit_length() - 1
+                    b &= b - 1
+                    r |= int(db[_kpk_index(1, bksq, to, psq)])
+                if prank < 6:
+                    r |= int(db[_kpk_index(1, bksq, wksq, psq + 8)])
+                if prank == 1 and (psq + 8) != wksq and (psq + 8) != bksq:
+                    r |= int(db[_kpk_index(1, bksq, wksq, psq + 16)])
+            else:
+                good, bad = _DRAW, _WIN
+                b = king_att[bksq]
+                while b:
+                    to = (b & -b).bit_length() - 1
+                    b &= b - 1
+                    r |= int(db[_kpk_index(0, to, wksq, psq)])
+
+            if r & good:
+                db[idx] = good
+                changed = True
+            elif not (r & _UNKNOWN):
+                db[idx] = bad
+                changed = True
+
+    bitbase = np.zeros(_KPK_MAX_INDEX // 32, dtype=np.uint32)
+    for idx in range(_KPK_MAX_INDEX):
+        if db[idx] == _WIN:
+            bitbase[idx // 32] |= np.uint32(1) << np.uint32(idx & 31)
+    return bitbase
+
+
+KPK_BITBASE = _build_kpk_bitbase()
+
+
+@numba.njit(cache=True, boundscheck=False, fastmath=True, inline='always')
+def kpk_bitbase_probe(wksq, psq, bksq, us):
+    """Probe KPK bitbase; squares must be normalized (strong=white, pawn files A-D)."""
+    # SF11 encoding: (RANK_7 - rank) in bits 15-17 => (6 - rank_index)
+    idx = (
+        np.int32(wksq)
+        | (np.int32(bksq) << 6)
+        | (np.int32(us) << 12)
+        | ((np.int32(psq) & 7) << 13)
+        | ((6 - (np.int32(psq) // 8)) << 15)
+    )
+    return (KPK_BITBASE[idx // 32] & (np.uint32(1) << np.uint32(idx & 31))) != np.uint32(0)
+
+
 @numba.njit(cache=True, boundscheck=False, fastmath=True)
 def mate_kxk(strong_king_sq, weak_king_sq):
     dist = CHEBYSHEV_DISTANCE[strong_king_sq, weak_king_sq]
@@ -73,12 +214,19 @@ def opposite_colors(sq1, sq2):
 
 @numba.njit(cache=True, boundscheck=False, fastmath=True, inline='always')
 def normalize_square(sq, strong_side, p_sq):
+    # SF11: horizontal flip by original pawn file, then vertical if black is strong
+    if (p_sq % 8) >= 4:
+        sq = sq ^ 7
     if strong_side == 1:
         sq = sq ^ 56
-    p_file = p_sq % 8
-    if p_file >= 4:
-        sq = sq ^ 7
     return sq
+
+
+@numba.njit(cache=True, boundscheck=False, fastmath=True, inline='always')
+def relative_square(side, sq):
+    """Map square so `side` appears as White (flip ranks if side is Black)."""
+    return sq ^ 56 if side == 1 else sq
+
 
 @numba.njit(cache=True, boundscheck=False, fastmath=True)
 def mate_kbnk(strong_king_sq, weak_king_sq, bishop_sq):
@@ -87,11 +235,167 @@ def mate_kbnk(strong_king_sq, weak_king_sq, bishop_sq):
     
     dist_kings = CHEBYSHEV_DISTANCE[strong_king_sq, weak_king_sq]
     
-    result = np.int32(10000) + PUSH_CLOSE[dist_kings] + PUSH_TO_CORNERS[idx]
+    result = np.int32(VALUE_KNOWN_WIN) + PUSH_CLOSE[dist_kings] + PUSH_TO_CORNERS[idx]
     return result
+
+
+@numba.njit(cache=True, boundscheck=False, fastmath=True)
+def _eval_kxk(strong_side, piece_bbs, side_to_move):
+    """K + material vs lone king (SF11 Endgame<KXK>). Score from White's perspective."""
+    if strong_side == 0:
+        sk = get_lsb_index(piece_bbs[5])
+        wk = get_lsb_index(piece_bbs[11])
+        npm = (count_bits(piece_bbs[1]) * EG_MATERIAL_VALUES[1]
+               + count_bits(piece_bbs[2]) * EG_MATERIAL_VALUES[2]
+               + count_bits(piece_bbs[3]) * EG_MATERIAL_VALUES[3]
+               + count_bits(piece_bbs[4]) * EG_MATERIAL_VALUES[4])
+        pawns = count_bits(piece_bbs[0])
+        q = count_bits(piece_bbs[4])
+        r = count_bits(piece_bbs[3])
+        b = count_bits(piece_bbs[2])
+        n = count_bits(piece_bbs[1])
+        bishops = piece_bbs[2]
+    else:
+        sk = get_lsb_index(piece_bbs[11])
+        wk = get_lsb_index(piece_bbs[5])
+        npm = (count_bits(piece_bbs[7]) * EG_MATERIAL_VALUES[1]
+               + count_bits(piece_bbs[8]) * EG_MATERIAL_VALUES[2]
+               + count_bits(piece_bbs[9]) * EG_MATERIAL_VALUES[3]
+               + count_bits(piece_bbs[10]) * EG_MATERIAL_VALUES[4])
+        pawns = count_bits(piece_bbs[6])
+        q = count_bits(piece_bbs[10])
+        r = count_bits(piece_bbs[9])
+        b = count_bits(piece_bbs[8])
+        n = count_bits(piece_bbs[7])
+        bishops = piece_bbs[8]
+
+    result = np.int32(npm + pawns * EG_MATERIAL_VALUES[0]
+                      + PUSH_TO_EDGES[wk]
+                      + PUSH_CLOSE[CHEBYSHEV_DISTANCE[sk, wk]])
+
+    both_bishop_colors = ((bishops & DARK_SQUARES) != 0) and ((bishops & LIGHT_SQUARES) != 0)
+    if q > 0 or r > 0 or (b > 0 and n > 0) or both_bishop_colors:
+        known = result + np.int32(VALUE_KNOWN_WIN)
+        cap = np.int32(MATE_IN_MAX_PLY - 1)
+        result = known if known < cap else cap
+
+    # Return from White's perspective
+    if strong_side == 0:
+        return result
+    return -result
+
+
+@numba.njit(cache=True, boundscheck=False, fastmath=True)
+def _eval_kpk(strong_side, piece_bbs, side_to_move):
+    """KP vs K via KPK bitbase (SF11). Score from White's perspective."""
+    if strong_side == 0:
+        sk = get_lsb_index(piece_bbs[5])
+        wk = get_lsb_index(piece_bbs[11])
+        psq = get_lsb_index(piece_bbs[0])
+    else:
+        sk = get_lsb_index(piece_bbs[11])
+        wk = get_lsb_index(piece_bbs[5])
+        psq = get_lsb_index(piece_bbs[6])
+
+    wksq = normalize_square(sk, strong_side, psq)
+    bksq = normalize_square(wk, strong_side, psq)
+    npsq = normalize_square(psq, strong_side, psq)
+    us = np.int32(0) if strong_side == side_to_move else np.int32(1)
+
+    if not kpk_bitbase_probe(wksq, npsq, bksq, us):
+        return np.int32(0)  # draw
+
+    result = np.int32(VALUE_KNOWN_WIN) + EG_MATERIAL_VALUES[0] + np.int32(npsq // 8)
+    if strong_side == 0:
+        return result
+    return -result
+
+
+@numba.njit(cache=True, boundscheck=False, fastmath=True)
+def _eval_krkp(strong_side, piece_bbs, side_to_move):
+    """KR vs KP (SF11 Endgame<KRKP>). Score from White's perspective."""
+    if strong_side == 0:
+        wksq = relative_square(0, get_lsb_index(piece_bbs[5]))
+        bksq = relative_square(0, get_lsb_index(piece_bbs[11]))
+        rsq = relative_square(0, get_lsb_index(piece_bbs[3]))
+        psq = relative_square(0, get_lsb_index(piece_bbs[6]))
+        weak_stm = (side_to_move == 1)
+        strong_stm = (side_to_move == 0)
+    else:
+        wksq = relative_square(1, get_lsb_index(piece_bbs[11]))
+        bksq = relative_square(1, get_lsb_index(piece_bbs[5]))
+        rsq = relative_square(1, get_lsb_index(piece_bbs[9]))
+        psq = relative_square(1, get_lsb_index(piece_bbs[0]))
+        weak_stm = (side_to_move == 0)
+        strong_stm = (side_to_move == 1)
+
+    queening_sq = psq & 7  # RANK_1, same file
+    dist_wk_p = CHEBYSHEV_DISTANCE[wksq, psq]
+    dist_bk_p = CHEBYSHEV_DISTANCE[bksq, psq]
+    dist_bk_r = CHEBYSHEV_DISTANCE[bksq, rsq]
+
+    # Strong king in front of pawn on file? (pawn is north of strong king in relative coords)
+    king_in_front = (wksq & 7) == (psq & 7) and (wksq // 8) < (psq // 8)
+
+    if king_in_front:
+        result = EG_MATERIAL_VALUES[3] - dist_wk_p
+    elif dist_bk_p >= 3 + (1 if weak_stm else 0) and dist_bk_r >= 3:
+        result = EG_MATERIAL_VALUES[3] - dist_wk_p
+    elif ((bksq // 8) <= 2 and dist_bk_p == 1 and (wksq // 8) >= 3
+          and dist_wk_p > 2 + (1 if strong_stm else 0)):
+        result = np.int32(80) - np.int32(8) * dist_wk_p
+    else:
+        psq_south = psq - 8 if psq >= 8 else psq
+        result = (np.int32(200)
+                  - np.int32(8) * (CHEBYSHEV_DISTANCE[wksq, psq_south]
+                                   - CHEBYSHEV_DISTANCE[bksq, psq_south]
+                                   - CHEBYSHEV_DISTANCE[psq, queening_sq]))
+
+    if strong_side == 0:
+        return np.int32(result)
+    return np.int32(-result)
+
+
+@numba.njit(cache=True, boundscheck=False, fastmath=True)
+def _eval_kqkp(strong_side, piece_bbs, side_to_move):
+    """KQ vs KP (SF11 Endgame<KQKP>). Score from White's perspective."""
+    if strong_side == 0:
+        sk = get_lsb_index(piece_bbs[5])
+        wk = get_lsb_index(piece_bbs[11])
+        psq = get_lsb_index(piece_bbs[6])
+        weak_side = 1
+    else:
+        sk = get_lsb_index(piece_bbs[11])
+        wk = get_lsb_index(piece_bbs[5])
+        psq = get_lsb_index(piece_bbs[0])
+        weak_side = 0
+
+    result = np.int32(PUSH_CLOSE[CHEBYSHEV_DISTANCE[sk, wk]])
+
+    # relative rank of pawn for weak side
+    if weak_side == 0:
+        rel_rank = psq // 8
+    else:
+        rel_rank = 7 - (psq // 8)
+
+    pawn_bb = BB_SQUARES[psq]
+    on_acfh = (pawn_bb & ACFH_FILES) != np.uint64(0)
+    if not (rel_rank == 6 and CHEBYSHEV_DISTANCE[wk, psq] == 1 and on_acfh):
+        result += EG_MATERIAL_VALUES[4] - EG_MATERIAL_VALUES[0]
+
+    if strong_side == 0:
+        return result
+    return -result
+
 
 @numba.njit(cache=True, boundscheck=False, fastmath=True)
 def evaluate_special_endgame(piece_bbs, occupancy_bbs, game_state, phase):
+    """
+    Specialized endgame evaluation (SF11 material-table subset).
+
+    Handles: KBNK, KPK, KRKP, KQKP, KXK.
+    Returns (hit, score_from_white) — caller converts to side-to-move perspective.
+    """
     wp = count_bits(piece_bbs[0])
     wn = count_bits(piece_bbs[1])
     wb = count_bits(piece_bbs[2])
@@ -104,21 +408,48 @@ def evaluate_special_endgame(piece_bbs, occupancy_bbs, game_state, phase):
     br = count_bits(piece_bbs[9])
     bq = count_bits(piece_bbs[10])
     
-    w_minor_major = wn + wb + wr + wq
-    b_minor_major = bn + bb + br + bq
-    total_pawns = wp + bp
+    w_npm = wn * MG_MATERIAL_VALUES[1] + wb * MG_MATERIAL_VALUES[2] + wr * MG_MATERIAL_VALUES[3] + wq * MG_MATERIAL_VALUES[4]
+    b_npm = bn * MG_MATERIAL_VALUES[1] + bb * MG_MATERIAL_VALUES[2] + br * MG_MATERIAL_VALUES[3] + bq * MG_MATERIAL_VALUES[4]
     
     wk_sq = get_lsb_index(piece_bbs[5])
     bk_sq = get_lsb_index(piece_bbs[11])
-    
-    if total_pawns == 0:
-        if w_minor_major == 2 and wb == 1 and wn == 1 and b_minor_major == 0:
+    side_to_move = np.int32(game_state[0])
+
+    # --- KBNK ---
+    if wp == 0 and bp == 0:
+        if wn == 1 and wb == 1 and wr == 0 and wq == 0 and bn == 0 and bb == 0 and br == 0 and bq == 0:
             bishop_sq = get_lsb_index(piece_bbs[2])
             return True, np.int32(mate_kbnk(wk_sq, bk_sq, bishop_sq))
-        if b_minor_major == 2 and bb == 1 and bn == 1 and w_minor_major == 0:
+        if bn == 1 and bb == 1 and br == 0 and bq == 0 and wn == 0 and wb == 0 and wr == 0 and wq == 0:
             bishop_sq = get_lsb_index(piece_bbs[8])
             return True, np.int32(-mate_kbnk(bk_sq, wk_sq, bishop_sq))
-            
+
+    # --- KPK (exactly one pawn, no other non-kings) ---
+    if w_npm == 0 and b_npm == 0:
+        if wp == 1 and bp == 0:
+            return True, _eval_kpk(0, piece_bbs, side_to_move)
+        if bp == 1 and wp == 0:
+            return True, _eval_kpk(1, piece_bbs, side_to_move)
+
+    # --- KRKP ---
+    if wr == 1 and wq == 0 and wn == 0 and wb == 0 and wp == 0 and br == 0 and bq == 0 and bn == 0 and bb == 0 and bp == 1:
+        return True, _eval_krkp(0, piece_bbs, side_to_move)
+    if br == 1 and bq == 0 and bn == 0 and bb == 0 and bp == 0 and wr == 0 and wq == 0 and wn == 0 and wb == 0 and wp == 1:
+        return True, _eval_krkp(1, piece_bbs, side_to_move)
+
+    # --- KQKP ---
+    if wq == 1 and wr == 0 and wn == 0 and wb == 0 and wp == 0 and bq == 0 and br == 0 and bn == 0 and bb == 0 and bp == 1:
+        return True, _eval_kqkp(0, piece_bbs, side_to_move)
+    if bq == 1 and br == 0 and bn == 0 and bb == 0 and bp == 0 and wq == 0 and wr == 0 and wn == 0 and wb == 0 and wp == 1:
+        return True, _eval_kqkp(1, piece_bbs, side_to_move)
+
+    # --- KXK: weak side has only king; strong npm >= Rook ---
+    rook_mg = MG_MATERIAL_VALUES[3]
+    if b_npm == 0 and bp == 0 and w_npm >= rook_mg:
+        return True, _eval_kxk(0, piece_bbs, side_to_move)
+    if w_npm == 0 and wp == 0 and b_npm >= rook_mg:
+        return True, _eval_kxk(1, piece_bbs, side_to_move)
+
     return False, np.int32(0)
 
 @numba.njit(cache=True, boundscheck=False, fastmath=True, inline='always')

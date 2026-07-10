@@ -1,56 +1,54 @@
 ---
-description: "Search algorithm mathematical correctness, Negamax symmetry, draw, repetition, and pruning safety constraints."
+description: "Negamax symmetry, mate distance, repetition/50-move, root and in-check pruning safety."
 trigger: glob
-glob: "**/{search,search_heuristics}.py"
+glob: "**/chess_engine/**/{search,search_heuristics,time_manager,transposition_table}.py"
 ---
 
 # Search Correctness Constraints
 
-When modifying or optimizing the core search engine (`search.py`, `search_heuristics.py`), the AI assistant **MUST** ensure the mathematical correctness of the search algorithms and the safety of pruning boundaries.
+Applies when editing search / move ordering / TT.  
+Algorithm narrative: `chess_engine/classical/SEARCH_ANALYSIS.md` (and NNUE twin if relevant).
 
 ---
 
-## 1. Negamax Symmetry Invariants
+## 1. Negamax (MUST)
 
-The engine operates under the Negamax framework.
-
-*   **Score Symmetry**:
-    *   All evaluation scores and search returns **must** be relative to the active player (**Side to Move**).
-    *   When recursively calling child searches, you **must** negate the return value (e.g., `score = -search(...)`) and invert the alpha-beta bounds (`-beta`, `-alpha`).
-    *   Any asymmetric score calculations or reduction offsets will break the alpha-beta pruning mathematics, resulting in catastrophic tactical blunders.
+* Scores are **side-to-move relative**
+* Child call: `score = -search(...)` with bounds `(-beta, -alpha)`
+* No asymmetric “side bonuses” inside the recursive score path
 
 ---
 
-## 2. Checkmate Score Handling (Mate Distance Invariants)
+## 2. Mate distance (MUST)
 
-When checkmate is discovered, the return score **must** be adjusted dynamically based on the **search depth (ply)**. This guides the engine to select the fastest mate path when winning, and the longest defense path when losing.
-
-*   **Ply-Distance Adjustment Formulas**:
-    *   **Mating the opponent**: Return `MATE_SCORE - ply`
-    *   **Being mated by the opponent**: Return `-MATE_SCORE + ply`
-*   **Transposition Table (TT) Safeguard**:
-    *   When writing mate scores into or reading them from the TT, you **must** translate/normalize them (removing the ply offset relative to the current node) to ensure cache validity across different search branches.
+* Mating side: `MATE_SCORE - ply`
+* Being mated: `-MATE_SCORE + ply`
+* TT store/load: convert mate scores to/from path-relative form so TT entries stay valid across plies
 
 ---
 
-## 3. Repetition & Draw Invariants
+## 3. Repetition & draws (MUST match engine policy)
 
-To prevent the engine from falling into infinite loops or ignoring upcoming draw conditions:
+Current classical search policy (do not “fix” to FIDE triple-rep without an explicit design change):
 
-*   **Stack and History Dual-Check**:
-    *   Repetition checks **must** compare both the active search path stack (`ply_path_stack`) and the global game history (`game_history`).
-    *   The lookup scope is strictly limited by the **halfmove clock limit** (no pawn moves, no captures).
-*   **Draw Scores**:
-    *   A **draw (0.0 score)** must be triggered on the **first repetition** (i.e., the second time a position is reached) or when the **50-move halfmove clock limit** is reached.
-    *   **Root Safeguard**: **Strictly forbid draw pruning at the root node (ply = 0)**. The root must always evaluate legal moves fully to avoid illegal moves or instant resignations.
-*   **50-Move Scale-down**:
-    *   As the halfmove clock approaches 50, scale down evaluations smoothly to prevent search "cliff effects" where a forced draw is ignored until it is too late.
+* Count hits on `ply_path_stack` and `game_history`, scoped by **halfmove clock**
+* At `ply > 0`: treat **first repetition** (second occurrence of the key) **or** halfmove ≥ 50 as **draw (0)**
+* **MUST NOT** apply draw/repetition cutoffs at **root** (`ply == 0`)
+* Near 50-move limit: scale eval toward draw (avoid cliff at the leaf)
 
 ---
 
-## 4. Pruning Safety Boundaries
+## 4. Pruning safety (MUST)
 
-Search heuristics (such as Null Move Pruning (NMP), Reverse Futility Pruning (RFP), Late Move Pruning (LMP), and Razoring) are highly effective at node reduction but must strictly respect safety bounds:
+* **No** heuristic prune / early fail-soft that skips full root move resolution at `ply == 0` (all legal root moves must be considered for bestmove)
+* If **in check**: **forbid** NMP, RFP, and other static-eval-based prunes that skip evasion search; search check evasions full-width as designed
+* Changing prune margins/constants: prefer constants in `constants.py`; keep PV / check / mate lines protected
 
-*   **No Root Pruning**: **Never** prune or return early at the root node (`ply == 0`). All legal moves at the root must be fully searched.
-*   **In-Check Protection**: If the side-to-move is in check (`is_in_check` is True), **strictly forbid** NMP, RFP, or any other heuristic pruning. You must perform a full-width search of all check evasions.
+---
+
+## 5. After changes (recommend)
+
+```bash
+python -m tests.test_search
+# Heavy: only with user OK — tools/tournament.py, tests/benchmark.py
+```

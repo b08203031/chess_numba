@@ -1,380 +1,417 @@
-import re
-import os
+#!/usr/bin/env python3
+"""
+Parse per-move search stats from tournament PGN comments and compare two engines.
+
+Comment format expected:
+  { d=11, eval=+0.07, n=332609, t=528ms }
+
+Consolidates former _extra_analysis.py search portions (by-color depth/NPS,
+depth histogram, same-depth node ratios).
+
+Game-level WDL / Elo: 統計數據.py
+
+Usage (repo root):
+  python tournament_analysis/parse_search_stats.py
+  python tournament_analysis/parse_search_stats.py --name1 New --name2 Old
+"""
+from __future__ import annotations
+
 import argparse
+import os
+import re
+from collections import defaultdict
+from pathlib import Path
+from typing import Dict, List, Optional, Tuple
+
+import matplotlib.pyplot as plt
 import numpy as np
 import scipy.stats as sp_stats
-import matplotlib.pyplot as plt
 
-def parse_pgn(file_path, name1, name2):
-    if not os.path.exists(file_path):
-        print(f"Error: PGN file not found: {file_path}")
+HERE = Path(__file__).resolve().parent
+DEFAULT_PGN = HERE / "tournament_results.pgn"
+
+WHITE_MOVE_RE = re.compile(
+    r"\b(?<!\.)\b(\d+)\.\s+(\S+)\s*\{\s*d=(\d+),\s*eval=([^,]+),\s*n=(\d+),\s*t=(\d+)ms\s*\}"
+)
+BLACK_MOVE_RE = re.compile(
+    r"\b(\d+)\.\.\.\s+(\S+)\s*\{\s*d=(\d+),\s*eval=([^,]+),\s*n=(\d+),\s*t=(\d+)ms\s*\}"
+)
+
+
+def empty_stats() -> Dict[str, List]:
+    return {"depth": [], "nodes": [], "time": [], "move_num": [], "color": []}
+
+
+def parse_pgn(file_path: str | Path, name1: str, name2: str):
+    path = Path(file_path)
+    if not path.exists():
+        print(f"Error: PGN file not found: {path}")
         return None
 
-    with open(file_path, 'r', encoding='utf-8') as f:
-        content = f.read()
-
-    # Split by games
+    content = path.read_text(encoding="utf-8", errors="replace")
     game_blocks = content.split('[Event "')
-    
-    new_stats = {'depth': [], 'nodes': [], 'time': [], 'move_num': []}
-    old_stats = {'depth': [], 'nodes': [], 'time': [], 'move_num': []}
+    # Also accept [Event without quote variants from split on [Event
+    if len(game_blocks) <= 1:
+        game_blocks = re.split(r"\[Event ", content)
 
-    # Regex patterns
-    # Matches white moves: 1. Qxe4+ { d=11, eval=+0.07, n=332609, t=528ms }
-    # Avoid matching black move indicators like 1...
-    white_move_pattern = re.compile(r'\b(?<!\.)\b(\d+)\.\s+(\S+)\s*\{\s*d=(\d+),\s*eval=([^,]+),\s*n=(\d+),\s*t=(\d+)ms\s*\}')
-    # Matches black moves: 1... Nxe4 { d=13, eval=+0.05, n=349642, t=562ms }
-    black_move_pattern = re.compile(r'\b(\d+)\.\.\.\s+(\S+)\s*\{\s*d=(\d+),\s*eval=([^,]+),\s*n=(\d+),\s*t=(\d+)ms\s*\}')
+    new_stats = empty_stats()
+    old_stats = empty_stats()
+    # (engine, color) -> lists
+    by_color = defaultdict(lambda: {"depth": [], "nodes": [], "time": [], "nps": []})
 
     games_parsed = 0
     for block in game_blocks:
         if not block.strip():
             continue
-        
-        # Determine who is White and Black
         white_match = re.search(r'\[White\s+"([^"]+)"\]', block)
         black_match = re.search(r'\[Black\s+"([^"]+)"\]', block)
-        
         if not white_match or not black_match:
             continue
-            
         white_player = white_match.group(1)
         black_player = black_match.group(1)
-        
-        # We only care about games involving name1 and name2
-        if white_player not in [name1, name2] or black_player not in [name1, name2]:
+        if white_player not in (name1, name2) or black_player not in (name1, name2):
             continue
-            
         games_parsed += 1
-        
-        # Find all white moves and black moves
-        white_moves = white_move_pattern.findall(block)
-        black_moves = black_move_pattern.findall(block)
-        
-        # Parse white moves
-        for move in white_moves:
-            move_num = int(move[0])
-            depth = int(move[2])
-            nodes = int(move[4])
-            time_ms = int(move[5])
-            
-            if white_player == name1:
-                new_stats['depth'].append(depth)
-                new_stats['nodes'].append(nodes)
-                new_stats['time'].append(time_ms)
-                new_stats['move_num'].append(move_num)
-            else:
-                old_stats['depth'].append(depth)
-                old_stats['nodes'].append(nodes)
-                old_stats['time'].append(time_ms)
-                old_stats['move_num'].append(move_num)
-                
-        # Parse black moves
-        for move in black_moves:
-            move_num = int(move[0])
-            depth = int(move[2])
-            nodes = int(move[4])
-            time_ms = int(move[5])
-            
-            if black_player == name1:
-                new_stats['depth'].append(depth)
-                new_stats['nodes'].append(nodes)
-                new_stats['time'].append(time_ms)
-                new_stats['move_num'].append(move_num)
-            else:
-                old_stats['depth'].append(depth)
-                old_stats['nodes'].append(nodes)
-                old_stats['time'].append(time_ms)
-                old_stats['move_num'].append(move_num)
+
+        for move in WHITE_MOVE_RE.findall(block):
+            move_num, _san, depth_s, _ev, nodes_s, time_s = move
+            depth, nodes, time_ms = int(depth_s), int(nodes_s), int(time_s)
+            eng = white_player
+            col = "W"
+            bucket = new_stats if eng == name1 else old_stats
+            bucket["depth"].append(depth)
+            bucket["nodes"].append(nodes)
+            bucket["time"].append(time_ms)
+            bucket["move_num"].append(int(move_num))
+            bucket["color"].append(col)
+            bc = by_color[(eng, col)]
+            bc["depth"].append(depth)
+            bc["nodes"].append(nodes)
+            bc["time"].append(time_ms)
+            if time_ms > 0:
+                bc["nps"].append(nodes / (time_ms / 1000.0))
+
+        for move in BLACK_MOVE_RE.findall(block):
+            move_num, _san, depth_s, _ev, nodes_s, time_s = move
+            depth, nodes, time_ms = int(depth_s), int(nodes_s), int(time_s)
+            eng = black_player
+            col = "B"
+            bucket = new_stats if eng == name1 else old_stats
+            bucket["depth"].append(depth)
+            bucket["nodes"].append(nodes)
+            bucket["time"].append(time_ms)
+            bucket["move_num"].append(int(move_num))
+            bucket["color"].append(col)
+            bc = by_color[(eng, col)]
+            bc["depth"].append(depth)
+            bc["nodes"].append(nodes)
+            bc["time"].append(time_ms)
+            if time_ms > 0:
+                bc["nps"].append(nodes / (time_ms / 1000.0))
 
     print(f"Successfully parsed {games_parsed} games.")
-    return new_stats, old_stats
+    return new_stats, old_stats, by_color
 
-def plot_line_metric(new_moves, new_means, new_sems, old_moves, old_means, old_sems, 
-                     title, xlabel, ylabel, filename, name1, name2, use_log=False):
+
+def plot_line_metric(
+    new_moves, new_means, new_sems, old_moves, old_means, old_sems,
+    title, xlabel, ylabel, filename, name1, name2, use_log=False,
+):
     plt.figure(figsize=(10, 5.5))
-    
-    # Plot New Engine
-    plt.plot(new_moves, new_means, color='#1f77b4', label=f'{name1} (Avg)', linewidth=2.0, marker='o', markersize=4)
+    plt.plot(new_moves, new_means, color="#1f77b4", label=f"{name1} (Avg)", linewidth=2.0, marker="o", markersize=4)
     if len(new_sems) > 0:
-        plt.fill_between(new_moves, new_means - new_sems, new_means + new_sems, color='#1f77b4', alpha=0.15, label=f'{name1} SEM')
-        
-    # Plot Old Engine
-    plt.plot(old_moves, old_means, color='#ff7f0e', label=f'{name2} (Avg)', linewidth=2.0, marker='s', markersize=4)
+        plt.fill_between(new_moves, new_means - new_sems, new_means + new_sems, color="#1f77b4", alpha=0.15, label=f"{name1} SEM")
+    plt.plot(old_moves, old_means, color="#ff7f0e", label=f"{name2} (Avg)", linewidth=2.0, marker="s", markersize=4)
     if len(old_sems) > 0:
-        plt.fill_between(old_moves, old_means - old_sems, old_means + old_sems, color='#ff7f0e', alpha=0.15, label=f'{name2} SEM')
-        
-    plt.title(title, fontsize=12, fontweight='bold', pad=12)
+        plt.fill_between(old_moves, old_means - old_sems, old_means + old_sems, color="#ff7f0e", alpha=0.15, label=f"{name2} SEM")
+    plt.title(title, fontsize=12, fontweight="bold", pad=12)
     plt.xlabel(xlabel, fontsize=10)
     plt.ylabel(ylabel, fontsize=10)
-    
     if use_log:
-        plt.yscale('log')
-        
-    plt.grid(True, which="both", linestyle='--', alpha=0.5)
-    plt.legend(loc='best', frameon=True, facecolor='white', edgecolor='none')
+        plt.yscale("log")
+    plt.grid(True, which="both", linestyle="--", alpha=0.5)
+    plt.legend(loc="best", frameon=True, facecolor="white", edgecolor="none")
     plt.tight_layout()
     plt.savefig(filename, dpi=150)
     plt.close()
 
-def analyze_and_plot(new_stats, old_stats, output_dir, name1, name2):
-    if not os.path.exists(output_dir):
-        os.makedirs(output_dir)
-        
-    new_depths = np.array(new_stats['depth'])
-    new_nodes = np.array(new_stats['nodes'])
-    new_times = np.array(new_stats['time'])
-    new_move_nums = np.array(new_stats.get('move_num', []))
-    
-    old_depths = np.array(old_stats['depth'])
-    old_nodes = np.array(old_stats['nodes'])
-    old_times = np.array(old_stats['time'])
-    old_move_nums = np.array(old_stats.get('move_num', []))
-    
+
+def get_metric_per_move(move_nums, values, max_move=100, min_samples=5):
+    if len(move_nums) == 0:
+        return np.array([]), np.array([]), np.array([])
+    unique_moves = np.unique(move_nums)
+    unique_moves = unique_moves[unique_moves <= max_move]
+    m_list, mean_list, sem_list = [], [], []
+    for m in unique_moves:
+        samples = values[move_nums == m]
+        if len(samples) >= min_samples:
+            m_list.append(m)
+            mean_list.append(np.mean(samples))
+            sem_list.append(np.std(samples, ddof=1) / np.sqrt(len(samples)) if len(samples) > 1 else 0.0)
+    return np.array(m_list), np.array(mean_list), np.array(sem_list)
+
+
+def append_by_color_section(report: List[str], by_color, name1: str, name2: str) -> None:
+    report.append("【5. 分執色搜尋統計 (engine × color)】")
+    for eng in (name1, name2):
+        for col in ("W", "B"):
+            s = by_color.get((eng, col))
+            if not s or not s["depth"]:
+                report.append(f"  {eng} {col}: (no moves)")
+                continue
+            d = np.array(s["depth"], dtype=float)
+            n = np.array(s["nodes"], dtype=float)
+            nps = np.array(s["nps"], dtype=float) if s["nps"] else np.array([])
+            d_nomate = d[d < 100]
+            deep = float(np.mean(d >= 14) * 100)
+            line = (
+                f"  {eng} {col}: moves={len(d)} mean_d={d.mean():.2f} med_d={np.median(d):.0f} "
+                f"d>=14={deep:.1f}% mean_n={n.mean():.0f}"
+            )
+            if len(nps):
+                line += f" mean_nps={nps.mean():.0f}"
+            if len(d_nomate):
+                line += f" mean_d_nomate={d_nomate.mean():.2f}"
+            report.append(line)
+    report.append("")
+
+
+def append_depth_hist_and_ratios(report: List[str], new_depths, new_nodes, old_depths, old_nodes, name1, name2) -> None:
+    report.append("【6. 深度直方圖 (%)】")
+    bins = [(1, 10), (11, 12), (13, 13), (14, 15), (16, 20), (21, 50), (51, 128)]
+    for eng, darr in ((name1, new_depths), (name2, old_depths)):
+        if len(darr) == 0:
+            continue
+        parts = []
+        for a, b in bins:
+            parts.append(f"{a}-{b}:{(np.mean((darr >= a) & (darr <= b)) * 100):.1f}%")
+        report.append(f"  {eng}: " + " ".join(parts))
+        dnm = darr[darr < 100]
+        if len(dnm):
+            report.append(
+                f"    no-mate mean_d={dnm.mean():.2f} med={np.median(dnm):.0f} "
+                f"d>=14={(dnm >= 14).mean() * 100:.1f}%"
+            )
+    report.append("")
+
+    report.append("【7. 同深度平均節點比 (min 20 samples each)】")
+    any_row = False
+    for d in range(6, 25):
+        nn = new_nodes[new_depths == d]
+        on = old_nodes[old_depths == d]
+        if len(nn) >= 20 and len(on) >= 20:
+            any_row = True
+            ratio = nn.mean() / on.mean() if on.mean() > 0 else float("nan")
+            report.append(
+                f"  d={d}: {name1} {nn.mean():.0f} (n={len(nn)})  "
+                f"{name2} {on.mean():.0f} (n={len(on)})  ratio={ratio:.3f}"
+            )
+    if not any_row:
+        report.append("  (insufficient samples)")
+    report.append("")
+
+
+def analyze_and_plot(new_stats, old_stats, by_color, output_dir, name1, name2):
+    os.makedirs(output_dir, exist_ok=True)
+
+    new_depths = np.array(new_stats["depth"])
+    new_nodes = np.array(new_stats["nodes"])
+    new_times = np.array(new_stats["time"])
+    new_move_nums = np.array(new_stats.get("move_num", []))
+
+    old_depths = np.array(old_stats["depth"])
+    old_nodes = np.array(old_stats["nodes"])
+    old_times = np.array(old_stats["time"])
+    old_move_nums = np.array(old_stats.get("move_num", []))
+
     if len(new_depths) == 0 or len(old_depths) == 0:
-        print(f"Error: Not enough move data to analyze. {name1} moves: {len(new_depths)}, {name2} moves: {len(old_depths)}")
+        print(
+            f"Error: Not enough move data. {name1} moves: {len(new_depths)}, {name2} moves: {len(old_depths)}"
+        )
         return
-        
-    # Calculate NPS (Nodes Per Second)
-    # Prevent division by zero
+
     new_nps = np.where(new_times > 0, new_nodes / (new_times / 1000.0), 0)
     old_nps = np.where(old_times > 0, old_nodes / (old_times / 1000.0), 0)
-    
-    # Filter out 0 NPS for statistics
     new_nps_clean = new_nps[new_nps > 0]
     old_nps_clean = old_nps[old_nps > 0]
 
-    # Calculate Standard Deviations (ddof=1 for sample standard deviation)
-    new_depth_std = np.std(new_depths, ddof=1) if len(new_depths) > 1 else 0.0
-    old_depth_std = np.std(old_depths, ddof=1) if len(old_depths) > 1 else 0.0
-    new_node_std = np.std(new_nodes, ddof=1) if len(new_nodes) > 1 else 0.0
-    old_node_std = np.std(old_nodes, ddof=1) if len(old_nodes) > 1 else 0.0
-    new_time_std = np.std(new_times, ddof=1) if len(new_times) > 1 else 0.0
-    old_time_std = np.std(old_times, ddof=1) if len(old_times) > 1 else 0.0
-    new_nps_std = np.std(new_nps_clean, ddof=1) if len(new_nps_clean) > 1 else 0.0
-    old_nps_std = np.std(old_nps_clean, ddof=1) if len(old_nps_clean) > 1 else 0.0
+    def sample_std(a):
+        return float(np.std(a, ddof=1)) if len(a) > 1 else 0.0
 
-    # Perform Welch's t-test to check if differences are statistically significant
     t_depth, p_depth = sp_stats.ttest_ind(new_depths, old_depths, equal_var=False)
     t_node, p_node = sp_stats.ttest_ind(new_nodes, old_nodes, equal_var=False)
     t_time, p_time = sp_stats.ttest_ind(new_times, old_times, equal_var=False)
-    
-    if len(new_nps_clean) > 0 and len(old_nps_clean) > 0:
+    if len(new_nps_clean) and len(old_nps_clean):
         t_nps, p_nps = sp_stats.ttest_ind(new_nps_clean, old_nps_clean, equal_var=False)
     else:
         t_nps, p_nps = 0.0, 1.0
 
-    report = []
-    report.append("========== 搜尋效能與深度對比統計報告 (含標準差與顯著性分析) ==========\n")
-    report.append(f"【樣本數據量】")
-    report.append(f"  * {name1} 引擎總著步數: {len(new_depths)}")
-    report.append(f"  * {name2} 引擎總著步數: {len(old_depths)}\n")
-    
-    report.append(f"【1. 搜尋深度 (Depth) 分析】")
-    report.append(f"  * {name1} 引擎平均深度: {np.mean(new_depths):.2f} 層 (標準差: {new_depth_std:.2f}, 中位數: {np.median(new_depths):.0f}, 最大: {np.max(new_depths)})")
-    report.append(f"  * {name2} 引擎平均深度: {np.mean(old_depths):.2f} 層 (標準差: {old_depth_std:.2f}, 中位數: {np.median(old_depths):.0f}, 最大: {np.max(old_depths)})")
-    depth_diff = np.mean(new_depths) - np.mean(old_depths)
-    report.append(f"  * 深度差異 ({name1} - {name2}): {depth_diff:+.2f} 層")
-    report.append(f"  * Welch's t-test 顯著性檢定: t = {t_depth:+.3f}, p-value = {p_depth:.4e}")
-    if p_depth < 0.05:
-        report.append("    [+] 深度差異具有統計顯著性 (p < 0.05)")
+    report: List[str] = []
+    report.append("========== 搜尋效能與深度對比統計報告 ==========\n")
+    report.append("【樣本】")
+    report.append(f"  * {name1} 著步數: {len(new_depths)}")
+    report.append(f"  * {name2} 著步數: {len(old_depths)}\n")
+
+    report.append("【1. 搜尋深度 (Depth)】")
+    report.append(
+        f"  * {name1}: mean={np.mean(new_depths):.2f} σ={sample_std(new_depths):.2f} "
+        f"med={np.median(new_depths):.0f} max={np.max(new_depths)}"
+    )
+    report.append(
+        f"  * {name2}: mean={np.mean(old_depths):.2f} σ={sample_std(old_depths):.2f} "
+        f"med={np.median(old_depths):.0f} max={np.max(old_depths)}"
+    )
+    report.append(f"  * 差異 ({name1}-{name2}): {np.mean(new_depths) - np.mean(old_depths):+.2f}")
+    report.append(f"  * Welch t={t_depth:+.3f}, p={p_depth:.4e}  {'[顯著]' if p_depth < 0.05 else '[不顯著]'}")
+    report.append(
+        f"  * depth>=14: {name1} {np.mean(new_depths >= 14)*100:.1f}% vs "
+        f"{name2} {np.mean(old_depths >= 14)*100:.1f}%\n"
+    )
+
+    report.append("【2. 節點數 (Nodes)】")
+    report.append(f"  * {name1}: mean={np.mean(new_nodes):.0f} σ={sample_std(new_nodes):.0f} med={np.median(new_nodes):.0f}")
+    report.append(f"  * {name2}: mean={np.mean(old_nodes):.0f} σ={sample_std(old_nodes):.0f} med={np.median(old_nodes):.0f}")
+    if np.mean(old_nodes) > 0:
+        report.append(f"  * 差異: {(np.mean(new_nodes) - np.mean(old_nodes)) / np.mean(old_nodes) * 100:+.1f}%")
+    report.append(f"  * Welch t={t_node:+.3f}, p={p_node:.4e}  {'[顯著]' if p_node < 0.05 else '[不顯著]'}\n")
+
+    report.append("【3. 每步耗時 (ms)】")
+    report.append(f"  * {name1}: mean={np.mean(new_times):.1f} σ={sample_std(new_times):.1f}")
+    report.append(f"  * {name2}: mean={np.mean(old_times):.1f} σ={sample_std(old_times):.1f}")
+    report.append(f"  * Welch t={t_time:+.3f}, p={p_time:.4e}  {'[顯著]' if p_time < 0.05 else '[不顯著]'}\n")
+
+    report.append("【4. NPS】")
+    if len(new_nps_clean) and len(old_nps_clean):
+        report.append(
+            f"  * {name1}: mean={np.mean(new_nps_clean):.0f} σ={sample_std(new_nps_clean):.0f} med={np.median(new_nps_clean):.0f}"
+        )
+        report.append(
+            f"  * {name2}: mean={np.mean(old_nps_clean):.0f} σ={sample_std(old_nps_clean):.0f} med={np.median(old_nps_clean):.0f}"
+        )
+        report.append(
+            f"  * 差異: {(np.mean(new_nps_clean) - np.mean(old_nps_clean)) / np.mean(old_nps_clean) * 100:+.1f}%"
+        )
+        report.append(f"  * Welch t={t_nps:+.3f}, p={p_nps:.4e}  {'[顯著]' if p_nps < 0.05 else '[不顯著]'}\n")
     else:
-        report.append("    [-] 深度差異無統計顯著性，可能為隨機統計誤差 (p >= 0.05)")
-    
-    # Analyze proportion of deep searches (depth >= 14)
-    new_deep_prop = np.mean(new_depths >= 14) * 100
-    old_deep_prop = np.mean(old_depths >= 14) * 100
-    report.append(f"  * 深度 >= 14 比例: {name1} {new_deep_prop:.1f}% vs {name2} {old_deep_prop:.1f}%\n")
-    
-    report.append(f"【2. 搜尋節點數 (Nodes) 分析】")
-    report.append(f"  * {name1} 引擎平均節點數: {np.mean(new_nodes):.0f} (標準差: {new_node_std:.0f}, 中位數: {np.median(new_nodes):.0f})")
-    report.append(f"  * {name2} 引擎平均節點數: {np.mean(old_nodes):.0f} (標準差: {old_node_std:.0f}, 中位數: {np.median(old_nodes):.0f})")
-    nodes_diff_pct = ((np.mean(new_nodes) - np.mean(old_nodes)) / np.mean(old_nodes) * 100) if np.mean(old_nodes) > 0 else 0
-    report.append(f"  * 節點數差異: {nodes_diff_pct:+.1f}%")
-    report.append(f"  * Welch's t-test 顯著性檢定: t = {t_node:+.3f}, p-value = {p_node:.4e}")
-    if p_node < 0.05:
-        report.append("    [+] 節點數差異具有統計顯著性 (p < 0.05)\n")
-    else:
-        report.append("    [-] 節點數差異無統計顯著性，可能為隨機統計誤差 (p >= 0.05)\n")
-    
-    report.append(f"【3. 每步耗時 (Time) 分析】")
-    report.append(f"  * {name1} 引擎平均每步耗時: {np.mean(new_times):.1f} ms (標準差: {new_time_std:.1f} ms)")
-    report.append(f"  * {name2} 引擎平均每步耗時: {np.mean(old_times):.1f} ms (標準差: {old_time_std:.1f} ms)")
-    report.append(f"  * Welch's t-test 顯著性檢定: t = {t_time:+.3f}, p-value = {p_time:.4e}")
-    if p_time < 0.05:
-        report.append("    [+] 耗時差異具有統計顯著性 (p < 0.05)\n")
-    else:
-        report.append("    [-] 耗時差異無統計顯著性，可能為隨機統計誤差 (p >= 0.05)\n")
-    
-    report.append(f"【4. 搜尋速度 (NPS) 分析】")
-    if len(new_nps_clean) > 0 and len(old_nps_clean) > 0:
-        report.append(f"  * {name1} 引擎平均 NPS: {np.mean(new_nps_clean):.0f} (標準差: {new_nps_std:.0f}, 中位數: {np.median(new_nps_clean):.0f})")
-        report.append(f"  * {name2} 引擎平均 NPS: {np.mean(old_nps_clean):.0f} (標準差: {old_nps_std:.0f}, 中位數: {np.median(old_nps_clean):.0f})")
-        nps_diff_pct = (np.mean(new_nps_clean) - np.mean(old_nps_clean)) / np.mean(old_nps_clean) * 100
-        report.append(f"  * NPS 差異: {nps_diff_pct:+.1f}%")
-        report.append(f"  * Welch's t-test 顯著性檢定: t = {t_nps:+.3f}, p-value = {p_nps:.4e}")
-        if p_nps < 0.05:
-            report.append("    [+] NPS 差異具有統計顯著性 (p < 0.05)\n")
-        else:
-            report.append("    [-] NPS 差異無統計顯著性，可能為隨機統計誤差 (p >= 0.05)\n")
-    else:
-        report.append("  * 無法計算 NPS 統計（耗時數據不全）\n")
-    
+        report.append("  * 無法計算 NPS\n")
+
+    append_by_color_section(report, by_color, name1, name2)
+    append_depth_hist_and_ratios(report, new_depths, new_nodes, old_depths, old_nodes, name1, name2)
     report.append("=========================================\n")
-    
+
     report_text = "\n".join(report)
     print(report_text)
-    
     with open(os.path.join(output_dir, "search_stats_report.txt"), "w", encoding="utf-8") as rf:
         rf.write(report_text)
 
-    # Clean up old distribution plots if they exist
-    for old_file in ["depth_distribution.png", "nps_distribution.png"]:
-        file_path = os.path.join(output_dir, old_file)
-        if os.path.exists(file_path):
+    for old_file in ("depth_distribution.png", "nps_distribution.png"):
+        fp = os.path.join(output_dir, old_file)
+        if os.path.exists(fp):
             try:
-                os.remove(file_path)
-            except Exception as e:
-                print(f"Warning: could not remove old file {file_path}: {e}")
+                os.remove(fp)
+            except OSError as e:
+                print(f"Warning: could not remove {fp}: {e}")
 
-    # Calculate statistics per move number
-    def get_metric_per_move(move_nums, values, max_move=100, min_samples=5):
-        if len(move_nums) == 0:
-            return np.array([]), np.array([]), np.array([])
-        unique_moves = np.unique(move_nums)
-        unique_moves = unique_moves[unique_moves <= max_move]
-        
-        m_list, mean_list, sem_list = [], [], []
-        for m in unique_moves:
-            mask = (move_nums == m)
-            samples = values[mask]
-            if len(samples) >= min_samples:
-                m_list.append(m)
-                mean_list.append(np.mean(samples))
-                sem_list.append(np.std(samples, ddof=1) / np.sqrt(len(samples)) if len(samples) > 1 else 0.0)
-        return np.array(m_list), np.array(mean_list), np.array(sem_list)
-
-    # Group metrics by move number
     new_m_depth, new_mean_depth, new_sem_depth = get_metric_per_move(new_move_nums, new_depths)
     old_m_depth, old_mean_depth, old_sem_depth = get_metric_per_move(old_move_nums, old_depths)
-
     new_m_nodes, new_mean_nodes, new_sem_nodes = get_metric_per_move(new_move_nums, new_nodes)
     old_m_nodes, old_mean_nodes, old_sem_nodes = get_metric_per_move(old_move_nums, old_nodes)
-
     new_m_time, new_mean_time, new_sem_time = get_metric_per_move(new_move_nums, new_times)
     old_m_time, old_mean_time, old_sem_time = get_metric_per_move(old_move_nums, old_times)
 
-    # Plot Line Charts per Move
-    # 1. Depth per Move
-    if len(new_m_depth) > 0 and len(old_m_depth) > 0:
+    if len(new_m_depth) and len(old_m_depth):
         plot_line_metric(
             new_m_depth, new_mean_depth, new_sem_depth,
             old_m_depth, old_mean_depth, old_sem_depth,
             title=f"Average Search Depth per Move ({name1} vs {name2})",
-            xlabel="Move Number",
-            ylabel="Average Depth (Plies)",
+            xlabel="Move Number", ylabel="Average Depth (Plies)",
             filename=os.path.join(output_dir, "depth_per_move.png"),
-            name1=name1,
-            name2=name2
+            name1=name1, name2=name2,
         )
-
-    # 2. Nodes per Move
-    if len(new_m_nodes) > 0 and len(old_m_nodes) > 0:
+    if len(new_m_nodes) and len(old_m_nodes):
         plot_line_metric(
             new_m_nodes, new_mean_nodes, new_sem_nodes,
             old_m_nodes, old_mean_nodes, old_sem_nodes,
             title=f"Average Nodes Searched per Move ({name1} vs {name2})",
-            xlabel="Move Number",
-            ylabel="Average Nodes Searched",
+            xlabel="Move Number", ylabel="Average Nodes Searched",
             filename=os.path.join(output_dir, "nodes_per_move.png"),
-            name1=name1,
-            name2=name2,
-            use_log=True
+            name1=name1, name2=name2, use_log=True,
         )
-
-    # 3. Time per Move
-    if len(new_m_time) > 0 and len(old_m_time) > 0:
+    if len(new_m_time) and len(old_m_time):
         plot_line_metric(
             new_m_time, new_mean_time, new_sem_time,
             old_m_time, old_mean_time, old_sem_time,
             title=f"Average Search Time per Move ({name1} vs {name2})",
-            xlabel="Move Number",
-            ylabel="Average Search Time (ms)",
+            xlabel="Move Number", ylabel="Average Search Time (ms)",
             filename=os.path.join(output_dir, "time_per_move.png"),
-            name1=name1,
-            name2=name2
+            name1=name1, name2=name2,
         )
 
-    # Plot 4: Average Nodes vs Depth
-    plt.figure(figsize=(10, 5))
-    common_depths = sorted(list(set(new_depths).intersection(set(old_depths))))
-    # Filter common depths to reasonable range
-    common_depths = [d for d in common_depths if d < 30] # Filter out mates
-    
+    common_depths = sorted(set(new_depths.tolist()).intersection(set(old_depths.tolist())))
+    common_depths = [d for d in common_depths if d < 30]
     if common_depths:
+        plt.figure(figsize=(10, 5))
         new_avg_nodes = [np.mean(new_nodes[new_depths == d]) for d in common_depths]
         old_avg_nodes = [np.mean(old_nodes[old_depths == d]) for d in common_depths]
-        
-        plt.plot(common_depths, new_avg_nodes, marker='o', label=f'{name1} Engine', color='#1f77b4', linewidth=2)
-        plt.plot(common_depths, old_avg_nodes, marker='s', label=f'{name2} Engine', color='#ff7f0e', linewidth=2)
-        plt.title(f"Average Nodes Searched vs Depth ({name1} vs {name2})")
+        plt.plot(common_depths, new_avg_nodes, marker="o", label=f"{name1}", color="#1f77b4", linewidth=2)
+        plt.plot(common_depths, old_avg_nodes, marker="s", label=f"{name2}", color="#ff7f0e", linewidth=2)
+        plt.title(f"Average Nodes vs Depth ({name1} vs {name2})")
         plt.xlabel("Search Depth (Plies)")
         plt.ylabel("Average Nodes Searched")
-        plt.yscale('log')
+        plt.yscale("log")
         plt.grid(True, which="both", ls="-", alpha=0.5)
         plt.legend()
         plt.tight_layout()
         plt.savefig(os.path.join(output_dir, "avg_nodes_vs_depth.png"), dpi=150)
         plt.close()
-    
+
     print(f"Visualizations saved to {output_dir}")
 
-if __name__ == '__main__':
-    project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    pgn_path = os.path.join(project_root, "tournament_analysis", "tournament_results.pgn")
-    out_dir = os.path.join(project_root, "tournament_analysis")
-    
-    parser = argparse.ArgumentParser(description="Parse search stats from PGN.")
-    parser.add_argument("--name1", default=None, help="Name of the first engine (e.g., New/MyEngine)")
-    parser.add_argument("--name2", default=None, help="Name of the second engine (e.g., Old/Stockfish)")
+
+def auto_names(pgn_path: Path) -> Tuple[str, str]:
+    content = pgn_path.read_text(encoding="utf-8", errors="replace")
+    white_names = re.findall(r'\[White\s+"([^"]+)"\]', content)
+    black_names = re.findall(r'\[Black\s+"([^"]+)"\]', content)
+    unique_names = list(set(white_names + black_names))
+    if "New" in unique_names and "Old" in unique_names:
+        return "New", "Old"
+    if "MyEngine" in unique_names and "Stockfish" in unique_names:
+        return "MyEngine", "Stockfish"
+    if len(unique_names) >= 2:
+        unique_names.sort()
+        return unique_names[0], unique_names[1]
+    if len(unique_names) == 1:
+        return unique_names[0], "Unknown"
+    return "New", "Old"
+
+
+def main():
+    parser = argparse.ArgumentParser(description="Parse search stats from tournament PGN")
+    parser.add_argument("--pgn", type=Path, default=DEFAULT_PGN)
+    parser.add_argument("--out-dir", type=Path, default=HERE)
+    parser.add_argument("--name1", default=None, help="First engine (e.g. New)")
+    parser.add_argument("--name2", default=None, help="Second engine (e.g. Old)")
     args = parser.parse_args()
 
-    # Auto-detect names if not specified
+    if not args.pgn.exists():
+        print(f"Error: PGN not found: {args.pgn}")
+        return 1
+
     name1 = args.name1
     name2 = args.name2
-    
     if name1 is None or name2 is None:
-        if os.path.exists(pgn_path):
-            with open(pgn_path, 'r', encoding='utf-8') as f:
-                content = f.read()
-            white_names = re.findall(r'\[White\s+"([^"]+)"\]', content)
-            black_names = re.findall(r'\[Black\s+"([^"]+)"\]', content)
-            unique_names = list(set(white_names + black_names))
-            
-            # Prefer 'New' and 'Old'
-            if 'New' in unique_names and 'Old' in unique_names:
-                name1 = 'New'
-                name2 = 'Old'
-            # Or 'MyEngine' and 'Stockfish'
-            elif 'MyEngine' in unique_names and 'Stockfish' in unique_names:
-                name1 = 'MyEngine'
-                name2 = 'Stockfish'
-            elif len(unique_names) >= 2:
-                # Retain consistent order of appearance or alphabetical order
-                unique_names.sort()
-                name1 = unique_names[0]
-                name2 = unique_names[1]
-            elif len(unique_names) == 1:
-                name1 = unique_names[0]
-                name2 = "Unknown"
-            else:
-                name1 = "New"
-                name2 = "Old"
-        else:
-            name1 = "New"
-            name2 = "Old"
+        a1, a2 = auto_names(args.pgn)
+        name1 = name1 or a1
+        name2 = name2 or a2
 
-    print(f"Parsing stats comparing Player 1: '{name1}' vs Player 2: '{name2}'")
-    stats = parse_pgn(pgn_path, name1, name2)
-    if stats:
-        analyze_and_plot(stats[0], stats[1], out_dir, name1, name2)
+    print(f"Parsing stats: '{name1}' vs '{name2}'  from {args.pgn}")
+    stats = parse_pgn(args.pgn, name1, name2)
+    if not stats:
+        return 1
+    new_stats, old_stats, by_color = stats
+    analyze_and_plot(new_stats, old_stats, by_color, str(args.out_dir), name1, name2)
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
