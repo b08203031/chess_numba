@@ -114,6 +114,73 @@ class TestEndgameConformance(unittest.TestCase):
         self.assertTrue(hit)
         self.assertGreater(score, 0)
 
+    # ----- P2: KNNK / KRKB / KRKN / KQKR / KNNKP -----
+    def test_knnk_draw(self):
+        # SF: KNNK is always VALUE_DRAW (must not fall into KXK)
+        fen = "4k3/8/8/8/8/2N1N3/8/4K3 w - - 0 1"
+        hit, score, val, *_ = self._special(fen)
+        self.assertTrue(hit)
+        self.assertEqual(score, 0)
+        self.assertEqual(val, 0)
+
+    def test_knnk_black_draw(self):
+        fen = "4k3/2n1n3/8/8/8/8/8/4K3 w - - 0 1"
+        hit, score, val, *_ = self._special(fen)
+        self.assertTrue(hit)
+        self.assertEqual(score, 0)
+
+    def test_krkb_drawish(self):
+        # SF: only PushToEdges; edge king scores higher than center for attacker
+        fen_edge = "k7/8/8/8/3R4/8/8/4K3 w - - 0 1"   # black king a8
+        fen_center = "4k3/8/8/8/3R4/8/8/4K3 w - - 0 1"  # black king e8-ish edge still
+        # Use true center-ish: black king on e4
+        fen_mid = "8/8/8/4k3/3R4/8/8/4K3 w - - 0 1"
+        hit_e, score_e, val_e, *_ = self._special(fen_edge)
+        hit_m, score_m, val_m, *_ = self._special(fen_mid)
+        self.assertTrue(hit_e and hit_m)
+        self.assertGreater(score_e, 0)
+        self.assertGreater(score_m, 0)
+        self.assertGreater(score_e, score_m)  # corner/edge > more central
+        self.assertEqual(val_e, score_e)
+
+    def test_krkb_black_strong(self):
+        fen = "4k3/8/8/3r4/8/8/8/B3K3 w - - 0 1"
+        hit, score, val, *_ = self._special(fen)
+        self.assertTrue(hit)
+        self.assertLess(score, 0)
+
+    def test_krkn_better_when_king_far_from_knight(self):
+        # PushAway: larger dist(king, knight) → higher score
+        fen_far = "k7/8/8/8/3R4/8/8/4K1n1 w - - 0 1"  # Ka8, ng1 far
+        fen_near = "k7/8/8/8/3R4/8/n7/4K3 w - - 0 1"  # Ka8, na2 closer
+        hit_f, score_f, _, *_ = self._special(fen_far)
+        hit_n, score_n, _, *_ = self._special(fen_near)
+        self.assertTrue(hit_f and hit_n)
+        self.assertGreater(score_f, score_n)
+
+    def test_kqkr_white_advantage(self):
+        # Queen vs rook: material + geometry, clearly positive for Q side
+        fen = "4k3/8/8/8/3Q4/8/8/3rK3 w - - 0 1"
+        hit, score, val, *_ = self._special(fen)
+        self.assertTrue(hit)
+        # EG queen-rook ≈ 950-530 = 420 plus edges
+        self.assertGreater(score, 400)
+        self.assertEqual(val, score)
+
+    def test_kqkr_black_strong(self):
+        fen = "3Rk3/8/8/8/3q4/8/8/4K3 w - - 0 1"
+        hit, score, val, *_ = self._special(fen)
+        self.assertTrue(hit)
+        self.assertLess(score, -400)
+
+    def test_knnkp(self):
+        # Two knights vs king + pawn: ~2*N - P + edges > 0 for white
+        fen = "4k3/4p3/8/8/8/2N1N3/8/4K3 w - - 0 1"
+        hit, score, val, *_ = self._special(fen)
+        self.assertTrue(hit)
+        self.assertGreater(score, 0)
+        self.assertEqual(val, score)
+
     # ----- Non-special -----
     def test_not_special_kbk(self):
         # SF d22: cp 0 theoretical draw; npm < rook so not KXK

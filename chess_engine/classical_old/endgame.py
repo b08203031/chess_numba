@@ -1,5 +1,6 @@
 # chess_engine/classical/endgame.py
-# Specialized endgame evaluators aligned with Stockfish 11 (KXK, KPK, KRKP, KQKP, KBNK)
+# Specialized endgame evaluators aligned with Stockfish 11:
+# Value: KXK, KPK, KRKP, KQKP, KBNK, KNNK, KRKB, KRKN, KQKR, KNNKP
 # plus scale-factor catalog for other fortresses.
 import numba
 import numpy as np
@@ -389,11 +390,70 @@ def _eval_kqkp(strong_side, piece_bbs, side_to_move):
 
 
 @numba.njit(cache=True, boundscheck=False, fastmath=True)
+def _eval_krkb(strong_side, piece_bbs, side_to_move):
+    """KR vs KB (SF11): drawish; only PushToEdges on weak king. White POV."""
+    if strong_side == 0:
+        weak_k = get_lsb_index(piece_bbs[11])
+        result = np.int32(PUSH_TO_EDGES[weak_k])
+        return result
+    weak_k = get_lsb_index(piece_bbs[5])
+    return np.int32(-PUSH_TO_EDGES[weak_k])
+
+
+@numba.njit(cache=True, boundscheck=False, fastmath=True)
+def _eval_krkn(strong_side, piece_bbs, side_to_move):
+    """KR vs KN (SF11): PushToEdges + PushAway(king, knight). White POV."""
+    if strong_side == 0:
+        weak_k = get_lsb_index(piece_bbs[11])
+        weak_n = get_lsb_index(piece_bbs[7])
+        result = np.int32(PUSH_TO_EDGES[weak_k] + PUSH_AWAY[CHEBYSHEV_DISTANCE[weak_k, weak_n]])
+        return result
+    weak_k = get_lsb_index(piece_bbs[5])
+    weak_n = get_lsb_index(piece_bbs[1])
+    result = np.int32(PUSH_TO_EDGES[weak_k] + PUSH_AWAY[CHEBYSHEV_DISTANCE[weak_k, weak_n]])
+    return -result
+
+
+@numba.njit(cache=True, boundscheck=False, fastmath=True)
+def _eval_kqkr(strong_side, piece_bbs, side_to_move):
+    """KQ vs KR (SF11): Q-R material + PushToEdges + PushClose. White POV."""
+    if strong_side == 0:
+        sk = get_lsb_index(piece_bbs[5])
+        wk = get_lsb_index(piece_bbs[11])
+    else:
+        sk = get_lsb_index(piece_bbs[11])
+        wk = get_lsb_index(piece_bbs[5])
+
+    result = (EG_MATERIAL_VALUES[4] - EG_MATERIAL_VALUES[3]
+              + PUSH_TO_EDGES[wk]
+              + PUSH_CLOSE[CHEBYSHEV_DISTANCE[sk, wk]])
+    if strong_side == 0:
+        return np.int32(result)
+    return np.int32(-result)
+
+
+@numba.njit(cache=True, boundscheck=False, fastmath=True)
+def _eval_knnkp(strong_side, piece_bbs, side_to_move):
+    """KNN vs KP (SF11): 2*N - P + PushToEdges. White POV."""
+    if strong_side == 0:
+        weak_k = get_lsb_index(piece_bbs[11])
+        result = (np.int32(2) * EG_MATERIAL_VALUES[1]
+                  - EG_MATERIAL_VALUES[0]
+                  + PUSH_TO_EDGES[weak_k])
+        return result
+    weak_k = get_lsb_index(piece_bbs[5])
+    result = (np.int32(2) * EG_MATERIAL_VALUES[1]
+              - EG_MATERIAL_VALUES[0]
+              + PUSH_TO_EDGES[weak_k])
+    return -result
+
+
+@numba.njit(cache=True, boundscheck=False, fastmath=True)
 def evaluate_special_endgame(piece_bbs, occupancy_bbs, game_state, phase):
     """
     Specialized endgame evaluation (SF11 material-table subset).
 
-    Handles: KBNK, KPK, KRKP, KQKP, KXK.
+    Handles: KBNK, KPK, KRKP, KQKP, KXK, KNNK, KRKB, KRKN, KQKR, KNNKP.
     Returns (hit, score_from_white) — caller converts to side-to-move perspective.
     """
     wp = count_bits(piece_bbs[0])
@@ -414,6 +474,13 @@ def evaluate_special_endgame(piece_bbs, occupancy_bbs, game_state, phase):
     wk_sq = get_lsb_index(piece_bbs[5])
     bk_sq = get_lsb_index(piece_bbs[11])
     side_to_move = np.int32(game_state[0])
+
+    # --- KNNK (always draw; must precede KXK — 2N npm can exceed Rook MG) ---
+    if wp == 0 and bp == 0:
+        if wn == 2 and wb == 0 and wr == 0 and wq == 0 and bn == 0 and bb == 0 and br == 0 and bq == 0:
+            return True, np.int32(0)
+        if bn == 2 and bb == 0 and br == 0 and bq == 0 and wn == 0 and wb == 0 and wr == 0 and wq == 0:
+            return True, np.int32(0)
 
     # --- KBNK ---
     if wp == 0 and bp == 0:
@@ -437,11 +504,35 @@ def evaluate_special_endgame(piece_bbs, occupancy_bbs, game_state, phase):
     if br == 1 and bq == 0 and bn == 0 and bb == 0 and bp == 0 and wr == 0 and wq == 0 and wn == 0 and wb == 0 and wp == 1:
         return True, _eval_krkp(1, piece_bbs, side_to_move)
 
+    # --- KRKB ---
+    if wr == 1 and wq == 0 and wn == 0 and wb == 0 and wp == 0 and br == 0 and bq == 0 and bn == 0 and bb == 1 and bp == 0:
+        return True, _eval_krkb(0, piece_bbs, side_to_move)
+    if br == 1 and bq == 0 and bn == 0 and bb == 0 and bp == 0 and wr == 0 and wq == 0 and wn == 0 and wb == 1 and wp == 0:
+        return True, _eval_krkb(1, piece_bbs, side_to_move)
+
+    # --- KRKN ---
+    if wr == 1 and wq == 0 and wn == 0 and wb == 0 and wp == 0 and br == 0 and bq == 0 and bn == 1 and bb == 0 and bp == 0:
+        return True, _eval_krkn(0, piece_bbs, side_to_move)
+    if br == 1 and bq == 0 and bn == 0 and bb == 0 and bp == 0 and wr == 0 and wq == 0 and wn == 1 and wb == 0 and wp == 0:
+        return True, _eval_krkn(1, piece_bbs, side_to_move)
+
     # --- KQKP ---
     if wq == 1 and wr == 0 and wn == 0 and wb == 0 and wp == 0 and bq == 0 and br == 0 and bn == 0 and bb == 0 and bp == 1:
         return True, _eval_kqkp(0, piece_bbs, side_to_move)
     if bq == 1 and br == 0 and bn == 0 and bb == 0 and bp == 0 and wq == 0 and wr == 0 and wn == 0 and wb == 0 and wp == 1:
         return True, _eval_kqkp(1, piece_bbs, side_to_move)
+
+    # --- KQKR ---
+    if wq == 1 and wr == 0 and wn == 0 and wb == 0 and wp == 0 and bq == 0 and br == 1 and bn == 0 and bb == 0 and bp == 0:
+        return True, _eval_kqkr(0, piece_bbs, side_to_move)
+    if bq == 1 and br == 0 and bn == 0 and bb == 0 and bp == 0 and wq == 0 and wr == 1 and wn == 0 and wb == 0 and wp == 0:
+        return True, _eval_kqkr(1, piece_bbs, side_to_move)
+
+    # --- KNNKP (two knights vs king + pawn) ---
+    if wn == 2 and wb == 0 and wr == 0 and wq == 0 and wp == 0 and bn == 0 and bb == 0 and br == 0 and bq == 0 and bp == 1:
+        return True, _eval_knnkp(0, piece_bbs, side_to_move)
+    if bn == 2 and bb == 0 and br == 0 and bq == 0 and bp == 0 and wn == 0 and wb == 0 and wr == 0 and wq == 0 and wp == 1:
+        return True, _eval_knnkp(1, piece_bbs, side_to_move)
 
     # --- KXK: weak side has only king; strong npm >= Rook ---
     rook_mg = MG_MATERIAL_VALUES[3]

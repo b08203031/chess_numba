@@ -90,6 +90,20 @@ def _kpk(fen):
 class TestA1ThreatByMinor(unittest.TestCase):
     """A1: minor threats include strongly-protected (pawn-defended) non-pawns."""
 
+    def test_threat_by_minor_table_matches_sf11_scaled(self):
+        # SF11 ThreatByMinor[PAWN..QUEEN], MG×0.78 / EG×0.56 (same as THREAT_BY_ROOK).
+        expected = [
+            (5, 18),   # Pawn  (6, 32)
+            (46, 23),  # Knight (59, 41)
+            (62, 31),  # Bishop (79, 56) — was wrongly knight-shifted pre-B5
+            (70, 67),  # Rook  (90, 119)
+            (62, 90),  # Queen (79, 161)
+            (0, 0),    # King  (ThreatByKing handles king)
+        ]
+        for i, (mg, eg) in enumerate(expected):
+            self.assertEqual(int(THREAT_BY_MINOR[i, 0]), mg, f"index {i} MG")
+            self.assertEqual(int(THREAT_BY_MINOR[i, 1]), eg, f"index {i} EG")
+
     def test_minor_threat_on_pawn_defended_rook(self):
         # White Ne4 attacks black Rd6; black Pc7 defends d6 (pawn attack).
         # Before A1, strongly-protected targets were filtered out entirely.
@@ -205,6 +219,16 @@ class TestA4RookOnFile(unittest.TestCase):
         self.assertEqual(mg2, 2 * int(ROOK_ON_SEMI_OPEN_FILE_BONUS[0]))
         self.assertEqual(mg1, int(ROOK_ON_SEMI_OPEN_FILE_BONUS[0]))
         self.assertEqual(mg2, 2 * mg1)
+
+    def test_rook_on_seventh_no_standalone_bonus(self):
+        # B5: SF11 has no ROOK_ON_SEVENTH term; 7th-rank rook must not get extra coord score.
+        fen_7th = "4k3/R7/8/8/8/8/8/4K3 w - - 0 1"  # Ra7, open a-file
+        fen_back = "4k3/8/8/8/8/8/8/R3K3 w - - 0 1"  # Ra1, open a-file
+        mg7, eg7 = _coord(fen_7th)
+        mg1, eg1 = _coord(fen_back)
+        self.assertEqual(mg7, mg1)
+        self.assertEqual(eg7, eg1)
+        self.assertEqual(mg7, int(ROOK_ON_OPEN_FILE_BONUS[0]))
 
 
 class TestKPKExpanded(unittest.TestCase):

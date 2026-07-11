@@ -500,20 +500,8 @@ def evaluate_piece_coordination(piece_bbs, piece_counts):
             else:
                 mg_score -= ROOK_ON_SEMI_OPEN_FILE_BONUS[0] * b_rooks_on_file
                 eg_score -= ROOK_ON_SEMI_OPEN_FILE_BONUS[1] * b_rooks_on_file
-    
-    # --- 3. Rooks on 7th Rank / 車在第 7 橫排 ---
-    # White Rooks on Rank 7 (Index 6)
-    white_rooks_on_7th = white_rooks & RANK_MASKS[6]
-    if white_rooks_on_7th:
-        count = count_bits(white_rooks_on_7th)
-        mg_score += ROOK_ON_SEVENTH_BONUS[0] * count
-        eg_score += ROOK_ON_SEVENTH_BONUS[1] * count
 
-    # Black Rooks on Rank 2 (Index 1) - Relative 7th for Black
-    black_rooks_on_7th = black_rooks & RANK_MASKS[1]
-    if black_rooks_on_7th:
-        count = count_bits(black_rooks_on_7th)
-        mg_score -= ROOK_ON_SEVENTH_BONUS[0] * count
-        eg_score -= ROOK_ON_SEVENTH_BONUS[1] * count
+    # Rook-on-7th standalone bonus removed (not in SF11 evaluate.cpp;
+    # covered by PST / mobility / threats).
 
     return mg_score, eg_score

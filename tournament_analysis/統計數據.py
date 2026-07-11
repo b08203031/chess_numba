@@ -312,6 +312,240 @@ class ChessEngineAnalyzer:
         plt.savefig(output_file, dpi=150)
         plt.close()
 
+    def plot_all_charts(self, output_dir: Path) -> List[Path]:
+        """Generate charts matching the richer game-level report sections."""
+        out_paths: List[Path] = []
+        output_dir = Path(output_dir)
+        output_dir.mkdir(parents=True, exist_ok=True)
+        if not self.games:
+            return out_paths
+
+        # 1) Cumulative wins (existing)
+        p = output_dir / "cumulative_wins.png"
+        self.plot_cumulative_wins(p)
+        out_paths.append(p)
+
+        # 2) Cumulative score rate + rolling score
+        scores = np.array(self.score_sequence, dtype=float)
+        n = len(scores)
+        x = np.arange(1, n + 1)
+        cum_pts = np.cumsum(scores)
+        cum_rate = cum_pts / x
+        fig, axes = plt.subplots(2, 1, figsize=(10, 8), sharex=True)
+        axes[0].plot(x, cum_pts, color="#1f77b4", linewidth=2, label="Cumulative points")
+        axes[0].plot(x, 0.5 * x, linestyle="--", color="#888888", label="Equal (0.5/game)")
+        axes[0].set_ylabel("Points")
+        axes[0].set_title(f"Cumulative Score — {self.target_engine}")
+        axes[0].legend()
+        axes[0].grid(True, linestyle=":", alpha=0.6)
+        window = 20 if n >= 40 else max(5, n // 5)
+        if n >= window:
+            roll = np.convolve(scores, np.ones(window) / window, mode="valid")
+            axes[1].plot(np.arange(window, n + 1), roll, color="#2ca02c", linewidth=2, label=f"Rolling score (w={window})")
+        axes[1].axhline(0.5, color="#888888", linestyle="--", label="0.50")
+        axes[1].set_xlabel("Games")
+        axes[1].set_ylabel("Score rate")
+        axes[1].set_ylim(0.0, 1.0)
+        axes[1].legend()
+        axes[1].grid(True, linestyle=":", alpha=0.6)
+        fig.tight_layout()
+        p = output_dir / "cumulative_score.png"
+        fig.savefig(p, dpi=150)
+        plt.close(fig)
+        out_paths.append(p)
+
+        # 3) WDL by color (grouped bars)
+        labels = ["White", "Black"]
+        w_counts = [self.w_wins, self.b_wins]
+        d_counts = [self.w_draws, self.b_draws]
+        l_counts = [self.w_losses, self.b_losses]
+        fig, ax = plt.subplots(figsize=(8, 5))
+        xpos = np.arange(len(labels))
+        width = 0.25
+        ax.bar(xpos - width, w_counts, width, label="Win", color="#2ca02c")
+        ax.bar(xpos, d_counts, width, label="Draw", color="#7f7f7f")
+        ax.bar(xpos + width, l_counts, width, label="Loss", color="#d62728")
+        ax.set_xticks(xpos)
+        ax.set_xticklabels(labels)
+        ax.set_ylabel("Games")
+        ax.set_title(f"WDL by Color — {self.target_engine}")
+        ax.legend()
+        ax.grid(True, axis="y", linestyle=":", alpha=0.5)
+        fig.tight_layout()
+        p = output_dir / "wdl_by_color.png"
+        fig.savefig(p, dpi=150)
+        plt.close(fig)
+        out_paths.append(p)
+
+        # 4) Score by length bucket
+        by_len: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
+        for g in self.games:
+            by_len[g["length_bucket"]].append(g)
+        names = [name for name, _ in LENGTH_BUCKETS if by_len.get(name)]
+        if names:
+            rates, ns, colors = [], [], []
+            for name in names:
+                sub = by_len[name]
+                w = sum(1 for g in sub if g["rt"] == "W")
+                d = sum(1 for g in sub if g["rt"] == "D")
+                rates.append((w + 0.5 * d) / len(sub))
+                ns.append(len(sub))
+                colors.append("#1f77b4" if rates[-1] >= 0.5 else "#ff7f0e")
+            fig, ax = plt.subplots(figsize=(9, 5))
+            bars = ax.bar(range(len(names)), rates, color=colors, edgecolor="white")
+            ax.axhline(0.5, color="#888888", linestyle="--", linewidth=1)
+            ax.set_xticks(range(len(names)))
+            ax.set_xticklabels(names, rotation=15, ha="right")
+            ax.set_ylim(0.0, 1.0)
+            ax.set_ylabel("Score rate")
+            ax.set_title(f"Score by Game Length — {self.target_engine}")
+            for bar, rate, cnt in zip(bars, rates, ns):
+                ax.text(bar.get_x() + bar.get_width() / 2, rate + 0.02, f"{rate:.2f}\nn={cnt}",
+                        ha="center", va="bottom", fontsize=8)
+            ax.grid(True, axis="y", linestyle=":", alpha=0.5)
+            fig.tight_layout()
+            p = output_dir / "score_by_length.png"
+            fig.savefig(p, dpi=150)
+            plt.close(fig)
+            out_paths.append(p)
+
+        # 5) Length distribution by result
+        fig, ax = plt.subplots(figsize=(10, 5))
+        bins = np.arange(0, max(self.lengths + [1]) + 10, 10)
+        if self.lengths_w:
+            ax.hist(self.lengths_w, bins=bins, alpha=0.55, label="Wins", color="#2ca02c")
+        if self.lengths_l:
+            ax.hist(self.lengths_l, bins=bins, alpha=0.55, label="Losses", color="#d62728")
+        if self.lengths_d:
+            ax.hist(self.lengths_d, bins=bins, alpha=0.45, label="Draws", color="#7f7f7f")
+        ax.set_xlabel("Full-moves")
+        ax.set_ylabel("Count")
+        ax.set_title(f"Game Length Distribution by Result — {self.target_engine}")
+        ax.legend()
+        ax.grid(True, axis="y", linestyle=":", alpha=0.5)
+        fig.tight_layout()
+        p = output_dir / "length_by_result.png"
+        fig.savefig(p, dpi=150)
+        plt.close(fig)
+        out_paths.append(p)
+
+        # 6) Pair outcomes (FEN pairs preferred, else consecutive)
+        pair_src = self.fen_pair_counts if self.fen_pair_counts else self.consecutive_pair_counts
+        pair_label = "FEN match-pairs" if self.fen_pair_counts else "Consecutive pairs"
+        if pair_src:
+            keys = ["WW", "WD", "WL", "DW", "DD", "DL", "LW", "LD", "LL"]
+            vals = [pair_src.get(k, 0) for k in keys]
+            fig, ax = plt.subplots(figsize=(10, 5))
+            colors9 = ["#2ca02c" if k[0] == "W" else ("#7f7f7f" if k[0] == "D" else "#d62728") for k in keys]
+            ax.bar(keys, vals, color=colors9, edgecolor="white")
+            ax.set_ylabel("Pairs")
+            ax.set_title(f"Pair Outcomes ({pair_label}) — {self.target_engine}")
+            tot = sum(vals) or 1
+            for i, v in enumerate(vals):
+                if v:
+                    ax.text(i, v + max(vals) * 0.01, f"{v}\n{v / tot:.0%}", ha="center", va="bottom", fontsize=8)
+            ax.grid(True, axis="y", linestyle=":", alpha=0.5)
+            fig.tight_layout()
+            p = output_dir / "pair_outcomes.png"
+            fig.savefig(p, dpi=150)
+            plt.close(fig)
+            out_paths.append(p)
+
+        # 7) Elo + 95% CI
+        elo_data = self.calculate_elo_and_ci()
+        if elo_data:
+            elo = elo_data["Elo_Diff"]
+            lo, hi = elo_data["CI_95"]
+            if math.isfinite(elo) and math.isfinite(lo) and math.isfinite(hi):
+                fig, ax = plt.subplots(figsize=(8, 3.5))
+                yerr_lo = max(0.0, elo - lo)
+                yerr_hi = max(0.0, hi - elo)
+                ax.errorbar([0], [elo], yerr=[[yerr_lo], [yerr_hi]], fmt="o", color="#1f77b4",
+                            capsize=8, markersize=10, linewidth=2)
+                ax.axhline(0, color="#888888", linestyle="--")
+                ax.set_xticks([0])
+                ax.set_xticklabels([self.target_engine])
+                ax.set_ylabel("Elo vs opponent")
+                ax.set_title(f"Elo Difference ± 95% CI  (score={elo_data['Expected_Score']:.3f}, n={elo_data['Total']})")
+                ax.grid(True, axis="y", linestyle=":", alpha=0.5)
+                fig.tight_layout()
+                p = output_dir / "elo_ci.png"
+                fig.savefig(p, dpi=150)
+                plt.close(fig)
+                out_paths.append(p)
+
+        # 8) Top openings score (white + black)
+        fig, axes = plt.subplots(1, 2, figsize=(12, 5), sharey=True)
+        for ax, title, op_dict in (
+            (axes[0], "As White (first move)", self.openings_white),
+            (axes[1], "As Black (vs first move)", self.openings_black),
+        ):
+            items = sorted(op_dict.items(), key=lambda x: x[1]["Total"], reverse=True)[:8]
+            if not items:
+                ax.set_title(title)
+                ax.text(0.5, 0.5, "no data", ha="center", transform=ax.transAxes)
+                continue
+            labels = [k for k, _ in items]
+            rates = [(d["W"] + 0.5 * d["D"]) / d["Total"] for _, d in items]
+            ns = [d["Total"] for _, d in items]
+            y = np.arange(len(labels))
+            ax.barh(y, rates, color="#1f77b4", alpha=0.85)
+            ax.axvline(0.5, color="#888888", linestyle="--")
+            ax.set_yticks(y)
+            ax.set_yticklabels([f"{lab} (n={c})" for lab, c in zip(labels, ns)])
+            ax.set_xlim(0, 1)
+            ax.set_xlabel("Score rate")
+            ax.set_title(title)
+            ax.grid(True, axis="x", linestyle=":", alpha=0.5)
+        fig.suptitle(f"Opening Score Rates — {self.target_engine}", fontweight="bold")
+        fig.tight_layout()
+        p = output_dir / "openings_score.png"
+        fig.savefig(p, dpi=150)
+        plt.close(fig)
+        out_paths.append(p)
+
+        # 9) Promotions by result
+        promo_means = []
+        promo_labs = []
+        for lab, color in (("W", "#2ca02c"), ("D", "#7f7f7f"), ("L", "#d62728")):
+            sub = [g["promos"] for g in self.games if g["rt"] == lab]
+            if sub:
+                promo_labs.append(lab)
+                promo_means.append(float(np.mean(sub)))
+        if promo_labs:
+            fig, ax = plt.subplots(figsize=(6, 4))
+            ax.bar(promo_labs, promo_means, color=["#2ca02c", "#7f7f7f", "#d62728"][: len(promo_labs)])
+            ax.set_ylabel("Avg promotions / game")
+            ax.set_title(f"Promotions by Result — {self.target_engine}")
+            ax.grid(True, axis="y", linestyle=":", alpha=0.5)
+            fig.tight_layout()
+            p = output_dir / "promotions_by_result.png"
+            fig.savefig(p, dpi=150)
+            plt.close(fig)
+            out_paths.append(p)
+
+        # 10) First half vs second half score
+        if n >= 20:
+            h = n // 2
+            s1 = float(np.mean(scores[:h]))
+            s2 = float(np.mean(scores[h:]))
+            fig, ax = plt.subplots(figsize=(6, 4))
+            ax.bar(["First half", "Second half"], [s1, s2], color=["#1f77b4", "#ff7f0e"])
+            ax.axhline(0.5, color="#888888", linestyle="--")
+            ax.set_ylim(0, 1)
+            ax.set_ylabel("Score rate")
+            ax.set_title(f"Score Stability (halves) — {self.target_engine}")
+            for i, v in enumerate((s1, s2)):
+                ax.text(i, v + 0.02, f"{v:.3f}", ha="center")
+            ax.grid(True, axis="y", linestyle=":", alpha=0.5)
+            fig.tight_layout()
+            p = output_dir / "score_halves.png"
+            fig.savefig(p, dpi=150)
+            plt.close(fig)
+            out_paths.append(p)
+
+        return out_paths
+
     def analyze_color_bias(self) -> Optional[Dict[str, Any]]:
         obs = np.array(
             [
@@ -574,9 +808,10 @@ class ChessEngineAnalyzer:
                 out(line)
             out("\n" + "=" * 50 + "\n")
 
-        plot_path = Path(output_dir) / "cumulative_wins.png"
-        self.plot_cumulative_wins(plot_path)
-        out(f"📈 累積勝場圖: {plot_path}")
+        chart_paths = self.plot_all_charts(Path(output_dir))
+        out("📈 圖表產出:")
+        for cp in chart_paths:
+            out(f"  - {cp.name}")
         out("\n提示: 搜尋深度/節點/NPS 請跑 parse_search_stats.py")
         out("================ 分析結束 ================\n")
 

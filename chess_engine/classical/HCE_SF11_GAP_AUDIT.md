@@ -1,13 +1,13 @@
 # Classical HCE 與 Stockfish 11 — 對齊審核報告
 
-**日期：** 2026-07-11（階段 A+B+B3+B4；B4 對戰 **200 局** 定稿）  
+**日期：** 2026-07-11（階段 A…B5+**P2/C2** 定稿；B5+P2 對戰 **352 局** 顯著）  
 **範圍：** `chess_engine/classical` 手工評估（HCE） vs `stockfish_11`  
 **基準分支狀態：**
 
 | 目錄 | 內容 |
 | :--- | :--- |
-| `chess_engine/classical` | **A+B+B3+B4**（含移除通路兵材質 scale；現行 New） |
-| `chess_engine/classical_old` | **A+B+B3**（B4 前 sync；仍含通路兵材質 scale） |
+| `chess_engine/classical` | **A+B+B3+B4+B5+P2+C2**（ThreatByMinor；十種 specialized EG；KPK golden） |
+| `chess_engine/classical_old` | **與 classical 同步**（2026-07-11 sync；B5+P2 定稿後） |
 
 **結論摘要：** 核心結構與 SF11 **高度對齊**。本文為 HCE 對齊**唯一主文件**（舊 `EVALUATION_ANALYSIS` / `PAWN_EVALUATION_DIFFERENCES` / `RESEARCH_REPORT` 已刪除；`classical_old/` 亦不維護 markdown）。
 
@@ -19,6 +19,7 @@
 | B（尺度混用）vs A | ~**−9 Elo** / 120 局 | — |
 | **B（尺度一致）vs A** | ~**+30 Elo** / **200 局**（CI 含 0） | `PHASE_B_TOURNAMENT_ANALYSIS.md` |
 | **B4（去通路兵材質 scale）vs B3** | ~**+9 Elo** / **200 局**（51.25%，CI 含 0，**打平**） | `PHASE_B4_TOURNAMENT_ANALYSIS.md` |
+| **B5+P2 vs 改前 Old** | ~**+30 Elo** / **352 局**（54.26%，CI **[3.1, 56.6]**，**顯著**） | `tournament_analysis/game_stats_report.txt` |
 
 ---
 
@@ -40,14 +41,14 @@ Classical HCE 是 **以 Stockfish 11 為藍本、維持 ~100cp 人類可讀尺�
 | 機動性區域 | ✅ | K/Q、牽制、低位/受阻兵、敵兵攻擊 |
 | 機動性表 | ✅ 縮放 | 非線性查表 |
 | 棋子特徵 (N/B/R/Q) | ✅ 大多 | 見 §3；CorneredBishop 僅 960 可忽略 |
-| 威脅 | ✅ | ThreatByMinor=`defended\|weak`；SafePawn/PawnPush/Restricted 等 |
+| 威脅 | ✅ | ThreatByMinor=`defended\|weak` + **B5 表按 SF 類型對齊**；SafePawn/PawnPush/Restricted 等 |
 | 國王安全 | ✅ 結構對齊 | SF11 `count×weight` + 安全將軍原係數 + 一次 100cp 縮放 |
 | 兵型結構 | ✅ 強 | stopper/lever/phalanx/connected 等 |
 | 通路兵 | ✅ | 路徑/王鄰近/候選半價；**已移除**非 SF 的材質 `PASSED_SCALE_*` |
 | 空間 | ✅ 啟用 | SF 公式 + 刻意 `// SPACE_SCALE_DIVISOR(4)` |
 | 主動權 (initiative) | ✅ | 雙套 MG/EG 權重（SF 單一 complexity） |
 | 殘局縮放因子 | ✅ 強 | `get_endgame_scale_factor` 多種堡壘 |
-| 專用殘局**評估** | ✅ 目標五種 | **KXK / KPK bitbase / KRKP / KQKP / KBNK** |
+| 專用殘局**評估** | ✅ 十種 | **KXK / KPK / KRKP / KQKP / KBNK / KNNK / KRKB / KRKN / KQKR / KNNKP** |
 | Tempo / Lazy | ✅ | 門檻已縮放 |
 
 ---
@@ -70,7 +71,7 @@ Classical HCE 是 **以 Stockfish 11 為藍本、維持 ~100cp 人類可讀尺�
 | 10 | 空間評估（有呼叫） | `evaluate_space` |
 | 11 | Initiative 複雜度修正 | `_compute_initiative` |
 | 12 | 殘局 scale + rule50 衰減 | `endgame.py` |
-| 13 | 專用殘局五種短路 | `evaluate_special_endgame` |
+| 13 | 專用殘局十種短路 | `evaluate_special_endgame`（含 P2） |
 | 14 | Tempo | `TEMPO_BONUS` |
 
 ### 3.2 棋子特徵
@@ -86,8 +87,8 @@ Classical HCE 是 **以 Stockfish 11 為藍本、維持 ~100cp 人類可讀尺�
 | TrappedRook（非半開放 + 易位縮放） | ✅ 階段 A |
 | WeakQueen | ✅ |
 | Outpost ranks 4–6 + ReachableOutpost（馬） | ✅ 階段 A |
-| Outpost hole 加分 | ⚠️ 非 SF 額外項 |
-| Rook on 7th | ⚠️ 非 SF 額外項 |
+| Outpost hole 加分 | ✅ 已移除（B5；SF 無獨立 hole） |
+| Rook on 7th | ✅ 已移除（B5；SF 無獨立項） |
 | King tropism（Manhattan） | ✅ 已移除（B3；原為死代碼） |
 | CorneredBishop | ⏭ 僅 Chess960 |
 
@@ -109,12 +110,10 @@ Classical HCE 是 **以 Stockfish 11 為藍本、維持 ~100cp 人類可讀尺�
 
 | # | 項目 | 現況 | 建議 |
 | :-: | :--- | :--- | :--- |
-| 1 | Outpost hole | 額外 `OUTPOST_HOLE_BONUS` | 可併入 Outpost 或刪 |
-| 2 | Rook on 7th | `evaluate_piece_coordination` | 可保留作 classical 特徵或刪 |
-| 3 | KingProtector 係數 | 相對 SF 偏輕 | 可微調 |
-| 4 | 更多專用殘局 | 無 KRKB/KRKN/KQKR/KNNK… | 僅在殘局轉換仍弱時再加 |
-| 5 | PSQT 形狀 | 簡化表 | 需大規模調參才值得動 |
-| 6 | KPK bitbase 與 SF 位元完全一致 | 自建 retrograde，已修 rank 編碼 | 可再對 golden FEN 抽樣 |
+| 1 | KingProtector 係數 | 相對 SF 偏輕 | 可微調 |
+| 2 | PSQT 形狀 | 簡化表 | 需大規模調參才值得動 |
+| 3 | KPK golden 持續維護 | `tests/test_kpk_golden.py` + `tools/verify_kpk_golden.py` | 改 bitbase 後必跑 |
+| 4 | THREAT_SAFE_PAWN 縮放 | 比標稱 0.78/0.56 更重 | 可選抬升 |
 
 ### 4.3 已關閉的舊「高嚴重度」項
 
@@ -129,6 +128,8 @@ Classical HCE 是 **以 Stockfish 11 為藍本、維持 ~100cp 人類可讀尺�
 | 專用殘局未接入 | ✅ 階段 A（五種） |
 | `evaluate_special_endgame` 死碼 | ✅ 已接主路徑 |
 | `attacker_count` 未用於 danger | ✅ 已為 `count×weight` |
+| ThreatByMinor 表 B/R/Q 錯位 | ✅ B5 |
+| Outpost hole / Rook on 7th 非 SF | ✅ B5 移除 |
 
 ---
 
@@ -152,13 +153,20 @@ Classical HCE 是 **以 Stockfish 11 為藍本、維持 ~100cp 人類可讀尺�
 | B2 kingDanger SF 結構 + **全式 100/128 尺度一致** | `constants.py`、`evaluation.py` | ✅ |
 | B3 移除 eval tropism（原為死代碼） | `evaluation.py`、`constants.py` | ✅ |
 | B4 移除通路兵材質 scale（對齊 SF11） | `evaluation.py`、`constants.py` | ✅ |
+| B5 ThreatByMinor 表 + 移除非 SF 特徵 | `constants.py`、`evaluation.py`、`pawns.py` | ✅ |
 
-### 階段 C — 殘局擴充（可選）
+### 階段 C / P2 — 殘局擴充
 
 | 項目 | 說明 | 狀態 |
 | :--- | :--- | :---: |
-| C1 更多 specialized EG | KRKB、KQKR… | 待定 |
-| C2 KPK golden 對照 | 與 SF11 bitbase 抽樣 | 待定 |
+| C1 KNNK | 固定和棋（須先於 KXK） | ✅ |
+| C1 KRKB / KRKN | PushToEdges / +PushAway | ✅ |
+| C1 KQKR | EG 后−車 + edges + close | ✅ |
+| C1 KNNKP | 2N−P + edges | ✅ |
+| C2 KPK golden 對照 | 獨立 SF11 參考表全表對位（111282 wins）+ 理論 FEN；可選 SF 搜尋抽樣 | ✅ |
+| B5+P2 Elo 定稿 | 352 局 nodes=200k，~+30 Elo 顯著 | ✅ |
+
+**尺度：** 幾何表同 SF11；材質用 `EG_MATERIAL_VALUES`（~100cp），非 SF 213/1380…
 
 ### 階段 D — 整潔 / 驗證
 
@@ -166,7 +174,7 @@ Classical HCE 是 **以 Stockfish 11 為藍本、維持 ~100cp 人類可讀尺�
 | :--- | :---: |
 | 本審核報告為 HCE 唯一主文件 | ✅ |
 | 刪除過時評估文檔 | ✅ `EVALUATION_ANALYSIS.md`、`PAWN_EVALUATION_DIFFERENCES.md`、`RESEARCH_REPORT.md` |
-| 單元測試 | ✅ `tests/test_phase_a_eval.py`、`tests/test_endgame_conformance.py` |
+| 單元測試 | ✅ `tests/test_phase_a_eval.py`、`tests/test_endgame_conformance.py`（含 P2） |
 | SF 殘局 oracle | ✅ `ENDGAME_SF_VERIFICATION.md` |
 | 階段 A 對戰 | ✅ `PHASE_A_TOURNAMENT_ANALYSIS.md` |
 | 階段 B 對戰（200 局，~+30 Elo） | ✅ `PHASE_B_TOURNAMENT_ANALYSIS.md` |
@@ -222,7 +230,7 @@ python tournament_analysis/統計數據.py
 | :--- | :--- |
 | 量測階段 B 淨增益 | 見 `PHASE_B_TOURNAMENT_ANALYSIS.md`（A vs A+B，~+30 Elo） |
 | 量測 B4 通路兵 scale 移除 | ✅ **200 局** ≈ **+9 Elo / 51.25%**（CI 含 0，視為打平） |
-| 再挖 Elo | 優先更多 EG；其次 outpost hole / rook 7th |
+| 再挖 Elo | 優先更多 EG；其次 KingProtector / SafePawn 微調 |
 | 維持 100cp | 繼續禁止 raw SF 材質；新係數一律「SF 結構 + 一次縮放」 |
 | 文件 | 以本報告為 HCE 對齊唯一真相來源 |
 
@@ -343,12 +351,50 @@ SF 係數在「pawn MG=128」空間與 SF mobility/shelter 共調。我們材質
   - 中途 76 局曾見 44.7%（~−37）→ **小樣本噪音**；滿 200 局收斂至 ~51%。  
   - 影響面窄（僅「非兵落後 + 通路兵」）；棋力**中性**（略正、未顯著）；非 nodes 設定錯誤。
 
+### B5 — ThreatByMinor 表 + 結構純化（2026-07-11）
+
+**驗證（改前）：**
+
+1. SF11 `ThreatByMinor[PAWN..QUEEN]` = `(6,32),(59,41),(79,56),(90,119),(79,161)`（`evaluate.cpp`）。
+2. 本引擎索引 `0..4` = P/N/B/R/Q；用法 `THREAT_BY_MINOR[pt]` × popcount 正確。
+3. 舊表 Bishop 誤用 Knight 值，Rook/Queen 整列下移（註解亦錯）。
+4. 縮放沿用既有 `THREAT_BY_ROOK` 慣例 MG×0.78 / EG×0.56 → 修正後 `(5,18),(46,23),(62,31),(70,67),(62,90)`。
+5. SF11 **無** `Outpost hole`（Outpost 已含 `~pawn_attacks_span`）與 **無** 獨立 Rook-on-7th。
+
+**變更：**
+
+| 項 | 檔案 |
+| :--- | :--- |
+| 修正 `THREAT_BY_MINOR` | `constants.py` |
+| 移除 `OUTPOST_HOLE_BONUS` 累加 | `evaluation.py`、`constants.py` |
+| 移除 `ROOK_ON_SEVENTH_BONUS` | `pawns.py` `evaluate_piece_coordination`、`constants.py` |
+| tuner 參數註冊同步 | `tuner/parameters.py`、`tuner/tuner.py` |
+
+**未改：** Outpost rank 表形狀（非 flat SF `Outpost*2`）；`THREAT_SAFE_PAWN` 既有縮放。
+
+### P2 / C2 — 專用殘局擴充 + KPK golden（2026-07-11）
+
+| 項 | 內容 |
+| :--- | :--- |
+| P2 Value 短路 | **KNNK**（和）、**KRKB**、**KRKN**、**KQKR**、**KNNKP**（+既有五種 → 共十種） |
+| 尺度 | 幾何表同 SF11；材質用 `EG_MATERIAL_VALUES`（~100cp） |
+| C2 KPK golden | 獨立 SF11 pure-Python 參考全表對位（111282 wins）；`tests/test_kpk_golden.py`、`tools/verify_kpk_golden.py` |
+| 檔案 | `endgame.py`、`evaluation.py` 註解、測試與 audit |
+
+### B5+P2 對戰定稿（**352 局**，2026-07-11）
+
+- 設定：`tournament.py --nodes 200000`（成對換先）；New = B5+P2，Old = 改前（仍含 hole/rook-7th/舊 ThreatByMinor、無 P2）。  
+- 結果：New **110–162–80**，得分率 **54.26%**，Elo **+29.7**，95% CI **[3.1, 56.6]**（**下界 > 0，顯著**）。  
+- 長局 `very_long(>80)` score **0.564**（優勢集中收官/簡化）；搜尋深度/NPS 與 Old 無實質差（nodes +1.7% 可忽略）。  
+- 報告：`tournament_analysis/game_stats_report.txt`、`search_stats_report.txt`。
+
 ### 同步與對戰
 
 1. A 結束：`sync` → Old = A。  
 2. B 在 `classical` → 200 局：**+29.6 Elo** vs A（見 `PHASE_B_TOURNAMENT_ANALYSIS.md`）。  
 3. B3 tropism 死代碼清理（分數不變）。  
-4. B4 前 `sync` → Old = A+B+B3；New 移除通路兵材質 scale（可對打）。
+4. B4 前 `sync` → Old = A+B+B3；New 移除通路兵材質 scale（可對打）。  
+5. **B5+P2 定稿後 `sync`** → Old = classical（2026-07-11）。
 
 ---
 
@@ -356,10 +402,10 @@ SF 係數在「pawn MG=128」空間與 SF mobility/shelter 共調。我們材質
 
 | 版本標籤 | 內容 |
 | :--- | :--- |
-| `classical_old`（目前） | 階段 A+B+B3（仍含通路兵 **材質** scale） |
-| `classical`（目前） | 階段 A+B+B3+B4（通路兵 **無** 材質 scale） |
-| B4 對戰（**200 局**） | New **51.25%**（~**+9 Elo**，CI 含 0）→ 見 `PHASE_B4_TOURNAMENT_ANALYSIS.md` |
-| 建議下一動 | **保留 B4**（結構對齊、棋力中性）；階段 C 更多 EG；可選 ≥1000 局精測 |
+| `classical` / `classical_old`（目前） | **A+B+B3+B4+B5+P2+C2**（已 sync） |
+| B4 對戰（**200 局**） | ~**+9 Elo**（CI 含 0） |
+| **B5+P2 對戰（**352 局**）** | ~**+30 Elo**（**顯著**） |
+| 建議下一動 | P3：`THREAT_SAFE_PAWN` / `KING_PROTECTOR` 尺度微調（單變量對戰） |
 
 ---
 
@@ -368,7 +414,9 @@ SF 係數在「pawn MG=128」空間與 SF mobility/shelter 共調。我們材質
 | 文件 | 用途 |
 | :--- | :--- |
 | **本文** `HCE_SF11_GAP_AUDIT.md` | HCE ↔ SF11 對齊主文件 |
-| `ENDGAME_SF_VERIFICATION.md` | 專用殘局 vs SF 搜尋 oracle |
+| `ENDGAME_SF_VERIFICATION.md` | 專用殘局 vs SF 搜尋 oracle；KPK golden 入口 |
+| `tests/test_kpk_golden.py` / `tools/verify_kpk_golden.py` | KPK bitbase 全表 + 理論 FEN |
+| `tournament_analysis/game_stats_report.txt` | B5+P2 定稿對戰局級統計 |
 | `tournament_analysis/PHASE_A_TOURNAMENT_ANALYSIS.md` | 階段 A 對戰（歷史，+61 Elo） |
 | `tournament_analysis/PHASE_B_TOURNAMENT_ANALYSIS.md` | 階段 B 對戰（200 局，+30 Elo） |
 | `tournament_analysis/PHASE_B4_TOURNAMENT_ANALYSIS.md` | 階段 B4 通路兵 scale 移除（200 局，~+9 Elo，打平） |

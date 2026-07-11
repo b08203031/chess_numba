@@ -60,8 +60,39 @@ python tournament_analysis/parse_search_stats.py --name1 New --name2 Old
 
 | 腳本 | 產出 |
 | :--- | :--- |
-| `統計數據.py` | 終端報告、`game_stats_report.txt`、`cumulative_wins.png` |
-| `parse_search_stats.py` | `search_stats_report.txt`、`depth_per_move.png`、`nodes_per_move.png`、`time_per_move.png`、`avg_nodes_vs_depth.png` |
+| `統計數據.py` | 終端報告、`game_stats_report.txt` + 局級圖表（見下） |
+| `parse_search_stats.py` | `search_stats_report.txt` + 著法級圖表（見下） |
+
+### 局級圖表（`統計數據.py`）
+
+| 檔案 | 內容 |
+| :--- | :--- |
+| `cumulative_wins.png` | 累積勝場 vs 理想斜率 |
+| `cumulative_score.png` | 累積得分 + 滾動勝率 |
+| `wdl_by_color.png` | 持白/持黑 WDL 分組長條 |
+| `score_by_length.png` | 局長分桶得分率 |
+| `length_by_result.png` | 勝/負/和 局長直方圖 |
+| `pair_outcomes.png` | 成對結果（WW…LL） |
+| `elo_ci.png` | Elo 差 ± 95% CI |
+| `openings_score.png` | 主流開局得分率 |
+| `promotions_by_result.png` | 升變次數 by 結果 |
+| `score_halves.png` | 前/後半場得分率 |
+
+### 著法級圖表（`parse_search_stats.py`）
+
+| 檔案 | 內容 |
+| :--- | :--- |
+| `depth_per_move.png` | 每步平均深度（含 SEM） |
+| `nodes_per_move.png` | 每步平均節點 |
+| `time_per_move.png` | 每步平均耗時 |
+| `nps_per_move.png` | 每步平均 NPS |
+| `avg_nodes_vs_depth.png` | 同深度平均節點曲線 |
+| `depth_histogram.png` | 深度分箱 % 對比 |
+| `nps_histogram.png` | NPS 分佈 |
+| `nodes_histogram.png` | 節點分佈 |
+| `depth_by_color.png` | 引擎×執色平均深度 |
+| `same_depth_node_ratio.png` | 同深度節點比 New/Old |
+| `depth_cdf.png` | 深度累積分佈（≤40） |
 
 （舊的 `scratch/analyze_tournament_phase_*.py`、`_extra_analysis.py`、`inspect_pgn.py` 已併入上述兩支腳本並刪除。）
 

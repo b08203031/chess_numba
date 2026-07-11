@@ -566,16 +566,12 @@ def evaluate_attacks_mobility_threats(piece_bbs, occupancy_bbs, white_king_sq, b
             b_attacker_weight += KING_ATTACK_WEIGHTS[2]  # KNIGHT
         b_king_attacks_count += count_bits(att & black_king_adjacent)
 
-        # Outpost Logic (White Knight)
+        # Outpost Logic (White Knight) — SF11: OutpostRanks & pawn-supported & ~enemy span
         is_outpost = (BB_SQUARES[sq] & white_outposts) != np.uint64(0)
         if is_outpost:
             rank = sq // 8
             mg_outpost += OUTPOST_BONUS_KNIGHT[rank, 0]
             eg_outpost += OUTPOST_BONUS_KNIGHT[rank, 1]
-            file_idx = sq % 8
-            if not (ADJACENT_FILES_MASKS[file_idx] & WHITE_FORWARD_RANKS[sq] & bp_bb):
-                 mg_outpost += OUTPOST_HOLE_BONUS[0]
-                 eg_outpost += OUTPOST_HOLE_BONUS[1]
         elif (att & white_outposts & ~white_occupancy) != np.uint64(0):
             mg_outpost += REACHABLE_OUTPOST_BONUS[0]
             eg_outpost += REACHABLE_OUTPOST_BONUS[1]
@@ -630,16 +626,12 @@ def evaluate_attacks_mobility_threats(piece_bbs, occupancy_bbs, white_king_sq, b
             b_attacker_weight += KING_ATTACK_WEIGHTS[3]  # BISHOP
         b_king_attacks_count += count_bits(att & black_king_adjacent)
 
-        # Outpost Logic (White Bishop)
+        # Outpost Logic (White Bishop) — SF11: same mask as knight, no separate hole bonus
         is_outpost = (BB_SQUARES[sq] & white_outposts) != np.uint64(0)
         if is_outpost:
             rank = sq // 8
             mg_outpost += OUTPOST_BONUS_BISHOP[rank, 0]
             eg_outpost += OUTPOST_BONUS_BISHOP[rank, 1]
-            file_idx = sq % 8
-            if not (ADJACENT_FILES_MASKS[file_idx] & WHITE_FORWARD_RANKS[sq] & bp_bb):
-                 mg_outpost += OUTPOST_HOLE_BONUS[0]
-                 eg_outpost += OUTPOST_HOLE_BONUS[1]
 
         # LongDiagonalBishop: bonus if bishop sees both center squares through pawns only
         CENTER_SQUARES = np.uint64(0x0000001818000000)  # d4, e4, d5, e5
@@ -789,10 +781,6 @@ def evaluate_attacks_mobility_threats(piece_bbs, occupancy_bbs, white_king_sq, b
             rel_rank = 7 - rank
             mg_outpost -= OUTPOST_BONUS_KNIGHT[rel_rank, 0]
             eg_outpost -= OUTPOST_BONUS_KNIGHT[rel_rank, 1]
-            file_idx = sq % 8
-            if not (ADJACENT_FILES_MASKS[file_idx] & BLACK_FORWARD_RANKS[sq] & wp_bb):
-                 mg_outpost -= OUTPOST_HOLE_BONUS[0]
-                 eg_outpost -= OUTPOST_HOLE_BONUS[1]
         elif (att & black_outposts & ~black_occupancy) != np.uint64(0):
             mg_outpost -= REACHABLE_OUTPOST_BONUS[0]
             eg_outpost -= REACHABLE_OUTPOST_BONUS[1]
@@ -847,17 +835,13 @@ def evaluate_attacks_mobility_threats(piece_bbs, occupancy_bbs, white_king_sq, b
             w_attacker_weight += KING_ATTACK_WEIGHTS[3]  # BISHOP
         w_king_attacks_count += count_bits(att & white_king_adjacent)
 
-        # Outpost Logic (Black Bishop)
+        # Outpost Logic (Black Bishop) — SF11: no separate hole bonus
         is_outpost = (BB_SQUARES[sq] & black_outposts) != np.uint64(0)
         if is_outpost:
             rank = sq // 8
             rel_rank = 7 - rank
             mg_outpost -= OUTPOST_BONUS_BISHOP[rel_rank, 0]
             eg_outpost -= OUTPOST_BONUS_BISHOP[rel_rank, 1]
-            file_idx = sq % 8
-            if not (ADJACENT_FILES_MASKS[file_idx] & BLACK_FORWARD_RANKS[sq] & wp_bb):
-                 mg_outpost -= OUTPOST_HOLE_BONUS[0]
-                 eg_outpost -= OUTPOST_HOLE_BONUS[1]
 
         # LongDiagonalBishop: bonus if bishop sees both center squares through pawns only
         CENTER_SQUARES = np.uint64(0x0000001818000000)  # d4, e4, d5, e5
@@ -1447,7 +1431,8 @@ def _evaluate_position_jit(piece_bbs, occupancy_bbs, game_state, lazy: bool, sea
     """
     side_to_move = game_state[0]
 
-    # --- Specialized endgames (SF11 subset): KBNK, KPK, KRKP, KQKP, KXK ---
+    # --- Specialized endgames (SF11): KBNK, KPK, KRKP, KQKP, KXK,
+    #     KNNK, KRKB, KRKN, KQKR, KNNKP ---
     # Score from evaluate_special_endgame is White's perspective.
     hit_special, special_score = evaluate_special_endgame(piece_bbs, occupancy_bbs, game_state, np.int32(0))
     if hit_special:

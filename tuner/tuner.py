@@ -91,14 +91,12 @@ class SPSAOptimizer:
         cm.add_range("BISHOP_PAIR_BONUS", min_val=0)
         cm.add_range("ROOK_ON_SEMI_OPEN_FILE_BONUS", min_val=0)
         cm.add_range("ROOK_ON_OPEN_FILE_BONUS", min_val=0)
-        cm.add_range("ROOK_ON_SEVENTH_BONUS", min_val=0)
         cm.add_range("PASSED_PAWN_BONUS", min_val=0)
         cm.add_range("CANDIDATE_PASSED_PAWN_BONUS", min_val=0)
         
         # Outposts
         cm.add_range("OUTPOST_BONUS_KNIGHT", min_val=0)
         cm.add_range("OUTPOST_BONUS_BISHOP", min_val=0)
-        cm.add_range("OUTPOST_HOLE_BONUS", min_val=0)
 
         # King Safety / King Danger 
         cm.add_range("KING_SAFETY_ATTACK_UNITS", min_val=0)

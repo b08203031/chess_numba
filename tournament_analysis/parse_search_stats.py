@@ -365,7 +365,143 @@ def analyze_and_plot(new_stats, old_stats, by_color, output_dir, name1, name2):
         plt.savefig(os.path.join(output_dir, "avg_nodes_vs_depth.png"), dpi=150)
         plt.close()
 
+    saved: List[str] = [
+        "depth_per_move.png", "nodes_per_move.png", "time_per_move.png", "avg_nodes_vs_depth.png",
+    ]
+
+    # --- Depth histogram (binned %) ---
+    bins = [(1, 10), (11, 12), (13, 13), (14, 15), (16, 20), (21, 50), (51, 128)]
+    bin_labels = [f"{a}-{b}" for a, b in bins]
+    new_pct = [float(np.mean((new_depths >= a) & (new_depths <= b)) * 100) for a, b in bins]
+    old_pct = [float(np.mean((old_depths >= a) & (old_depths <= b)) * 100) for a, b in bins]
+    fig, ax = plt.subplots(figsize=(10, 5))
+    x = np.arange(len(bin_labels))
+    w = 0.38
+    ax.bar(x - w / 2, new_pct, w, label=name1, color="#1f77b4")
+    ax.bar(x + w / 2, old_pct, w, label=name2, color="#ff7f0e")
+    ax.set_xticks(x)
+    ax.set_xticklabels(bin_labels)
+    ax.set_ylabel("% of moves")
+    ax.set_xlabel("Depth bin")
+    ax.set_title(f"Depth Histogram ({name1} vs {name2})")
+    ax.legend()
+    ax.grid(True, axis="y", linestyle=":", alpha=0.5)
+    fig.tight_layout()
+    fig.savefig(os.path.join(output_dir, "depth_histogram.png"), dpi=150)
+    plt.close(fig)
+    saved.append("depth_histogram.png")
+
+    # --- NPS distribution ---
+    if len(new_nps_clean) and len(old_nps_clean):
+        fig, ax = plt.subplots(figsize=(10, 5))
+        # clip extreme mate/qsearch outliers for readability
+        hi = float(np.percentile(np.concatenate([new_nps_clean, old_nps_clean]), 99))
+        ax.hist(new_nps_clean[new_nps_clean <= hi], bins=40, alpha=0.55, label=name1, color="#1f77b4", density=True)
+        ax.hist(old_nps_clean[old_nps_clean <= hi], bins=40, alpha=0.55, label=name2, color="#ff7f0e", density=True)
+        ax.set_xlabel("NPS")
+        ax.set_ylabel("Density")
+        ax.set_title(f"NPS Distribution ({name1} vs {name2})")
+        ax.legend()
+        ax.grid(True, axis="y", linestyle=":", alpha=0.5)
+        fig.tight_layout()
+        fig.savefig(os.path.join(output_dir, "nps_histogram.png"), dpi=150)
+        plt.close(fig)
+        saved.append("nps_histogram.png")
+
+    # --- Nodes distribution ---
+    fig, ax = plt.subplots(figsize=(10, 5))
+    hi_n = float(np.percentile(np.concatenate([new_nodes, old_nodes]), 99))
+    ax.hist(new_nodes[new_nodes <= hi_n], bins=40, alpha=0.55, label=name1, color="#1f77b4", density=True)
+    ax.hist(old_nodes[old_nodes <= hi_n], bins=40, alpha=0.55, label=name2, color="#ff7f0e", density=True)
+    ax.set_xlabel("Nodes / move")
+    ax.set_ylabel("Density")
+    ax.set_title(f"Nodes Distribution ({name1} vs {name2})")
+    ax.legend()
+    ax.grid(True, axis="y", linestyle=":", alpha=0.5)
+    fig.tight_layout()
+    fig.savefig(os.path.join(output_dir, "nodes_histogram.png"), dpi=150)
+    plt.close(fig)
+    saved.append("nodes_histogram.png")
+
+    # --- NPS per move (line) ---
+    if len(new_move_nums) and len(old_move_nums) and len(new_nps) and len(old_nps):
+        nm, nmean, nsem = get_metric_per_move(new_move_nums, new_nps)
+        om, omean, osem = get_metric_per_move(old_move_nums, old_nps)
+        if len(nm) and len(om):
+            plot_line_metric(
+                nm, nmean, nsem, om, omean, osem,
+                title=f"Average NPS per Move ({name1} vs {name2})",
+                xlabel="Move Number", ylabel="Average NPS",
+                filename=os.path.join(output_dir, "nps_per_move.png"),
+                name1=name1, name2=name2,
+            )
+            saved.append("nps_per_move.png")
+
+    # --- Mean depth by engine × color ---
+    if by_color:
+        cats, means, cols = [], [], []
+        for eng, color in ((name1, "#1f77b4"), (name2, "#ff7f0e")):
+            for col in ("W", "B"):
+                s = by_color.get((eng, col))
+                if s and s["depth"]:
+                    cats.append(f"{eng}\n{col}")
+                    means.append(float(np.mean(s["depth"])))
+                    cols.append(color)
+        if cats:
+            fig, ax = plt.subplots(figsize=(8, 5))
+            ax.bar(cats, means, color=cols, edgecolor="white")
+            ax.set_ylabel("Mean depth")
+            ax.set_title(f"Mean Depth by Engine × Color ({name1} vs {name2})")
+            for i, v in enumerate(means):
+                ax.text(i, v + 0.05, f"{v:.2f}", ha="center", fontsize=9)
+            ax.grid(True, axis="y", linestyle=":", alpha=0.5)
+            fig.tight_layout()
+            fig.savefig(os.path.join(output_dir, "depth_by_color.png"), dpi=150)
+            plt.close(fig)
+            saved.append("depth_by_color.png")
+
+    # --- Same-depth node ratio bars ---
+    ratio_ds, ratios = [], []
+    for d in range(6, 21):
+        nn = new_nodes[new_depths == d]
+        on = old_nodes[old_depths == d]
+        if len(nn) >= 20 and len(on) >= 20 and on.mean() > 0:
+            ratio_ds.append(d)
+            ratios.append(float(nn.mean() / on.mean()))
+    if ratio_ds:
+        fig, ax = plt.subplots(figsize=(10, 5))
+        bar_colors = ["#2ca02c" if r >= 1.0 else "#d62728" for r in ratios]
+        ax.bar([str(d) for d in ratio_ds], ratios, color=bar_colors, edgecolor="white")
+        ax.axhline(1.0, color="#888888", linestyle="--")
+        ax.set_xlabel("Depth")
+        ax.set_ylabel(f"Mean nodes ratio ({name1}/{name2})")
+        ax.set_title(f"Same-Depth Node Ratio ({name1} / {name2})")
+        ax.grid(True, axis="y", linestyle=":", alpha=0.5)
+        fig.tight_layout()
+        fig.savefig(os.path.join(output_dir, "same_depth_node_ratio.png"), dpi=150)
+        plt.close(fig)
+        saved.append("same_depth_node_ratio.png")
+
+    # --- Depth CDF ---
+    fig, ax = plt.subplots(figsize=(10, 5))
+    for arr, lab, col in ((new_depths, name1, "#1f77b4"), (old_depths, name2, "#ff7f0e")):
+        s = np.sort(arr)
+        y = np.arange(1, len(s) + 1) / len(s)
+        # cap display at 40 for readability (mate depths still in tail)
+        mask = s <= 40
+        ax.plot(s[mask], y[mask], label=lab, color=col, linewidth=2)
+    ax.set_xlabel("Depth")
+    ax.set_ylabel("CDF")
+    ax.set_title(f"Depth CDF (≤40 shown) ({name1} vs {name2})")
+    ax.legend()
+    ax.grid(True, linestyle=":", alpha=0.5)
+    fig.tight_layout()
+    fig.savefig(os.path.join(output_dir, "depth_cdf.png"), dpi=150)
+    plt.close(fig)
+    saved.append("depth_cdf.png")
+
     print(f"Visualizations saved to {output_dir}")
+    print("Charts: " + ", ".join(saved))
 
 
 def auto_names(pgn_path: Path) -> Tuple[str, str]:

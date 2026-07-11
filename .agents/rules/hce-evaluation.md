@@ -1,7 +1,6 @@
 ---
-description: "Classical HCE eval constraints: SF11 alignment source of truth, scale, specialized endgames."
 trigger: glob
-glob: "**/chess_engine/**/{evaluation,pawns,material,endgame,constants}.py"
+description: "Classical HCE eval constraints: SF11 alignment source of truth, scale, specialized endgames."
 ---
 
 # Classical HCE Evaluation Constraints
@@ -41,3 +40,4 @@ Endgame oracle: `chess_engine/classical/ENDGAME_SF_VERIFICATION.md`.
 python -m unittest tests.test_phase_a_eval tests.test_endgame_conformance -v
 # Elo: only with user OK — tools/tournament.py vs main_old.py
 ```
+* Add the test to verify any new feature.

@@ -46,7 +46,7 @@ class ParameterManager:
         self._add_param("BISHOP_PAIR_BONUS", constants.BISHOP_PAIR_BONUS)
         self._add_param("ROOK_ON_SEMI_OPEN_FILE_BONUS", constants.ROOK_ON_SEMI_OPEN_FILE_BONUS)
         self._add_param("ROOK_ON_OPEN_FILE_BONUS", constants.ROOK_ON_OPEN_FILE_BONUS)
-        self._add_param("ROOK_ON_SEVENTH_BONUS", constants.ROOK_ON_SEVENTH_BONUS)
+        # ROOK_ON_SEVENTH_BONUS removed from classical (not in SF11)
 
         # --- Pawn Structure ---
         self._add_param("PASSED_PAWN_BONUS", constants.PASSED_PAWN_BONUS)
@@ -60,7 +60,7 @@ class ParameterManager:
         # --- Outposts ---
         self._add_param("OUTPOST_BONUS_KNIGHT", constants.OUTPOST_BONUS_KNIGHT)
         self._add_param("OUTPOST_BONUS_BISHOP", constants.OUTPOST_BONUS_BISHOP)
-        self._add_param("OUTPOST_HOLE_BONUS", constants.OUTPOST_HOLE_BONUS)
+        # OUTPOST_HOLE_BONUS removed from classical (SF11 has no separate hole term)
 
         # --- King Safety ---
         self._add_param("KING_SAFETY_ATTACK_UNITS", constants.KING_SAFETY_ATTACK_UNITS)

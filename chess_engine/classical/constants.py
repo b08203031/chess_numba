@@ -330,8 +330,8 @@ BISHOP_PAIR_BONUS = np.array([20, 30], dtype=np.int32) # MG, EG
 ROOK_ON_SEMI_OPEN_FILE_BONUS = np.array([15, 10], dtype=np.int32) # MG, EG
 ROOK_ON_OPEN_FILE_BONUS = np.array([25, 15], dtype=np.int32) # MG, EG
 
-# Rook on 7th rank (confining king or attacking pawns) bonus / 車在第 7 橫排（限制國王或攻擊兵）的獎勵
-ROOK_ON_SEVENTH_BONUS = np.array([20, 50], dtype=np.int32) # MG, EG
+# ROOK_ON_SEVENTH_BONUS removed (SF11 has no standalone rook-on-7th term;
+# 7th-rank pressure is covered by PST, mobility, and threats).
 
 # =============================================================================
 # --- Pawn Structure Constants / 兵型結構常量 ---
@@ -441,9 +441,8 @@ OUTPOST_BONUS_BISHOP = np.array([
     [0, 0]     # Rank 8
 ], dtype=np.int32)
 
-# Bonus if the outpost is a "Hole" (cannot be attacked by enemy pawns at all).
-# 如果前哨是“洞”（完全無法被敵方兵攻擊），則給予額外獎勵。
-OUTPOST_HOLE_BONUS = np.array([25, 15], dtype=np.int32) # MG, EG
+# OUTPOST_HOLE_BONUS removed: SF11 Outpost already requires
+# attackedBy[Us][PAWN] & ~pawn_attacks_span(Them) (no separate hole term).
 REACHABLE_OUTPOST_BONUS = np.array([16, 5], dtype=np.int32) # MG, EG (SF11: S(32, 10) scaled)
 
 # =============================================================================
@@ -589,14 +588,16 @@ THREAT_SLIDER_ON_QUEEN = np.array([46, 10], dtype=np.int32)
 
 # ThreatByMinor[target_piece_type]: Minor (N/B) attacks piece of given type.
 # Index: 0=Pawn, 1=Knight, 2=Bishop, 3=Rook, 4=Queen, 5=King
+# SF11 evaluate.cpp ThreatByMinor[PAWN..QUEEN] = (6,32),(59,41),(79,56),(90,119),(79,161)
+# Scaled MG×0.78 / EG×0.56 (same convention as THREAT_BY_ROOK).
 # 輕子威脅：馬/象攻擊對應類型棋子的獎勵。
 THREAT_BY_MINOR = np.array([
     [ 5, 18],  # vs Pawn    (SF11: 6, 32)
     [46, 23],  # vs Knight  (SF11: 59, 41)
-    [46, 23],  # vs Bishop  (SF11: 59, 41)
-    [62, 32],  # vs Rook    (SF11: 79, 56)
-    [70, 67],  # vs Queen   (SF11: 90, 119)
-    [ 0,  0],  # vs King    (should not occur)
+    [62, 31],  # vs Bishop  (SF11: 79, 56)
+    [70, 67],  # vs Rook    (SF11: 90, 119)
+    [62, 90],  # vs Queen   (SF11: 79, 161)
+    [ 0,  0],  # vs King    (SF uses ThreatByKing; not this table)
 ], dtype=np.int32)
 
 # ThreatByRook[target_piece_type]: Rook attacks piece of given type (only if weak).
