@@ -1,13 +1,13 @@
 # Classical HCE 與 Stockfish 11 — 對齊審核報告
 
-**日期：** 2026-07-11（階段 A…B5+**P2/C2** 定稿；B5+P2 對戰 **352 局** 顯著）  
+**日期：** 2026-07-11（HCE **B5+P2+C2** 定稿；搜尋 **PR-A+B+C KNOWN_WIN 護欄** 定稿；評估 P3 回滾）  
 **範圍：** `chess_engine/classical` 手工評估（HCE） vs `stockfish_11`  
 **基準分支狀態：**
 
 | 目錄 | 內容 |
 | :--- | :--- |
-| `chess_engine/classical` | **A+B+B3+B4+B5+P2+C2**（ThreatByMinor；十種 specialized EG；KPK golden） |
-| `chess_engine/classical_old` | **與 classical 同步**（2026-07-11 sync；B5+P2 定稿後） |
+| `chess_engine/classical` | **HCE B5+P2+C2** + **搜尋 PR-A+B+C**（RFP/NMP/ProbCut/Razor + correction clamp） |
+| `chess_engine/classical_old` | 搜尋／評估程式與 `classical` 同步；保留調參前 `constants.py` 作純參數 A/B 基準 |
 
 **結論摘要：** 核心結構與 SF11 **高度對齊**。本文為 HCE 對齊**唯一主文件**（舊 `EVALUATION_ANALYSIS` / `PAWN_EVALUATION_DIFFERENCES` / `RESEARCH_REPORT` 已刪除；`classical_old/` 亦不維護 markdown）。
 
@@ -19,7 +19,9 @@
 | B（尺度混用）vs A | ~**−9 Elo** / 120 局 | — |
 | **B（尺度一致）vs A** | ~**+30 Elo** / **200 局**（CI 含 0） | `PHASE_B_TOURNAMENT_ANALYSIS.md` |
 | **B4（去通路兵材質 scale）vs B3** | ~**+9 Elo** / **200 局**（51.25%，CI 含 0，**打平**） | `PHASE_B4_TOURNAMENT_ANALYSIS.md` |
-| **B5+P2 vs 改前 Old** | ~**+30 Elo** / **352 局**（54.26%，CI **[3.1, 56.6]**，**顯著**） | `tournament_analysis/game_stats_report.txt` |
+| **B5+P2 vs 改前 Old** | ~**+30 Elo** / **352 局**（54.26%，CI **[3.1, 56.6]**，**顯著**） | 見歷史 PGN / 當期統計 |
+| **搜尋 PR-A（RFP/NMP 護欄）** | **50.0%** / **64 局**（Elo 0）→ **定稿** | [SEARCH_EVAL_INTERFACE.md](SEARCH_EVAL_INTERFACE.md) |
+| **搜尋 PR-B+C（ProbCut/Razor + clamp）** | **50.0%** / **122 局**（Elo 0，CI 含 0）→ **定稿** | 同上；`tournament_analysis/*_report.txt` |
 
 ---
 
@@ -35,9 +37,9 @@ Classical HCE 是 **以 Stockfish 11 為藍本、維持 ~100cp 人類可讀尺�
 
 | 組件 | 狀態 | 說明 |
 | :--- | :---: | :--- |
-| 材質值 + PSQT | 部分 | 刻意 `100/320/330/500/900`；PST 非 SF11 原表 |
+| 材質值 + PSQT | ✅ Texel baseline | MG/EG 材質與 PST 已在本引擎尺度調參；不要求與 SF11 原表數值相同 |
 | 材質不平衡多項式 | ✅ 對齊（縮放） | `material.py` QuadraticOurs/Theirs + `//16` |
-| 局面階段 (phase) | ✅ 對齊（尺度適配） | npm taper：`MIDGAME_LIMIT=6400`, `ENDGAME_LIMIT=1641`, phase∈[0,128] |
+| 局面階段 (phase) | ✅ 對齊（動態尺度） | npm taper；limits 由 active MG N/B/R/Q 推導，phase∈[0,128] |
 | 機動性區域 | ✅ | K/Q、牽制、低位/受阻兵、敵兵攻擊 |
 | 機動性表 | ✅ 縮放 | 非線性查表 |
 | 棋子特徵 (N/B/R/Q) | ✅ 大多 | 見 §3；CorneredBishop 僅 960 可忽略 |
@@ -110,10 +112,9 @@ Classical HCE 是 **以 Stockfish 11 為藍本、維持 ~100cp 人類可讀尺�
 
 | # | 項目 | 現況 | 建議 |
 | :-: | :--- | :--- | :--- |
-| 1 | KingProtector 係數 | 相對 SF 偏輕 | 可微調 |
-| 2 | PSQT 形狀 | 簡化表 | 需大規模調參才值得動 |
-| 3 | KPK golden 持續維護 | `tests/test_kpk_golden.py` + `tools/verify_kpk_golden.py` | 改 bitbase 後必跑 |
-| 4 | THREAT_SAFE_PAWN 縮放 | 比標稱 0.78/0.56 更重 | 可選抬升 |
+| 1 | PSQT 形狀 | 簡化表 | 需大規模調參才值得動 |
+| 2 | KPK golden 持續維護 | `tests/test_kpk_golden.py` + `tools/verify_kpk_golden.py` | 改 bitbase 後必跑 |
+| 3 | 評估係數抬升（曾稱 P3a/b） | 已對戰並**回滾** | 勿再開；見 §12 |
 
 ### 4.3 已關閉的舊「高嚴重度」項
 
@@ -272,7 +273,7 @@ python tournament_analysis/統計數據.py
 
 | 殘局 | 概要 |
 | :--- | :--- |
-| KBNK | `mate_kbnk` + VALUE_KNOWN_WIN |
+| KBNK | `mate_kbnk` + VALUE_KNOWN_WIN（含象馬協同、目標同色角吸引、異色角排斥、逃逸格限制、異色格控制與逼和防護） |
 | KPK | 自建 bitbase（已修 rank 編碼 `6 - rank`） |
 | KRKP | SF 相對座標幾何 |
 | KQKP | A/C/F/H 7 橫排例外 |
@@ -298,12 +299,15 @@ python tournament_analysis/統計數據.py
 
 ```text
 npm = sum of MG non-pawn material (both sides)
-npm' = clamp(npm, ENDGAME_LIMIT=1641, MIDGAME_LIMIT=6400)
-phase = ((npm' - 1641) * 128) / (6400 - 1641)   # ∈ [0, 128]
+MIDGAME_LIMIT = 2 * (2*N_mg + 2*B_mg + 2*R_mg + Q_mg)
+ENDGAME_LIMIT = round(MIDGAME_LIMIT * 3915 / 15258)
+npm' = clamp(npm, ENDGAME_LIMIT, MIDGAME_LIMIT)
+phase = ((npm' - ENDGAME_LIMIT) * 128) / (MIDGAME_LIMIT - ENDGAME_LIMIT)
 final = (mg * phase + eg * (128 - phase) * sf/64) / 128   # sf 在 scale≠NORMAL 時作用於 eg
 ```
 
 - 檔案：`constants.py`（`PHASE_MIDGAME`、`MIDGAME_LIMIT`、`ENDGAME_LIMIT`）、`evaluation.py` 主路徑。
+- 2026-07-29：limits 改由 active MG material 動態推導；目前 Texel 值（N/B/R/Q = 345/364/573/1170）對應 `MIDGAME_LIMIT=7468`、`ENDGAME_LIMIT=1916`。Texel 候選與 runtime match weights 亦用候選本身的 limits，保持 start position phase=128。
 
 ### B2 — kingDanger（SF11 結構 + **本引擎尺度一致**）
 
@@ -394,7 +398,18 @@ SF 係數在「pawn MG=128」空間與 SF mobility/shelter 共調。我們材質
 2. B 在 `classical` → 200 局：**+29.6 Elo** vs A（見 `PHASE_B_TOURNAMENT_ANALYSIS.md`）。  
 3. B3 tropism 死代碼清理（分數不變）。  
 4. B4 前 `sync` → Old = A+B+B3；New 移除通路兵材質 scale（可對打）。  
-5. **B5+P2 定稿後 `sync`** → Old = classical（2026-07-11）。
+5. **B5+P2 定稿後 `sync`** → Old = classical（2026-07-11）。  
+6. P3 嘗試後**全部回滾**，`sync` 凍結 B5+P2+C2。
+
+### P3a / P3b — 嘗試與回滾（2026-07-11）
+
+| 項 | 結果 |
+| :--- | :--- |
+| P3b 無兵 MG scale + 王兵賽跑勝者 | 32 局 very_long **0.31**、~**−100 Elo** → **回滾** |
+| P3a SafePawn (135,53) + KingProtector (5,4) | 110 局 **48.2%**、~**−13 Elo**（CI 含 0）→ **回滾** |
+| 定稿係數 | SafePawn **(70,45)**；KingProtector **(4,3)**；drawish scale 舊門檻 |
+| 教訓 | 結構 bug 修正（B5/P2）有 Elo；純抬 SF 比例係數需單獨長測，且可為負 |
+| 測試 | `tests/test_p3_eval.py` 鎖定定稿常數 |
 
 ---
 
@@ -402,10 +417,13 @@ SF 係數在「pawn MG=128」空間與 SF mobility/shelter 共調。我們材質
 
 | 版本標籤 | 內容 |
 | :--- | :--- |
-| `classical` / `classical_old`（目前） | **A+B+B3+B4+B5+P2+C2**（已 sync） |
+| `classical` / `classical_old`（目前） | 搜尋、`evaluation.py`、`endgame.py` 與全部相依程式一致；只保留 New/Old 評估常數差異作乾淨 A/B |
 | B4 對戰（**200 局**） | ~**+9 Elo**（CI 含 0） |
-| **B5+P2 對戰（**352 局**）** | ~**+30 Elo**（**顯著**） |
-| 建議下一動 | P3：`THREAT_SAFE_PAWN` / `KING_PROTECTOR` 尺度微調（單變量對戰） |
+| **B5+P2 對戰（**352 局**）** | ~**+30 Elo**（**顯著**）← HCE 定稿 |
+| **搜尋 PR-A（64 局）** | **50% / Elo 0** |
+| **搜尋 PR-B+C（122 局）** | **50% / Elo 0** ← 搜尋護欄全套定稿 |
+| 評估 P3 整包 / 純 P3a | 負向或中性偏負 → 已回滾 |
+| 建議下一動 | 棋力向：PST/搜尋強度；**勿**再開評估係數抬升；可選搜尋 P5–P7 |
 
 ---
 
@@ -416,7 +434,9 @@ SF 係數在「pawn MG=128」空間與 SF mobility/shelter 共調。我們材質
 | **本文** `HCE_SF11_GAP_AUDIT.md` | HCE ↔ SF11 對齊主文件 |
 | `ENDGAME_SF_VERIFICATION.md` | 專用殘局 vs SF 搜尋 oracle；KPK golden 入口 |
 | `tests/test_kpk_golden.py` / `tools/verify_kpk_golden.py` | KPK bitbase 全表 + 理論 FEN |
-| `tournament_analysis/game_stats_report.txt` | B5+P2 定稿對戰局級統計 |
+| `tournament_analysis/game_stats_report.txt` | 當期對戰局級統計（含 PR-B+C 122 局） |
+| `tournament_analysis/search_stats_report.txt` | 當期 depth/nodes/NPS |
+| [SEARCH_EVAL_INTERFACE.md](SEARCH_EVAL_INTERFACE.md) | 搜尋 KNOWN_WIN 護欄 PR-A/B/C 定稿 |
 | `tournament_analysis/PHASE_A_TOURNAMENT_ANALYSIS.md` | 階段 A 對戰（歷史，+61 Elo） |
 | `tournament_analysis/PHASE_B_TOURNAMENT_ANALYSIS.md` | 階段 B 對戰（200 局，+30 Elo） |
 | `tournament_analysis/PHASE_B4_TOURNAMENT_ANALYSIS.md` | 階段 B4 通路兵 scale 移除（200 局，~+9 Elo，打平） |

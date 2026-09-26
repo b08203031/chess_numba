@@ -1,6 +1,6 @@
 # 神經網路評估 (NNUE) 系統：使用說明書
 
-本文件說明 `chess_engine/nnue/ml_eval/` 的**離線訓練、量化與推理操作**。網路拓撲與數學細節見 **[ARCHITECTURE.md](../ARCHITECTURE.md)**；資料管線與 SPSA 總覽見 **[tuner/README.md](../../../../tuner/README.md)**。
+本文件說明 `chess_engine/nnue/ml_eval/` 的**離線訓練、量化與推理操作**。網路拓撲與數學細節見 **[ARCHITECTURE.md](../ARCHITECTURE.md)**；資料管線與 SPSA 總覽見 **[tuner/README.md](../../../tuner/README.md)**。
 
 ---
 
@@ -13,7 +13,7 @@
 | `chess_engine/nnue/ml_eval/inference.py` | Numba 整數前向與暖機 |
 | `chess_engine/nnue/ml_eval/weights/` | `*.pth` / `*.npy` / `metadata.json` |
 | `tuner/nnue_pipeline/` | 下載 binpack、Primer、轉 HalfKA NPZ、合併資料集 |
-| `tuner/ultimate_halfka_farseerT75.npz` | 預設訓練資料集（由管線產生） |
+| `tuner/data/nnue/ultimate_halfka_farseerT75.npz` | 預設訓練資料集（由管線產生） |
 
 **所有命令皆在專案根目錄執行。**
 
@@ -35,9 +35,9 @@ python tuner/nnue_pipeline/fetch_official_data.py --target-mb 1024 --limit 32000
 
 典型產物：
 
-- `tuner/official_data_farseerT75.binpack`
-- `tuner/official_data_farseerT75.bin`（Primer Bullet records）
-- `tuner/ultimate_halfka_farseerT75.npz`（`train.py` 讀取）
+- `tuner/data/nnue/official_data_farseerT75.binpack`
+- `tuner/data/nnue/official_data_farseerT75.bin`（Primer Bullet records）
+- `tuner/data/nnue/ultimate_halfka_farseerT75.npz`（`train.py` 讀取）
 
 轉換細節（特徵順序、WDL target）由 `tuner/nnue_pipeline/convert_bullet_bin.py` 處理：Primer raw `Value` → UCI cp（`cp = value * 100 / 208`）→ `sigma(0.0025 * cp)`。
 
@@ -62,7 +62,7 @@ python chess_engine/nnue/ml_eval/train.py
 
 訓練會：
 
-- 讀取 `tuner/ultimate_halfka_farseerT75.npz`（或腳本內相對路徑回退）
+- 讀取 `tuner/data/nnue/ultimate_halfka_farseerT75.npz`（或腳本內相對路徑回退）
 - 使用 `BCEWithLogitsLoss`、AMP、gradient clipping
 - FC1：`weight_decay=0`；dense / factorizer / delta：`weight_decay=0.001`
 - 寫入 `chess_engine/nnue/ml_eval/weights/latest_model.pth`、`best_model.pth`

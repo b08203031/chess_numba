@@ -11,7 +11,7 @@ from chess_engine.classical.core import generate_legal_moves
 from chess_engine.classical.debug_utils import log_info
 from chess_engine.classical.fen_parser import parse_fen
 from chess_engine.classical.move import move_to_uci
-from chess_engine.classical.search import iterative_deepening_search
+from chess_engine.classical.search import iterative_deepening_search, warmup_search_jit
 from chess_engine.classical.time_manager import calculate_search_time
 from chess_engine.classical.transposition_table import (
     create_transposition_table,
@@ -32,6 +32,8 @@ global_search_context = None
 
 # Global counter for TT generation
 global_tt_generation = 0
+# One-shot Numba compile of recursive search/QS (lazy njit; see JIT_COMPILE_CACHE_REPORT.md)
+_search_jit_warmed = False
 
 def run_search(board_state, max_depth, time_config, transposition_table, killer_moves, history_table, pv_table):
     """
@@ -54,20 +56,31 @@ def uci_loop():
     # Initialize engine components before the loop starts / 在循環開始前初始化引擎組件
     transposition_table = create_transposition_table(TT_SIZE_MB)
     
-    # We need persistent tables for the search context / 我們需要搜尋上下文的持久化表
-    # Update killer_moves to be 1D array matching SearchContext definition
+    # Phase 1a history tables (restored from classical_old shapes)
     killer_moves = np.zeros(MAX_PLY * 2, dtype=np.uint16)
     history_table = np.zeros((12, 64), dtype=np.int32)
     butterfly_history = np.zeros((64, 64), dtype=np.int32)
-    continuation_history = np.zeros((4, 12, 64, 12, 64), dtype=np.int16)
-    capture_history = np.zeros((12, 64, 12), dtype=np.int32)
+    continuation_history = np.zeros((5, 12, 64, 12, 64), dtype=np.int16)
+    capture_history = np.zeros((12, 64, 6), dtype=np.int32)
     pawn_history = np.full((8192, 12, 64), -1238, dtype=np.int16)
-    pawn_correction_history = np.zeros(16384, dtype=np.int16) # CORRECTION_HISTORY_SIZE
+    pawn_correction_history = np.zeros(16384, dtype=np.int16)
     minor_correction_history = np.zeros(16384, dtype=np.int16)
     non_pawn_correction_history_white = np.zeros(16384, dtype=np.int16)
     non_pawn_correction_history_black = np.zeros(16384, dtype=np.int16)
     continuation_correction_history = np.zeros((12, 64, 12, 64), dtype=np.int16)
     pv_table = np.zeros((MAX_PLY, MAX_PLY), dtype=np.uint16)
+
+    # Allocate one context per engine process.  Rebuilding it on every `go`
+    # discarded counter/low-ply history and repeatedly allocated the large
+    # pawn/search buffers, while tournament's in-process backend correctly
+    # kept one context for the whole game.
+    global_search_context = SearchContext(
+        transposition_table, killer_moves, pv_table, history_table,
+        butterfly_history, continuation_history, capture_history, pawn_history,
+        pawn_correction_history, minor_correction_history,
+        non_pawn_correction_history_white, non_pawn_correction_history_black,
+        continuation_correction_history,
+    )
 
     # --- Initialize Opening Book / 初始化開局書 ---
     script_dir = os.path.dirname(os.path.realpath(__file__))
@@ -121,6 +134,17 @@ def uci_loop():
                 except ValueError:
                     pass
             elif command == "isready":
+                global _search_jit_warmed
+                if not _search_jit_warmed:
+                    # Compile recursive search/QS here so first timed `go` is hot.
+                    # May take ~1–3 minutes cold; subsequent isready is instant.
+                    log_info("Warming Numba search JIT (first isready)...")
+                    try:
+                        warmup_search_jit()
+                        _search_jit_warmed = True
+                        log_info("Numba search JIT warm-up complete.")
+                    except Exception as e:
+                        log_info(f"Numba search JIT warm-up failed: {e}")
                 print("readyok", flush=True)
             elif command == "ucinewgame":
                 clear_transposition_table(transposition_table)
@@ -136,6 +160,21 @@ def uci_loop():
                 non_pawn_correction_history_black.fill(0)
                 continuation_correction_history.fill(0)
                 pv_table.fill(0)
+                # SearchContext-owned heuristic/state arrays are not part of
+                # the constructor arguments above and must be reset explicitly.
+                global_search_context.counter_moves.fill(0)
+                global_search_context.low_ply_history.fill(0)
+                global_search_context.move_stack.fill(0)
+                global_search_context.piece_stack.fill(-1)
+                global_search_context.static_eval_stack.fill(0)
+                global_search_context.reduction_stack.fill(0)
+                global_search_context.tt_pv_stack.fill(False)
+                global_search_context.follow_pv_stack.fill(False)
+                global_search_context.last_iteration_pv.fill(0)
+                global_search_context.last_iteration_pv_len = np.int32(0)
+                global_search_context.nodes_searched = np.uint64(0)
+                global_search_context.nodes_searched_array.fill(0)
+                global_search_context.stop_flag[0] = False
                 game_history = []
                 global_tt_generation = 0 # Reset generation on new game
             elif command == "position":
@@ -246,16 +285,6 @@ def uci_loop():
                     print(f"bestmove {move_to_uci(selected_move)}", flush=True)
                     continue
 
-                # --- Prepare Search Context / 準備搜尋上下文 ---
-                # Create a new context for this search / 為此搜尋創建新的上下文
-                global_search_context = SearchContext(
-                    transposition_table, killer_moves, pv_table, history_table,
-                    butterfly_history, continuation_history, capture_history, pawn_history,
-                    pawn_correction_history, minor_correction_history,
-                    non_pawn_correction_history_white, non_pawn_correction_history_black,
-                    continuation_correction_history
-                )
-                
                 # Update TT Generation
                 global_tt_generation = (global_tt_generation + 1) % 256
                 

@@ -1,0 +1,259 @@
+"""Runtime HCE weight table for match-SPSA (SearchContext.eval_weights).
+
+Index map is fixed across blocks. Only the active SPSA block is mutated;
+other slots stay at constants defaults (or previously synced best).
+
+Numba sees live updates when the array is a StructRef field.
+"""
+from __future__ import annotations
+
+import numpy as np
+
+# --- G4 (0..12) ---
+EW_TEMPO_BONUS = 0
+EW_SAFE_CHECK_QUEEN = 1
+EW_SAFE_CHECK_ROOK = 2
+EW_SAFE_CHECK_BISHOP = 3
+EW_SAFE_CHECK_KNIGHT = 4
+EW_KING_DANGER_WEAK_SQ = 5
+EW_KING_DANGER_UNSAFE_CHECK = 6
+EW_KING_DANGER_BLOCKERS = 7
+EW_KING_DANGER_ATTACK_ON_KING_SQ = 8
+EW_KING_DANGER_NO_QUEEN = 9
+EW_KING_DANGER_KNIGHT_DEF = 10
+EW_KING_DANGER_OFFSET = 11
+EW_KING_DANGER_THRESHOLD = 12
+
+# --- A1+A2+A3 (13..25) ---
+EW_KING_FLANK_ATTACK_NUM = 13
+EW_KING_FLANK_DEFENSE_MULT = 14
+EW_KING_SHELTER_FEEDBACK_NUM = 15
+EW_PAWNLESS_FLANK_MG = 16
+EW_PAWNLESS_FLANK_EG = 17
+EW_FLANK_ATTACKS_MG = 18
+EW_KING_DANGER_OUT_MG_NUM = 19
+EW_KING_DANGER_OUT_EG_NUM = 20
+EW_EG_SAFETY_SCALE = 21  # 100 == 1.0
+EW_SHELTER_BASE_MG = 22
+EW_SHELTER_BASE_EG = 23
+EW_BLOCKED_STORM = 24
+EW_BLOCKED_STORM_EG = 25
+
+# --- Passed scalars (26..35) — 10 dims ---
+EW_PASSED_PATH_SAFE_NONE = 26
+EW_PASSED_PATH_SAFE_EDGE = 27
+EW_PASSED_PATH_SAFE_BLOCK = 28
+EW_PASSED_PATH_SUPPORT = 29
+EW_PASSED_DYNAMICS_MULT = 30
+EW_PASSED_DYNAMICS_OFFSET = 31
+EW_KING_PROX_ENEMY_MULT = 32
+EW_KING_PROX_FRIENDLY_MULT = 33
+EW_PASSED_FILE_BONUS_MG = 34
+EW_PASSED_FILE_BONUS_EG = 35
+
+# --- Material N/B/R/Q MG+EG (36..43); Pawn frozen in constants ---
+EW_MAT_N_MG = 36
+EW_MAT_N_EG = 37
+EW_MAT_B_MG = 38
+EW_MAT_B_EG = 39
+EW_MAT_R_MG = 40
+EW_MAT_R_EG = 41
+EW_MAT_Q_MG = 42
+EW_MAT_Q_EG = 43
+
+# --- Imbalance scales (44..45) ---
+EW_IMBALANCE_SCALE_MG = 44
+EW_IMBALANCE_SCALE_EG = 45
+
+# --- Passed rank bonus MG/EG for ranks 3..6 (46..53) ---
+EW_PASS_R3_MG = 46
+EW_PASS_R3_EG = 47
+EW_PASS_R4_MG = 48
+EW_PASS_R4_EG = 49
+EW_PASS_R5_MG = 50
+EW_PASS_R5_EG = 51
+EW_PASS_R6_MG = 52
+EW_PASS_R6_EG = 53
+
+EW_SIZE = 64
+
+G4_PARAM_NAMES = (
+    "TEMPO_BONUS",
+    "SAFE_CHECK_QUEEN",
+    "SAFE_CHECK_ROOK",
+    "SAFE_CHECK_BISHOP",
+    "SAFE_CHECK_KNIGHT",
+    "KING_DANGER_WEAK_SQ",
+    "KING_DANGER_UNSAFE_CHECK",
+    "KING_DANGER_BLOCKERS",
+    "KING_DANGER_ATTACK_ON_KING_SQ",
+    "KING_DANGER_NO_QUEEN",
+    "KING_DANGER_KNIGHT_DEF",
+    "KING_DANGER_OFFSET",
+    "KING_DANGER_THRESHOLD",
+)
+
+EVAL_PARAM_INDEX = {
+    # G4
+    "TEMPO_BONUS": EW_TEMPO_BONUS,
+    "SAFE_CHECK_QUEEN": EW_SAFE_CHECK_QUEEN,
+    "SAFE_CHECK_ROOK": EW_SAFE_CHECK_ROOK,
+    "SAFE_CHECK_BISHOP": EW_SAFE_CHECK_BISHOP,
+    "SAFE_CHECK_KNIGHT": EW_SAFE_CHECK_KNIGHT,
+    "KING_DANGER_WEAK_SQ": EW_KING_DANGER_WEAK_SQ,
+    "KING_DANGER_UNSAFE_CHECK": EW_KING_DANGER_UNSAFE_CHECK,
+    "KING_DANGER_BLOCKERS": EW_KING_DANGER_BLOCKERS,
+    "KING_DANGER_ATTACK_ON_KING_SQ": EW_KING_DANGER_ATTACK_ON_KING_SQ,
+    "KING_DANGER_NO_QUEEN": EW_KING_DANGER_NO_QUEEN,
+    "KING_DANGER_KNIGHT_DEF": EW_KING_DANGER_KNIGHT_DEF,
+    "KING_DANGER_OFFSET": EW_KING_DANGER_OFFSET,
+    "KING_DANGER_THRESHOLD": EW_KING_DANGER_THRESHOLD,
+    # A
+    "KING_FLANK_ATTACK_NUM": EW_KING_FLANK_ATTACK_NUM,
+    "KING_FLANK_DEFENSE_MULT": EW_KING_FLANK_DEFENSE_MULT,
+    "KING_SHELTER_FEEDBACK_NUM": EW_KING_SHELTER_FEEDBACK_NUM,
+    "PAWNLESS_FLANK_MG": EW_PAWNLESS_FLANK_MG,
+    "PAWNLESS_FLANK_EG": EW_PAWNLESS_FLANK_EG,
+    "FLANK_ATTACKS_MG": EW_FLANK_ATTACKS_MG,
+    "KING_DANGER_OUT_MG_NUM": EW_KING_DANGER_OUT_MG_NUM,
+    "KING_DANGER_OUT_EG_NUM": EW_KING_DANGER_OUT_EG_NUM,
+    "EG_SAFETY_SCALE": EW_EG_SAFETY_SCALE,
+    "SHELTER_BASE_MG": EW_SHELTER_BASE_MG,
+    "SHELTER_BASE_EG": EW_SHELTER_BASE_EG,
+    "BLOCKED_STORM": EW_BLOCKED_STORM,
+    "BLOCKED_STORM_EG": EW_BLOCKED_STORM_EG,
+    # Passed
+    "PASSED_PATH_SAFE_NONE_ATTACK": EW_PASSED_PATH_SAFE_NONE,
+    "PASSED_PATH_SAFE_EDGE_ATTACK": EW_PASSED_PATH_SAFE_EDGE,
+    "PASSED_PATH_SAFE_BLOCK_ONLY": EW_PASSED_PATH_SAFE_BLOCK,
+    "PASSED_PATH_SUPPORT_BONUS": EW_PASSED_PATH_SUPPORT,
+    "PASSED_DYNAMICS_MULT": EW_PASSED_DYNAMICS_MULT,
+    "PASSED_DYNAMICS_OFFSET": EW_PASSED_DYNAMICS_OFFSET,
+    "KING_PROX_ENEMY_MULT": EW_KING_PROX_ENEMY_MULT,
+    "KING_PROX_FRIENDLY_MULT": EW_KING_PROX_FRIENDLY_MULT,
+    "PASSED_FILE_BONUS_MG": EW_PASSED_FILE_BONUS_MG,
+    "PASSED_FILE_BONUS_EG": EW_PASSED_FILE_BONUS_EG,
+    # Material (pawn frozen)
+    "MAT_N_MG": EW_MAT_N_MG,
+    "MAT_N_EG": EW_MAT_N_EG,
+    "MAT_B_MG": EW_MAT_B_MG,
+    "MAT_B_EG": EW_MAT_B_EG,
+    "MAT_R_MG": EW_MAT_R_MG,
+    "MAT_R_EG": EW_MAT_R_EG,
+    "MAT_Q_MG": EW_MAT_Q_MG,
+    "MAT_Q_EG": EW_MAT_Q_EG,
+    # Imbalance
+    "IMBALANCE_SCALE_MG": EW_IMBALANCE_SCALE_MG,
+    "IMBALANCE_SCALE_EG": EW_IMBALANCE_SCALE_EG,
+    # Passed rank table (ranks 3-6)
+    "PASSED_RANK3_MG": EW_PASS_R3_MG,
+    "PASSED_RANK3_EG": EW_PASS_R3_EG,
+    "PASSED_RANK4_MG": EW_PASS_R4_MG,
+    "PASSED_RANK4_EG": EW_PASS_R4_EG,
+    "PASSED_RANK5_MG": EW_PASS_R5_MG,
+    "PASSED_RANK5_EG": EW_PASS_R5_EG,
+    "PASSED_RANK6_MG": EW_PASS_R6_MG,
+    "PASSED_RANK6_EG": EW_PASS_R6_EG,
+}
+
+
+def g4_from_constants(constants_module=None) -> dict:
+    """Read G4 defaults from a selected engine namespace.
+
+    ``constants_module`` is optional for backwards compatibility with the
+    tuner.  Tournament backends pass ``classical_old.constants`` explicitly so
+    an old SearchContext cannot accidentally inherit the current weights.
+    """
+    if constants_module is None:
+        from chess_engine.classical import constants as C
+    else:
+        C = constants_module
+
+    return {
+        "TEMPO_BONUS": int(C.TEMPO_BONUS),
+        "SAFE_CHECK_QUEEN": int(C.SAFE_CHECK_QUEEN),
+        "SAFE_CHECK_ROOK": int(C.SAFE_CHECK_ROOK),
+        "SAFE_CHECK_BISHOP": int(C.SAFE_CHECK_BISHOP),
+        "SAFE_CHECK_KNIGHT": int(C.SAFE_CHECK_KNIGHT),
+        "KING_DANGER_WEAK_SQ": int(C.KING_DANGER_WEAK_SQ),
+        "KING_DANGER_UNSAFE_CHECK": int(C.KING_DANGER_UNSAFE_CHECK),
+        "KING_DANGER_BLOCKERS": int(C.KING_DANGER_BLOCKERS),
+        "KING_DANGER_ATTACK_ON_KING_SQ": int(C.KING_DANGER_ATTACK_ON_KING_SQ),
+        "KING_DANGER_NO_QUEEN": int(C.KING_DANGER_NO_QUEEN),
+        "KING_DANGER_KNIGHT_DEF": int(C.KING_DANGER_KNIGHT_DEF),
+        "KING_DANGER_OFFSET": int(C.KING_DANGER_OFFSET),
+        "KING_DANGER_THRESHOLD": int(C.KING_DANGER_THRESHOLD),
+    }
+
+
+def default_eval_weights(constants_module=None) -> np.ndarray:
+    """Full baseline from the requested constants module (current by default)."""
+    if constants_module is None:
+        from chess_engine.classical import constants as C
+    else:
+        C = constants_module
+
+    w = np.zeros(EW_SIZE, dtype=np.int32)
+    for name, val in g4_from_constants(C).items():
+        w[EVAL_PARAM_INDEX[name]] = int(val)
+
+    w[EW_KING_FLANK_ATTACK_NUM] = int(C.KING_FLANK_ATTACK_NUM)
+    w[EW_KING_FLANK_DEFENSE_MULT] = int(C.KING_FLANK_DEFENSE_MULT)
+    w[EW_KING_SHELTER_FEEDBACK_NUM] = int(C.KING_SHELTER_FEEDBACK_NUM)
+    w[EW_PAWNLESS_FLANK_MG] = int(C.PAWNLESS_FLANK[0])
+    w[EW_PAWNLESS_FLANK_EG] = int(C.PAWNLESS_FLANK[1])
+    w[EW_FLANK_ATTACKS_MG] = int(C.FLANK_ATTACKS[0])
+    w[EW_KING_DANGER_OUT_MG_NUM] = int(C.KING_DANGER_OUT_MG_NUM)
+    w[EW_KING_DANGER_OUT_EG_NUM] = int(C.KING_DANGER_OUT_EG_NUM)
+    w[EW_EG_SAFETY_SCALE] = 100
+    w[EW_SHELTER_BASE_MG] = int(C.SHELTER_BASE_MG)
+    w[EW_SHELTER_BASE_EG] = int(C.SHELTER_BASE_EG)
+    w[EW_BLOCKED_STORM] = int(C.BLOCKED_STORM)
+    w[EW_BLOCKED_STORM_EG] = int(C.BLOCKED_STORM_EG)
+
+    w[EW_PASSED_PATH_SAFE_NONE] = int(C.PASSED_PATH_SAFE_NONE_ATTACK)
+    w[EW_PASSED_PATH_SAFE_EDGE] = int(C.PASSED_PATH_SAFE_EDGE_ATTACK)
+    w[EW_PASSED_PATH_SAFE_BLOCK] = int(C.PASSED_PATH_SAFE_BLOCK_ONLY)
+    w[EW_PASSED_PATH_SUPPORT] = int(C.PASSED_PATH_SUPPORT_BONUS)
+    w[EW_PASSED_DYNAMICS_MULT] = int(C.PASSED_DYNAMICS_MULT)
+    w[EW_PASSED_DYNAMICS_OFFSET] = int(C.PASSED_DYNAMICS_OFFSET)
+    w[EW_KING_PROX_ENEMY_MULT] = int(C.KING_PROX_ENEMY_MULT)
+    w[EW_KING_PROX_FRIENDLY_MULT] = int(C.KING_PROX_FRIENDLY_MULT)
+    w[EW_PASSED_FILE_BONUS_MG] = int(C.PASSED_FILE_BONUS[0])
+    w[EW_PASSED_FILE_BONUS_EG] = int(C.PASSED_FILE_BONUS[1])
+
+    w[EW_MAT_N_MG] = int(C.MG_MATERIAL_VALUES[1])
+    w[EW_MAT_N_EG] = int(C.EG_MATERIAL_VALUES[1])
+    w[EW_MAT_B_MG] = int(C.MG_MATERIAL_VALUES[2])
+    w[EW_MAT_B_EG] = int(C.EG_MATERIAL_VALUES[2])
+    w[EW_MAT_R_MG] = int(C.MG_MATERIAL_VALUES[3])
+    w[EW_MAT_R_EG] = int(C.EG_MATERIAL_VALUES[3])
+    w[EW_MAT_Q_MG] = int(C.MG_MATERIAL_VALUES[4])
+    w[EW_MAT_Q_EG] = int(C.EG_MATERIAL_VALUES[4])
+
+    w[EW_IMBALANCE_SCALE_MG] = int(C.IMBALANCE_SCALE_MG)
+    w[EW_IMBALANCE_SCALE_EG] = int(C.IMBALANCE_SCALE_EG)
+
+    # PassedRank table ranks 3..6 (relative rank for both colors)
+    w[EW_PASS_R3_MG] = int(C.PASSED_PAWN_BONUS[3, 0])
+    w[EW_PASS_R3_EG] = int(C.PASSED_PAWN_BONUS[3, 1])
+    w[EW_PASS_R4_MG] = int(C.PASSED_PAWN_BONUS[4, 0])
+    w[EW_PASS_R4_EG] = int(C.PASSED_PAWN_BONUS[4, 1])
+    w[EW_PASS_R5_MG] = int(C.PASSED_PAWN_BONUS[5, 0])
+    w[EW_PASS_R5_EG] = int(C.PASSED_PAWN_BONUS[5, 1])
+    w[EW_PASS_R6_MG] = int(C.PASSED_PAWN_BONUS[6, 0])
+    w[EW_PASS_R6_EG] = int(C.PASSED_PAWN_BONUS[6, 1])
+    return w
+
+
+def apply_param_dict(weights: np.ndarray, params: dict) -> None:
+    for name, val in params.items():
+        idx = EVAL_PARAM_INDEX.get(name)
+        if idx is None:
+            raise KeyError(f"Unknown eval param: {name}")
+        weights[idx] = int(val)
+
+
+def params_from_weights(weights: np.ndarray, names=None) -> dict:
+    names = names or list(EVAL_PARAM_INDEX.keys())
+    return {n: int(weights[EVAL_PARAM_INDEX[n]]) for n in names}

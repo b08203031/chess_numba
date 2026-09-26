@@ -13,7 +13,7 @@ from chess_engine.classical_old.constants import (
     EG_MATERIAL_VALUES, MG_MATERIAL_VALUES, VALUE_KNOWN_WIN, MATE_IN_MAX_PLY,
 )
 from chess_engine.classical_old.bitboard_utils import get_lsb_index, count_bits, FILE_MASKS, BB_SQUARES
-from chess_engine.classical_old.move_generator import get_bishop_attacks, KING_ATTACKS
+from chess_engine.classical_old.move_generator import get_bishop_attacks, KING_ATTACKS, KNIGHT_ATTACKS
 
 # --- Helper Distance Tables ---
 def _create_manhattan_distance_table():
@@ -230,26 +230,85 @@ def relative_square(side, sq):
 
 
 @numba.njit(cache=True, boundscheck=False, fastmath=True)
-def mate_kbnk(strong_king_sq, weak_king_sq, bishop_sq):
+def mate_kbnk(strong_king_sq, weak_king_sq, bishop_sq, knight_sq, occ_all, strong_pieces):
+    """
+    KBN vs K (King, Bishop, Knight vs lone King) specialized evaluator.
+    Guides the attacking side to herd the defending king away from wrong corners
+    (opposite color to bishop) and into target corners (matching bishop color),
+    restricting flight squares, coordinating knight and bishop, and avoiding stalemate.
+    """
+    b_attacks = get_bishop_attacks(bishop_sq, occ_all)
+    n_attacks = KNIGHT_ATTACKS[knight_sq]
+    k_attacks = KING_ATTACKS[strong_king_sq]
+    strong_attacks = b_attacks | n_attacks | k_attacks
+
+    weak_adj = KING_ATTACKS[weak_king_sq]
+    flight = weak_adj & ~strong_attacks & ~strong_pieces
+    safe_sq_count = count_bits(flight)
+    is_check = (strong_attacks & BB_SQUARES[weak_king_sq]) != np.uint64(0)
+
+    # Stalemate protection: 0 flight squares and not in check -> DRAW (0)
+    if safe_sq_count == 0 and not is_check:
+        return np.int32(0)
+
+    # Immediate checkmate: 0 flight squares and in check -> near-mate win
+    if safe_sq_count == 0 and is_check:
+        return np.int32(MATE_IN_MAX_PLY - 1)
+
     is_opposite = opposite_colors(bishop_sq, 0)  # 0 is SQ_A1
     idx = (weak_king_sq ^ 56) if is_opposite else weak_king_sq
-    
-    dist_kings = CHEBYSHEV_DISTANCE[strong_king_sq, weak_king_sq]
-    
-    result = np.int32(VALUE_KNOWN_WIN) + PUSH_CLOSE[dist_kings] + PUSH_TO_CORNERS[idx]
-    return result
+
+    score = np.int32(VALUE_KNOWN_WIN) + PUSH_CLOSE[CHEBYSHEV_DISTANCE[strong_king_sq, weak_king_sq]] + PUSH_TO_CORNERS[idx]
+
+    # 1. Target corners (mating corners matching bishop color) and wrong corners (opposite color)
+    if is_opposite:
+        c1, c2 = 56, 7  # Light corners (A8, H1)
+        w1, w2 = 0, 63  # Dark corners (A1, H8)
+        opp_color_mask = DARK_SQUARES
+    else:
+        c1, c2 = 0, 63  # Dark corners (A1, H8)
+        w1, w2 = 56, 7  # Light corners (A8, H1)
+        opp_color_mask = LIGHT_SQUARES
+
+    dist_target = min(MANHATTAN_DISTANCE[weak_king_sq, c1], MANHATTAN_DISTANCE[weak_king_sq, c2])
+    dist_wrong = min(MANHATTAN_DISTANCE[weak_king_sq, w1], MANHATTAN_DISTANCE[weak_king_sq, w2])
+
+    # Reward driving defending king toward target corners
+    score += np.int32((14 - dist_target) * 35)
+    # Penalize defending king staying near wrong corners (reward driving away)
+    score += np.int32(dist_wrong * 25)
+
+    # 2. Piece proximity to weak king
+    dist_knight = CHEBYSHEV_DISTANCE[knight_sq, weak_king_sq]
+    dist_bishop = CHEBYSHEV_DISTANCE[bishop_sq, weak_king_sq]
+    score += np.int32((8 - dist_knight) * 20)
+    score += np.int32((8 - dist_bishop) * 10)
+
+    # 3. King restriction (safe flight squares reduction)
+    score += np.int32((8 - safe_sq_count) * 25)
+
+    # 4. Control of opposite-color squares around weak king (neutralizing safe havens)
+    opp_adj = weak_adj & opp_color_mask
+    covered_opp = opp_adj & (n_attacks | k_attacks)
+    score += np.int32(count_bits(covered_opp) * 20)
+
+    cap = np.int32(MATE_IN_MAX_PLY - 1)
+    return score if score < cap else cap
 
 
 @numba.njit(cache=True, boundscheck=False, fastmath=True)
-def _eval_kxk(strong_side, piece_bbs, side_to_move):
+def _eval_kxk(
+    strong_side, piece_bbs, side_to_move,
+    pawn_eg, knight_eg, bishop_eg, rook_eg, queen_eg,
+):
     """K + material vs lone king (SF11 Endgame<KXK>). Score from White's perspective."""
     if strong_side == 0:
         sk = get_lsb_index(piece_bbs[5])
         wk = get_lsb_index(piece_bbs[11])
-        npm = (count_bits(piece_bbs[1]) * EG_MATERIAL_VALUES[1]
-               + count_bits(piece_bbs[2]) * EG_MATERIAL_VALUES[2]
-               + count_bits(piece_bbs[3]) * EG_MATERIAL_VALUES[3]
-               + count_bits(piece_bbs[4]) * EG_MATERIAL_VALUES[4])
+        npm = (count_bits(piece_bbs[1]) * knight_eg
+               + count_bits(piece_bbs[2]) * bishop_eg
+               + count_bits(piece_bbs[3]) * rook_eg
+               + count_bits(piece_bbs[4]) * queen_eg)
         pawns = count_bits(piece_bbs[0])
         q = count_bits(piece_bbs[4])
         r = count_bits(piece_bbs[3])
@@ -259,10 +318,10 @@ def _eval_kxk(strong_side, piece_bbs, side_to_move):
     else:
         sk = get_lsb_index(piece_bbs[11])
         wk = get_lsb_index(piece_bbs[5])
-        npm = (count_bits(piece_bbs[7]) * EG_MATERIAL_VALUES[1]
-               + count_bits(piece_bbs[8]) * EG_MATERIAL_VALUES[2]
-               + count_bits(piece_bbs[9]) * EG_MATERIAL_VALUES[3]
-               + count_bits(piece_bbs[10]) * EG_MATERIAL_VALUES[4])
+        npm = (count_bits(piece_bbs[7]) * knight_eg
+               + count_bits(piece_bbs[8]) * bishop_eg
+               + count_bits(piece_bbs[9]) * rook_eg
+               + count_bits(piece_bbs[10]) * queen_eg)
         pawns = count_bits(piece_bbs[6])
         q = count_bits(piece_bbs[10])
         r = count_bits(piece_bbs[9])
@@ -270,7 +329,7 @@ def _eval_kxk(strong_side, piece_bbs, side_to_move):
         n = count_bits(piece_bbs[7])
         bishops = piece_bbs[8]
 
-    result = np.int32(npm + pawns * EG_MATERIAL_VALUES[0]
+    result = np.int32(npm + pawns * pawn_eg
                       + PUSH_TO_EDGES[wk]
                       + PUSH_CLOSE[CHEBYSHEV_DISTANCE[sk, wk]])
 
@@ -287,7 +346,7 @@ def _eval_kxk(strong_side, piece_bbs, side_to_move):
 
 
 @numba.njit(cache=True, boundscheck=False, fastmath=True)
-def _eval_kpk(strong_side, piece_bbs, side_to_move):
+def _eval_kpk(strong_side, piece_bbs, side_to_move, pawn_eg):
     """KP vs K via KPK bitbase (SF11). Score from White's perspective."""
     if strong_side == 0:
         sk = get_lsb_index(piece_bbs[5])
@@ -306,14 +365,14 @@ def _eval_kpk(strong_side, piece_bbs, side_to_move):
     if not kpk_bitbase_probe(wksq, npsq, bksq, us):
         return np.int32(0)  # draw
 
-    result = np.int32(VALUE_KNOWN_WIN) + EG_MATERIAL_VALUES[0] + np.int32(npsq // 8)
+    result = np.int32(VALUE_KNOWN_WIN) + pawn_eg + np.int32(npsq // 8)
     if strong_side == 0:
         return result
     return -result
 
 
 @numba.njit(cache=True, boundscheck=False, fastmath=True)
-def _eval_krkp(strong_side, piece_bbs, side_to_move):
+def _eval_krkp(strong_side, piece_bbs, side_to_move, rook_eg):
     """KR vs KP (SF11 Endgame<KRKP>). Score from White's perspective."""
     if strong_side == 0:
         wksq = relative_square(0, get_lsb_index(piece_bbs[5]))
@@ -339,9 +398,9 @@ def _eval_krkp(strong_side, piece_bbs, side_to_move):
     king_in_front = (wksq & 7) == (psq & 7) and (wksq // 8) < (psq // 8)
 
     if king_in_front:
-        result = EG_MATERIAL_VALUES[3] - dist_wk_p
+        result = rook_eg - dist_wk_p
     elif dist_bk_p >= 3 + (1 if weak_stm else 0) and dist_bk_r >= 3:
-        result = EG_MATERIAL_VALUES[3] - dist_wk_p
+        result = rook_eg - dist_wk_p
     elif ((bksq // 8) <= 2 and dist_bk_p == 1 and (wksq // 8) >= 3
           and dist_wk_p > 2 + (1 if strong_stm else 0)):
         result = np.int32(80) - np.int32(8) * dist_wk_p
@@ -358,7 +417,7 @@ def _eval_krkp(strong_side, piece_bbs, side_to_move):
 
 
 @numba.njit(cache=True, boundscheck=False, fastmath=True)
-def _eval_kqkp(strong_side, piece_bbs, side_to_move):
+def _eval_kqkp(strong_side, piece_bbs, side_to_move, pawn_eg, queen_eg):
     """KQ vs KP (SF11 Endgame<KQKP>). Score from White's perspective."""
     if strong_side == 0:
         sk = get_lsb_index(piece_bbs[5])
@@ -382,7 +441,7 @@ def _eval_kqkp(strong_side, piece_bbs, side_to_move):
     pawn_bb = BB_SQUARES[psq]
     on_acfh = (pawn_bb & ACFH_FILES) != np.uint64(0)
     if not (rel_rank == 6 and CHEBYSHEV_DISTANCE[wk, psq] == 1 and on_acfh):
-        result += EG_MATERIAL_VALUES[4] - EG_MATERIAL_VALUES[0]
+        result += queen_eg - pawn_eg
 
     if strong_side == 0:
         return result
@@ -415,7 +474,7 @@ def _eval_krkn(strong_side, piece_bbs, side_to_move):
 
 
 @numba.njit(cache=True, boundscheck=False, fastmath=True)
-def _eval_kqkr(strong_side, piece_bbs, side_to_move):
+def _eval_kqkr(strong_side, piece_bbs, side_to_move, rook_eg, queen_eg):
     """KQ vs KR (SF11): Q-R material + PushToEdges + PushClose. White POV."""
     if strong_side == 0:
         sk = get_lsb_index(piece_bbs[5])
@@ -424,7 +483,7 @@ def _eval_kqkr(strong_side, piece_bbs, side_to_move):
         sk = get_lsb_index(piece_bbs[11])
         wk = get_lsb_index(piece_bbs[5])
 
-    result = (EG_MATERIAL_VALUES[4] - EG_MATERIAL_VALUES[3]
+    result = (queen_eg - rook_eg
               + PUSH_TO_EDGES[wk]
               + PUSH_CLOSE[CHEBYSHEV_DISTANCE[sk, wk]])
     if strong_side == 0:
@@ -433,23 +492,27 @@ def _eval_kqkr(strong_side, piece_bbs, side_to_move):
 
 
 @numba.njit(cache=True, boundscheck=False, fastmath=True)
-def _eval_knnkp(strong_side, piece_bbs, side_to_move):
+def _eval_knnkp(strong_side, piece_bbs, side_to_move, pawn_eg, knight_eg):
     """KNN vs KP (SF11): 2*N - P + PushToEdges. White POV."""
     if strong_side == 0:
         weak_k = get_lsb_index(piece_bbs[11])
-        result = (np.int32(2) * EG_MATERIAL_VALUES[1]
-                  - EG_MATERIAL_VALUES[0]
+        result = (np.int32(2) * knight_eg
+                  - pawn_eg
                   + PUSH_TO_EDGES[weak_k])
         return result
     weak_k = get_lsb_index(piece_bbs[5])
-    result = (np.int32(2) * EG_MATERIAL_VALUES[1]
-              - EG_MATERIAL_VALUES[0]
+    result = (np.int32(2) * knight_eg
+              - pawn_eg
               + PUSH_TO_EDGES[weak_k])
     return -result
 
 
 @numba.njit(cache=True, boundscheck=False, fastmath=True)
-def evaluate_special_endgame(piece_bbs, occupancy_bbs, game_state, phase):
+def evaluate_special_endgame_with_material(
+    piece_bbs, occupancy_bbs, game_state, phase,
+    pawn_mg, knight_mg, bishop_mg, rook_mg, queen_mg,
+    pawn_eg, knight_eg, bishop_eg, rook_eg, queen_eg,
+):
     """
     Specialized endgame evaluation (SF11 material-table subset).
 
@@ -468,8 +531,8 @@ def evaluate_special_endgame(piece_bbs, occupancy_bbs, game_state, phase):
     br = count_bits(piece_bbs[9])
     bq = count_bits(piece_bbs[10])
     
-    w_npm = wn * MG_MATERIAL_VALUES[1] + wb * MG_MATERIAL_VALUES[2] + wr * MG_MATERIAL_VALUES[3] + wq * MG_MATERIAL_VALUES[4]
-    b_npm = bn * MG_MATERIAL_VALUES[1] + bb * MG_MATERIAL_VALUES[2] + br * MG_MATERIAL_VALUES[3] + bq * MG_MATERIAL_VALUES[4]
+    w_npm = wn * knight_mg + wb * bishop_mg + wr * rook_mg + wq * queen_mg
+    b_npm = bn * knight_mg + bb * bishop_mg + br * rook_mg + bq * queen_mg
     
     wk_sq = get_lsb_index(piece_bbs[5])
     bk_sq = get_lsb_index(piece_bbs[11])
@@ -486,23 +549,25 @@ def evaluate_special_endgame(piece_bbs, occupancy_bbs, game_state, phase):
     if wp == 0 and bp == 0:
         if wn == 1 and wb == 1 and wr == 0 and wq == 0 and bn == 0 and bb == 0 and br == 0 and bq == 0:
             bishop_sq = get_lsb_index(piece_bbs[2])
-            return True, np.int32(mate_kbnk(wk_sq, bk_sq, bishop_sq))
+            knight_sq = get_lsb_index(piece_bbs[1])
+            return True, np.int32(mate_kbnk(wk_sq, bk_sq, bishop_sq, knight_sq, occupancy_bbs[2], occupancy_bbs[0]))
         if bn == 1 and bb == 1 and br == 0 and bq == 0 and wn == 0 and wb == 0 and wr == 0 and wq == 0:
             bishop_sq = get_lsb_index(piece_bbs[8])
-            return True, np.int32(-mate_kbnk(bk_sq, wk_sq, bishop_sq))
+            knight_sq = get_lsb_index(piece_bbs[7])
+            return True, np.int32(-mate_kbnk(bk_sq, wk_sq, bishop_sq, knight_sq, occupancy_bbs[2], occupancy_bbs[1]))
 
     # --- KPK (exactly one pawn, no other non-kings) ---
     if w_npm == 0 and b_npm == 0:
         if wp == 1 and bp == 0:
-            return True, _eval_kpk(0, piece_bbs, side_to_move)
+            return True, _eval_kpk(0, piece_bbs, side_to_move, pawn_eg)
         if bp == 1 and wp == 0:
-            return True, _eval_kpk(1, piece_bbs, side_to_move)
+            return True, _eval_kpk(1, piece_bbs, side_to_move, pawn_eg)
 
     # --- KRKP ---
     if wr == 1 and wq == 0 and wn == 0 and wb == 0 and wp == 0 and br == 0 and bq == 0 and bn == 0 and bb == 0 and bp == 1:
-        return True, _eval_krkp(0, piece_bbs, side_to_move)
+        return True, _eval_krkp(0, piece_bbs, side_to_move, rook_eg)
     if br == 1 and bq == 0 and bn == 0 and bb == 0 and bp == 0 and wr == 0 and wq == 0 and wn == 0 and wb == 0 and wp == 1:
-        return True, _eval_krkp(1, piece_bbs, side_to_move)
+        return True, _eval_krkp(1, piece_bbs, side_to_move, rook_eg)
 
     # --- KRKB ---
     if wr == 1 and wq == 0 and wn == 0 and wb == 0 and wp == 0 and br == 0 and bq == 0 and bn == 0 and bb == 1 and bp == 0:
@@ -518,30 +583,47 @@ def evaluate_special_endgame(piece_bbs, occupancy_bbs, game_state, phase):
 
     # --- KQKP ---
     if wq == 1 and wr == 0 and wn == 0 and wb == 0 and wp == 0 and bq == 0 and br == 0 and bn == 0 and bb == 0 and bp == 1:
-        return True, _eval_kqkp(0, piece_bbs, side_to_move)
+        return True, _eval_kqkp(0, piece_bbs, side_to_move, pawn_eg, queen_eg)
     if bq == 1 and br == 0 and bn == 0 and bb == 0 and bp == 0 and wq == 0 and wr == 0 and wn == 0 and wb == 0 and wp == 1:
-        return True, _eval_kqkp(1, piece_bbs, side_to_move)
+        return True, _eval_kqkp(1, piece_bbs, side_to_move, pawn_eg, queen_eg)
 
     # --- KQKR ---
     if wq == 1 and wr == 0 and wn == 0 and wb == 0 and wp == 0 and bq == 0 and br == 1 and bn == 0 and bb == 0 and bp == 0:
-        return True, _eval_kqkr(0, piece_bbs, side_to_move)
+        return True, _eval_kqkr(0, piece_bbs, side_to_move, rook_eg, queen_eg)
     if bq == 1 and br == 0 and bn == 0 and bb == 0 and bp == 0 and wq == 0 and wr == 1 and wn == 0 and wb == 0 and wp == 0:
-        return True, _eval_kqkr(1, piece_bbs, side_to_move)
+        return True, _eval_kqkr(1, piece_bbs, side_to_move, rook_eg, queen_eg)
 
     # --- KNNKP (two knights vs king + pawn) ---
     if wn == 2 and wb == 0 and wr == 0 and wq == 0 and wp == 0 and bn == 0 and bb == 0 and br == 0 and bq == 0 and bp == 1:
-        return True, _eval_knnkp(0, piece_bbs, side_to_move)
+        return True, _eval_knnkp(0, piece_bbs, side_to_move, pawn_eg, knight_eg)
     if bn == 2 and bb == 0 and br == 0 and bq == 0 and bp == 0 and wn == 0 and wb == 0 and wr == 0 and wq == 0 and wp == 1:
-        return True, _eval_knnkp(1, piece_bbs, side_to_move)
+        return True, _eval_knnkp(1, piece_bbs, side_to_move, pawn_eg, knight_eg)
 
     # --- KXK: weak side has only king; strong npm >= Rook ---
-    rook_mg = MG_MATERIAL_VALUES[3]
     if b_npm == 0 and bp == 0 and w_npm >= rook_mg:
-        return True, _eval_kxk(0, piece_bbs, side_to_move)
+        return True, _eval_kxk(
+            0, piece_bbs, side_to_move,
+            pawn_eg, knight_eg, bishop_eg, rook_eg, queen_eg,
+        )
     if w_npm == 0 and wp == 0 and b_npm >= rook_mg:
-        return True, _eval_kxk(1, piece_bbs, side_to_move)
+        return True, _eval_kxk(
+            1, piece_bbs, side_to_move,
+            pawn_eg, knight_eg, bishop_eg, rook_eg, queen_eg,
+        )
 
     return False, np.int32(0)
+
+
+@numba.njit(cache=True, boundscheck=False, fastmath=True)
+def evaluate_special_endgame(piece_bbs, occupancy_bbs, game_state, phase):
+    """Production wrapper using the active constants material scale."""
+    return evaluate_special_endgame_with_material(
+        piece_bbs, occupancy_bbs, game_state, phase,
+        MG_MATERIAL_VALUES[0], MG_MATERIAL_VALUES[1], MG_MATERIAL_VALUES[2],
+        MG_MATERIAL_VALUES[3], MG_MATERIAL_VALUES[4],
+        EG_MATERIAL_VALUES[0], EG_MATERIAL_VALUES[1], EG_MATERIAL_VALUES[2],
+        EG_MATERIAL_VALUES[3], EG_MATERIAL_VALUES[4],
+    )
 
 @numba.njit(cache=True, boundscheck=False, fastmath=True, inline='always')
 def is_pawn_passed_on_the_fly(sq, side, enemy_pawns_bb):
@@ -580,12 +662,15 @@ def get_endgame_scale_factor(piece_bbs, occupancy_bbs, game_state, phase, eg_sco
     
     # Pre-determine strong side for later generic scaling
     # White is strong side (0) if eg_score >= 0, otherwise Black is strong side (1)
-    strong_side = 0 if eg_score >= 0 else 1
+    # SF11 uses WHITE only for a strictly positive EG score; a zero score
+    # selects BLACK. More importantly, material-table scale functions belong
+    # only to their registered strong side.
+    strong_side = 0 if eg_score > 0 else 1
     pawn_count_strong = wp if strong_side == 0 else bp
 
     # 1. KBPsK (King + Bishop + Pawns vs King)
     # SF11 endgame.cpp lines 334-394
-    if w_minor_major == 1 and wb == 1 and b_minor_major == 0 and wp > 0:
+    if strong_side == 0 and w_minor_major == 1 and wb == 1 and b_minor_major == 0 and wp > 0:
         wb_sq = get_lsb_index(piece_bbs[2])
         all_on_a = (piece_bbs[0] & ~FILE_MASKS[0]) == np.uint64(0)
         all_on_h = (piece_bbs[0] & ~FILE_MASKS[7]) == np.uint64(0)
@@ -629,7 +714,7 @@ def get_endgame_scale_factor(piece_bbs, occupancy_bbs, game_state, phase, eg_sco
                         if bk_sq // 8 >= 6 and weak_king_dist <= 2 and weak_king_dist <= strong_king_dist:
                             return SCALE_FACTOR_DRAW
 
-    if b_minor_major == 1 and bb == 1 and w_minor_major == 0 and bp > 0:
+    if strong_side == 1 and b_minor_major == 1 and bb == 1 and w_minor_major == 0 and bp > 0:
         bb_sq = get_lsb_index(piece_bbs[8])
         all_on_a = (piece_bbs[6] & ~FILE_MASKS[0]) == np.uint64(0)
         all_on_h = (piece_bbs[6] & ~FILE_MASKS[7]) == np.uint64(0)
@@ -675,7 +760,7 @@ def get_endgame_scale_factor(piece_bbs, occupancy_bbs, game_state, phase, eg_sco
     # SF11 endgame.cpp lines 619-645
     # 2. KBPKB (King + Bishop + Pawn vs King + Bishop)
     # SF11 endgame.cpp lines 619-645
-    if w_minor_major == 1 and wb == 1 and wp == 1 and b_minor_major == 1 and bb == 1 and bp == 0:
+    if strong_side == 0 and w_minor_major == 1 and wb == 1 and wp == 1 and b_minor_major == 1 and bb == 1 and bp == 0:
         wb_sq = get_lsb_index(piece_bbs[2])
         bb_sq = get_lsb_index(piece_bbs[8])
         wb_color = ((wb_sq % 8) + (wb_sq // 8)) & 1
@@ -690,7 +775,7 @@ def get_endgame_scale_factor(piece_bbs, occupancy_bbs, game_state, phase, eg_sco
         if wb_color != bb_color:
             return SCALE_FACTOR_DRAW
 
-    if b_minor_major == 1 and bb == 1 and bp == 1 and w_minor_major == 1 and wb == 1 and wp == 0:
+    if strong_side == 1 and b_minor_major == 1 and bb == 1 and bp == 1 and w_minor_major == 1 and wb == 1 and wp == 0:
         wb_sq = get_lsb_index(piece_bbs[2])
         bb_sq = get_lsb_index(piece_bbs[8])
         wb_color = ((wb_sq % 8) + (wb_sq // 8)) & 1
@@ -707,7 +792,7 @@ def get_endgame_scale_factor(piece_bbs, occupancy_bbs, game_state, phase, eg_sco
 
     # KPsK (King + 2+ Pawns vs King on same rook file)
     # SF11 endgame.cpp lines 596-616
-    if w_minor_major == 0 and wp >= 2 and b_minor_major == 0 and bp == 0:
+    if strong_side == 0 and w_minor_major == 0 and wp >= 2 and b_minor_major == 0 and bp == 0:
         all_on_a = (piece_bbs[0] & ~FILE_MASKS[0]) == np.uint64(0)
         all_on_h = (piece_bbs[0] & ~FILE_MASKS[7]) == np.uint64(0)
         if all_on_a or all_on_h:
@@ -724,7 +809,7 @@ def get_endgame_scale_factor(piece_bbs, occupancy_bbs, game_state, phase, eg_sco
                 if ok:
                     return SCALE_FACTOR_DRAW
 
-    if b_minor_major == 0 and bp >= 2 and w_minor_major == 0 and wp == 0:
+    if strong_side == 1 and b_minor_major == 0 and bp >= 2 and w_minor_major == 0 and wp == 0:
         all_on_a = (piece_bbs[6] & ~FILE_MASKS[0]) == np.uint64(0)
         all_on_h = (piece_bbs[6] & ~FILE_MASKS[7]) == np.uint64(0)
         if all_on_a or all_on_h:
@@ -743,7 +828,7 @@ def get_endgame_scale_factor(piece_bbs, occupancy_bbs, game_state, phase, eg_sco
 
     # KNPKB (Knight + Pawn vs Bishop)
     # SF11 endgame.cpp lines 758-776
-    if w_minor_major == 1 and wn == 1 and wp == 1 and b_minor_major == 1 and bb == 1 and bp == 0:
+    if strong_side == 0 and w_minor_major == 1 and wn == 1 and wp == 1 and b_minor_major == 1 and bb == 1 and bp == 0:
         p_sq = get_lsb_index(piece_bbs[0])
         b_sq = get_lsb_index(piece_bbs[8])
         b_attacks = get_bishop_attacks(b_sq, occupancy_bbs[2])
@@ -753,7 +838,7 @@ def get_endgame_scale_factor(piece_bbs, occupancy_bbs, game_state, phase, eg_sco
         if b_attacks & forward_mask:
             return np.int32(CHEBYSHEV_DISTANCE[bk_sq, p_sq])
 
-    if b_minor_major == 1 and bn == 1 and bp == 1 and w_minor_major == 1 and wb == 1 and wp == 0:
+    if strong_side == 1 and b_minor_major == 1 and bn == 1 and bp == 1 and w_minor_major == 1 and wb == 1 and wp == 0:
         p_sq = get_lsb_index(piece_bbs[6])
         b_sq = get_lsb_index(piece_bbs[2])
         b_attacks = get_bishop_attacks(b_sq, occupancy_bbs[2])
@@ -765,7 +850,7 @@ def get_endgame_scale_factor(piece_bbs, occupancy_bbs, game_state, phase, eg_sco
 
     # KBPPKB (Bishop + 2 Pawns vs Bishop, opposite-colored)
     # SF11 endgame.cpp lines 649-713
-    if w_minor_major == 1 and wb == 1 and wp == 2 and b_minor_major == 1 and bb == 1 and bp == 0:
+    if strong_side == 0 and w_minor_major == 1 and wb == 1 and wp == 2 and b_minor_major == 1 and bb == 1 and bp == 0:
         wbsq = get_lsb_index(piece_bbs[2])
         bbsq = get_lsb_index(piece_bbs[8])
         if opposite_colors(wbsq, bbsq):
@@ -793,7 +878,7 @@ def get_endgame_scale_factor(piece_bbs, occupancy_bbs, game_state, phase, eg_sco
                     if bbsq == blockSq1 or (b_attacks & (np.uint64(1) << np.uint64(blockSq1))):
                         return SCALE_FACTOR_DRAW
 
-    if b_minor_major == 1 and bb == 1 and bp == 2 and w_minor_major == 1 and wb == 1 and wp == 0:
+    if strong_side == 1 and b_minor_major == 1 and bb == 1 and bp == 2 and w_minor_major == 1 and wb == 1 and wp == 0:
         wbsq = get_lsb_index(piece_bbs[2])
         bbsq = get_lsb_index(piece_bbs[8])
         if opposite_colors(wbsq, bbsq):
@@ -823,7 +908,7 @@ def get_endgame_scale_factor(piece_bbs, occupancy_bbs, game_state, phase, eg_sco
 
     # KRPPKRP (Rook + 2 Pawns vs Rook + Pawn)
     # SF11 endgame.cpp lines 567-593
-    if w_minor_major == 1 and wr == 1 and wp == 2 and b_minor_major == 1 and br == 1 and bp == 1:
+    if strong_side == 0 and w_minor_major == 1 and wr == 1 and wp == 2 and b_minor_major == 1 and br == 1 and bp == 1:
         pw_temp = piece_bbs[0]
         wpsq1 = get_lsb_index(pw_temp)
         pw_temp &= pw_temp - np.uint64(1)
@@ -837,7 +922,7 @@ def get_endgame_scale_factor(piece_bbs, occupancy_bbs, game_state, phase, eg_sco
                 if 1 < r < 6:
                     return np.int32([0, 9, 10, 14, 21, 44, 0, 0][r])
 
-    if b_minor_major == 1 and br == 1 and bp == 2 and w_minor_major == 1 and wr == 1 and wp == 1:
+    if strong_side == 1 and b_minor_major == 1 and br == 1 and bp == 2 and w_minor_major == 1 and wr == 1 and wp == 1:
         pb_temp = piece_bbs[6]
         wpsq1 = get_lsb_index(pb_temp)
         pb_temp &= pb_temp - np.uint64(1)
@@ -855,7 +940,7 @@ def get_endgame_scale_factor(piece_bbs, occupancy_bbs, game_state, phase, eg_sco
     # SF11 endgame.cpp lines 716-736
     # Draw if defending king blocks pawn's file while in front, AND
     # (king is on opposite color to bishop, OR king is not yet on 7th rank)
-    if w_minor_major == 1 and wb == 1 and wp == 1 and b_minor_major == 1 and bn == 1 and bp == 0:
+    if strong_side == 0 and w_minor_major == 1 and wb == 1 and wp == 1 and b_minor_major == 1 and bn == 1 and bp == 0:
         wb_sq = get_lsb_index(piece_bbs[2])
         p_sq = get_lsb_index(piece_bbs[0])
         if (bk_sq % 8 == p_sq % 8
@@ -863,7 +948,7 @@ def get_endgame_scale_factor(piece_bbs, occupancy_bbs, game_state, phase, eg_sco
                 and (opposite_colors(bk_sq, wb_sq) or bk_sq // 8 <= 5)):  # rel_rank <= RANK_6
             return SCALE_FACTOR_DRAW
 
-    if b_minor_major == 1 and bb == 1 and bp == 1 and w_minor_major == 1 and wn == 1 and wp == 0:
+    if strong_side == 1 and b_minor_major == 1 and bb == 1 and bp == 1 and w_minor_major == 1 and wn == 1 and wp == 0:
         bb_sq = get_lsb_index(piece_bbs[8])
         p_sq = get_lsb_index(piece_bbs[6])
         if (wk_sq % 8 == p_sq % 8
@@ -874,14 +959,14 @@ def get_endgame_scale_factor(piece_bbs, occupancy_bbs, game_state, phase, eg_sco
     # 4. KNPK (King + Knight + Pawn vs King)
     # SF11 endgame.cpp lines 739-755
     # Draw only when: normalized pawn is on a7 AND defending king is within 1 of a8
-    if w_minor_major == 1 and wn == 1 and wp == 1 and b_minor_major == 0 and bp == 0:
+    if strong_side == 0 and w_minor_major == 1 and wn == 1 and wp == 1 and b_minor_major == 0 and bp == 0:
         wp_sq = get_lsb_index(piece_bbs[0])
         wpsq_norm = normalize_square(wp_sq, 0, wp_sq)
         bksq_norm = normalize_square(bk_sq, 0, wp_sq)
         if wpsq_norm == 48 and CHEBYSHEV_DISTANCE[56, bksq_norm] <= 1:
             return SCALE_FACTOR_DRAW
 
-    if b_minor_major == 1 and bn == 1 and bp == 1 and w_minor_major == 0 and wp == 0:
+    if strong_side == 1 and b_minor_major == 1 and bn == 1 and bp == 1 and w_minor_major == 0 and wp == 0:
         bp_sq = get_lsb_index(piece_bbs[6])
         bpsq_norm = normalize_square(bp_sq, 1, bp_sq)
         wksq_norm = normalize_square(wk_sq, 1, bp_sq)
@@ -889,7 +974,7 @@ def get_endgame_scale_factor(piece_bbs, occupancy_bbs, game_state, phase, eg_sco
             return SCALE_FACTOR_DRAW
 
     # 3. KRPKB (Rook + Pawn vs Bishop)
-    if w_minor_major == 1 and wr == 1 and wp == 1 and b_minor_major == 1 and bb == 1 and bp == 0:
+    if strong_side == 0 and w_minor_major == 1 and wr == 1 and wp == 1 and b_minor_major == 1 and bb == 1 and bp == 0:
         bk_sq_orig = bk_sq
         bb_sq_orig = get_lsb_index(piece_bbs[8])
         wp_sq_orig = get_lsb_index(piece_bbs[0])
@@ -911,7 +996,7 @@ def get_endgame_scale_factor(piece_bbs, occupancy_bbs, game_state, phase, eg_sco
                         if abs(bsq % 8 - psq % 8) >= 2:
                             return 8
 
-    if b_minor_major == 1 and br == 1 and bp == 1 and w_minor_major == 1 and wb == 1 and wp == 0:
+    if strong_side == 1 and b_minor_major == 1 and br == 1 and bp == 1 and w_minor_major == 1 and wb == 1 and wp == 0:
         wk_sq_orig = wk_sq
         wb_sq_orig = get_lsb_index(piece_bbs[2])
         bp_sq_orig = get_lsb_index(piece_bbs[6])
@@ -934,7 +1019,7 @@ def get_endgame_scale_factor(piece_bbs, occupancy_bbs, game_state, phase, eg_sco
                             return 8
 
     # 4. KRPKN (Rook + Pawn vs Knight)
-    if w_minor_major == 1 and wr == 1 and wp == 1 and b_minor_major == 1 and bn == 1 and bp == 0:
+    if strong_side == 0 and w_minor_major == 1 and wr == 1 and wp == 1 and b_minor_major == 1 and bn == 1 and bp == 0:
         p_sq = get_lsb_index(piece_bbs[0])
         p_file = p_sq % 8
         p_rank = p_sq // 8
@@ -945,7 +1030,7 @@ def get_endgame_scale_factor(piece_bbs, occupancy_bbs, game_state, phase, eg_sco
             if CHEBYSHEV_DISTANCE[bk_sq, p_sq + 8] <= 2 and CHEBYSHEV_DISTANCE[bn_sq, p_sq + 8] <= 2:
                 return SCALE_FACTOR_DRAW
 
-    if b_minor_major == 1 and br == 1 and bp == 1 and w_minor_major == 1 and wn == 1 and wp == 0:
+    if strong_side == 1 and b_minor_major == 1 and br == 1 and bp == 1 and w_minor_major == 1 and wn == 1 and wp == 0:
         p_sq = get_lsb_index(piece_bbs[6])
         p_file = p_sq % 8
         p_rank = p_sq // 8
@@ -957,7 +1042,7 @@ def get_endgame_scale_factor(piece_bbs, occupancy_bbs, game_state, phase, eg_sco
                 return SCALE_FACTOR_DRAW
 
     # 5. KRKP (Rook vs Pawn)
-    if w_minor_major == 1 and wr == 1 and wp == 0 and b_minor_major == 0 and bp == 1:
+    if strong_side == 0 and w_minor_major == 1 and wr == 1 and wp == 0 and b_minor_major == 0 and bp == 1:
         p_sq = get_lsb_index(piece_bbs[6])
         p_rank = p_sq // 8
         p_file = p_sq % 8
@@ -966,7 +1051,7 @@ def get_endgame_scale_factor(piece_bbs, occupancy_bbs, game_state, phase, eg_sco
             if CHEBYSHEV_DISTANCE[wk_sq, promo_sq] > 3 and CHEBYSHEV_DISTANCE[bk_sq, promo_sq] <= 1:
                 return SCALE_FACTOR_KRPKR_FORTRESS
                 
-    if b_minor_major == 1 and br == 1 and bp == 0 and w_minor_major == 0 and wp == 1:
+    if strong_side == 1 and b_minor_major == 1 and br == 1 and bp == 0 and w_minor_major == 0 and wp == 1:
         p_sq = get_lsb_index(piece_bbs[0])
         p_rank = p_sq // 8
         p_file = p_sq % 8
@@ -978,13 +1063,13 @@ def get_endgame_scale_factor(piece_bbs, occupancy_bbs, game_state, phase, eg_sco
     # 6. KRPKR (Rook + Pawn vs Rook) - PHILIDOR & GLAURUNG RULES
     is_krpkr = False
     strong_side_rp = 0
-    if w_minor_major == 1 and wr == 1 and wp == 1 and b_minor_major == 1 and br == 1 and bp == 0:
+    if strong_side == 0 and w_minor_major == 1 and wr == 1 and wp == 1 and b_minor_major == 1 and br == 1 and bp == 0:
         is_krpkr = True
         strong_side_rp = 0
         wksq_orig, bksq_orig = wk_sq, bk_sq
         wrsq_orig, brsq_orig = get_lsb_index(piece_bbs[3]), get_lsb_index(piece_bbs[9])
         wpsq_orig = get_lsb_index(piece_bbs[0])
-    elif b_minor_major == 1 and br == 1 and bp == 1 and w_minor_major == 1 and wr == 1 and wp == 0:
+    elif strong_side == 1 and b_minor_major == 1 and br == 1 and bp == 1 and w_minor_major == 1 and wr == 1 and wp == 0:
         is_krpkr = True
         strong_side_rp = 1
         wksq_orig, bksq_orig = bk_sq, wk_sq
@@ -1070,7 +1155,7 @@ def get_endgame_scale_factor(piece_bbs, occupancy_bbs, game_state, phase, eg_sco
                 return max(0, val)
 
     # 7. KQKRPs (Queen vs Rook + Pawn)
-    if w_minor_major == 1 and wq == 1 and wp == 0 and b_minor_major == 1 and br == 1 and bp == 1:
+    if strong_side == 0 and w_minor_major == 1 and wq == 1 and wp == 0 and b_minor_major == 1 and br == 1 and bp == 1:
         p_sq = get_lsb_index(piece_bbs[6])
         br_sq = get_lsb_index(piece_bbs[9])
         if 7 - (bk_sq // 8) <= 1 and 7 - (wk_sq // 8) >= 3 and 7 - (br_sq // 8) == 2:
@@ -1078,7 +1163,7 @@ def get_endgame_scale_factor(piece_bbs, occupancy_bbs, game_state, phase, eg_sco
                 if p_sq // 8 == br_sq // 8 + 1 and abs(p_sq % 8 - br_sq % 8) == 1:
                     return SCALE_FACTOR_DRAW
                     
-    if b_minor_major == 1 and bq == 1 and bp == 0 and w_minor_major == 1 and wr == 1 and wp == 1:
+    if strong_side == 1 and b_minor_major == 1 and bq == 1 and bp == 0 and w_minor_major == 1 and wr == 1 and wp == 1:
         p_sq = get_lsb_index(piece_bbs[0])
         wr_sq = get_lsb_index(piece_bbs[3])
         if wk_sq // 8 <= 1 and bk_sq // 8 >= 3 and wr_sq // 8 == 2:
@@ -1087,20 +1172,21 @@ def get_endgame_scale_factor(piece_bbs, occupancy_bbs, game_state, phase, eg_sco
                     return SCALE_FACTOR_DRAW
 
     # 8. material.cpp GENERAL NO-PAWN SCALING
-    # SF11 material.cpp: when stronger side has no pawns and advantage <= bishop value
-    # Covers: KRKB/KRKN (sf=4), KRKR/symmetric (sf=14)
-    # BishopValueMg threshold ≈ 340 cp, RookValueMg threshold ≈ 530 cp
+    # SF11 material.cpp: when stronger side has no pawns and advantage <= bishop value.
+    # P3b MG-threshold rewrite was reverted after match regression in long games;
+    # keep the battle-tested EG-ish npm numbers co-tuned with this engine.
+    # KRKB/KRKN/KQKR still short-circuit via evaluate_special_endgame before scale.
     if pawn_count_strong == 0:
         npm_w = wn * 310 + wb * 340 + wr * 530 + wq * 950
         npm_b = bn * 310 + bb * 340 + br * 530 + bq * 950
         npm_strong = npm_w if strong_side == 0 else npm_b
-        npm_weak   = npm_b if strong_side == 0 else npm_w
-        if npm_strong - npm_weak <= 340:  # advantage <= BishopValueMg
-            if npm_strong < 530:  # weaker than a rook: pure minor advantage, nearly draw
+        npm_weak = npm_b if strong_side == 0 else npm_w
+        if npm_strong - npm_weak <= 340:  # advantage <= ~Bishop
+            if npm_strong < 530:  # weaker than a rook: pure minor → draw
                 return SCALE_FACTOR_DRAW
-            elif npm_weak <= 340:  # weak side has only a minor piece: sf=4
+            elif npm_weak <= 340:  # weak side only a minor: sf=4
                 return 4
-            else:  # symmetric or near-symmetric (KRKR, etc.): sf=14
+            else:  # near-symmetric majors (e.g. KRKR): sf=14
                 return 14
 
     # 9. GENERAL OCB & PAWN COUNT SCALING (Fall-through if no specialized scale factor was triggered)

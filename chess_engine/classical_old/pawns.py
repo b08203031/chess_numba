@@ -128,14 +128,35 @@ for sq in range(64):
         BLACK_BACKWARD_TEST_MASK[sq] = ADJACENT_FILES_MASKS[file_idx] & WHITE_FORWARD_RANKS[sq - 8]
 
 
+# Runtime weight indices (must match tune_eval_match.eval_weights A3)
+_EW_SHELTER_BASE_MG = 22
+_EW_SHELTER_BASE_EG = 23
+_EW_BLOCKED_STORM = 24
+_EW_BLOCKED_STORM_EG = 25
+_DUMMY_EW = np.zeros(64, dtype=np.int32)
+
+
+@numba.njit(cache=True, inline="always")
+def _ew_get_pawns(ew, use_ew, idx, default):
+    if use_ew:
+        return ew[idx]
+    return np.int32(default)
+
+
 @numba.njit(cache=True, boundscheck=False, fastmath=True)
-def evaluate_shelter_aligned(piece_bbs, king_sq, color):
+def evaluate_shelter_aligned(piece_bbs, king_sq, color, ew, use_ew):
     """
     評估國王前方的兵盾（Friendly Shelter）與敵兵風暴（Enemy Storm）。
     使用 for 循環，LLVM 會自動展開以提高效能與可讀性。
+    ew/use_ew: runtime A3 shelter/storm scalars for match-SPSA.
     """
-    mg_score = SHELTER_BASE_MG
-    eg_score = SHELTER_BASE_EG
+    base_mg = _ew_get_pawns(ew, use_ew, _EW_SHELTER_BASE_MG, SHELTER_BASE_MG)
+    base_eg = _ew_get_pawns(ew, use_ew, _EW_SHELTER_BASE_EG, SHELTER_BASE_EG)
+    blocked_mg = _ew_get_pawns(ew, use_ew, _EW_BLOCKED_STORM, BLOCKED_STORM)
+    blocked_eg = _ew_get_pawns(ew, use_ew, _EW_BLOCKED_STORM_EG, BLOCKED_STORM_EG)
+
+    mg_score = base_mg
+    eg_score = base_eg
     king_rank = king_sq >> 3
     if color == 0:
         rank_mask = WHITE_FORWARD_RANKS[king_sq] | RANK_MASKS[king_rank]
@@ -170,8 +191,8 @@ def evaluate_shelter_aligned(piece_bbs, king_sq, color):
         
         if our_rank > 0 and our_rank == their_rank - 1:
             if their_rank == 2:
-                mg_score += BLOCKED_STORM
-                eg_score += BLOCKED_STORM_EG
+                mg_score += blocked_mg
+                eg_score += blocked_eg
         else:
             mg_score += UNBLOCKED_STORM[d, their_rank]
             
@@ -179,7 +200,7 @@ def evaluate_shelter_aligned(piece_bbs, king_sq, color):
 
 
 @numba.njit(cache=True, boundscheck=False, fastmath=True)
-def evaluate_pawn_structure(piece_bbs, castling_rights):
+def evaluate_pawn_structure(piece_bbs, castling_rights, ew, use_ew):
     """
     評估雙方的兵型結構（通路兵、孤兵、重疊兵、後兵、連結兵、弱對決、開放線弱兵）。
     同時計算並返回兵盾與兵風暴評估分數（已併入國王安全）。
@@ -375,24 +396,24 @@ def evaluate_pawn_structure(piece_bbs, castling_rights):
 
     # --- 3. Evaluate Pawn Shield & Storm (Virtualized Castling aligned) ---
     # White Shield Evaluation
-    white_mg_shield, white_eg_shield = evaluate_shelter_aligned(piece_bbs, white_king_sq, 0)
+    white_mg_shield, white_eg_shield = evaluate_shelter_aligned(piece_bbs, white_king_sq, 0, ew, use_ew)
     if (castling_rights & 1) != 0:
-        mg, eg = evaluate_shelter_aligned(piece_bbs, 6, 0) # G1
+        mg, eg = evaluate_shelter_aligned(piece_bbs, 6, 0, ew, use_ew) # G1
         if mg > white_mg_shield:
             white_mg_shield, white_eg_shield = mg, eg
     if (castling_rights & 2) != 0:
-        mg, eg = evaluate_shelter_aligned(piece_bbs, 2, 0) # C1
+        mg, eg = evaluate_shelter_aligned(piece_bbs, 2, 0, ew, use_ew) # C1
         if mg > white_mg_shield:
             white_mg_shield, white_eg_shield = mg, eg
 
     # Black Shield Evaluation
-    black_mg_shield, black_eg_shield = evaluate_shelter_aligned(piece_bbs, black_king_sq, 1)
+    black_mg_shield, black_eg_shield = evaluate_shelter_aligned(piece_bbs, black_king_sq, 1, ew, use_ew)
     if (castling_rights & 4) != 0:
-        mg, eg = evaluate_shelter_aligned(piece_bbs, 62, 1) # G8
+        mg, eg = evaluate_shelter_aligned(piece_bbs, 62, 1, ew, use_ew) # G8
         if mg > black_mg_shield:
             black_mg_shield, black_eg_shield = mg, eg
     if (castling_rights & 8) != 0:
-        mg, eg = evaluate_shelter_aligned(piece_bbs, 58, 1) # C8
+        mg, eg = evaluate_shelter_aligned(piece_bbs, 58, 1, ew, use_ew) # C8
         if mg > black_mg_shield:
             black_mg_shield, black_eg_shield = mg, eg
 
@@ -430,7 +451,8 @@ def evaluate_pawn_structure_cached(piece_bbs, pawn_key, castling_rights, search_
             search_context.pawn_table_b_attacks_span[idx]
         )
         
-    res = evaluate_pawn_structure(piece_bbs, castling_rights)
+    ew = search_context.eval_weights
+    res = evaluate_pawn_structure(piece_bbs, castling_rights, ew, True)
     
     # Store computed values in cache (write-always)
     search_context.pawn_table_keys[idx] = pawn_key
@@ -471,10 +493,17 @@ def evaluate_piece_coordination(piece_bbs, piece_counts):
     black_pawns = piece_bbs[6]
     black_rooks = piece_bbs[9]
 
-    # --- 1. Bishop Pair / 雙象 ---
-    # NOTE: Bishop pair is now handled by the material imbalance polynomial matrix
-    # (compute_imbalance). The standalone bonus has been removed to avoid double-counting.
-    # See SF11 material.cpp QuadraticOurs[0][0] = 1438.
+    # --- 1. Dynamic Bishop Pair / 動態雙象優勢 (隨盤面兵數縮放) ---
+    total_pawns = piece_counts[0] + piece_counts[6]
+    openness = np.int32(16 - total_pawns)
+
+    if piece_counts[2] >= 2:
+        mg_score += BISHOP_PAIR_BONUS[0] + (openness * BISHOP_PAIR_PAWN_SCALE[0]) // np.int32(16)
+        eg_score += BISHOP_PAIR_BONUS[1] + (openness * BISHOP_PAIR_PAWN_SCALE[1]) // np.int32(16)
+
+    if piece_counts[8] >= 2:
+        mg_score -= BISHOP_PAIR_BONUS[0] + (openness * BISHOP_PAIR_PAWN_SCALE[0]) // np.int32(16)
+        eg_score -= BISHOP_PAIR_BONUS[1] + (openness * BISHOP_PAIR_PAWN_SCALE[1]) // np.int32(16)
 
     # --- 2. Rooks on Open and Semi-Open Files (SF11: per-rook, not per-file) ---
     for f in range(8):

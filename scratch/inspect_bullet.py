@@ -46,7 +46,7 @@ def print_board(occupancy, pieces, king_sq, opp_king_sq):
         print(" ".join(row))
 
 def main():
-    bin_path = os.path.join(workspace_dir, "tuner/official_data_farseerT75.bin")
+    bin_path = os.path.join(workspace_dir, "tuner/data/nnue/official_data_farseerT75.bin")
     if not os.path.exists(bin_path):
         print(f"Dataset path {bin_path} does not exist!")
         return

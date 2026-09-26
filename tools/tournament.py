@@ -1,625 +1,424 @@
+"""Tournament runner for the current and baseline Classical engines.
+
+Default mode imports ``classical`` and ``classical_old`` in one Python process.
+Each worker owns two independent SearchContexts, while the compiled Numba code
+is shared by every worker in the same backend namespace.
+"""
+from __future__ import annotations
+
 import argparse
-import chess
-import chess.pgn
 import math
 import os
-import subprocess
+import random
 import sys
-import time
-from datetime import datetime
+from pathlib import Path
+from typing import Mapping, Optional, Sequence
 
-def parse_info_line(line):
-    if not line:
-        return ""
-    
-    tokens = line.split()
-    info_dict = {}
-    
-    i = 0
-    while i < len(tokens):
-        if tokens[i] == "depth" and i + 1 < len(tokens):
-            info_dict["depth"] = tokens[i+1]
-            i += 2
-        elif tokens[i] == "score" and i + 2 < len(tokens):
-            score_type = tokens[i+1]  # "cp" or "mate"
-            score_val = tokens[i+2]
-            if score_type == "cp":
-                try:
-                    val = int(score_val)
-                    info_dict["score"] = f"{val/100:+.2f}"
-                except ValueError:
-                    info_dict["score"] = f"cp {score_val}"
-            elif score_type == "mate":
-                info_dict["score"] = f"#{score_val}"
+if __package__ in {None, ""}:
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+from tools.match_core import (
+    InProcessEngineFactory,
+    SearchLimit,
+    StageResult,
+    UciEngine,
+    UciEngineFactory,
+    SPRTTest,
+    calculate_elo_statistics,
+    clear_numba_cache,
+    close_engine_pairs,
+    create_engine_pairs,
+    load_openings,
+    parse_info_line,
+    parse_limit_token,
+    run_stage,
+)
+
+
+ROOT = Path(__file__).resolve().parents[1]
+DEFAULT_ENGINE1 = ROOT / "main.py"
+DEFAULT_ENGINE2 = ROOT / "main_old.py"
+DEFAULT_NODES = 50_000
+DEFAULT_TT_MB = 128
+
+# Backwards-compatible name for scripts that imported the old UCI wrapper.
+Engine = UciEngine
+
+
+def _parse_env(items: Sequence[str], option: str) -> dict[str, str]:
+    values: dict[str, str] = {}
+    for item in items:
+        if "=" not in item:
+            raise ValueError(f"{option} expects KEY=VALUE, got {item!r}")
+        key, value = item.split("=", 1)
+        key = key.strip()
+        if not key:
+            raise ValueError(f"{option} contains an empty key")
+        values[key] = value
+    return values
+
+
+def parse_limit(limit_str: str) -> dict[str, Optional[int]]:
+    """Compatibility wrapper around the validated shared limit parser."""
+    limit = parse_limit_token(limit_str)
+    return {"time": limit.time_ms, "depth": limit.depth, "nodes": limit.nodes}
+
+
+def parse_stages(stages_str: str) -> list[dict[str, object]]:
+    """Parse ``games:limit`` stages; every stage must contain full color pairs."""
+    stages: list[dict[str, object]] = []
+    for raw in stages_str.split(","):
+        raw = raw.strip()
+        if not raw:
+            continue
+        parts = raw.split(":")
+        if len(parts) != 2:
+            raise ValueError(f"Invalid stage {raw!r}; expected games:limit")
+        games = int(parts[0])
+        if games < 2 or games % 2:
+            raise ValueError(f"Stage games must be an even integer >= 2, got {games}")
+        limit = parse_limit_token(parts[1])
+        stages.append({
+            "games": games,
+            "limit": limit,
+            "limit_str": limit.token(),
+        })
+    if not stages:
+        raise ValueError("No stages were parsed")
+    return stages
+
+
+def _safe_token(value: str) -> str:
+    return "".join(char if char.isalnum() or char in "-_" else "_" for char in value)
+
+
+def _stage_pgn_path(base: Optional[str], stage_number: int, limit: SearchLimit, multi: bool) -> str:
+    output_dir = ROOT / "tournament_analysis"
+    if base:
+        path = Path(base).resolve()
+        if not multi:
+            return str(path)
+        suffix = path.suffix or ".pgn"
+        return str(path.with_name(f"{path.stem}_stage{stage_number}_{_safe_token(limit.token())}{suffix}"))
+    if multi:
+        return str(output_dir / f"tournament_results_stage{stage_number}_{_safe_token(limit.token())}.pgn")
+    return str(output_dir / "tournament_results.pgn")
+
+
+def _is_default_pair(engine1_path: str, engine2_path: str) -> bool:
+    return (
+        Path(engine1_path).resolve() == DEFAULT_ENGINE1.resolve()
+        and Path(engine2_path).resolve() == DEFAULT_ENGINE2.resolve()
+    )
+
+
+def _select_backend(
+    requested: str,
+    engine1_path: str,
+    engine2_path: str,
+    own_book1: bool,
+    own_book2: bool,
+) -> str:
+    if requested != "auto":
+        selected = requested
+    else:
+        selected = "inprocess" if _is_default_pair(engine1_path, engine2_path) else "uci"
+    if selected == "inprocess" and (own_book1 or own_book2):
+        raise ValueError("In-process matches use external opening positions; OwnBook requires --backend uci")
+    return selected
+
+
+def _print_result(result: StageResult, first_name: str, second_name: str) -> None:
+    elo, error = calculate_elo_statistics(result.wins, result.draws, result.losses)
+    print("\n=== Stage Finished ===")
+    print(f"Games: {result.games}")
+    print(
+        f"{first_name}: {result.points:.1f} "
+        f"({result.wins}W {result.draws}D {result.losses}L)"
+    )
+    print(f"{second_name}: {result.games - result.points:.1f}")
+    if math.isinf(elo):
+        print("Elo difference: beyond finite estimate (perfect or zero score)")
+    else:
+        print(f"Elo difference: {elo:+.2f} ±{error:.2f} (95% CI)")
+    print(f"Status: {result.status}; LLR={result.llr:.2f}")
+    print(f"PGN: {result.pgn_path}")
+
+
+def run_tournament(
+    engine1_path: str,
+    engine2_path: str,
+    games_count: int,
+    time_ms: Optional[int],
+    engine1_name: str = "Engine_A",
+    engine2_name: str = "Engine_B",
+    depth: Optional[int] = None,
+    nodes: Optional[int] = None,
+    concurrency: int = 1,
+    pgn_file: Optional[str] = None,
+    engine1_env: Optional[Mapping[str, object]] = None,
+    engine2_env: Optional[Mapping[str, object]] = None,
+    external_barriers: object = None,
+    early_trash: bool = True,
+    early_trash_min_games: int = 80,
+    early_trash_max_score_pct: float = 40.0,
+    early_trash_max_elo: object = None,
+    own_book1: bool = False,
+    own_book2: bool = False,
+    use_openings: bool = True,
+    use_sprt: bool = True,
+    openings_pgn: Optional[str] = None,
+    opening_plies: int = 16,
+    stages: Optional[Sequence[Mapping[str, object]]] = None,
+    *,
+    backend: str = "auto",
+    engine1_module: str = "chess_engine.classical",
+    engine2_module: str = "chess_engine.classical_old",
+    tt_mb: int = DEFAULT_TT_MB,
+    max_plies: int = 400,
+    search_timeout_s: float = 300.0,
+    sprt_elo0: float = 0.0,
+    sprt_elo1: float = 10.0,
+    seed: int = 0,
+) -> list[StageResult]:
+    """Run one or more stages while keeping the same worker pool alive."""
+    del early_trash_max_elo  # Kept in the public signature for compatibility.
+    if external_barriers is not None:
+        raise ValueError("external_barriers belonged to the removed subprocess-JIT design")
+    if concurrency <= 0:
+        raise ValueError("concurrency must be >= 1")
+    if tt_mb <= 0:
+        raise ValueError("tt_mb must be >= 1")
+
+    if stages:
+        normalized: list[dict[str, object]] = []
+        for stage in stages:
+            if isinstance(stage.get("limit"), SearchLimit):
+                limit = stage["limit"]
             else:
-                info_dict["score"] = f"{score_type} {score_val}"
-            i += 3
-        elif tokens[i] == "nodes" and i + 1 < len(tokens):
-            info_dict["nodes"] = tokens[i+1]
-            i += 2
-        elif tokens[i] == "time" and i + 1 < len(tokens):
-            info_dict["time"] = tokens[i+1] + "ms"
-            i += 2
-        elif tokens[i] == "pv":
-            info_dict["pv"] = " ".join(tokens[i+1:])
-            break
-        else:
-            i += 1
-            
-    parts = []
-    if "depth" in info_dict: parts.append(f"d={info_dict['depth']}")
-    if "score" in info_dict: parts.append(f"eval={info_dict['score']}")
-    if "nodes" in info_dict: parts.append(f"n={info_dict['nodes']}")
-    if "time" in info_dict: parts.append(f"t={info_dict['time']}")
-    
-    return ", ".join(parts)
-
-class Engine:
-    def __init__(self, name, script_path, cache_dir=None, verbose=True):
-        self.name = name
-        self.script_path = os.path.abspath(script_path)
-        self.process = None
-        self.working_dir = os.path.dirname(self.script_path)
-        self.verbose = verbose
-        self.cache_dir = cache_dir
-
-    def start(self):
-        cmd = [sys.executable, "-u", self.script_path]
-
-        try:
-            # Create a unique cache directory for this process to avoid Numba lock collisions
-            import tempfile
-            import random
-            
-            if self.cache_dir:
-                self.unique_cache_dir = None
-                env_cache_dir = self.cache_dir
-            else:
-                self.unique_cache_dir = os.path.join(
-                    tempfile.gettempdir(), 
-                    f"numba_cache_{self.name}_{time.time_ns()}_{random.randint(0, 100000)}"
-                )
-                os.makedirs(self.unique_cache_dir, exist_ok=True)
-                env_cache_dir = self.unique_cache_dir
-
-            env = os.environ.copy()
-            env["NUMBA_CACHE_DIR"] = env_cache_dir
-
-            # Redirect stderr to stdout to prevent deadlocks and capture logs
-            self.process = subprocess.Popen(
-                cmd,
-                stdin=subprocess.PIPE,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                cwd=self.working_dir,
-                universal_newlines=True,
-                bufsize=1,
-                env=env
-            )
-            self.send_command("uci")
-            self.wait_for_ready()
-        except Exception as e:
-            print(f"Error starting engine {self.name}: {e}")
-            raise
-
-    def terminate(self):
-        if self.process:
-            self.send_command("quit")
-            try:
-                self.process.wait(timeout=2)
-            except subprocess.TimeoutExpired:
-                self.process.kill()
-            self.process = None
-            
-            # Clean up the unique cache directory only if it was dynamically created
-            if getattr(self, "unique_cache_dir", None) and os.path.exists(self.unique_cache_dir):
-                import shutil
-                try:
-                    shutil.rmtree(self.unique_cache_dir)
-                except Exception:
-                    pass
-
-    def send_command(self, command):
-        if self.process:
-            try:
-                self.process.stdin.write(command + "\n")
-                self.process.stdin.flush()
-            except BrokenPipeError:
-                pass
-
-    def wait_for_ready(self):
-        self.send_command("isready")
-        while True:
-            line = self.read_line()
-            if line is None:
-                raise RuntimeError(f"Engine {self.name} terminated unexpectedly during initialization")
-            if line == "readyok":
-                break
-            else:
-                # 打印啟動期間所有的消息，包括 Numba 編譯警告，避免看起來像當機
-                if self.verbose:
-                    print(f"[{self.name} init] {line}")
-
-    def read_line(self):
-        if not self.process:
-            return None
-        line = self.process.stdout.readline()
-        if not line:
-            return None
-        return line.strip()
-
-    def warm_up(self):
-        # Trigger JIT compilation
-        if self.verbose:
-            print(f"[{self.name}] Warming up...")
-        self.send_command("setoption name OwnBook value false")
-        self.send_command("position kiwipete")
-        self.send_command("go depth 14")
-        while True:
-            line = self.read_line()
-            if line is None:
-                raise RuntimeError(f"Engine {self.name} terminated during warm-up")
-            # 打印 warmup 期間所有的消息
-            if self.verbose:
-                print(f"[{self.name} warmup] {line}")
-            if line.startswith("bestmove"):
-                break
-
-    def get_move(self, moves_history, time_limit_ms, start_fen=None, depth=None, nodes=None):
-        if start_fen:
-            cmd = f"position fen {start_fen}"
-        else:
-            cmd = "position startpos"
-
-        if moves_history:
-            cmd += " moves " + " ".join(moves_history)
-
-        self.send_command(cmd)
+                limit = SearchLimit.from_mapping(stage)
+            normalized.append({
+                "games": int(stage["games"]),
+                "limit": limit,
+                "pgn_file": stage.get("pgn_file"),
+            })
+    else:
         if nodes is not None:
-            self.send_command(f"go nodes {nodes}")
+            limit = SearchLimit(nodes=nodes)
         elif depth is not None:
-            self.send_command(f"go depth {depth}")
+            limit = SearchLimit(depth=depth)
+        elif time_ms is not None:
+            limit = SearchLimit(time_ms=time_ms)
         else:
-            self.send_command(f"go movetime {time_limit_ms}")
+            limit = SearchLimit(nodes=DEFAULT_NODES)
+        normalized = [{"games": int(games_count), "limit": limit, "pgn_file": pgn_file}]
 
-        best_move = None
-        last_info = ""
-        while True:
-            line = self.read_line()
-            if line is None:
-                print(f"[{self.name}] Engine crashed or closed connection")
-                break
+    for stage in normalized:
+        games = int(stage["games"])
+        if games < 2 or games % 2:
+            raise ValueError("Every stage must use an even game count >= 2")
 
-            # print(f"[{self.name}] {line}") # Debug output
-            if line.startswith("info"):
-                # Only capture complete info lines that contain both depth and score
-                # to avoid capturing incomplete "Search stopped at depth X due to limit" lines
-                if "depth" in line and "score" in line:
-                    last_info = line
-
-            if line.startswith("bestmove"):
-                parts = line.split()
-                if len(parts) >= 2:
-                    try:
-                        best_move = chess.Move.from_uci(parts[1])
-                    except ValueError:
-                        print(f"[{self.name}] Invalid move received: {parts[1]}")
-                break
-
-        info_str = parse_info_line(last_info)
-        return best_move, info_str
-
-class SPRTTest:
-    def __init__(self, elo0=0.0, elo1=5.0, alpha=0.05, beta=0.05):
-        self.elo0 = elo0
-        self.elo1 = elo1
-        self.a = math.log((1 - beta) / alpha)
-        self.b = math.log(beta / (1 - alpha))
-        self.pair_scores = [] # stores scores of Engine 1 in each pair (0 to 2)
-        
-    def add_pair_result(self, score):
-        self.pair_scores.append(score)
-        
-    def check_status(self):
-        n = len(self.pair_scores)
-        if n < 5:
-            return "Continue", 0.0
-            
-        mean = sum(self.pair_scores) / n
-        mean_sq = sum(x**2 for x in self.pair_scores) / n
-        variance = mean_sq - mean**2
-        
-        if variance <= 1e-10:
-            return "Continue", 0.0
-            
-        # Expected scores for a single game based on Elo difference
-        mu0_game = 1.0 / (1.0 + 10.0 ** (-self.elo0 / 400.0))
-        mu1_game = 1.0 / (1.0 + 10.0 ** (-self.elo1 / 400.0))
-        
-        # Expected scores for a PAIR of games
-        mu0_pair = 2.0 * mu0_game
-        mu1_pair = 2.0 * mu1_game
-        
-        # Calculate Sequential Probability Ratio Test (SPRT) Log-Likelihood Ratio (LLR)
-        # using the normal approximation of the score sum
-        sum_scores = sum(self.pair_scores)
-        llr = (mu1_pair - mu0_pair) / variance * (sum_scores - n * (mu0_pair + mu1_pair) / 2.0)
-        
-        if llr >= self.a:
-            return "H1 Accepted (Engine improved)", llr
-        elif llr <= self.b:
-            return "H0 Accepted (No improvement)", llr
-        else:
-            return "Continue", llr
-
-def play_game(white_engine, black_engine, time_limit_ms, game_number, start_fen=None, depth=None, nodes=None, verbose=True):
-    if start_fen:
-        board = chess.Board(start_fen)
+    selected = _select_backend(backend, engine1_path, engine2_path, own_book1, own_book2)
+    if selected == "inprocess":
+        factory1 = InProcessEngineFactory(
+            engine1_name, engine1_module, tt_mb=tt_mb, env_extra=engine1_env
+        )
+        factory2 = InProcessEngineFactory(
+            engine2_name, engine2_module, tt_mb=tt_mb, env_extra=engine2_env
+        )
     else:
-        board = chess.Board()
+        for path in (engine1_path, engine2_path):
+            if not os.path.exists(path):
+                raise FileNotFoundError(path)
+        factory1 = UciEngineFactory(
+            engine1_name,
+            engine1_path,
+            options={"OwnBook": own_book1},
+            env_extra=engine1_env,
+            search_timeout_s=search_timeout_s,
+        )
+        factory2 = UciEngineFactory(
+            engine2_name,
+            engine2_path,
+            options={"OwnBook": own_book2},
+            env_extra=engine2_env,
+            search_timeout_s=search_timeout_s,
+        )
 
-    # Send new game command
-    white_engine.send_command("ucinewgame")
-    black_engine.send_command("ucinewgame")
-    white_engine.wait_for_ready()
-    black_engine.wait_for_ready()
+    epd = str(ROOT / "data" / "openings.epd")
+    openings = load_openings(
+        epd_path=epd,
+        pgn_path=openings_pgn,
+        pgn_plies=opening_plies,
+        enabled=use_openings,
+    )
+    random.Random(seed).shuffle(openings)
+    max_pairs = max(int(stage["games"]) // 2 for stage in normalized)
+    actual_concurrency = min(int(concurrency), max_pairs)
+    print(
+        f"Backend: {selected}; workers={actual_concurrency}; TT={tt_mb} MB/context; "
+        f"openings={len(openings)}; seed={seed}",
+        flush=True,
+    )
+    if selected == "inprocess":
+        print("JIT plan: classical once + classical_old once; worker contexts share compiled code.", flush=True)
+    print(
+        "Warm-up: Kiwipete depth 14 for each Python/Numba backend, then one "
+        "complete startpos game at depth 1 (all results discarded).",
+        flush=True,
+    )
 
-    pgn_game = chess.pgn.Game()
-    if start_fen:
-        pgn_game.setup(start_fen)
-        
-    pgn_game.headers["Event"] = "Engine Tournament"
-    pgn_game.headers["Site"] = "Local"
-    pgn_game.headers["Date"] = datetime.now().strftime("%Y.%m.%d")
-    pgn_game.headers["Round"] = str(game_number)
-    pgn_game.headers["White"] = white_engine.name
-    pgn_game.headers["Black"] = black_engine.name
-
-    node = pgn_game
-
-    log_lines = []
-    def log(msg, end="\n"):
-        if verbose:
-            print(msg, end=end)
-        log_lines.append(msg + end)
-
-    log(f"Game {game_number}: {white_engine.name} (White) vs {black_engine.name} (Black)", end="")
-    if start_fen:
-        log(" (from custom opening)")
-    else:
-        log("")
-
-    while not board.is_game_over(claim_draw=True):
-        mover = white_engine if board.turn == chess.WHITE else black_engine
-
-        try:
-            moves_history = [m.uci() for m in board.move_stack]
-            move, info_str = mover.get_move(moves_history, time_limit_ms, start_fen, depth=depth, nodes=nodes)
-        except Exception as e:
-            log(f"Error getting move from {mover.name}: {e}")
-            result = "0-1" if board.turn == chess.WHITE else "1-0"
-            pgn_game.headers["Result"] = result
-            return result, pgn_game, "".join(log_lines)
-
-        if move is None:
-            log(f"No move returned by {mover.name}. Forfeiting.")
-            result = "0-1" if board.turn == chess.WHITE else "1-0"
-            pgn_game.headers["Result"] = result
-            return result, pgn_game, "".join(log_lines)
-
-        if move not in board.legal_moves:
-            log(f"Illegal move from {mover.name}: {move}")
-            result = "0-1" if board.turn == chess.WHITE else "1-0"
-            pgn_game.headers["Result"] = result
-            return result, pgn_game, "".join(log_lines)
-
-        board.push(move)
-        node = node.add_variation(move)
-        if info_str:
-            node.comment = info_str
-
-    result = board.result(claim_draw=True)
-    pgn_game.headers["Result"] = result
-    log(f" Result: {result}")
-
-    return result, pgn_game, "".join(log_lines)
-
-def run_game_pair(pair_i, engine1_path, engine2_path, time_ms, engine1_name, engine2_name, opening_fen, depth, nodes=None, verbose=False, cache_dir1=None, cache_dir2=None):
-    e1 = Engine(engine1_name, engine1_path, cache_dir=cache_dir1, verbose=verbose)
-    e2 = Engine(engine2_name, engine2_path, cache_dir=cache_dir2, verbose=verbose)
-    
-    log_output = []
+    pool = create_engine_pairs(factory1, factory2, actual_concurrency)
+    results: list[StageResult] = []
     try:
-        e1.start()
-        e2.start()
-        e1.warm_up()
-        e2.warm_up()
-        
-        # Game A: Engine 1 plays White
-        game_num_a = 2 * pair_i - 1
-        res_a, pgn_a, log_a = play_game(e1, e2, time_ms, game_num_a, opening_fen, depth=depth, nodes=nodes, verbose=verbose)
-        log_output.append(log_a)
-        
-        # Game B: Engine 1 plays Black
-        game_num_b = 2 * pair_i
-        res_b, pgn_b, log_b = play_game(e2, e1, time_ms, game_num_b, opening_fen, depth=depth, nodes=nodes, verbose=verbose)
-        log_output.append(log_b)
-        
-        return {
-            "pair_i": pair_i,
-            "res_a": res_a,
-            "res_b": res_b,
-            "pgn_a_str": str(pgn_a),
-            "pgn_b_str": str(pgn_b),
-            "log": "".join(log_output),
-            "error": None
-        }
-    except Exception as e:
-        import traceback
-        return {
-            "pair_i": pair_i,
-            "res_a": None,
-            "res_b": None,
-            "pgn_a_str": None,
-            "pgn_b_str": None,
-            "log": "".join(log_output),
-            "error": f"Error in pair {pair_i}: {e}\n{traceback.format_exc()}"
-        }
+        multi = len(normalized) > 1
+        for number, stage in enumerate(normalized, 1):
+            limit = stage["limit"]
+            output = stage.get("pgn_file") or _stage_pgn_path(pgn_file, number, limit, multi)
+            print(
+                f"\n>>> Stage {number}/{len(normalized)}: games={stage['games']}, "
+                f"limit={limit.describe()}",
+                flush=True,
+            )
+            result = run_stage(
+                pool,
+                openings,
+                games=int(stage["games"]),
+                first_limit=limit,
+                second_limit=limit,
+                first_name=engine1_name,
+                second_name=engine2_name,
+                pgn_path=str(output),
+                event="Engine Tournament",
+                use_sprt=use_sprt,
+                sprt_elo0=sprt_elo0,
+                sprt_elo1=sprt_elo1,
+                early_trash=early_trash,
+                early_trash_min_games=early_trash_min_games,
+                early_trash_max_score_pct=early_trash_max_score_pct,
+                max_plies=max_plies,
+            )
+            results.append(result)
+            _print_result(result, engine1_name, engine2_name)
     finally:
-        e1.terminate()
-        e2.terminate()
+        close_engine_pairs(pool)
+    return results
 
-def calculate_elo_statistics(wins, draws, losses):
-    """
-    計算 Elo 分差與 95% 信賴區間的誤差。
-    """
-    total_games = wins + draws + losses
-    if total_games == 0:
-        return 0.0, 0.0
 
-    # 1. 計算得分率 (Score Rate, p)
-    score = wins + 0.5 * draws
-    p = score / total_games
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        description="Run a paired tournament between current and baseline engines.",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=(
+            "Limits: nN=fixed nodes, dN=fixed depth, plain N=movetime ms.\n"
+            "Default without a limit option: n50000.\n"
+            "Examples:\n"
+            "  python tools/tournament.py -c 8 --nodes 100000\n"
+            "  python tools/tournament.py -c 8 --stages 200:n20000,400:n100000\n"
+            "  python tools/tournament.py --depth 12\n"
+            "  python tools/tournament.py --time 1000"
+        ),
+    )
+    parser.add_argument("--engine1", default=str(DEFAULT_ENGINE1))
+    parser.add_argument("--engine2", default=str(DEFAULT_ENGINE2))
+    parser.add_argument("--name1", default="New")
+    parser.add_argument("--name2", default="Old")
+    parser.add_argument("--games", type=int, default=100)
+    limits = parser.add_mutually_exclusive_group()
+    limits.add_argument("--nodes", type=int, help=f"fixed nodes/move (default: {DEFAULT_NODES})")
+    limits.add_argument("--depth", type=int, help="fixed depth/move")
+    limits.add_argument("--time", type=int, help="fixed movetime in ms/move")
+    parser.add_argument("--stages", metavar="SPEC", help="games:limit list, e.g. 200:n20000,400:n100000")
+    parser.add_argument("--concurrency", "-c", type=int, default=1, help="parallel games/independent contexts")
+    parser.add_argument("--backend", choices=("auto", "inprocess", "uci"), default="auto")
+    parser.add_argument("--engine1-module", default="chess_engine.classical")
+    parser.add_argument("--engine2-module", default="chess_engine.classical_old")
+    parser.add_argument("--tt-mb", type=int, default=DEFAULT_TT_MB, help="TT MB per engine context (default: 128)")
+    parser.add_argument("--pgn", help="output PGN; multi-stage adds a stage suffix")
+    parser.add_argument("--engine1-env", action="append", default=[], metavar="KEY=VALUE")
+    parser.add_argument("--engine2-env", action="append", default=[], metavar="KEY=VALUE")
+    parser.add_argument("--own-book1", action="store_true", help="UCI backend only")
+    parser.add_argument("--own-book2", action="store_true", help="UCI backend only")
+    parser.add_argument("--no-openings", action="store_true")
+    parser.add_argument("--openings-pgn", metavar="PATH")
+    parser.add_argument("--opening-moves", type=int, default=8)
+    parser.add_argument("--seed", type=int, default=0, help="deterministic opening shuffle seed")
+    parser.add_argument("--no-sprt", action="store_true")
+    parser.add_argument("--sprt-elo0", type=float, default=0.0)
+    parser.add_argument("--sprt-elo1", type=float, default=10.0)
+    parser.add_argument("--no-early-trash", action="store_true")
+    parser.add_argument("--early-trash-min-games", type=int, default=80)
+    parser.add_argument("--early-trash-max-score-pct", type=float, default=40.0)
+    parser.add_argument("--max-plies", type=int, default=400)
+    parser.add_argument("--search-timeout", type=float, default=300.0, metavar="SECONDS")
+    parser.add_argument("--clear-cache", action="store_true", help="explicitly clear Numba caches before startup")
+    parser.add_argument("--no-clear-cache", action="store_true", help=argparse.SUPPRESS)
+    return parser
 
-    # 處理邊界情況
-    if p <= 0:
-        return -float('inf'), 0.0
-    if p >= 1:
-        return float('inf'), 0.0
 
-    # 2. 計算 Elo 分差
-    elo_diff = -400 * math.log10(1 / p - 1)
+def main(argv: Optional[Sequence[str]] = None) -> int:
+    parser = build_parser()
+    args = parser.parse_args(argv)
+    try:
+        if args.clear_cache and args.no_clear_cache:
+            parser.error("--clear-cache conflicts with --no-clear-cache")
+        if args.clear_cache:
+            clear_numba_cache(str(ROOT))
+        if args.no_openings and args.openings_pgn:
+            parser.error("--no-openings conflicts with --openings-pgn")
+        if args.opening_moves < 0:
+            parser.error("--opening-moves must be >= 0")
+        if args.stages and any(value is not None for value in (args.nodes, args.depth, args.time)):
+            parser.error("--stages conflicts with --nodes/--depth/--time")
+        engine1_env = _parse_env(args.engine1_env, "--engine1-env")
+        engine2_env = _parse_env(args.engine2_env, "--engine2-env")
+        stages = parse_stages(args.stages) if args.stages else None
+        if args.nodes is not None:
+            nodes, depth, time_ms = args.nodes, None, None
+        elif args.depth is not None:
+            nodes, depth, time_ms = None, args.depth, None
+        elif args.time is not None:
+            nodes, depth, time_ms = None, None, args.time
+        else:
+            nodes, depth, time_ms = DEFAULT_NODES, None, None
+        run_tournament(
+            args.engine1,
+            args.engine2,
+            args.games,
+            time_ms,
+            args.name1,
+            args.name2,
+            depth=depth,
+            nodes=nodes,
+            concurrency=args.concurrency,
+            pgn_file=args.pgn,
+            engine1_env=engine1_env,
+            engine2_env=engine2_env,
+            early_trash=not args.no_early_trash,
+            early_trash_min_games=args.early_trash_min_games,
+            early_trash_max_score_pct=args.early_trash_max_score_pct,
+            own_book1=args.own_book1,
+            own_book2=args.own_book2,
+            use_openings=not args.no_openings,
+            use_sprt=not args.no_sprt,
+            openings_pgn=args.openings_pgn,
+            opening_plies=args.opening_moves * 2,
+            stages=stages,
+            backend=args.backend,
+            engine1_module=args.engine1_module,
+            engine2_module=args.engine2_module,
+            tt_mb=args.tt_mb,
+            max_plies=args.max_plies,
+            search_timeout_s=args.search_timeout,
+            sprt_elo0=args.sprt_elo0,
+            sprt_elo1=args.sprt_elo1,
+            seed=args.seed,
+        )
+        return 0
+    except (OSError, RuntimeError, ValueError) as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 2
 
-    # 3. 計算標準誤 (Standard Error, SE)
-    # E[x^2] = (wins * 1^2 + draws * 0.5^2 + losses * 0^2) / N
-    mean_sq = (wins * 1.0 + draws * 0.25) / total_games
-    variance = mean_sq - (p ** 2)
-    
-    if variance < 0: variance = 0
-    
-    sigma = math.sqrt(variance)
-    se = sigma / math.sqrt(total_games)
-
-    # 4. 計算誤差範圍 (95% CI)
-    z_score = 1.96
-    gradient = 400 / (math.log(10) * p * (1 - p))
-    error_margin = z_score * se * gradient
-
-    return elo_diff, error_margin
-
-def count_result(result_str, is_white):
-    if result_str == "1-0": return 1.0 if is_white else 0.0
-    if result_str == "0-1": return 0.0 if is_white else 1.0
-    return 0.5 
-
-def run_tournament(engine1_path, engine2_path, games_count, time_ms, engine1_name="Engine_A", engine2_name="Engine_B", depth=None, nodes=None, concurrency=1):
-    # Read openings if available
-    openings = [None]
-    openings_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "data", "openings.epd")
-    if os.path.exists(openings_path):
-        with open(openings_path, "r") as f:
-            lines = [l.strip() for l in f if l.strip()]
-            if lines: openings = lines
-
-    import random
-    random.shuffle(openings)
-
-    scores = {engine1_name: 0.0, engine2_name: 0.0}
-    e1_stats = {"wins": 0, "draws": 0, "losses": 0}
-
-    pgn_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "tournament_analysis")
-    pgn_file = os.path.join(pgn_dir, "tournament_results.pgn")
-    os.makedirs(pgn_dir, exist_ok=True)
-    with open(pgn_file, "w") as f:
-        pass
-        
-    # Target Elo bounds: Test if we gained 10 Elo or 0 Elo
-    sprt = SPRTTest(elo0=0.0, elo1=10.0, alpha=0.05, beta=0.05)
-    
-    pairs_count = games_count // 2
-    status, llr = "Continue", 0.0
-    total_matches_played = 0
-
-    import queue
-    import threading
-
-    pair_queue = queue.Queue()
-    for pair_i in range(1, pairs_count + 1):
-        pair_queue.put(pair_i)
-
-    state_lock = threading.Lock()
-    sprt_stopped = threading.Event()
-
-    actual_concurrency = min(concurrency, pairs_count)
-    if actual_concurrency < 1:
-        actual_concurrency = 1
-
-    # Use barriers to synchronize engine stages:
-    # 1. All workers compile/warm-up NEW engine in parallel.
-    # 2. Once all NEW engines are ready, all workers compile/warm-up OLD engine in parallel.
-    compilation_barrier_1 = threading.Barrier(actual_concurrency)
-    compilation_barrier_2 = threading.Barrier(actual_concurrency)
-
-    def worker_thread(worker_id):
-        nonlocal total_matches_played, status, llr
-        
-        verbose_worker = (worker_id == 0)
-        e1 = Engine(engine1_name, engine1_path, cache_dir=None, verbose=verbose_worker)
-        e2 = Engine(engine2_name, engine2_path, cache_dir=None, verbose=verbose_worker)
-        
-        try:
-            # Stage 1: Compile & Warm-up NEW engines in parallel
-            e1.start()
-            e1.warm_up()
-            try:
-                compilation_barrier_1.wait()
-            except threading.BrokenBarrierError:
-                return
-
-            # Stage 2: Compile & Warm-up OLD engines in parallel
-            e2.start()
-            e2.warm_up()
-            try:
-                compilation_barrier_2.wait()
-            except threading.BrokenBarrierError:
-                return
-            
-            while not sprt_stopped.is_set():
-                try:
-                    pair_i = pair_queue.get_nowait()
-                except queue.Empty:
-                    break
-                
-                opening_fen = openings[(pair_i - 1) % len(openings)]
-                pair_verbose = verbose_worker and (pair_i == 1)
-                
-                # Game A: Engine 1 plays White
-                game_num_a = 2 * pair_i - 1
-                res_a, pgn_a, log_a = play_game(e1, e2, time_ms, game_num_a, opening_fen, depth=depth, nodes=nodes, verbose=pair_verbose)
-                
-                # Game B: Engine 1 plays Black
-                game_num_b = 2 * pair_i
-                res_b, pgn_b, log_b = play_game(e2, e1, time_ms, game_num_b, opening_fen, depth=depth, nodes=nodes, verbose=pair_verbose)
-                
-                with state_lock:
-                    if sprt_stopped.is_set():
-                        pair_queue.task_done()
-                        break
-                    
-                    if not pair_verbose:
-                        print(log_a + log_b, end="", flush=True)
-                        
-                    score_a_for_e1 = count_result(res_a, is_white=True)
-                    score_b_for_e1 = count_result(res_b, is_white=False)
-                    pair_score = score_a_for_e1 + score_b_for_e1
-                    
-                    sprt.add_pair_result(pair_score)
-                    scores[engine1_name] += pair_score
-                    scores[engine2_name] += (2.0 - pair_score)
-                    
-                    for s in [score_a_for_e1, score_b_for_e1]:
-                        if s == 1.0: e1_stats["wins"] += 1
-                        elif s == 0.0: e1_stats["losses"] += 1
-                        else: e1_stats["draws"] += 1
-                        
-                    with open(pgn_file, "a") as f_pgn:
-                        f_pgn.write(str(pgn_a) + "\n\n")
-                        f_pgn.write(str(pgn_b) + "\n\n")
-                        
-                    status, llr = sprt.check_status()
-                    total_matches_played += 2
-                    
-                    print(f"\nAfter {len(sprt.pair_scores)} pairs ({len(sprt.pair_scores)*2} games):", flush=True)
-                    print(f"{engine1_name}: {scores[engine1_name]}", flush=True)
-                    print(f"{engine2_name}: {scores[engine2_name]}", flush=True)
-                    print(f"SPRT LLR: {llr:.2f} bounds: [{sprt.b:.2f}, {sprt.a:.2f}]", flush=True)
-                    print(f"SPRT Status: {status}", flush=True)
-                    print("-" * 30, flush=True)
-                    
-                    if status != "Continue":
-                        print(f"SPRT bounds triggered. Stopping test early.")
-                        sprt_stopped.set()
-                        pair_queue.task_done()
-                        break
-                        
-                pair_queue.task_done()
-        except Exception as e:
-            import traceback
-            print(f"Worker {worker_id} generated an exception: {e}\n{traceback.format_exc()}")
-            compilation_barrier_1.abort()
-            compilation_barrier_2.abort()
-        finally:
-            e1.terminate()
-            e2.terminate()
-
-    # Start worker threads
-    threads = []
-    print(f"Starting tournament with concurrency={actual_concurrency} (parallel threads)...")
-    for worker_id in range(actual_concurrency):
-        t = threading.Thread(target=worker_thread, args=(worker_id,))
-        t.start()
-        threads.append(t)
-        
-    for t in threads:
-        t.join()
-
-    print("\n=== Tournament Finished ===")
-    print(f"Total Matches Played: {total_matches_played}")
-    print(f"Final Score {engine1_name}: {scores[engine1_name]} ({e1_stats['wins']}W - {e1_stats['draws']}D - {e1_stats['losses']}L)")
-    print(f"Final Score {engine2_name}: {scores[engine2_name]}")
-    print(f"SPRT Status: {status} (LLR = {llr:.2f})")
-
-    elo_diff, error_margin = calculate_elo_statistics(e1_stats["wins"], e1_stats["draws"], e1_stats["losses"])
-    if math.isinf(elo_diff):
-         print(f"ELO Difference: > +/- 800 (Perfect score or zero score)")
-    else:
-         print(f"Estimated ELO Difference ({engine1_name} - {engine2_name}): {elo_diff:+.2f} [+/- {error_margin:.2f}]")
-         print(f"95% Confidence Interval: {elo_diff - error_margin:+.2f} to {elo_diff + error_margin:+.2f}")
-
-    print(f"PGN saved to {pgn_file}")
-
-def clear_numba_cache(root_dir):
-    import shutil
-    from pathlib import Path
-    print("Clearing Numba __pycache__ directories...")
-    p = Path(root_dir)
-    for cache_dir in p.rglob("__pycache__"):
-        if cache_dir.is_dir():
-            try:
-                shutil.rmtree(cache_dir)
-            except Exception:
-                pass
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Run a tournament between two versions of the engine.")
-    root_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    clear_numba_cache(root_dir)
-    default_engine1 = os.path.join(root_dir, "main.py")
-    default_engine2 = os.path.join(root_dir, "main_old.py")
-    parser.add_argument("--engine1", default=default_engine1, help="Path to the first engine's main.py")
-    parser.add_argument("--engine2", default=default_engine2, help="Path to the second engine's main.py")
-    parser.add_argument("--name1", default="New", help="Name of the first engine")
-    parser.add_argument("--name2", default="Old", help="Name of the second engine")
-    parser.add_argument("--games", type=int, default=100, help="Number of games to play (default: 100)")
-    parser.add_argument("--time", type=int, default=1000, help="Time per move in ms (default: 1000)")
-    parser.add_argument("--depth", type=int, default=None, help="Fixed search depth per move (overrides --time if set)")
-    parser.add_argument("--nodes", type=int, default=None, help="Fixed nodes limit per move (overrides depth and time if set)")
-    parser.add_argument("--concurrency", "-c", type=int, default=1, help="Number of parallel game processes (concurrency)")
-
-    args = parser.parse_args()
-
-    if not os.path.exists(args.engine1):
-        print(f"Error: Engine 1 path not found: {args.engine1}")
-        sys.exit(1)
-    if not os.path.exists(args.engine2):
-        print(f"Error: Engine 2 path not found: {args.engine2}")
-        sys.exit(1)
-
-    if args.nodes is not None:
-        print(f"Mode: Fixed Nodes = {args.nodes}")
-    elif args.depth is not None:
-        print(f"Mode: Fixed Depth = {args.depth}")
-    else:
-        print(f"Mode: Fixed Time = {args.time} ms/move")
-
-    run_tournament(args.engine1, args.engine2, args.games, args.time, args.name1, args.name2, depth=args.depth, nodes=args.nodes, concurrency=args.concurrency)
+    raise SystemExit(main())

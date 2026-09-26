@@ -20,11 +20,9 @@ from chess_engine.classical.move_generator import (
 from chess_engine.classical.bitboard_utils import get_lsb_index, count_bits
 
 
-# Piece Values for SEE (based on Stockfish's internal values for SEE)
-# P=100, N=320, B=330, R=500, Q=900, K=20000
-# Note: King is given a very high value to prevent it from being "captured" in simulation logic.
-# We use local definition to ensure it matches exactly the SEE assumption (King value high)
-
+# Piece values for SEE (legacy ordering scale; Phase 1a keeps pre-P1 values).
+# Aligning to MG_MATERIAL_VALUES is a separate A/B — it changes QS/pruning globally.
+# King is extremely high so SEE never treats K as a capturable swap piece.
 SEE_PIECE_VALUES = np.array([100, 320, 330, 500, 900, 20000], dtype=np.int32)
 
 # Basic Attack Tables (Initialize once if possible, or use logic)

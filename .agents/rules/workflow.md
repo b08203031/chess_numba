@@ -14,7 +14,7 @@ Apply on every development, refactor, debug, or documentation task.
 * **MUST** open root `README.md` → section **專案文件導覽 (Documentation Map)** and load any design/analysis doc for the module you will touch.
 * **MUST NOT** invent parallel designs that contradict indexed docs (e.g. HCE audit, SEARCH_ANALYSIS, NNUE ARCHITECTURE).
 * Align algorithms with reference trees (repo-relative paths only):
-  * Search / modern engine ideas → `stockfish_repo/` (SF 18)
+  * Search / modern engine ideas → `stockfish_repo/` (SF 19)
   * Hand-crafted eval (HCE) → `stockfish_11/` (SF 11)
 
 ---
@@ -34,7 +34,7 @@ Apply on every development, refactor, debug, or documentation task.
 | :--- | :--- |
 | Light unit tests (`unittest`) with little/no heavy JIT | Elo tournaments, long benchmarks, deep perft mass runs, SPSA games |
 
-* First JIT compile of search/eval can take **several minutes** (>5). Wait for completion; **MUST NOT** spam restarts or re-launch the same compile.
+* First JIT compile of search/eval can take **several minutes** (order-of-magnitude: cold ~2–3+ min after 2026-07 cache work; still long). Wait for completion; **MUST NOT** spam restarts or re-launch the same compile. Details and re-measure protocol: `chess_engine/classical/JIT_COMPILE_CACHE_REPORT.md`.
 * When board/make/unmake/movegen change: **recommend** the user run perft (see `board-integrity` rule) rather than auto-running heavy perft.
 
 ---

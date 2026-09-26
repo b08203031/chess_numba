@@ -900,18 +900,26 @@ def has_sufficient_material(piece_bbs):
         temp &= temp - np.uint64(1)
         bb_cnt += 1
 
+    w_minors = wn_cnt + wb_cnt
+    b_minors = bn_cnt + bb_cnt
+
     # Either side has at least two minor pieces -> sufficient.
-    if (wn_cnt + wb_cnt > 1) or (bn_cnt + bb_cnt > 1):
+    if w_minors > 1 or b_minors > 1:
         return True
 
-    # One bishop each: opposite colors -> sufficient, same color -> insufficient.
-    if wb_cnt == 1 and bb_cnt == 1 and wn_cnt == 0 and bn_cnt == 0:
-        light_squares = np.uint64(0x55AA55AA55AA55AA)
-        w_light = (w_bishops & light_squares) != np.uint64(0)
-        b_light = (b_bishops & light_squares) != np.uint64(0)
-        if w_light == b_light:
-            return False  # Same color bishops
-        return True  # Opposite color bishops
+    # Both sides have at least one minor piece (i.e. exactly 1 minor piece each:
+    # Knight vs Knight, Knight vs Bishop, Bishop vs Knight, Bishop vs Bishop).
+    if w_minors == 1 and b_minors == 1:
+        # The ONLY 1-minor vs 1-minor dead position is Bishop vs Bishop of the same color.
+        if wb_cnt == 1 and bb_cnt == 1:
+            light_squares = np.uint64(0x55AA55AA55AA55AA)
+            w_light = (w_bishops & light_squares) != np.uint64(0)
+            b_light = (b_bishops & light_squares) != np.uint64(0)
+            if w_light == b_light:
+                return False  # Same color bishops -> dead position (insufficient)
+            return True  # Opposite color bishops -> can mate
+        # Knight vs Knight, Knight vs Bishop, Bishop vs Knight -> can mate (sufficient)
+        return True
 
     # King + Bishop vs King, King + Knight vs King, King vs King -> insufficient.
     return False

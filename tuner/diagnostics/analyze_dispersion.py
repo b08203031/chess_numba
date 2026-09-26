@@ -11,7 +11,7 @@ def analyze_dispersion():
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     print(f"Using device: {device}")
     
-    dataset_path = 'tuner/ultimate_halfka.npz'
+    dataset_path = 'tuner/data/nnue/ultimate_halfka.npz'
     if not os.path.exists(dataset_path):
         print(f"Dataset {dataset_path} not found.")
         sys.exit(1)

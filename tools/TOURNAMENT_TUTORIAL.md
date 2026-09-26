@@ -1,128 +1,214 @@
-# 🏆 引擎對戰與聯賽指南 (Tournament & Match Tutorial)
+# 引擎對戰與 Stockfish Match 指南
 
-本指南將引導您如何使用 [tournament.py](file:///c:/Users/ren%20cian/OneDrive/%E6%A1%8C%E9%9D%A2/chess/chess_numba/chess_numba/tools/tournament.py) 腳本，在多核心環境下對您的西洋棋引擎進行自動對決、統計評估與棋力增長驗證。
+本專案有兩個對戰入口：
 
----
+- `tools/tournament.py`：現行 `classical` 對基準 `classical_old`。
+- `tools/match_runner.py`：現行引擎對外部 Stockfish UCI 執行檔。
 
-## 📌 快速概覽與核心觀念
+兩者共用 `tools/match_core.py` 的裁判、PGN、SPRT、開局配對與工作池實作。預設搜尋限制是每步固定 `50,000` nodes；固定深度與固定時間仍保留。
 
-引擎對戰是西洋棋引擎開發中最重要的驗證手段。本專案整合了 **SPRT (序貫概率比檢定)**，能用最少的對局數判斷修改後的代碼（NEW）是否相較於舊版本（OLD）有顯著的棋力提升，避免盲目調參。
+兩支程式在正式對局前會依序執行兩層暖機：先讓每個 Python/Numba backend 搜尋一次 Kiwipete、固定 `depth 14`；再從標準初始局面進行一場完整的 depth-1 暖機局。d1 暖機局的雙方每步都固定 `d1`。所有暖機結果與 PGN 都不列入比分、SPRT 或正式輸出。in-process backend 的 Kiwipete 搜尋與 d1 對局只需使用第一組共享 JIT 的 context；若明確使用 Python UCI backend，彼此不共享 JIT 的 worker 子行程會各自執行相同暖機。外部 native Stockfish 不額外執行 Kiwipete 搜尋，但會參與 d1 暖機對局。
 
-> [!IMPORTANT]
-> **首次編譯警告**：本引擎的核心搜尋與評估函數採用了 **Numba JIT** 進行靜態編譯。在沒有快取的情況下，首次導入與編譯引擎需要約 **3 至 5 分鐘**。此時程式看起來會停住不動，這是 Numba 正在編譯 LLVM 機器碼，請耐心等候。
+第一組 worker 的 Kiwipete 暖機會即時列出雙方每個完成深度的 UCI `info`（depth、score、nodes、nps、PV）；後續平行 worker 仍保持安靜，避免暖機訊息重複刷屏。這些診斷行只供觀察，不會改變搜尋限制或正式對局結果。
 
----
+## 1. 為什麼改成 in-process
 
-## ⚙️ 參數設定與命令列參數
+舊版 `tournament.py -c 8` 會建立 8 個 New 與 8 個 Old Python 子行程。Numba 的遞迴 `_search` / quiescence 目前必須使用 `cache=False`，因此主要搜尋函數會在 16 個行程內分別編譯。
 
-您可以在工作區根目錄下，透過命令列參數自訂對戰：
-
-```bash
-python tools/tournament.py [參數]
-```
-
-### 1. 核心參數列表
-
-| 參數 | 預設值 | 說明 |
-| :--- | :--- | :--- |
-| `--games` | `100` | 總對局場數。注意：必須是偶數（因為會自動成對對局，先後手互換）。 |
-| `--time` | `1000` | 每步考慮時間，單位為毫秒（ms）。 |
-| `--depth` | `None` | 固定搜尋深度（會覆蓋時間限制，適用於深度基準測試）。 |
-| `--nodes` | `None` | 固定節點數限制（會覆蓋時間與深度限制）。 |
-| `-c`, `--concurrency` | `1` | 並行對戰的 Worker 數量。**若想加快對決速度並跑滿 CPU，請設為您的 CPU 核心數（例如 `-c 4`）。** |
-| `--clear-cache` | `False` | 啟動前強制清空 Numba 的 JIT 快取。 |
-| `--engine1` | `main.py` | NEW 引擎進入點路徑。 |
-| `--engine2` | `main_old.py` | OLD 引擎進入點路徑。 |
-| `--name1` | `New` | NEW 引擎在 PGN 棋譜中的名字。 |
-| `--name2` | `Old` | OLD 引擎在 PGN 棋譜中的名字。 |
-
----
-
-## ⚡ 併發對戰與雙重屏障同步機制 (Barrier Synchronization)
-
-當您設定並行對決（例如 `-c 4`）時，系統會開啟 4 組 worker 同時對戰。為了防止多個 Worker 同時編譯時產生 **Numba 快取鎖定衝突（Lock Collision）**，系統內建了**雙重屏障（Double Barrier）**同步機制：
-
-```mermaid
-graph TD
-    Start[啟動對決 -c 4] --> Stage1[階段 1: 4組 Worker 同時啟動 NEW 引擎]
-    Stage1 --> Warmup1[NEW 引擎 JIT 編譯與暖機]
-    Warmup1 --> Barrier1{Barrier 1: 等待4組皆暖機完?}
-    Barrier1 -- 否 --> Barrier1
-    Barrier1 -- 是 --> Stage2[階段 2: 4組 Worker 同時啟動 OLD 引擎]
-    Stage2 --> Warmup2[OLD 引擎 JIT 編譯與暖機]
-    Warmup2 --> Barrier2{Barrier 2: 等待4組皆暖機完?}
-    Barrier2 -- 否 --> Barrier2
-    Barrier2 -- 是 --> Stage3[階段 3: 開啟對決]
-    Stage3 --> Play[4組 Worker 獨立並行下棋, 搶奪對局任務]
-```
-
-### 屏障機制的 Terminal 輸出行為
-在進行雙重屏障同步時，控制台會顯示如下資訊：
-1. **[New warmup]**：4 個 Worker 同時在背景編譯 NEW 引擎。只有 `worker_0` 的詳細暖機過程（深度的評估與搜尋結果）會即時印出，直到印出 `bestmove ...`，等待其他 3 個 Worker 也編譯就緒。
-2. **[Old init/warmup]**：NEW 引擎全部就緒後，開始編譯 OLD 引擎。同樣只有 `worker_0` 會印出暖機細節，直到印出 `bestmove ...`。
-3. **對決開啟**：所有 Worker 進入並行對決，搶奪任務，速度飛快。
-
----
-
-## 📊 控制台輸出與結果解讀
-
-### 1. 對局結果輸出
-
-對戰開始後，為了避免多線程同時輸出導致畫面被撕裂，Terminal 輸出採用以下規則：
-* **第 1 組對局（Game 1 & 2）**：會**即時滾動印出每一步的走法**，方便您觀察引擎實時的運算動態。
-* **其他所有組局**：在對局進行中不會有任何輸出。直到該對局**下完的瞬間**，才會以**整包日誌**的形式一口氣印在畫面上。
-* **統計資訊**：每當有任一場對局結束，畫面上都會刷新全局統計：
+現在預設架構是：
 
 ```text
-After 10 pairs (20 games):
-New: 12.5
-Old: 7.5
-SPRT LLR: 1.25 bounds: [-2.94, 2.94]
-SPRT Status: Continue
-------------------------------
+單一 Python 行程
+├─ chess_engine.classical：JIT 一次
+├─ chess_engine.classical_old：JIT 一次
+├─ worker 1：New context 1 ↔ Old context 1
+├─ worker 2：New context 2 ↔ Old context 2
+└─ 主執行緒：python-chess 裁判、PGN、SPRT、統計
 ```
 
-### 2. SPRT 提早終止機制
+每個 context 仍有獨立的 TT、pawn cache、history、correction history 與搜尋狀態；只有已編譯的機器碼被同一 namespace 的 workers 共用。Numba 搜尋函數會釋放 GIL，所以 worker threads 可以真正同時搜尋。
 
-SPRT (Sequential Probability Ratio Test) 會根據當前累積的比分計算出 **LLR (對數概度比)**。
-* 若 LLR 觸及上限 `2.94`（代表 NEW 顯著優於 OLD），對決會**提早結束**並宣告 NEW 引擎棋力上升（Accept H1）。
-* 若 LLR 觸及下限 `-2.94`（代表 NEW 沒有顯著進步），對決也會**提早結束**（Accept H0）。
-* 這就是為什麼設定 `--games 100`，但有時在第 20 場或 30 場就突然停住並顯示結果的原因，此機制能節省大量的 CPU 測試時間。
+`classical_old` 的 runtime `eval_weights` 會明確從 `classical_old.constants` 初始化，不會混用現行評估參數。
 
----
+### 純評估參數 A/B 基準
 
-## 💾 檢視對局棋譜 (PGN) 與步步搜尋分析
+若目標是驗證 Texel 常數本身，New 與 Old 必須共用完全相同的搜尋與評估程式，只讓 `constants.py` 不同。同步與檢查使用：
 
-所有對局的詳細棋譜會自動覆寫並追加記錄在：
-[tournament_results.pgn](file:///c:/Users/ren%20cian/OneDrive/%E6%A1%8C%E9%9D%A2/chess/chess_numba/chess_numba/tournament_analysis/tournament_results.pgn)
+```bash
+python tools/sync_classical_old.py --sync-code
+python tools/sync_classical_old.py --diff-code
+```
 
-### 📊 每步棋最大深度詳細資料記錄
-新版對戰工具會**自動截取並解析每一步在最大搜尋深度時的詳細搜尋數據**，並將其作為 PGN 標準註解（Comment）寫入棋譜中。
-例如在 PGN 棋譜內，您會看到如下格式：
-`1. e4 {d=12, eval=+0.25, n=4521, t=240ms} e5 {d=11, eval=-0.15, n=3982, t=198ms}`
+`--sync-code` 會同步所有 Python 引擎程式、namespace imports 與 `constants.py` 的搜尋常數區，但刻意保留 `chess_engine/classical_old/constants.py` 前半部的舊評估常數；未變動的檔案不會重寫。`--diff-code` 應輸出 `Engine code and search constants are logically identical`。不要在 tournament 執行途中同步；應先完成並封存當期 PGN。
 
-* **d**：最大搜尋深度（depth）。
-* **eval**：評估分數（如果是 `+0.25` 代表白優，`-0.15` 代表黑優；若是將死則顯示 `#3` 意為 3 步將死）。
-* **n**：此步搜尋累積的節點數（nodes）。
-* **t**：此步搜尋所耗費的時間（time）。
+舊參數快照仍須具備現行公式需要的結構常數。對於舊版沒有的 king-danger rookless 分支，Old 令 `KING_DANGER_NO_QUEEN_ROOKLESS = KING_DANGER_NO_QUEEN`，等價保留原本「有后／無后」單一係數的行為；New 才使用分開調出的兩個值。phase 上下限則由各自的 MG 材質值套用同一公式推導，因此材質與 phase 尺度保持耦合。
 
-> [!TIP]
-> 1. 這些註解是完全符合標準 PGN 規範的。當您將 `tournament_results.pgn` 載入到 Arena, Cute Chess 或者是 Lichess 時，這些評估數據會以圖表或評估曲線的形式展示出來，非常方便進行搜尋效能與走子質量的分析。
-> 2. 由於 concurrency 併發對戰時每個 Worker 的對局時間不同，因此寫入 PGN 的局數順序（Round）可能會是亂序（例如 Round 1, 2, 7, 8...），這在多線程並行中是完全正常的。
+## 2. tournament.py
 
----
+### 固定節點（建議）
 
-## 🛠️ 常見問題與排錯 (FAQ)
+```bash
+python tools/tournament.py --games 200 --nodes 100000 -c 8 --no-sprt
+```
 
-### Q1. 為什麼畫面一直卡在 `[New warmup]` 或 `[Old warmup]` 的深度 14，且工作管理員看起來沒什麼 CPU 在跑？
-* **原因**：Numba 正在進行首次 JIT 編譯，這在有些 CPU 上需要耗費數分鐘的時間。請耐心等候，編譯完後對局就會立刻開始。
+未指定 `--nodes`、`--depth` 或 `--time` 時，預設等同 `--nodes 50000`。
 
-### Q2. 為什麼工作管理員只有 2 顆 CPU 在跑，沒有跑滿多核心？
-* **原因**：您沒有指定並行參數。預設的 `concurrency` 是 1。請在指令後面加上 `-c 4`（視您的 CPU 核心數而定）來開啟並行。
+固定節點適合比較棋力，因為 CPU 排程或瞬間 NPS 波動不會改變每一步的搜尋工作量。每個開局會交換黑白各下一盤。
 
-### Q3. 引擎代碼修改了，但測試結果好像沒有變化，是否使用了舊的編譯快取？
-* **原因**：Numba 的快取有時可能未偵測到底層依賴的修改。
-* **解法**：請在啟動指令加上 `--clear-cache` 強制清除快取重新編譯：
-  ```bash
-  python tools/tournament.py -c 4 --clear-cache
-  ```
+### 固定深度
+
+```bash
+python tools/tournament.py --games 100 --depth 12 -c 4
+```
+
+固定深度的實際節點量可能相差很大，主要適合功能診斷，不建議直接拿不同搜尋版本的 depth 當等成本棋力比較。
+
+### 固定時間
+
+```bash
+python tools/tournament.py --games 100 --time 1000 -c 4
+```
+
+`--time 1000` 表示每步 1,000 ms。多盤同時執行時，wall-clock 搜尋會受核心排程影響；若重視 NPS 穩定度，使用固定節點，或以 `-c 1` 另做 NPS benchmark。
+
+### 多階段
+
+```bash
+python tools/tournament.py -c 8 --no-sprt \
+  --stages "200:n20000,400:n100000,200:d12"
+```
+
+限制 token：
+
+- `n50000`：固定 50,000 nodes。
+- `d12`：固定 depth 12。
+- `1000`：固定 1,000 ms/move。
+
+所有階段共用同一批 contexts，階段切換不會重新 JIT 或重新配置工作池；每盤開始仍會清空該 context 的 TT/history，維持對局獨立性。
+
+### Backend 選擇
+
+預設 `--backend auto`：
+
+- `main.py` 對 `main_old.py`：選擇 `inprocess`。
+- 自訂任意 UCI 路徑：退回 `uci` 相容模式。
+
+可以明確指定：
+
+```bash
+python tools/tournament.py --backend inprocess
+python tools/tournament.py --backend uci
+```
+
+in-process backend 使用：
+
+- `--engine1-module chess_engine.classical`
+- `--engine2-module chess_engine.classical_old`
+
+`--own-book1/--own-book2` 只支援 UCI backend。一般 A/B 測試應關閉引擎自己的隨機 book，改用裁判提供的成對開局。
+
+## 3. 記憶體與 TT
+
+`--tt-mb` 預設維持 `128`，而且是「每個引擎 context」128 MB：
+
+```bash
+python tools/tournament.py -c 8 --tt-mb 128 --nodes 100000
+```
+
+`-c 8` 會建立 8 個 New + 8 個 Old contexts，單計 TT 約 2 GB；另外還有 continuation history、pawn history、pawn cache 等大型陣列。16 GB 系統可先使用 `-c 8`，若出現大量換頁、整機記憶體逼近上限或 NPS 明顯下降，再降低 concurrency，而不是縮小 TT。
+
+`-c` 建議不要超過實體核心數。每盤只有輪到走棋的一方搜尋，因此 `-c N` 最多約有 N 個同時進行的搜尋。
+
+## 4. 開局與重現性
+
+預設讀取 `data/openings.epd`，並用 `--seed 0` 做可重現的洗牌。
+
+使用 PGN 開局庫：
+
+```bash
+python tools/tournament.py --openings-pgn data/8moves_v3.pgn \
+  --opening-moves 8 --seed 123 --nodes 100000
+```
+
+只從初始局面開始：
+
+```bash
+python tools/tournament.py --no-openings --nodes 100000
+```
+
+## 5. SPRT、early trash 與 PGN
+
+- SPRT 預設啟用，假設區間可用 `--sprt-elo0`、`--sprt-elo1` 修改。
+- `--no-sprt` 會完整跑完排定局數。
+- `tournament.py` 預設保留 early trash；可用 `--no-early-trash` 關閉。
+- PGN 每步註解包含 depth、side-to-move evaluation、nodes、time 與 NPS。
+- engine crash、timeout、無 bestmove、非法著或 backend 狀態不同步都會明確判負，不會偷偷改走第一個合法著。
+- failure PGN 會附帶 `Failure` 與 `FailurePly` header，保存 bounded exception 訊息與發生回合；統計時應剔除該 failure 所在的整組換色配對。
+- 預設最長 400 plies；可用 `--max-plies` 修改，超過時裁定和棋並寫入 PGN Termination。
+
+自訂輸出：
+
+```bash
+python tools/tournament.py --pgn tournament_analysis/eval_ab.pgn --nodes 100000
+```
+
+多階段會自動加入 `_stageN_limit` 後綴。
+
+## 6. match_runner.py：對 Stockfish
+
+預設架構：
+
+```text
+單一 Python 行程
+├─ classical JIT 一次
+├─ worker 1：local context 1 ↔ Stockfish process 1
+├─ ...
+└─ worker N：local context N ↔ Stockfish process N
+```
+
+Stockfish 是外部 native UCI 引擎，因此每個平行 worker 仍需要一個長駐 Stockfish 行程；我方 Numba 引擎不再因 `-c` 重複編譯。
+
+等節點對戰：
+
+```bash
+python tools/match_runner.py --sf external/stockfish/stockfish-windows-x86-64-avx2.exe \
+  --games 100 --engine-nodes 50000 --sf-nodes 50000 -c 8 --no-sprt
+```
+
+不指定限制時，雙方都預設 50,000 nodes。
+
+非對稱校準或混合限制：
+
+```bash
+python tools/match_runner.py --stages \
+  "20:n50000:n10000,20:n100000:n20000,20:d12:d10" -c 4 --no-sprt
+```
+
+整批 stages 共用同一個 local context 池和同一批 Stockfish 行程。
+
+資源選項：
+
+- `--tt-mb 128`：我方每 context 的 TT，預設 128 MB。
+- `--sf-hash-mb 128`：需要時明確設定每個 Stockfish 行程的 Hash；未指定時維持 Stockfish 自己的預設值。
+- `--sf-threads 1`：每個 Stockfish 行程的 threads；`-c > 1` 時建議維持 1，避免超額使用核心。
+- `--engine-backend uci`：自訂我方 UCI 程式時的相容模式。
+
+Stockfish 校準通常應加 `--no-sprt`，因為測量目標常是完整比分而不是判斷「我方是否比 Stockfish +10 Elo」。`match_runner.py` 的 early trash 預設關閉，需要時才加 `--early-trash`。
+
+## 7. Cache 與 timeout
+
+正常執行不會自動刪除 Numba cache。只有確認原始碼／依賴快取失效或要做冷啟動實驗時才使用：
+
+```bash
+python tools/tournament.py --clear-cache --nodes 50000
+```
+
+UCI backend 使用非阻塞 stdout reader，並用 `--search-timeout` 防止外部引擎永久卡住。in-process 固定時間則由搜尋本身的 stop flag 控制。
+
+## 8. 實務建議
+
+1. 棋力 A/B：固定 nodes、成對開局、固定 seed。
+2. 最大吞吐量：逐步提高 `-c`，直到 games/hour 不再增加。
+3. 純 NPS：另用 `-c 1`、固定 position/節點，多次取中位數。
+4. 時間制：保留至少一個實體核心給作業系統，避免背景程式與 CPU 降頻。
+5. 不要把固定 depth 的勝率直接解讀成等成本棋力差。

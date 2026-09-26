@@ -4,7 +4,7 @@
 
 為了解決這個問題，統計學家亞伯拉罕·瓦爾德 (Abraham Wald) 在二戰期間發明了**序貫機率比檢定**（Sequential Probability Ratio Test, 簡稱 **SPRT**）。這是一套「**一邊做實驗，一邊做決定**」的強大統計工具。
 
-本節將像教科書一樣，由淺入深為您推導 SPRT 的核心邏輯、決策邊界的計算（包含 2.94 的由來），以及它在您的 [tournament.py](file:///c:/Users/ren%20cian/OneDrive/%E6%A1%8C%E9%9D%A2/chess/chess_numba/chess_numba/tournament.py) 代碼中究竟代表什麼數學意義。
+本節將像教科書一樣，由淺入深為您推導 SPRT 的核心邏輯、決策邊界的計算（包含 2.94 的由來），以及它在您的 [	ools/tournament.py](../tools/tournament.py) 代碼中究竟代表什麼數學意義。
 
 ---
 
@@ -26,7 +26,7 @@
     *   **後果**：丟失了一個實質的改進。
     *   **設定值**：與 $\alpha$ 相同，通常我們也設定 $\beta = 0.05$ (5%)。
 
-> 在您的代碼中 [SPRTTest(elo0=0.0, elo1=10.0, alpha=0.05, beta=0.05)](file:///c:/Users/ren%20cian/OneDrive/%E6%A1%8C%E9%9D%A2/chess/chess_numba/chess_numba/tournament.py#117-159) 正是定義了這四個參數。
+> 在您的代碼中 [SPRTTest(elo0=0.0, elo1=10.0, alpha=0.05, beta=0.05)](../tools/match_core.py) 正是定義了這四個參數。
 
 ---
 
@@ -86,13 +86,13 @@ $$P(Win) = \frac{1}{1 + 10^{\frac{- \Delta Elo}{400}}}$$
 
 ---
 
-## 4. [tournament.py](file:///c:/Users/ren%20cian/OneDrive/%E6%A1%8C%E9%9D%A2/chess/chess_numba/chess_numba/tournament.py) 裡的常態分佈近似算法 (Normal Approximation)
+## 4. [	ools/tournament.py](../tools/tournament.py) 裡的常態分佈近似算法 (Normal Approximation)
 
 在現實的引擎測試中，西洋棋有「和棋 (Draws)」，更有「白棋先手優勢」。為了消除先後手優勢，我們會讓引擎兩兩一組，針對相同開局下兩盤棋（黑白互換），這也是為什麼您的腳本裡叫做 `Pair Scores`。
 
 當樣本數變大的時候，我們不需要去算每一局精確的查表機率，我們可以使用統計學中的大魔王——**中央極限定理 (Central Limit Theorem, CLT)**。
 
-只要將對戰結果的分數 $S$ 取平均、算變異數，我們就可以把這些亂七八糟的分數逼近成一個「常態分佈的鐘形曲線」。這也是您在 [check_status()](file:///c:/Users/ren%20cian/OneDrive/%E6%A1%8C%E9%9D%A2/chess/chess_numba/chess_numba/tournament.py#128-159) 看到的那段落長公式的原理：
+只要將對戰結果的分數 $S$ 取平均、算變異數，我們就可以把這些亂七八糟的分數逼近成一個「常態分佈的鐘形曲線」。這也是您在 [check_status()](../tools/match_core.py) 看到的那段落長公式的原理：
 
 $$ LLR \approx \frac{\mu_1 - \mu_0}{\sigma^2} \times \left( \sum_{i=1}^n S_i - n \times \frac{\mu_0 + \mu_1}{2} \right) $$
 

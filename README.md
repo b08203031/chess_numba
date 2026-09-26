@@ -150,7 +150,7 @@ python -m tests.perft divide --depth 4
   * `polyglot.bin`: 共享的二進位開局庫檔案。
   * `classical/`: 現行經典評估（HCE）與搜尋；各模組自洽。
     * `constants.py`, `evaluation.py`, `pawns.py`, `material.py`, `endgame.py`, `search.py`, `move_generator.py` 等。
-  * `classical_old/`: 對戰基準快照（僅同步 `.py`，見 `tools/sync_classical_old.py`；**不維護 md**）。
+  * `classical_old/`: 對戰基準快照；純參數 A/B 以 `tools/sync_classical_old.py --sync-code` 同步程式與搜尋常數、保留舊評估常數（**不維護 md**）。
   * `nnue/`: NNUE 評估版本，包含推理邏輯。
     * `constants.py`, `evaluation.py`, `search.py` 等。
     * `ml_eval/`: 機器學習訓練、量化及推理模組。
@@ -166,15 +166,17 @@ python -m tests.perft divide --depth 4
   * `benchmark*.py`: 引擎效能基準測試。
 * `tools/`: 工具與對決管理目錄。
   * `screen_recognizer.py`: 螢幕棋盤影像識別模組。
-  * `tournament.py` & `match_runner.py`: UCI 引擎對決與聯賽管理程式。
+  * `match_core.py`: 共用 in-process context 池、UCI adapter、裁判、PGN 與 SPRT。
+  * `tournament.py` & `match_runner.py`: 單進程共享 JIT 的引擎對決，以及對 Stockfish 的混合式 match runner。
   * `filter_book.py`: 開局庫過濾工具。
 * `data/`: 資料儲存目錄。
   * `templates/`: 棋子識別影像範本。
   * `openings.epd`: 聯賽開局庫。
 * `external/`: 外部工具。
   * `stockfish/`: 包含官方 Stockfish 執行檔，用於聯賽對手或資料標記。
-* `tuner/`: 經典評估函數參數 SPSA 調優器與 NNUE 訓練數據管線。
-* `tune_search/`: 搜尋參數 SPSA 自動調優器。
+* `tuner/`: Classical HCE 評估參數 SPSA（`data_pipeline/`、`data/` 大檔）、以及 `nnue_pipeline/` 訓練資料。
+* `tune_search/`: 搜尋參數 SPSA 調優器（單一 registry、runtime/compile-time 分層、runtime 單次 JIT fixed-node match、compile-time UCI match）。
+* `tune_eval_match/`: **對局式 HCE 權重 SPSA**（單進程 / 單次 JIT，`SearchContext.eval_weights` 即時改權）。
 
 ## 📂 專案文件導覽 (Documentation Map)
 
@@ -190,27 +192,35 @@ python -m tests.perft divide --depth 4
 ### 2. 經典 (Classical) 評估與搜尋
 
 * **[搜尋算法分析](chess_engine/classical/SEARCH_ANALYSIS.md)**：PVS、NMP / LMR / Futility / Singular 等剪枝與 move ordering。
+* **[2026-08-04 搜尋優化診斷與交接](chess_engine/classical/SEARCH_OPTIMIZATION_DIAGNOSTIC_20260804.md)**：500 戰術 + 500 開局／安靜盤面的 n30k 複驗；P0–P4 diagnostics/rollback、P5 暖 history attribution，以及 P6 history-prune cont1 負尾保護。
+* **[Numba JIT 編譯與快取實驗報告](chess_engine/classical/JIT_COMPILE_CACHE_REPORT.md)**（**JIT / disk cache 主文件**）：1 MB 表上限、packed rook、StructRef `SearchContext`、特化爆炸、cold/warm 量測與 checklist；後續 JIT 工作請參考並擴寫。
+* **[2026-07-15/16 搜尋戰役報告](tournament_analysis/REPORT_2026-07-15_16_search_campaign.md)**：座標下降 R1–R3、結構 A/B、E1/E2、雙對戰 scale 100/85 結論與接納決策。
+* **[Classical 搜尋單項實驗日誌](tournament_analysis/SEARCH_EXP_LOG.md)**：E1+ 連續 A/B（200@100k）、留下/回滾門檻、early-trash、累積基線；**E14 起診斷隨對戰**（可選 `tools/hist_diag_bench.py` 事後彙總）。
+* **[NMP 實驗計畫](tournament_analysis/NMP_EXPERIMENT_PLAN.md)**：~15% 節點貢獻診斷、S1 失敗複盤、漏斗 KPI 與 Phase 0–3 中間態實驗閘道。
+* **[搜尋 ↔ 評估介面](chess_engine/classical/SEARCH_EVAL_INTERFACE.md)**：KNOWN_WIN 護欄（**PR-A+B+C 已定稿**；122 局 50%）、NMP/RFP/ProbCut/Razor 與 SF11/SF18 對照。
 * **[SEE 專題](chess_engine/classical/SEE_ANALYSIS.md)**：Swap 演算法、射線過濾、過路兵與升變。
-* **[HCE 與 SF11 對齊審核](chess_engine/classical/HCE_SF11_GAP_AUDIT.md)**（**評估對齊主文件**）：階段 A/B/B3/B4、kingDanger、通路兵 scale 與對戰結論。
+* **[HCE 與 SF11 對齊審核](chess_engine/classical/HCE_SF11_GAP_AUDIT.md)**（**評估對齊主文件**）：階段 A/B/B3/B4/B5/P2、對戰結論；評估 P3 回滾；搜尋護欄交叉引用。
 * **[殘局 vs Stockfish 驗證](chess_engine/classical/ENDGAME_SF_VERIFICATION.md)**：專用殘局說明；日常測 `tests/test_endgame_conformance.py`，可選 oracle `tools/verify_endgame_vs_sf.py`。
-* **[歷史啟發](chess_engine/classical/HISTORY_HEURISTICS_CN.md)**：主 / 蝴蝶 / 吃子 / 延續 / 糾錯歷史與重力公式。
+* **[歷史啟發](chess_engine/classical/HISTORY_HEURISTICS_CN.md)**：主 / 蝴蝶 / 吃子 / 延續 / 糾錯歷史與重力公式；**現用基線 Phase 1a**。
+* **[歷史啟發重構工程計畫](chess_engine/classical/HISTORY_REFORM_PLAN.md)**：五階段閘門紀錄；**1a 凍結、P2 已回退、P3–5 暫緩**；下一段方向見 §11（timeman / 剪枝尺度 / HCE 單項）。
+* **[搜尋優化候選提案 (E47–E50)](tournament_analysis/SEARCH_PROPOSALS_E47_E50.md)**：ProbCut 深度動態自適應、LMR ALL-Node / CutNode 減深對齊、廢除將軍延伸方案規劃。
 
 ### 3. 對戰、聯賽與調參
 
 * **[引擎對戰指南](tools/TOURNAMENT_TUTORIAL.md)**：`tools/tournament.py`、SPRT、併發與 JIT 暖機。
-* **[對戰框架說明](tournament_analysis/README.md)**：本目錄角色、開局庫與 SPRT 判讀。
-* **[階段 A](tournament_analysis/PHASE_A_TOURNAMENT_ANALYSIS.md)** / **[階段 B](tournament_analysis/PHASE_B_TOURNAMENT_ANALYSIS.md)** / **[階段 B4](tournament_analysis/PHASE_B4_TOURNAMENT_ANALYSIS.md)** 對戰分析。
-* **[SPSA 與 NNUE 數據管線](tuner/README.md)**、**[搜尋參數 SPSA](tune_search/README.md)**。
+* **[對戰框架說明](tournament_analysis/README.md)**：本目錄角色、成對賽果九宮格、局級/著法級統計圖表與分析腳本。
+* **[SPRT 統計原理推導](tournament_analysis/sprt_tutorial.md)**：瓦爾德序貫機率比檢定（SPRT）數學推導與 LLR 邊界解析。
+* **[Classical HCE 調參手冊](tuner/README.md)**（靜態資料集 SPSA、資料標籤、與 classical 同步）、**[搜尋參數 SPSA](tune_search/README.md)**、**[對局式 HCE 權重 SPSA](tune_eval_match/README.md)**（單進程 / 單次 JIT；king danger / tempo 等 runtime 權重與調參路線圖）。
 * **[AI 助手入口](AGENTS.md)** 與 **`.agents/rules/`**（工作流、Numba、棋盤完整性、搜尋約束、NNUE 規範）。
 
 ### 4. 隔離區（不進日常索引）
 
-* `archive/`、`tuner/archive_old_scripts/`：舊腳本與歷史分析，僅考古用。
+* `archive/`、`tuner/archive/`（含 `tuned_dumps/` 歷史 SPSA 輸出）、`archive/scratch/`：舊腳本與歷史產物，僅考古用。
 * `stockfish_repo/`、`stockfish_11/`、`external/`：上游原始碼與工具，非本引擎文件。
 
 ## 開發者注意事項
 
-* **Numba JIT:** 計算密集型函數使用 `@numba.njit`；修改時須保持 Numba 相容型別（NumPy 陣列與基本型別）。首次編譯可能需數分鐘。
+* **Numba JIT:** 計算密集型函數使用 `@numba.njit`；修改時須保持 Numba 相容型別（NumPy 陣列與基本型別）。首次 / 清 cache 後編譯可能需數分鐘；disk cache、1 MB 全域表上限、StructRef 與遞迴 cache 策略見 **[JIT 編譯與快取實驗報告](chess_engine/classical/JIT_COMPILE_CACHE_REPORT.md)**。
 * **Make-Unmake 架構:** 搜尋樹以原地 make/unmake 遍歷，須維護佔用位元棋盤與狀態完整性。
 * **Zobrist 哈希:** 每次移動與撤銷都必須正確增量更新，置換表才可靠。
 * **文件維護:** 重大功能或重構後更新對應技術文件，並同步本節導覽索引。

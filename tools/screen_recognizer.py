@@ -23,6 +23,8 @@ class ScreenRecognizer:
         self.M = None     # Store perspective transform matrix
         self.inv_M = None # To store inverse perspective matrix for coordinate mapping
         self.board_side_length = 800
+        # Reuse mss handle across captures (faster opponent-poll loops)
+        self._sct = None
 
     def _load_templates(self, path):
         """
@@ -74,7 +76,10 @@ class ScreenRecognizer:
         Returns:
             numpy.ndarray: 返回 OpenCV 格式的圖像。
         """
-        with mss.mss() as sct:
+        try:
+            if self._sct is None:
+                self._sct = mss.mss()
+            sct = self._sct
             # 安全地選擇顯示器：如果 monitors[1] 不存在（例如無顯示器環境），則退回到 monitors[0]
             if region is None:
                 if len(sct.monitors) > 1:
@@ -83,7 +88,23 @@ class ScreenRecognizer:
                     monitor = sct.monitors[0]
             else:
                 monitor = region
-            
+
+            sct_img = sct.grab(monitor)
+            img = Image.frombytes("RGB", sct_img.size, sct_img.bgra, "raw", "BGRX")
+            return cv2.cvtColor(np.array(img), cv2.COLOR_RGB2BGR)
+        except Exception:
+            # Recreate handle once if the previous mss session went bad
+            try:
+                if self._sct is not None:
+                    self._sct.close()
+            except Exception:
+                pass
+            self._sct = mss.mss()
+            sct = self._sct
+            if region is None:
+                monitor = sct.monitors[1] if len(sct.monitors) > 1 else sct.monitors[0]
+            else:
+                monitor = region
             sct_img = sct.grab(monitor)
             img = Image.frombytes("RGB", sct_img.size, sct_img.bgra, "raw", "BGRX")
             return cv2.cvtColor(np.array(img), cv2.COLOR_RGB2BGR)
@@ -401,21 +422,46 @@ class ScreenRecognizer:
         
         return fen
 
-    def get_fen_from_screen(self, player_color='w', active_player='w', castling='KQkq', en_passant='-', halfmove=0, fullmove=1, exclude_rect=None, verbose=True):
+    def get_fen_from_screen(
+        self,
+        player_color='w',
+        active_player='w',
+        castling='KQkq',
+        en_passant='-',
+        halfmove=0,
+        fullmove=1,
+        exclude_rect=None,
+        verbose=True,
+        reuse_transform=False,
+    ):
+        """
+        Capture screen and return FEN.
+
+        reuse_transform=True skips expensive contour board search and reuses the
+        last perspective matrix (M). Ideal for high-frequency opponent polling
+        after a successful full detection.
+        """
         if verbose:
             print("正在擷取整個螢幕...")
         screenshot = self.capture_screen()
-        
-        if verbose:
-            print("正在自動偵測棋盤...")
-        try:
-            # Wrap potential cv2 failures in a try block
-            board_img = self.find_board(screenshot, exclude_rect=exclude_rect, verbose=verbose)
-        except Exception as e:
+
+        board_img = None
+        if reuse_transform and self.M is not None:
+            try:
+                board_img = self.get_warped_board(screenshot)
+            except Exception:
+                board_img = None
+
+        if board_img is None:
             if verbose:
-                print(f"棋盤偵測發生錯誤: {e}")
-            return None
-        
+                print("正在自動偵測棋盤...")
+            try:
+                board_img = self.find_board(screenshot, exclude_rect=exclude_rect, verbose=verbose)
+            except Exception as e:
+                if verbose:
+                    print(f"棋盤偵測發生錯誤: {e}")
+                return None
+
         if board_img is None:
             if verbose:
                 print("無法從螢幕上找到棋盤。")
@@ -423,11 +469,30 @@ class ScreenRecognizer:
 
         if verbose:
             print("成功找到棋盤，正在進行辨識...")
-        # debug write removed
+        return self.get_fen_from_board_image(
+            board_img,
+            player_color=player_color,
+            active_player=active_player,
+            castling=castling,
+            en_passant=en_passant,
+            halfmove=halfmove,
+            fullmove=fullmove,
+        )
+
+    def get_fen_from_board_image(
+        self,
+        board_img,
+        player_color='w',
+        active_player='w',
+        castling='KQkq',
+        en_passant='-',
+        halfmove=0,
+        fullmove=1,
+    ):
         squares = self.split_into_squares(board_img)
 
         board_representation = []
-        for i, square in enumerate(squares):
+        for square in squares:
             piece = self.identify_piece_in_square(square)
             board_representation.append(piece)
 
@@ -435,9 +500,8 @@ class ScreenRecognizer:
             board_representation = board_representation[::-1]
 
         piece_fen = self.board_to_fen(board_representation)
-        
-        full_fen = f"{piece_fen} {active_player} {castling} {en_passant} {halfmove} {fullmove}"
-        return full_fen
+        return f"{piece_fen} {active_player} {castling} {en_passant} {halfmove} {fullmove}"
+
 
     def get_move_screen_coords(self, uci_move, player_color='w'):
         """

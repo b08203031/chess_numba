@@ -27,7 +27,7 @@ HF_TOKEN = os.environ.get("HF_TOKEN", "")  # 從環境變數讀取，例如 set 
 
 TARGET_SAMPLES = 40_000_000  # 本次抓取目標數量 (一次抓滿 4000 萬筆平滑過濾後的健康資料)
 SKIP_SAMPLES = 1_000_000     # 跳過前 100 萬筆 (因為原資料集開頭的 100 萬筆 FEN 格式損壞/異常)
-OUTPUT_FILE = "tuner/ultimate_dataset.npz"
+OUTPUT_FILE = "tuner/data/nnue/ultimate_dataset.npz"
 REPO_ID = "mateuszgrzyb/lichess-stockfish-normalized"
 
 K = 0.0025

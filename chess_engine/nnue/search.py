@@ -101,7 +101,8 @@ def quiescence_search(piece_bbs, occupancy_bbs, game_state, alpha, beta, ply, se
         return evaluate_position(piece_bbs, occupancy_bbs, game_state, search_context, ply, lazy=False), q_nodes
 
     if not has_sufficient_material(piece_bbs):
-        return np.int32(0), q_nodes
+        if not is_in_check(piece_bbs, occupancy_bbs, game_state):
+            return np.int32(0), q_nodes
 
     # M4: TT Probe in QSearch — avoids re-evaluating positions already in TT
     zobrist_key = game_state[4]
@@ -476,13 +477,16 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
 
     # Avoid 1st repetition (2nd occurrence total) or 50-move rule
     # Crucial fix: Do not prune at the root (ply 0).
-    if ply > 0 and (repetition_count >= 1 or halfmove_clock >= FIFTY_MOVE_RULE_LIMIT):
-        search_context.pv_table[ply, ply] = NO_MOVE
-        return (np.int32(0), NO_MOVE, nodes_searched, quiescence_nodes, tt_hits)
+    if ply > 0:
+        if repetition_count >= 1:
+            search_context.pv_table[ply, ply] = NO_MOVE
+            return (np.int32(0), NO_MOVE, nodes_searched, quiescence_nodes, tt_hits)
 
-    if ply > 0 and not has_sufficient_material(piece_bbs):
-        search_context.pv_table[ply, ply] = NO_MOVE
-        return (np.int32(0), NO_MOVE, nodes_searched, quiescence_nodes, tt_hits)
+        # 50-move rule and insufficient material cannot override checkmate
+        if halfmove_clock >= FIFTY_MOVE_RULE_LIMIT or not has_sufficient_material(piece_bbs):
+            if not is_in_check(piece_bbs, occupancy_bbs, game_state):
+                search_context.pv_table[ply, ply] = NO_MOVE
+                return (np.int32(0), NO_MOVE, nodes_searched, quiescence_nodes, tt_hits)
     
     # M3: 50-move rule scale-down — gradually reduce eval towards draw as halfmove_clock approaches limit
     # This prevents the "cliff effect" where deep search sees halfmove_clock=limit at leaf nodes
@@ -1533,9 +1537,20 @@ def iterative_deepening_search(piece_bbs, occupancy_bbs, game_state, max_depth, 
 
     nodes_limit = time_config.get('nodes_limit', 0)
 
+    last_score, best_move_total = 0, NO_MOVE
+    # Initialize counters before the timer thread starts.  The timer closes
+    # over ``total_nodes`` and may run immediately on a fixed-node search.
+    total_nodes, total_q_nodes, total_tt_hits = (np.uint64(v) for v in [0]*3)
+    last_completed_depth = 0
+    best_move_from_last_depth = NO_MOVE
+
     # Spawn timer thread if search is time-limited or node-limited
     timer_thread = None
     nodes_searched_array = search_context.nodes_searched_array
+    # This shared slot is observed by the Python timer and is scoped to the
+    # current root/depth iteration.  Do not carry a previous move's count into
+    # a new fixed-node search, or it can stop before depth 1 and return NO_MOVE.
+    nodes_searched_array[0] = np.uint64(0)
     if search_context.end_time > 0.0 or nodes_limit > 0:
         def timer_worker():
             end_time = search_context.end_time
@@ -1557,11 +1572,6 @@ def iterative_deepening_search(piece_bbs, occupancy_bbs, game_state, max_depth, 
         timer_thread = threading.Thread(target=timer_worker, daemon=True)
         timer_thread.start()
     
-    last_score, best_move_total = 0, NO_MOVE
-    total_nodes, total_q_nodes, total_tt_hits = (np.uint64(v) for v in [0]*3)
-    last_completed_depth = 0
-    best_move_from_last_depth = NO_MOVE
-
     # Clear Counter Moves at start of search? Stockfish doesn't seem to reset them per search, 
     # but usually they are part of thread data. We can keep them or clear them.
     # Clearing them ensures no pollution from previous moves in different game contexts if not handled by generations.
@@ -1582,6 +1592,7 @@ def iterative_deepening_search(piece_bbs, occupancy_bbs, game_state, max_depth, 
             beta = min(INFINITY, last_score + delta)
 
         search_context.nodes_searched = np.uint64(0)
+        nodes_searched_array[0] = np.uint64(0)
         
         while True:
             res = _search(piece_bbs, occupancy_bbs, game_state, current_depth, alpha, beta, search_context, 0, NO_MOVE, True, False)

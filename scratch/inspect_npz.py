@@ -27,7 +27,7 @@ def decode_feature(f):
     return f"{channel_names.get(channel, f'Ch{channel}')}@{sq_name}"
 
 def main():
-    npz_path = os.path.join(workspace_dir, "tuner/ultimate_halfka_farseerT75.npz")
+    npz_path = os.path.join(workspace_dir, "tuner/data/nnue/ultimate_halfka_farseerT75.npz")
     if not os.path.exists(npz_path):
         print(f"NPZ dataset not found at {npz_path}")
         return

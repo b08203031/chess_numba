@@ -21,15 +21,22 @@ __pycache__/
 *.pth
 *.npy
 
-# Stockfish
+# Stockfish engines and repositories
 *.exe
+stockfish_repo/
+stockfish_11/
+external/stockfish/
+stockfish*/
 
 # PGN
 *.pgn
 
-# Archive
+# Archive & historical dumps
 *.zip
+archive/
+tuner/archive/
+tuner/data/
 
-# IDE
+# IDE & third-party tools
 .vscode/
-
+.qoder/

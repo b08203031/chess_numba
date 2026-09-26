@@ -14,7 +14,11 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")
 import unittest
 import numpy as np
 from chess_engine.classical.fen_parser import parse_fen
-from chess_engine.classical.endgame import evaluate_special_endgame
+from chess_engine.classical.endgame import (
+    evaluate_special_endgame,
+    get_endgame_scale_factor,
+)
+from chess_engine.classical.constants import SCALE_FACTOR_DRAW
 from chess_engine.classical.evaluation import evaluate_position
 
 
@@ -192,6 +196,23 @@ class TestEndgameConformance(unittest.TestCase):
         fen = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
         hit, score, *_ = self._special(fen)
         self.assertFalse(hit)
+
+    def test_scale_function_only_applies_to_evaluated_strong_side(self):
+        # White has the wrong-bishop rook-pawn fortress pattern, but Black's
+        # extra pawns can make Black the evaluated strong side. SF11 only probes
+        # the scale function registered for that strong side.
+        fen = "k7/P7/8/8/8/3pp3/8/2B4K w - - 0 1"
+        piece_bbs, occupancy_bbs, game_state = parse_fen(fen)
+
+        white_sf = int(get_endgame_scale_factor(
+            piece_bbs, occupancy_bbs, game_state, np.int32(0), np.int32(100)
+        ))
+        black_sf = int(get_endgame_scale_factor(
+            piece_bbs, occupancy_bbs, game_state, np.int32(0), np.int32(-100)
+        ))
+
+        self.assertEqual(white_sf, int(SCALE_FACTOR_DRAW))
+        self.assertNotEqual(black_sf, int(SCALE_FACTOR_DRAW))
 
 
 if __name__ == "__main__":

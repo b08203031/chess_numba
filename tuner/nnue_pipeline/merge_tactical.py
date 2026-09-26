@@ -5,8 +5,8 @@ import numpy as np
 import numba
 import chess
 
-INPUT_JSONL = "tuner/tactical_data.jsonl"
-TARGET_NPZ = "tuner/ultimate_halfka.npz"
+INPUT_JSONL = "tuner/data/jsonl/tactical_data.jsonl"
+TARGET_NPZ = "tuner/data/nnue/ultimate_halfka.npz"
 
 # ========== 1. Numba HalfKA 解析器 (完全沿用) ==========
 @numba.njit(numba.int32[:](numba.types.Array(numba.uint64, 1, 'C', readonly=True), numba.boolean), cache=True, fastmath=True)

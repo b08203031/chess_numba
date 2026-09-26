@@ -3546,7 +3546,7 @@ def run_puzzle_test():
     """
     Runs a search test for each puzzle and prints statistics.
     """
-    from chess_engine.classical.engine_types import SearchContext
+    from chess_engine.classical.engine_types import create_search_context
 
 
     # 1. Warm-up (triggers JIT compilation)
@@ -3554,18 +3554,7 @@ def run_puzzle_test():
     fen_start = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
     p_bbs, o_bbs, g_state = parse_fen(fen_start)
     tt = create_transposition_table(16)
-    killer_moves = np.zeros(256, dtype=np.uint16)
-    history_table = np.zeros((12, 64), dtype=np.int32)
-    butterfly_history = np.zeros((64, 64), dtype=np.int32)
-    continuation_history = np.zeros((4, 12, 64, 12, 64), dtype=np.int16)
-    capture_history = np.zeros((12, 64, 12), dtype=np.int32)
-    pawn_history = np.full((8192, 12, 64), -1238, dtype=np.int16)
-    pawn_correction_history = np.zeros(16384, dtype=np.int16)
-    minor_correction_history = np.zeros(16384, dtype=np.int16)
-    non_pawn_correction_history_white = np.zeros(16384, dtype=np.int16)
-    non_pawn_correction_history_black = np.zeros(16384, dtype=np.int16)
-    pv_table = np.zeros((128, 128), dtype=np.uint16)
-    ctx = SearchContext(tt, killer_moves, pv_table, history_table, butterfly_history, continuation_history, capture_history, pawn_history, pawn_correction_history, minor_correction_history, non_pawn_correction_history_white, non_pawn_correction_history_black)
+    ctx, hist_tables = create_search_context(tt)
     
     # Run a quick search
     iterative_deepening_search(p_bbs, o_bbs, g_state, 8, {'optimum_time': 0, 'maximum_time': 0}, ctx)
@@ -3595,28 +3584,9 @@ def run_puzzle_test():
 
         piece_bbs, occupancy_bbs, game_state = parse_fen(puzzle["fen"])
         
-        # killer_moves, pv_table, and history_table are now initialized inside the loop
-        killer_moves = np.zeros(MAX_PLY * 2, dtype=np.uint16)
-        pv_table = np.zeros((MAX_PLY, MAX_PLY), dtype=np.uint16)
-        history_table = np.zeros((12, 64), dtype=np.int32) # Note: history_table size is 12x64 in search.py
-        butterfly_history = np.zeros((64, 64), dtype=np.int32)
-        continuation_history = np.zeros((4, 12, 64, 12, 64), dtype=np.int16)
-        capture_history = np.zeros((12, 64, 12), dtype=np.int32)
-        pawn_correction_history = np.zeros(16384, dtype=np.int16)
-        minor_correction_history = np.zeros(16384, dtype=np.int16)
-        non_pawn_correction_history_white = np.zeros(16384, dtype=np.int16)
-        non_pawn_correction_history_black = np.zeros(16384, dtype=np.int16)
-        
-        # Clear TT before each search
+        # Clear TT before each search; fresh history context per puzzle
         clear_transposition_table(transposition_table)
-        ctx.killer_moves.fill(0)
-        ctx.history_table.fill(0)
-        
-        search_context = SearchContext(
-            transposition_table, killer_moves, pv_table, history_table,
-            butterfly_history, continuation_history, capture_history, pawn_history,
-            pawn_correction_history, minor_correction_history, non_pawn_correction_history_white, non_pawn_correction_history_black
-        )
+        search_context, hist_tables = create_search_context(transposition_table)
 
         start_time = time.time()
 

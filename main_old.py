@@ -11,7 +11,7 @@ from chess_engine.classical_old.core import generate_legal_moves
 from chess_engine.classical_old.debug_utils import log_info
 from chess_engine.classical_old.fen_parser import parse_fen
 from chess_engine.classical_old.move import move_to_uci
-from chess_engine.classical_old.search import iterative_deepening_search
+from chess_engine.classical_old.search import iterative_deepening_search, warmup_search_jit
 from chess_engine.classical_old.time_manager import calculate_search_time
 from chess_engine.classical_old.transposition_table import (
     create_transposition_table,
@@ -32,6 +32,8 @@ global_search_context = None
 
 # Global counter for TT generation
 global_tt_generation = 0
+# One-shot Numba compile of recursive search/QS (lazy njit; see JIT_COMPILE_CACHE_REPORT.md)
+_search_jit_warmed = False
 
 def run_search(board_state, max_depth, time_config, transposition_table, killer_moves, history_table, pv_table):
     """
@@ -54,15 +56,14 @@ def uci_loop():
     # Initialize engine components before the loop starts / 在循環開始前初始化引擎組件
     transposition_table = create_transposition_table(TT_SIZE_MB)
     
-    # We need persistent tables for the search context / 我們需要搜尋上下文的持久化表
-    # Update killer_moves to be 1D array matching SearchContext definition
+    # Phase 1a history tables (restored from classical_old shapes)
     killer_moves = np.zeros(MAX_PLY * 2, dtype=np.uint16)
     history_table = np.zeros((12, 64), dtype=np.int32)
     butterfly_history = np.zeros((64, 64), dtype=np.int32)
-    continuation_history = np.zeros((4, 12, 64, 12, 64), dtype=np.int16)
-    capture_history = np.zeros((12, 64, 12), dtype=np.int32)
+    continuation_history = np.zeros((5, 12, 64, 12, 64), dtype=np.int16)
+    capture_history = np.zeros((12, 64, 6), dtype=np.int32)
     pawn_history = np.full((8192, 12, 64), -1238, dtype=np.int16)
-    pawn_correction_history = np.zeros(16384, dtype=np.int16) # CORRECTION_HISTORY_SIZE
+    pawn_correction_history = np.zeros(16384, dtype=np.int16)
     minor_correction_history = np.zeros(16384, dtype=np.int16)
     non_pawn_correction_history_white = np.zeros(16384, dtype=np.int16)
     non_pawn_correction_history_black = np.zeros(16384, dtype=np.int16)
@@ -105,7 +106,7 @@ def uci_loop():
             command = tokens[0]
 
             if command == "uci":
-                print("id name MyChessEngineOld")
+                print("id name MyChessEngine")
                 print("id author YourName")
                 print("option name OwnBook type check default true")
                 print("uciok", flush=True)
@@ -121,6 +122,17 @@ def uci_loop():
                 except ValueError:
                     pass
             elif command == "isready":
+                global _search_jit_warmed
+                if not _search_jit_warmed:
+                    # Compile recursive search/QS here so first timed `go` is hot.
+                    # May take ~1–3 minutes cold; subsequent isready is instant.
+                    log_info("Warming Numba search JIT (first isready)...")
+                    try:
+                        warmup_search_jit()
+                        _search_jit_warmed = True
+                        log_info("Numba search JIT warm-up complete.")
+                    except Exception as e:
+                        log_info(f"Numba search JIT warm-up failed: {e}")
                 print("readyok", flush=True)
             elif command == "ucinewgame":
                 clear_transposition_table(transposition_table)
@@ -247,7 +259,6 @@ def uci_loop():
                     continue
 
                 # --- Prepare Search Context / 準備搜尋上下文 ---
-                # Create a new context for this search / 為此搜尋創建新的上下文
                 global_search_context = SearchContext(
                     transposition_table, killer_moves, pv_table, history_table,
                     butterfly_history, continuation_history, capture_history, pawn_history,

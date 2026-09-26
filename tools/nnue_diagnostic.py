@@ -147,7 +147,7 @@ def run_diagnostics():
             print("-" * 60)
 
     # --- 3. Dataset-wide Activation Diagnostics (Optional) ---
-    dataset_path = "./tuner/ultimate_halfka_farseerT75.npz"
+    dataset_path = "./tuner/data/nnue/ultimate_halfka_farseerT75.npz"
     if os.path.exists(dataset_path):
         print_section("Dataset-wide Activation Diagnostics (10,000 Validation Samples)")
         print(f"Loading validation slice from {dataset_path}...")

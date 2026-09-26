@@ -18,7 +18,6 @@ from __future__ import annotations
 
 import argparse
 import math
-import os
 import re
 import sys
 from collections import Counter, defaultdict
@@ -38,6 +37,78 @@ LENGTH_BUCKETS = [
     ("long(51-80)", lambda m: 51 <= m <= 80),
     ("very_long(>80)", lambda m: m > 80),
 ]
+
+MOVE_NUMBER_RE = re.compile(r"(?<!\S)(\d+)\.(?:\.\.)?(?=\s|[A-Za-z0-9O])")
+
+
+def strip_pgn_annotations(movetext: str) -> str:
+    """Remove comments and side variations before inspecting mainline SAN."""
+    clean: List[str] = []
+    brace_depth = 0
+    variation_depth = 0
+    semicolon_comment = False
+
+    for char in movetext:
+        if semicolon_comment:
+            if char in "\r\n":
+                semicolon_comment = False
+                clean.append(" ")
+            continue
+        if brace_depth:
+            if char == "{":
+                brace_depth += 1
+            elif char == "}":
+                brace_depth -= 1
+                if brace_depth == 0:
+                    clean.append(" ")
+            continue
+        if variation_depth:
+            if char == "(":
+                variation_depth += 1
+            elif char == ")":
+                variation_depth -= 1
+                if variation_depth == 0:
+                    clean.append(" ")
+            continue
+        if char == "{":
+            brace_depth = 1
+        elif char == "(":
+            variation_depth = 1
+        elif char == ";":
+            semicolon_comment = True
+        else:
+            clean.append(char)
+
+    return "".join(clean)
+
+
+def extract_movetext_metadata(movetext: str, fen: str = "") -> Tuple[int, str, int, bool]:
+    """Return played full-moves, first SAN, promotions, and explicit mate-eval flag.
+
+    Search comments must be removed before counting move numbers: an eval such as
+    ``eval=+299.93`` is otherwise indistinguishable from a PGN move number to a
+    broad ``\\d+\\.`` regex.
+    """
+    clean = strip_pgn_annotations(movetext)
+    move_numbers = [int(value) for value in MOVE_NUMBER_RE.findall(clean)]
+
+    start_fullmove = 1
+    fen_fields = fen.split()
+    if len(fen_fields) >= 6:
+        try:
+            start_fullmove = max(1, int(fen_fields[5]))
+        except ValueError:
+            pass
+    num_moves = max(0, max(move_numbers) - start_fullmove + 1) if move_numbers else 0
+
+    first_match = re.search(
+        r"(?<!\S)\d+\.(?:\.\.)?\s*([^\s]+)",
+        clean,
+    )
+    first_move = first_match.group(1) if first_match else "Unknown"
+    promotions = len(re.findall(r"=[QRBN](?=[+#?!]*(?:\s|$))", clean))
+    mate_flag = bool(re.search(r"eval\s*=\s*#-?\d+", movetext))
+    return num_moves, first_move, promotions, mate_flag
 
 
 def to_elo(s: float) -> float:
@@ -94,9 +165,13 @@ class ChessEngineAnalyzer:
         self.total_pairs = 0
         self.consecutive_pair_counts: Counter = Counter()
         self.fen_pair_counts: Counter = Counter()
+        self.match_pairs: List[Tuple[int, Dict[str, Any], Dict[str, Any]]] = []
+        self.sequence_order = "PGN file order"
+        self.source_path: Optional[Path] = None
 
     def parse_pgn(self, file_path: str | Path) -> None:
         path = Path(file_path)
+        self.source_path = path.resolve()
         content = path.read_text(encoding="utf-8", errors="replace")
         games_raw = re.split(r"\[Event ", content)[1:]
         self.games.clear()
@@ -110,7 +185,7 @@ class ChessEngineAnalyzer:
         self.w_wins = self.w_draws = self.w_losses = 0
         self.b_wins = self.b_draws = self.b_losses = 0
 
-        for game in games_raw:
+        for file_index, game in enumerate(games_raw):
             white_m = re.search(r'\[White "(.*?)"\]', game)
             black_m = re.search(r'\[Black "(.*?)"\]', game)
             result_m = re.search(r'\[Result "(.*?)"\]', game)
@@ -126,15 +201,17 @@ class ChessEngineAnalyzer:
             rnd_m = re.search(r'\[Round "(.*?)"\]', game)
             date_m = re.search(r'\[Date "(.*?)"\]', game)
             fen_m = re.search(r'\[FEN "(.*?)"\]', game)
+            fen = fen_m.group(1) if fen_m else ""
 
             moves_m = re.search(r"\]\s*\n\s*\n(.*?)$", game, re.DOTALL)
             moves_text = moves_m.group(1) if moves_m else ""
-            move_numbers = re.findall(r"\b(\d+)\.", moves_text)
-            num_moves = max(int(m) for m in move_numbers) if move_numbers else 0
-            first_m = re.search(r"1\.\s+([a-zA-Z0-9\-=+#]+)", moves_text)
-            first_move = first_m.group(1) if first_m else "Unknown"
-            promos = len(re.findall(r"=[QRBN]", moves_text))
-            mate_flag = bool(re.search(r"eval=#-?\d+", moves_text))
+            num_moves, first_move, promos, mate_flag = extract_movetext_metadata(moves_text, fen)
+
+            round_number = 0
+            if rnd_m:
+                round_match = re.match(r"\s*(\d+)", rnd_m.group(1))
+                if round_match:
+                    round_number = int(round_match.group(1))
 
             is_target_white = white == self.target_engine
             if result == "1-0":
@@ -158,7 +235,8 @@ class ChessEngineAnalyzer:
 
             self.games.append(
                 {
-                    "round": int(rnd_m.group(1)) if rnd_m and rnd_m.group(1).isdigit() else 0,
+                    "round": round_number,
+                    "file_index": file_index,
                     "date": date_m.group(1) if date_m else "?",
                     "white": white,
                     "black": black,
@@ -170,19 +248,10 @@ class ChessEngineAnalyzer:
                     "is_target_white": is_target_white,
                     "promos": promos,
                     "mate_flag": mate_flag,
-                    "fen": fen_m.group(1) if fen_m else "",
+                    "fen": fen,
                     "first_move": first_move,
                 }
             )
-
-            self.score_sequence.append(score)
-            self.lengths.append(num_moves)
-            if res_type == "W":
-                self.lengths_w.append(num_moves)
-            elif res_type == "L":
-                self.lengths_l.append(num_moves)
-            else:
-                self.lengths_d.append(num_moves)
 
             if is_target_white:
                 if res_type == "W":
@@ -209,49 +278,72 @@ class ChessEngineAnalyzer:
                 bucket[res_type] += 1
                 bucket["Total"] += 1
 
+        rounds = [g["round"] for g in self.games]
+        if rounds and all(r > 0 for r in rounds) and len(set(rounds)) == len(rounds):
+            original_order = list(rounds)
+            self.games.sort(key=lambda g: g["round"])
+            reordered = original_order != [g["round"] for g in self.games]
+            self.sequence_order = "numeric Round order" + (" (PGN completion order reordered)" if reordered else "")
+        else:
+            self.sequence_order = "PGN file order (Round missing or duplicated)"
+
+        self.score_sequence = [g["score"] for g in self.games]
+        self.lengths = [g["nmoves"] for g in self.games]
+        self.lengths_w = [g["nmoves"] for g in self.games if g["rt"] == "W"]
+        self.lengths_l = [g["nmoves"] for g in self.games if g["rt"] == "L"]
+        self.lengths_d = [g["nmoves"] for g in self.games if g["rt"] == "D"]
+        self.match_pairs = self._build_match_pairs()
         self._calculate_pair_stats()
         self._calculate_fen_pairs()
 
+    def _build_match_pairs(self) -> List[Tuple[int, Dict[str, Any], Dict[str, Any]]]:
+        """Build complete color-swapped pairs, ordered by scheduled pair number."""
+        by_pair: Dict[int, List[Dict[str, Any]]] = defaultdict(list)
+        for game in self.games:
+            if game["round"] > 0:
+                by_pair[(game["round"] + 1) // 2].append(game)
+
+        pairs: List[Tuple[int, Dict[str, Any], Dict[str, Any]]] = []
+        for pair_number in sorted(by_pair):
+            games = by_pair[pair_number]
+            expected_rounds = {2 * pair_number - 1, 2 * pair_number}
+            if len(games) != 2 or {g["round"] for g in games} != expected_rounds:
+                continue
+            target_white = next((g for g in games if g["is_target_white"]), None)
+            target_black = next((g for g in games if not g["is_target_white"]), None)
+            if target_white is not None and target_black is not None:
+                pairs.append((pair_number, target_white, target_black))
+
+        if pairs:
+            return pairs
+
+        # Compatibility fallback for older PGNs without usable Round headers.
+        for index in range(0, len(self.games) - 1, 2):
+            games = self.games[index:index + 2]
+            target_white = next((g for g in games if g["is_target_white"]), None)
+            target_black = next((g for g in games if not g["is_target_white"]), None)
+            if target_white is not None and target_black is not None:
+                pairs.append((index // 2 + 1, target_white, target_black))
+        return pairs
+
     def _calculate_pair_stats(self) -> None:
-        """Consecutive match-pairs in file order (game i, i+1) from target W/D/L."""
+        """Count complete scheduled pairs in target-white, target-black order."""
         self.pair_outcomes = {k: 0 for k in self.pair_outcomes}
         self.consecutive_pair_counts = Counter()
-        n = len(self.score_sequence)
-        self.total_pairs = n // 2
+        self.total_pairs = len(self.match_pairs)
 
-        for i in range(0, self.total_pairs * 2, 2):
-            a = self.games[i]["rt"]
-            b = self.games[i + 1]["rt"]
-            key = a + b
+        for _, target_white, target_black in self.match_pairs:
+            key = target_white["rt"] + target_black["rt"]
             self.consecutive_pair_counts[key] += 1
             if key in self.pair_outcomes:
                 self.pair_outcomes[key] += 1
-            else:
-                # unexpected keys still counted in consecutive_pair_counts
-                pass
-
-            # Also 9-grid keyed by color order when pair is color-swapped for target
-            g0, g1 = self.games[i], self.games[i + 1]
-            if g0["is_target_white"] and not g1["is_target_white"]:
-                # first game target white, second target black
-                pass  # pair_outcomes key already a+b from target POV
 
     def _calculate_fen_pairs(self) -> None:
-        """Same opening FEN, two games with colors swapped (true match-pair)."""
-        by_fen: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
-        for g in self.games:
-            if g["fen"]:
-                by_fen[g["fen"]].append(g)
-
+        """Count scheduled pairs whose two games actually share the same FEN."""
         self.fen_pair_counts = Counter()
-        for fen, gl in by_fen.items():
-            if len(gl) != 2:
-                continue
-            g_w = next((g for g in gl if g["is_target_white"]), None)
-            g_b = next((g for g in gl if not g["is_target_white"]), None)
-            if not g_w or not g_b:
-                continue
-            self.fen_pair_counts[g_w["rt"] + g_b["rt"]] += 1
+        for _, target_white, target_black in self.match_pairs:
+            if target_white["fen"] and target_white["fen"] == target_black["fen"]:
+                self.fen_pair_counts[target_white["rt"] + target_black["rt"]] += 1
 
     def calculate_elo_and_ci(self) -> Optional[Dict[str, Any]]:
         total_w = self.w_wins + self.b_wins
@@ -263,13 +355,26 @@ class ChessEngineAnalyzer:
 
         score_expected = (total_w + 0.5 * total_d) / n
         elo_diff = to_elo(score_expected)
-        sum_sq = (
-            total_w * (1 - score_expected) ** 2
-            + total_d * (0.5 - score_expected) ** 2
-            + total_l * (0 - score_expected) ** 2
-        )
-        std_dev = math.sqrt(sum_sq / (n - 1)) if n > 1 else 0.0
-        std_err = std_dev / math.sqrt(n) if n > 0 else 0.0
+        if len(self.match_pairs) >= 2 and 2 * len(self.match_pairs) == n:
+            independent_scores = np.array(
+                [
+                    (target_white["score"] + target_black["score"]) / 2.0
+                    for _, target_white, target_black in self.match_pairs
+                ],
+                dtype=float,
+            )
+            std_err = float(np.std(independent_scores, ddof=1) / math.sqrt(len(independent_scores)))
+            ci_method = "color-swapped pair clustered"
+            independent_units = len(independent_scores)
+        else:
+            independent_scores = np.array(self.score_sequence, dtype=float)
+            std_err = (
+                float(np.std(independent_scores, ddof=1) / math.sqrt(len(independent_scores)))
+                if len(independent_scores) >= 2
+                else 0.0
+            )
+            ci_method = "per-game fallback"
+            independent_units = len(independent_scores)
         z_val = 1.96
         lo = max(1e-12, min(1 - 1e-12, score_expected - z_val * std_err))
         hi = max(1e-12, min(1 - 1e-12, score_expected + z_val * std_err))
@@ -285,6 +390,8 @@ class ChessEngineAnalyzer:
             "CI_95": (elo_min, elo_max),
             "Margin_of_Error": (elo_max - elo_min) / 2 if math.isfinite(elo_max) and math.isfinite(elo_min) else float("nan"),
             "Draw_Rate": total_d / n,
+            "CI_Method": ci_method,
+            "Independent_Units": independent_units,
         }
 
     def plot_cumulative_wins(self, output_file: str | Path) -> None:
@@ -303,7 +410,7 @@ class ChessEngineAnalyzer:
             color="#d62728",
             label=f"Ideal Trend (Slope: {avg_win_rate:.3f})",
         )
-        plt.xlabel("Total Games (N)")
+        plt.xlabel("Games in numeric Round order (N)")
         plt.ylabel("Cumulative Wins (W)")
         plt.title(f"Cumulative Win Trajectory for {self.target_engine}")
         plt.legend()
@@ -325,25 +432,47 @@ class ChessEngineAnalyzer:
         self.plot_cumulative_wins(p)
         out_paths.append(p)
 
-        # 2) Cumulative score rate + rolling score
-        scores = np.array(self.score_sequence, dtype=float)
-        n = len(scores)
-        x = np.arange(1, n + 1)
-        cum_pts = np.cumsum(scores)
-        cum_rate = cum_pts / x
+        # 2) Cumulative score rate + rolling score, clustered by match-pair.
+        pair_points = np.array(
+            [target_white["score"] + target_black["score"]
+             for _, target_white, target_black in self.match_pairs],
+            dtype=float,
+        )
+        if len(pair_points):
+            score_units = pair_points / 2.0
+            n = len(score_units)
+            x = np.arange(1, n + 1)
+            cum_pts = np.cumsum(pair_points)
+            equal_line = x.astype(float)
+            xlabel = "Complete color-swapped pairs"
+            unit_label = "pair"
+        else:
+            score_units = np.array(self.score_sequence, dtype=float)
+            n = len(score_units)
+            x = np.arange(1, n + 1)
+            cum_pts = np.cumsum(score_units)
+            equal_line = 0.5 * x
+            xlabel = "Games in numeric Round order"
+            unit_label = "game"
         fig, axes = plt.subplots(2, 1, figsize=(10, 8), sharex=True)
         axes[0].plot(x, cum_pts, color="#1f77b4", linewidth=2, label="Cumulative points")
-        axes[0].plot(x, 0.5 * x, linestyle="--", color="#888888", label="Equal (0.5/game)")
+        axes[0].plot(x, equal_line, linestyle="--", color="#888888", label="Equal score")
         axes[0].set_ylabel("Points")
         axes[0].set_title(f"Cumulative Score — {self.target_engine}")
         axes[0].legend()
         axes[0].grid(True, linestyle=":", alpha=0.6)
-        window = 20 if n >= 40 else max(5, n // 5)
+        window = 10 if n >= 20 else max(3, n // 5)
         if n >= window:
-            roll = np.convolve(scores, np.ones(window) / window, mode="valid")
-            axes[1].plot(np.arange(window, n + 1), roll, color="#2ca02c", linewidth=2, label=f"Rolling score (w={window})")
+            roll = np.convolve(score_units, np.ones(window) / window, mode="valid")
+            axes[1].plot(
+                np.arange(window, n + 1),
+                roll,
+                color="#2ca02c",
+                linewidth=2,
+                label=f"Rolling score (w={window} {unit_label}s)",
+            )
         axes[1].axhline(0.5, color="#888888", linestyle="--", label="0.50")
-        axes[1].set_xlabel("Games")
+        axes[1].set_xlabel(xlabel)
         axes[1].set_ylabel("Score rate")
         axes[1].set_ylim(0.0, 1.0)
         axes[1].legend()
@@ -429,9 +558,9 @@ class ChessEngineAnalyzer:
         plt.close(fig)
         out_paths.append(p)
 
-        # 6) Pair outcomes (FEN pairs preferred, else consecutive)
+        # 6) Pair outcomes (same-FEN scheduled pairs preferred)
         pair_src = self.fen_pair_counts if self.fen_pair_counts else self.consecutive_pair_counts
-        pair_label = "FEN match-pairs" if self.fen_pair_counts else "Consecutive pairs"
+        pair_label = "same-FEN scheduled pairs" if self.fen_pair_counts else "scheduled Round pairs"
         if pair_src:
             keys = ["WW", "WD", "WL", "DW", "DD", "DL", "LW", "LD", "LL"]
             vals = [pair_src.get(k, 0) for k in keys]
@@ -466,7 +595,11 @@ class ChessEngineAnalyzer:
                 ax.set_xticks([0])
                 ax.set_xticklabels([self.target_engine])
                 ax.set_ylabel("Elo vs opponent")
-                ax.set_title(f"Elo Difference ± 95% CI  (score={elo_data['Expected_Score']:.3f}, n={elo_data['Total']})")
+                ax.set_title(
+                    f"Elo Difference ± 95% CI  "
+                    f"(score={elo_data['Expected_Score']:.3f}, "
+                    f"games={elo_data['Total']}, units={elo_data['Independent_Units']})"
+                )
                 ax.grid(True, axis="y", linestyle=":", alpha=0.5)
                 fig.tight_layout()
                 p = output_dir / "elo_ci.png"
@@ -524,17 +657,22 @@ class ChessEngineAnalyzer:
             plt.close(fig)
             out_paths.append(p)
 
-        # 10) First half vs second half score
-        if n >= 20:
-            h = n // 2
-            s1 = float(np.mean(scores[:h]))
-            s2 = float(np.mean(scores[h:]))
+        # 10) First half vs second half score, using pairs as independent units.
+        pair_rates = np.array(
+            [(target_white["score"] + target_black["score"]) / 2.0
+             for _, target_white, target_black in self.match_pairs],
+            dtype=float,
+        )
+        if len(pair_rates) >= 10:
+            h = len(pair_rates) // 2
+            s1 = float(np.mean(pair_rates[:h]))
+            s2 = float(np.mean(pair_rates[h:]))
             fig, ax = plt.subplots(figsize=(6, 4))
-            ax.bar(["First half", "Second half"], [s1, s2], color=["#1f77b4", "#ff7f0e"])
+            ax.bar(["First pair-half", "Second pair-half"], [s1, s2], color=["#1f77b4", "#ff7f0e"])
             ax.axhline(0.5, color="#888888", linestyle="--")
             ax.set_ylim(0, 1)
             ax.set_ylabel("Score rate")
-            ax.set_title(f"Score Stability (halves) — {self.target_engine}")
+            ax.set_title(f"Paired Score Stability (halves) — {self.target_engine}")
             for i, v in enumerate((s1, s2)):
                 ax.text(i, v + 0.02, f"{v:.3f}", ha="center")
             ax.grid(True, axis="y", linestyle=":", alpha=0.5)
@@ -606,9 +744,18 @@ class ChessEngineAnalyzer:
         }
 
     def analyze_sequence(self):
-        if len(self.score_sequence) < 2:
+        if len(self.match_pairs) >= 2:
+            values = [
+                (target_white["score"] + target_black["score"]) / 2.0
+                for _, target_white, target_black in self.match_pairs
+            ]
+            unit = "color-swapped pair"
+        else:
+            values = self.score_sequence
+            unit = "game fallback"
+        if len(values) < 2:
             return None
-        seq = np.array(self.score_sequence)
+        seq = np.array(values)
         autocorr = (
             np.corrcoef(seq[:-1], seq[1:])[0, 1]
             if np.std(seq[:-1]) > 0 and np.std(seq[1:]) > 0
@@ -620,12 +767,22 @@ class ChessEngineAnalyzer:
         n1 = int(np.sum(binary_seq))
         n0 = len(binary_seq) - n1
         if n0 == 0 or n1 == 0:
-            return {"Autocorrelation": float(autocorr), "Runs_Z": 0.0, "Runs_P": 1.0}
+            return {
+                "Autocorrelation": float(autocorr),
+                "Runs_Z": 0.0,
+                "Runs_P": 1.0,
+                "Unit": unit,
+            }
         expected_runs = 2 * n0 * n1 / len(binary_seq) + 1
         var_runs = (expected_runs - 1) * (expected_runs - 2) / (len(binary_seq) - 1)
         z_runs = (runs - expected_runs) / np.sqrt(var_runs) if var_runs > 0 else 0.0
         p_runs = 2 * (1 - stats.norm.cdf(abs(z_runs)))
-        return {"Autocorrelation": float(autocorr), "Runs_Z": float(z_runs), "Runs_P": float(p_runs)}
+        return {
+            "Autocorrelation": float(autocorr),
+            "Runs_Z": float(z_runs),
+            "Runs_P": float(p_runs),
+            "Unit": unit,
+        }
 
     def analyze_length_buckets(self) -> List[str]:
         lines = ["[7. 對局長度分桶 WDL (target 視角)]"]
@@ -673,24 +830,51 @@ class ChessEngineAnalyzer:
         return lines
 
     def analyze_halves_and_cumulative(self) -> List[str]:
-        lines = ["[9. 前後半場與累積得分 (每 10 局)]"]
-        n = len(self.games)
-        if n == 0:
+        lines = ["[9. Round 排序的換先配對與累積得分 (每 5 對)]"]
+        if not self.games:
             lines.append("  (no games)")
             return lines
-        h = n // 2
+
+        lines.append(f"  sequence: {self.sequence_order}")
+        if not self.match_pairs:
+            lines.append("  (no complete color-swapped pairs)")
+            return lines
+
+        pair_rates = [
+            (target_white["score"] + target_black["score"]) / 2.0
+            for _, target_white, target_black in self.match_pairs
+        ]
+        h = len(pair_rates) // 2
         if h > 0:
-            s1 = sum(g["score"] for g in self.games[:h]) / h
-            s2 = sum(g["score"] for g in self.games[h:]) / (n - h)
-            lines.append(f"  first  {h:3d} games score={s1:.3f}")
-            lines.append(f"  second {n - h:3d} games score={s2:.3f}")
-        cum = wins = 0.0
-        for i, g in enumerate(self.games, 1):
-            cum += g["score"]
-            if g["rt"] == "W":
-                wins += 1
-            if i % 10 == 0 or i == n:
-                lines.append(f"  after {i:3d}: wins={int(wins):3d} pts={cum:.1f} score={cum / i:.3f}")
+            first = sum(pair_rates[:h]) / h
+            second = sum(pair_rates[h:]) / (len(pair_rates) - h)
+            lines.append(f"  first  {h:3d} pairs ({2 * h:3d} games) score={first:.3f}")
+            lines.append(
+                f"  second {len(pair_rates) - h:3d} pairs "
+                f"({2 * (len(pair_rates) - h):3d} games) score={second:.3f}"
+            )
+
+        points = 0.0
+        wins = draws = losses = 0
+        for index, (_, target_white, target_black) in enumerate(self.match_pairs, 1):
+            for game in (target_white, target_black):
+                points += game["score"]
+                if game["rt"] == "W":
+                    wins += 1
+                elif game["rt"] == "D":
+                    draws += 1
+                else:
+                    losses += 1
+            if index % 5 == 0 or index == len(self.match_pairs):
+                games = 2 * index
+                lines.append(
+                    f"  after {index:3d} pairs ({games:3d} games): "
+                    f"WDL={wins}-{draws}-{losses} pts={points:.1f} score={points / games:.3f}"
+                )
+
+        unpaired = len(self.games) - 2 * len(self.match_pairs)
+        if unpaired:
+            lines.append(f"  note: {unpaired} game(s) excluded because the color-swapped pair is incomplete")
         return lines
 
     def analyze_mates(self) -> List[str]:
@@ -717,6 +901,9 @@ class ChessEngineAnalyzer:
         out(f"========== 引擎對戰深度分析報告 ({self.target_engine}) ==========\n")
         if self.games:
             dates = Counter(g["date"] for g in self.games)
+            if self.source_path is not None:
+                out(f"來源 PGN: {self.source_path}")
+            out(f"序列順序: {self.sequence_order}")
             out(f"日期分佈: {dict(dates)}")
             out(f"White 名稱: {Counter(g['white'] for g in self.games)}")
             out(f"Black 名稱: {Counter(g['black'] for g in self.games)}\n")
@@ -735,6 +922,10 @@ class ChessEngineAnalyzer:
         out(f"和局率 : {elo_data['Draw_Rate']:.2%}")
         out(f"相對 Elo 變化 : {elo_data['Elo_Diff']:.2f}")
         out(f"95% 信賴區間 : [{elo_data['CI_95'][0]:.2f}, {elo_data['CI_95'][1]:.2f}]")
+        out(
+            f"CI 單位 : {elo_data['CI_Method']} "
+            f"(n={elo_data['Independent_Units']} independent units)"
+        )
         lo, hi = elo_data["CI_95"]
         if lo > 0:
             out("  ✅ 95% 信心：明顯強於對手（CI 下界 > 0）")
@@ -780,13 +971,13 @@ class ChessEngineAnalyzer:
 
         seq_data = self.analyze_sequence()
         if seq_data:
-            out("[5. 賽果序列]")
+            out(f"[5. 賽果序列 ({seq_data['Unit']})]")
             out(f"Lag-1 自相關 : {seq_data['Autocorrelation']:.4f}")
             out(f"游程檢定 p : {seq_data['Runs_P']:.4f}")
             out("\n" + "=" * 50 + "\n")
 
         out("[6. 對局對結果]")
-        out(f"連續配對 (檔案順序 game 2k,2k+1) 對數 : {self.total_pairs}")
+        out(f"完整 Round 換先配對數 : {self.total_pairs}")
         if self.consecutive_pair_counts:
             for k, v in self.consecutive_pair_counts.most_common():
                 out(f"  {k}: {v} ({v / self.total_pairs:.1%})" if self.total_pairs else f"  {k}: {v}")
@@ -795,7 +986,7 @@ class ChessEngineAnalyzer:
             out(f"同 FEN 換先配對 : {tot_f}")
             for k, v in self.fen_pair_counts.most_common():
                 out(f"  (W then B for target) {k}: {v} ({v / tot_f:.1%})")
-        out("  鍵 = 連續兩局 target 的 W/D/L；FEN 對則為 target 持白結果 + 持黑結果")
+        out("  鍵 = target 持白結果 + target 持黑結果（W/D/L）")
         out("\n" + "=" * 50 + "\n")
 
         for block in (
@@ -825,6 +1016,13 @@ class ChessEngineAnalyzer:
 
 
 def main(argv: Optional[List[str]] = None) -> int:
+    # Windows commonly inherits CP950 even when the terminal accepts UTF-8;
+    # report symbols such as ⚖/✅ would otherwise abort the whole analysis.
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is not None:
+            reconfigure(encoding="utf-8", errors="replace")
+
     parser = argparse.ArgumentParser(description="Tournament game-level statistics")
     parser.add_argument("--pgn", type=Path, default=DEFAULT_PGN, help="PGN path")
     parser.add_argument("--target", default=None, help="Target engine name (default: auto / New)")

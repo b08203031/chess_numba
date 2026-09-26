@@ -134,8 +134,23 @@ def set_occupancy(index, bits_in_mask, attack_mask):
 
 @numba.njit(cache=True, boundscheck=False, fastmath=True)
 def init_sliders_attacks():
+    """
+    Build bishop + rook magic attack tables.
+
+    Rook table is *packed* by per-square occupancy cardinality (sum 2^bits = 102400
+    entries ≈ 819 KiB). A fixed (64, 4096) layout is 2 MiB and exceeds Numba's
+    1_000_000-byte constant-array cache limit, which forces dynamic globals and
+    disables disk cache for get_rook_attacks and every transitive caller
+    (movegen / eval / search).
+    """
     bishop_attacks = np.zeros((64, 512), dtype=np.uint64)
-    rook_attacks = np.zeros((64, 4096), dtype=np.uint64)
+    rook_size = 0
+    for sq in range(64):
+        rook_size += 1 << int(ROOK_RELEVANT_BITS[sq])
+    rook_attacks = np.zeros(rook_size, dtype=np.uint64)
+    rook_offsets = np.zeros(64, dtype=np.int32)
+
+    rook_offset = 0
     for sq in range(64):
         attack_mask, relevant_bits_count = BISHOP_MASKS[sq], count_bits(BISHOP_MASKS[sq])
         indices = 1 << relevant_bits_count
@@ -143,22 +158,25 @@ def init_sliders_attacks():
             occ = set_occupancy(i, relevant_bits_count, attack_mask)
             magic_index = (np.uint64(occ) * BISHOP_MAGIC_NUMBERS[sq]) >> np.uint64(64 - BISHOP_RELEVANT_BITS[sq])
             bishop_attacks[sq, magic_index] = bishop_attacks_on_the_fly(sq, occ)
-            
+
+        rook_offsets[sq] = rook_offset
         attack_mask, relevant_bits_count = ROOK_MASKS[sq], count_bits(ROOK_MASKS[sq])
         indices = 1 << relevant_bits_count
         for i in range(indices):
             occ = set_occupancy(i, relevant_bits_count, attack_mask)
             magic_index = (np.uint64(occ) * ROOK_MAGIC_NUMBERS[sq]) >> np.uint64(64 - ROOK_RELEVANT_BITS[sq])
-            rook_attacks[sq, magic_index] = rook_attacks_on_the_fly(sq, occ)
-    return bishop_attacks, rook_attacks
+            rook_attacks[rook_offset + magic_index] = rook_attacks_on_the_fly(sq, occ)
+        rook_offset += indices
+    return bishop_attacks, rook_attacks, rook_offsets
 
-BISHOP_ATTACKS, _rook_attacks_temp = init_sliders_attacks()
-# Flatten rook attacks into 1D array for zero-branch lookup: ROOK_ATTACKS_FLAT[sq * 4096 + index]
-ROOK_ATTACKS_FLAT = np.ascontiguousarray(_rook_attacks_temp.reshape(-1))
-# BISHOP_ATTACKS = np.empty((64, 512), dtype=np.uint64)
-# ROOK_ATTACKS = np.empty((64, 4096), dtype=np.uint64)
+BISHOP_ATTACKS, _rook_attacks_packed, _rook_attack_offsets = init_sliders_attacks()
+# Contiguous packed rook table (~819200 bytes < Numba 1e6 cache limit).
+ROOK_ATTACKS = np.ascontiguousarray(_rook_attacks_packed)
+ROOK_ATTACK_OFFSETS = np.ascontiguousarray(_rook_attack_offsets)
 
-@numba.njit(cache=True, boundscheck=False, fastmath=True)
+# Explicit signatures are required: without them Numba specializes on
+# Literal[int](sq) for castling/constant squares (10+ overloads of the same body).
+@numba.njit(numba.uint64(numba.int64, numba.uint64), cache=True, boundscheck=False, fastmath=True)
 def get_bishop_attacks(sq, occ):
     """
     使用魔法位元棋盤查表獲取主教的攻擊。
@@ -168,22 +186,21 @@ def get_bishop_attacks(sq, occ):
     occ >>= np.uint64(64-BISHOP_RELEVANT_BITS[sq])
     return BISHOP_ATTACKS[sq, occ]
 
-@numba.njit(cache=True, boundscheck=False, fastmath=True)
+@numba.njit(numba.uint64(numba.int64, numba.uint64), cache=True, boundscheck=False, fastmath=True)
 def get_rook_attacks(sq, occ):
     """
-    使用魔法位元棋盤查表獲取城堡的攻擊。
-    Zero-branch flat 1D lookup.
+    Magic bitboard rook attacks via packed table + per-square base offset.
+    Branch-free; table size stays under Numba's global-array cache limit.
     """
     occ &= ROOK_MASKS[sq]
     occ *= ROOK_MAGIC_NUMBERS[sq]
-    occ >>= np.uint64(64-ROOK_RELEVANT_BITS[sq])
-    return ROOK_ATTACKS_FLAT[sq * 4096 + occ]
+    occ >>= np.uint64(64 - ROOK_RELEVANT_BITS[sq])
+    return ROOK_ATTACKS[ROOK_ATTACK_OFFSETS[sq] + occ]
 
 
-
-
-@numba.njit(cache=True, boundscheck=False, fastmath=True)
-def get_queen_attacks(sq, occ): return get_rook_attacks(sq, occ) | get_bishop_attacks(sq, occ)
+@numba.njit(numba.uint64(numba.int64, numba.uint64), cache=True, boundscheck=False, fastmath=True)
+def get_queen_attacks(sq, occ):
+    return get_rook_attacks(sq, occ) | get_bishop_attacks(sq, occ)
 
 KNIGHT_ATTACKS, KING_ATTACKS = (np.empty(64, dtype=np.uint64), np.empty(64, dtype=np.uint64))
 def _precompute_leaper_attacks():
@@ -209,7 +226,7 @@ GLOBAL_ATTACK_TABLES = (
     PAWN_ATTACKS, KNIGHT_ATTACKS, KING_ATTACKS,
     BISHOP_MASKS, ROOK_MASKS, BISHOP_MAGIC_NUMBERS, ROOK_MAGIC_NUMBERS,
     BISHOP_RELEVANT_BITS, ROOK_RELEVANT_BITS,
-    BISHOP_ATTACKS, ROOK_ATTACKS_FLAT,
+    BISHOP_ATTACKS, ROOK_ATTACKS, ROOK_ATTACK_OFFSETS,
     SQUARES_BETWEEN, ROOK_RAYS, BISHOP_RAYS
 )
 
@@ -1079,18 +1096,26 @@ def has_sufficient_material(piece_bbs):
     bn_cnt = count_bits_local(b_knights)
     bb_cnt = count_bits_local(b_bishops)
 
+    w_minors = wn_cnt + wb_cnt
+    b_minors = bn_cnt + bb_cnt
+
     # Either side has at least two minor pieces -> sufficient.
-    if (wn_cnt + wb_cnt > 1) or (bn_cnt + bb_cnt > 1):
+    if w_minors > 1 or b_minors > 1:
         return True
 
-    # One bishop each: opposite colors -> sufficient, same color -> insufficient.
-    if wb_cnt == 1 and bb_cnt == 1 and wn_cnt == 0 and bn_cnt == 0:
-        light_squares = np.uint64(0x55AA55AA55AA55AA)
-        w_light = (w_bishops & light_squares) != np.uint64(0)
-        b_light = (b_bishops & light_squares) != np.uint64(0)
-        if w_light == b_light:
-            return False  # Same color bishops
-        return True  # Opposite color bishops
+    # Both sides have at least one minor piece (i.e. exactly 1 minor piece each:
+    # Knight vs Knight, Knight vs Bishop, Bishop vs Knight, Bishop vs Bishop).
+    if w_minors == 1 and b_minors == 1:
+        # The ONLY 1-minor vs 1-minor dead position is Bishop vs Bishop of the same color.
+        if wb_cnt == 1 and bb_cnt == 1:
+            light_squares = np.uint64(0x55AA55AA55AA55AA)
+            w_light = (w_bishops & light_squares) != np.uint64(0)
+            b_light = (b_bishops & light_squares) != np.uint64(0)
+            if w_light == b_light:
+                return False  # Same color bishops -> dead position (insufficient)
+            return True  # Opposite color bishops -> can mate
+        # Knight vs Knight, Knight vs Bishop, Bishop vs Knight -> can mate (sufficient)
+        return True
 
     # King + Bishop vs King, King + Knight vs King, King vs King -> insufficient.
     return False

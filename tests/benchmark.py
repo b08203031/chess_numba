@@ -8,32 +8,11 @@ import numpy as np
 import shutil
 from pathlib import Path
 
-from chess_engine.classical.engine_types import SearchContext
+from chess_engine.classical.engine_types import create_search_context
 from chess_engine.classical.transposition_table import TT_SIZE_MB, create_transposition_table, clear_transposition_table
 
-# --- Transposition Table Setup / ç½®æ?è¡¨è¨­ç½?---
 transposition_table = create_transposition_table(TT_SIZE_MB)
-# Create SearchContext needed for search / ?µå»º?å????ä?ä¸æ?
-killer_moves = np.zeros(128, dtype=np.uint16) # Adjusted for potential array size mismatch if not using constant
-# Wait, killer moves is defined as MAX_PLY * 2 in main.py. MAX_PLY is 128 in search.py but 64 in main.py.
-# Let's use the constant from constants.py
-from chess_engine.classical.constants import MAX_PLY
-killer_moves = np.zeros(MAX_PLY * 2, dtype=np.uint16) # MAX_PLY is 128
-history_table = np.zeros((12, 64), dtype=np.int32)
-butterfly_history = np.zeros((64, 64), dtype=np.int32)
-continuation_history = np.zeros((4, 12, 64, 12, 64), dtype=np.int16)
-capture_history = np.zeros((12, 64, 12), dtype=np.int32)
-pawn_history = np.full((8192, 12, 64), -1238, dtype=np.int16)
-pawn_correction_history = np.zeros(16384, dtype=np.int16)
-minor_correction_history = np.zeros(16384, dtype=np.int16)
-non_pawn_correction_history_white = np.zeros(16384, dtype=np.int16)
-non_pawn_correction_history_black = np.zeros(16384, dtype=np.int16)
-pv_table = np.zeros((MAX_PLY, MAX_PLY), dtype=np.uint16)
-
-search_context = SearchContext(
-    transposition_table, killer_moves, pv_table, history_table, butterfly_history, continuation_history, capture_history, pawn_history,
-    pawn_correction_history, minor_correction_history, non_pawn_correction_history_white, non_pawn_correction_history_black
-)
+search_context, _hist_tables = create_search_context(transposition_table)
 
 from chess_engine.classical.debug_utils import log_info
 
@@ -77,6 +56,7 @@ def run_benchmark_for_fen(fen, depth, name):
     search_context.nodes_searched = np.uint64(0)
     search_context.killer_moves.fill(0)
     search_context.history_table.fill(0)
+    search_context.main_history.fill(0)
     search_context.pv_table.fill(0)
 
     start_time = time.time()

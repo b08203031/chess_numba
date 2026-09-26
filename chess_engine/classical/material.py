@@ -8,16 +8,28 @@ from chess_engine.classical.constants import (
     IMBALANCE_SCALE_MG, IMBALANCE_SCALE_EG
 )
 
+# Must match tune_eval_match.eval_weights
+_EW_IMB_SCALE_MG = 44
+_EW_IMB_SCALE_EG = 45
+
+
+@numba.njit(cache=True, inline="always")
+def _ew_get_mat(ew, use_ew, idx, default):
+    if use_ew:
+        return ew[idx]
+    return np.int32(default)
+
+
 @numba.njit(cache=True, boundscheck=False, fastmath=True)
-def compute_imbalance(cnt_0, cnt_1, cnt_2, cnt_3, cnt_4, cnt_6, cnt_7, cnt_8, cnt_9, cnt_10):
+def compute_imbalance(cnt_0, cnt_1, cnt_2, cnt_3, cnt_4, cnt_6, cnt_7, cnt_8, cnt_9, cnt_10,
+                      ew, use_ew):
     """
     Compute polynomial material imbalance (SF11 material.cpp style).
-    Uses QuadraticOurs/QuadraticTheirs matrices to model cross-piece-type interactions.
-    Index order: [BishopPair, Pawn, Knight, Bishop, Rook, Queen]
-    
-    Returns (mg_imbalance, eg_imbalance) from White's perspective.
+    Scale MG/EG are runtime-tunable via ew (match-SPSA). Quadratic tables fixed.
     """
-    # Pack into pieceCount format: [bishop_pair, pawn, knight, bishop, rook, queen]
+    scale_mg = _ew_get_mat(ew, use_ew, _EW_IMB_SCALE_MG, IMBALANCE_SCALE_MG)
+    scale_eg = _ew_get_mat(ew, use_ew, _EW_IMB_SCALE_EG, IMBALANCE_SCALE_EG)
+
     w_bp = np.int32(1) if cnt_2 > 1 else np.int32(0)
     b_bp = np.int32(1) if cnt_8 > 1 else np.int32(0)
 
@@ -26,7 +38,6 @@ def compute_imbalance(cnt_0, cnt_1, cnt_2, cnt_3, cnt_4, cnt_6, cnt_7, cnt_8, cn
     b = np.array([b_bp, np.int32(cnt_6), np.int32(cnt_7), np.int32(cnt_8),
                   np.int32(cnt_9), np.int32(cnt_10)], dtype=np.int32)
 
-    # White imbalance (Us=White, Them=Black)
     w_bonus = np.int32(0)
     for pt1 in range(6):
         if w[pt1] == 0:
@@ -37,7 +48,6 @@ def compute_imbalance(cnt_0, cnt_1, cnt_2, cnt_3, cnt_4, cnt_6, cnt_7, cnt_8, cn
             v += IMBALANCE_QUADRATIC_THEIRS[pt1, pt2] * b[pt2]
         w_bonus += w[pt1] * v
 
-    # Black imbalance (Us=Black, Them=White)
     b_bonus = np.int32(0)
     for pt1 in range(6):
         if b[pt1] == 0:
@@ -49,6 +59,6 @@ def compute_imbalance(cnt_0, cnt_1, cnt_2, cnt_3, cnt_4, cnt_6, cnt_7, cnt_8, cn
         b_bonus += b[pt1] * v
 
     raw = (w_bonus - b_bonus) // IMBALANCE_DIVISOR
-    mg_imbalance = raw * IMBALANCE_SCALE_MG // np.int32(100)
-    eg_imbalance = raw * IMBALANCE_SCALE_EG // np.int32(100)
+    mg_imbalance = raw * scale_mg // np.int32(100)
+    eg_imbalance = raw * scale_eg // np.int32(100)
     return mg_imbalance, eg_imbalance

@@ -122,7 +122,7 @@ def plot_loss(epoch, train_losses, val_losses):
 # --- 訓練超參數集中區 (Training Hyperparameters) ---
 class TrainingConfig:
     FEATURE_ENCODING_VERSION = 'halfkav2_hm_stockfish_official_v1'
-    DATASET_PATH = './tuner/ultimate_halfka_farseerT75.npz'
+    DATASET_PATH = './tuner/data/nnue/ultimate_halfka_farseerT75.npz'
     NUM_BUCKETS = 8  # SF18-style LayerStacks
     BATCH_SIZE = 16384
     SAMPLER_SEED = 42

@@ -2,7 +2,7 @@
 convert_bullet_bin.py — 將 Primer 輸出的 Bullet .bin 檔案轉換為 NNUE 訓練器的 .npz 格式
 
 用法:
-    python tuner/nnue_pipeline/convert_bullet_bin.py input.bin [--output tuner/ultimate_halfka.npz] [--limit 32000000]
+    python tuner/nnue_pipeline/convert_bullet_bin.py input.bin [--output tuner/data/nnue/ultimate_halfka.npz] [--limit 32000000]
 
 Bullet .bin 格式 (32 bytes per struct, C++ 'ChessBoard'):
     uint64_t occupancy;      // 8 bytes (Pieces bitboard)
@@ -25,7 +25,7 @@ import numba
 # ==========================================
 # ⚙️ 設定區
 # ==========================================
-DEFAULT_OUTPUT = "tuner/ultimate_halfka_farseerT75.npz"
+DEFAULT_OUTPUT = "tuner/data/nnue/ultimate_halfka_farseerT75.npz"
 DEFAULT_LIMIT = 32_000_000
 RECORD_SIZE = 32  # bytes per ChessBoard struct
 KING_BUCKET_STRIDE = 704
@@ -242,7 +242,7 @@ def stockfish_value_to_cp(value: int) -> float:
 def main():
     import argparse
     parser = argparse.ArgumentParser(description="Bullet .bin (32 bytes ChessBoard) -> NPZ 訓練資料")
-    parser.add_argument("input_bin", nargs="?", default="tuner/official_data_farseerT75.bin", help="輸入的 .bin 檔案路徑 (預設: tuner/official_data_farseerT75.bin)")
+    parser.add_argument("input_bin", nargs="?", default="tuner/data/nnue/official_data_farseerT75.bin", help="輸入的 .bin 檔案路徑 (預設: tuner/data/nnue/official_data_farseerT75.bin)")
     parser.add_argument("--output", "-o", default=DEFAULT_OUTPUT, help=f"輸出的 .npz 檔案路徑")
     parser.add_argument("--limit", "-n", type=int, default=DEFAULT_LIMIT, help=f"最大樣本數 (預設: {DEFAULT_LIMIT:,})")
     args = parser.parse_args()

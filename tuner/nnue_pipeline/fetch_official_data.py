@@ -18,9 +18,9 @@ import requests
 # ==========================================
 # 選擇官方最高品質的資料集
 DATASET_URL = "https://huggingface.co/datasets/official-stockfish/master-binpacks/resolve/main/farseerT75.binpack"
-BINPACK_FILE = "tuner/official_data_farseerT75.binpack"
-BULLET_FILE = "tuner/official_data_farseerT75.bin"
-OUTPUT_NPZ = "tuner/ultimate_halfka_farseerT75.npz"
+BINPACK_FILE = "tuner/data/nnue/official_data_farseerT75.binpack"
+BULLET_FILE = "tuner/data/nnue/official_data_farseerT75.bin"
+OUTPUT_NPZ = "tuner/data/nnue/ultimate_halfka_farseerT75.npz"
 
 # Paths relative to project root (chess_numba/)
 # primer.exe is in external/

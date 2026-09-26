@@ -109,7 +109,7 @@ def package():
                     "\n",
                     "# 請修改為您在雲端硬碟上存放資料集的實際路徑：\n",
                     "dataset_src = '/content/drive/MyDrive/ultimate_halfka_farseerT75.npz'\n",
-                    "dataset_dst = os.path.join(WORKDIR, 'tuner/ultimate_halfka_farseerT75.npz')\n",
+                    "dataset_dst = os.path.join(WORKDIR, 'tuner/data/nnue/ultimate_halfka_farseerT75.npz')\n",
                     "\n",
                     "os.makedirs(os.path.join(WORKDIR, 'tuner'), exist_ok=True)\n",
                     "if os.path.exists(dataset_src) and not os.path.exists(dataset_dst):\n",

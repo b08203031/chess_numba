@@ -1,79 +1,60 @@
+"""Compatibility facade for the search-parameter registry.
 
+Keep this module small because older scripts import ``SEARCH_PARAMS`` and the
+four helper functions directly.  New code should use
+``search_param_registry`` so it can select a staged profile and distinguish
+runtime-backed values from compile-time constants.
 """
-Configuration for search parameter tuning.
-Defines which parameters to tune, their ranges, and step sizes.
-"""
 
-# Define the parameters to tune
-# Format: "PARAM_NAME": (default_value, min_value, max_value, step_size)
-SEARCH_PARAMS = {
-    # --- Razoring ---
-    "RAZORING_MARGIN": (700, 300, 1200, 50),
+from tune_search.search_param_registry import (
+    DEFAULT_PROFILE,
+    PROFILE_NAMES,
+    SEARCH_PARAM_BY_NAME,
+    SEARCH_PARAM_SPECS,
+    SearchParamSpec,
+    get_bounds,
+    get_default_params as _get_default_params,
+    get_spec,
+    get_step,
+    legacy_search_params,
+    profile_names,
+    quantize_integer_value,
+    quantize_value,
+    resolve_names,
+    validate_registry,
+)
 
-    # --- Futility Pruning ---
-    "FP_MARGIN_D1": (400, 100, 800, 50),
-    "FP_MARGIN_D2": (700, 300, 1200, 50),
-    "FP_BASE": (200, 100, 500, 50),
-    "FP_MULTIPLIER": (200, 100, 500, 50),
 
-    # --- Reverse Futility Pruning (Static Null Move Pruning) ---
-    "RFP_MARGIN_D1": (250, 50, 600, 25),
+# Legacy shape: name -> (default, min, max, step).  This now contains the
+# complete registry rather than the previous stale 32-entry list.
+SEARCH_PARAMS = legacy_search_params()
 
-    # --- Null Move Pruning ---
-    "NMP_STATIC_MARGIN": (600, 0, 1200, 50),
-    "NULL_MOVE_REDUCTION": (2, 1, 4, 1), # Typically integer
 
-    # --- Late Move Reductions ---
-    "LMR_MIN_DEPTH": (4, 2, 6, 1),
-    "LMR_MIN_QUIET_MOVE_INDEX": (4, 2, 8, 1),
-    "LMR_BASE_OFFSET": (512, 200, 1000, 50),
-    "LMR_TTPV_INCREASE": (768, 300, 1500, 50),
-    "LMR_TTPV_DECREASE_BASE": (2048, 1000, 3500, 100),
-    "LMR_TTPV_PV_BONUS": (768, 300, 1500, 50),
-    "LMR_CUTNODE_BONUS": (1536, 500, 3500, 100),
-    "LMR_TTCAPTURE_BONUS": (768, 300, 1500, 50),
-    "LMR_MOVECOUNT_FACTOR": (40, 10, 100, 5),
-    "LMR_HISTORY_SCALE": (350, 100, 800, 50),
-    "LMR_CUTOFF_CNT_BASE": (128, 50, 400, 25),
-    "LMR_CUTOFF_CNT_EXTRA": (512, 200, 1500, 50),
-    "LMR_ALLNODE_EXTRA": (512, 200, 1500, 50),
-    "LMR_TTMOVE_REDUCTION": (1024, 300, 2500, 100),
-    "LMR_NO_TTMOVE_BONUS": (512, 200, 1500, 50),
-    "LMR_CORRECTION_DIVISOR": (32768, 10000, 60000, 2000),
-    
-    # --- SEE Pruning ---
-    "SEE_THRESHOLD": (-100, -300, 0, 25),
-    "PRUNING_CAPTURE_SEE_MARGIN": (-200, -500, 0, 50),
-    "PRUNING_QUIET_SEE_MARGIN": (-100, -400, 0, 25),
+def get_param_names(profile: str = DEFAULT_PROFILE):
+    return list(profile_names(profile))
 
-    # --- History Pruning ---
-    "PRUNING_HISTORY_THRESHOLD": (-1500, -3000, -500, 100),
-    
-    # --- Delta Pruning ---
-    "DELTA_PRUNING_MARGIN": (1200, 500, 2000, 100),
-    
-    # --- ProbCut ---
-    "PROBCUT_MARGIN": (150, 50, 400, 25),
-    
-    # --- Singular Extensions ---
-    "SINGULAR_EXTENSION_MARGIN": (150, 50, 400, 25),
 
-    # --- Other Parameters ---
-    "MAX_QUIESCENCE_DEPTH": (5, 4, 8, 1),
-}
+def get_default_params(names=None):
+    """Return defaults for explicit names, or all registry entries."""
+    return _get_default_params(names=names)
 
-def get_param_names():
-    return list(SEARCH_PARAMS.keys())
 
-def get_default_params():
-    return {k: v[0] for k, v in SEARCH_PARAMS.items()}
-
-def get_bounds(param_name):
-    if param_name in SEARCH_PARAMS:
-        return SEARCH_PARAMS[param_name][1], SEARCH_PARAMS[param_name][2]
-    return None, None
-
-def get_step(param_name):
-    if param_name in SEARCH_PARAMS:
-        return SEARCH_PARAMS[param_name][3]
-    return 1
+__all__ = [
+    "DEFAULT_PROFILE",
+    "PROFILE_NAMES",
+    "SEARCH_PARAMS",
+    "SEARCH_PARAM_BY_NAME",
+    "SEARCH_PARAM_SPECS",
+    "SearchParamSpec",
+    "get_bounds",
+    "get_default_params",
+    "get_param_names",
+    "get_spec",
+    "get_step",
+    "legacy_search_params",
+    "profile_names",
+    "quantize_integer_value",
+    "quantize_value",
+    "resolve_names",
+    "validate_registry",
+]

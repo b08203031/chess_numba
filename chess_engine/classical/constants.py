@@ -34,201 +34,65 @@ PAWN, KNIGHT, BISHOP, ROOK, QUEEN, KING = 0, 1, 2, 3, 4, 5
 # PAWN, KNIGHT, BISHOP, ROOK, QUEEN, KING
 #  0  ,   1   ,   2   ,  3  ,   4  ,  5
 
-# 中局（Middle Game）材質值
-MG_MATERIAL_VALUES = np.array([100, 320, 330, 500, 900, 0], dtype=np.int32)
-# 殘局（End Game）材質值
-EG_MATERIAL_VALUES = np.array([120, 310, 340, 530, 950, 0], dtype=np.int32)
-
+# 中局（Middle Game）材質值 / 殘局（End Game）材質值
+# Pawn: keep ~100cp human anchor (MG=100, EG=120).
+# N/B/R/Q: SF11 display scale = internal * 100 / PawnValueEg(213)
+#   SF types.h → N 367/401, B 387/430, R 599/648, Q 1192/1259.
+# Passed / path / prox use the same *100/213 so pass/N matches SF relative strength.
+# Index: PAWN, KNIGHT, BISHOP, ROOK, QUEEN, KING
+MG_MATERIAL_VALUES = np.array([100, 345, 364, 573, 1170, 0], dtype=np.int32)
+EG_MATERIAL_VALUES = np.array([120, 422, 436, 690, 1282, 0], dtype=np.int32)
 # =============================================================================
 # --- Game Phase Calculation (SF11 npm taper) / 遊戲階段計算 ---
 # =============================================================================
 # SF11: phase = ((clamp(npm, EndgameLimit, MidgameLimit) - EndgameLimit) * 128)
 #              / (MidgameLimit - EndgameLimit)
-# Scaled limits for our MG material (N/B/R/Q = 320/330/500/900):
-#   full both-side npm ≈ 6400  (SF ~15258 MidgameLimit)
-#   EndgameLimit ≈ 3915 * 6400/15258 ≈ 1641
+# Keep the phase scale coupled to the tuned MG N/B/R/Q values:
+#   MidgameLimit = full two-side starting non-pawn material
+#   EndgameLimit = MidgameLimit * SF11(3915 / 15258), rounded
+# This preserves phase(startpos)=128 when Texel/SPSA changes material values.
 PHASE_MIDGAME = np.int32(128)
 MAX_PHASE = PHASE_MIDGAME  # alias used by tapered blend
-MIDGAME_LIMIT = np.int32(6400)
-ENDGAME_LIMIT = np.int32(1641)
+PHASE_ENDGAME_RATIO_NUM = np.int32(3915)
+PHASE_ENDGAME_RATIO_DEN = np.int32(15258)
+MIDGAME_LIMIT = np.int32(2 * (
+    2 * int(MG_MATERIAL_VALUES[KNIGHT])
+    + 2 * int(MG_MATERIAL_VALUES[BISHOP])
+    + 2 * int(MG_MATERIAL_VALUES[ROOK])
+    + int(MG_MATERIAL_VALUES[QUEEN])
+))
+ENDGAME_LIMIT = np.int32(
+    (int(MIDGAME_LIMIT) * int(PHASE_ENDGAME_RATIO_NUM)
+     + int(PHASE_ENDGAME_RATIO_DEN) // 2)
+    // int(PHASE_ENDGAME_RATIO_DEN)
+)
 # Legacy piece-count weights (kept for reference / any external tools)
 PHASE_WEIGHTS = np.array([0, 1, 1, 2, 4, 0], dtype=np.int32)
 
 # =============================================================================
 # --- Piece-Square Tables (PSTs) / 棋子位置分數表 ---
 # =============================================================================
-# All tables are from White's perspective.
-# For Black, the board is flipped vertically (sq ^ 56).
-# The arrays are flattened 8x8 matrices, index 0 is A1, 63 is H8.
-# 所有表格均以白方視角定義。黑方使用時需垂直翻轉棋盤。
-# 陣列為展平的 8x8 矩陣，索引 0 為 A1，63 為 H8。
-
-def _create_pst(values):
-    """
-    輔助函式：從 2D 列表創建展平的 8x8 PST 陣列。
-    
-    Args:
-        values (list of list of int): 8x8 的分數列表。
-        
-    Returns:
-        np.array: 展平的一維 numpy 陣列。
-    """
-    return np.array([val for row in reversed(values) for val in row], dtype=np.int32)
-
-# --- Middlegame PSTs / 中局位置分數表 ---
-
-PAWN_PST_MG = _create_pst([
-    [0,  0,  0,  0,  0,  0,  0,  0],
-    [50, 50, 50, 50, 50, 50, 50, 50],
-    [10, 10, 20, 30, 30, 20, 10, 10],
-    [5,  5, 10, 25, 25, 10,  5,  5],
-    [0,  0,  0, 20, 20,  0,  0,  0],
-    [5, -5,-10,  0,  0,-10, -5,  5],
-    [5, 10, 10,-20,-20, 10, 10,  5],
-    [0,  0,  0,  0,  0,  0,  0,  0]
-])
-
-KNIGHT_PST_MG = _create_pst([
-    [-50,-40,-30,-30,-30,-30,-40,-50],
-    [-40,-20,  0,  0,  0,  0,-20,-40],
-    [-30,  0, 10, 15, 15, 10,  0,-30],
-    [-30,  5, 15, 20, 20, 15,  5,-30],
-    [-30,  0, 15, 20, 20, 15,  0,-30],
-    [-30,  5, 10, 15, 15, 10,  5,-30],
-    [-40,-20,  0,  5,  5,  0,-20,-40],
-    [-50,-40,-30,-30,-30,-30,-40,-50]
-])
-
-BISHOP_PST_MG = _create_pst([
-    [-20,-10,-10,-10,-10,-10,-10,-20],
-    [-10,  0,  0,  0,  0,  0,  0,-10],
-    [-10,  0,  5, 10, 10,  5,  0,-10],
-    [-10,  5,  5, 10, 10,  5,  5,-10],
-    [-10,  0, 10, 10, 10, 10,  0,-10],
-    [-10, 10, 10, 10, 10, 10, 10,-10],
-    [-10,  5,  0,  0,  0,  0,  5,-10],
-    [-20,-10,-10,-10,-10,-10,-10,-20]
-])
-
-ROOK_PST_MG = _create_pst([
-    [0,  0,  0,  0,  0,  0,  0,  0],
-    [5, 10, 10, 10, 10, 10, 10,  5],
-    [-5,  0,  0,  0,  0,  0,  0, -5],
-    [-5,  0,  0,  0,  0,  0,  0, -5],
-    [-5,  0,  0,  0,  0,  0,  0, -5],
-    [-5,  0,  0,  0,  0,  0,  0, -5],
-    [-5,  0,  0,  0,  0,  0,  0, -5],
-    [0,  0,  0,  5,  5,  0,  0,  0]
-])
-
-QUEEN_PST_MG = _create_pst([
-    [-20,-10,-10, -5, -5,-10,-10,-20],
-    [-10,  0,  0,  0,  0,  0,  0,-10],
-    [-10,  0,  5,  5,  5,  5,  0,-10],
-    [-5,  0,  5,  5,  5,  5,  0, -5],
-    [0,  0,  5,  5,  5,  5,  0, -5],
-    [-10,  5,  5,  5,  5,  5,  0,-10],
-    [-10,  0,  5,  0,  0,  0,  0,-10],
-    [-20,-10,-10, -5, -5,-10,-10,-20]
-])
-
-KING_PST_MG = _create_pst([
-    [-30,-40,-40,-50,-50,-40,-40,-30],
-    [-30,-40,-40,-50,-50,-40,-40,-30],
-    [-30,-40,-40,-50,-50,-40,-40,-30],
-    [-30,-40,-40,-50,-50,-40,-40,-30],
-    [-20,-30,-30,-40,-40,-30,-30,-20],
-    [-10,-20,-20,-20,-20,-20,-20,-10],
-    [20, 20,  0,  0,  0,  0, 20, 20],
-    [20, 30, 10,  0,  0, 10, 30, 20]
-])
-
-
-# --- Endgame PSTs / 殘局位置分數表 ---
-
-PAWN_PST_EG = _create_pst([
-    [0,  0,  0,  0,  0,  0,  0,  0],
-    [80, 80, 80, 80, 80, 80, 80, 80],
-    [50, 50, 50, 50, 50, 50, 50, 50],
-    [30, 30, 30, 30, 30, 30, 30, 30],
-    [20, 20, 20, 20, 20, 20, 20, 20],
-    [10, 10, 10, 10, 10, 10, 10, 10],
-    [10, 10, 10, 10, 10, 10, 10, 10],
-    [0,  0,  0,  0,  0,  0,  0,  0]
-])
-
-KNIGHT_PST_EG = _create_pst([
-    [-50,-40,-30,-30,-30,-30,-40,-50],
-    [-40,-20,  0,  5,  5,  0,-20,-40],
-    [-30,  5, 10, 15, 15, 10,  5,-30],
-    [-30,  0, 15, 20, 20, 15,  0,-30],
-    [-30,  5, 15, 20, 20, 15,  5,-30],
-    [-30,  0, 10, 15, 15, 10,  0,-30],
-    [-40,-20,  0,  0,  0,  0,-20,-40],
-    [-50,-40,-30,-30,-30,-30,-40,-50]
-])
-
-# SF11-inspired EG: bishops prefer activity and central diagonals in endgame
-BISHOP_PST_EG = _create_pst([
-    [-46,-24,-30,-10,-10,-30,-24,-46],
-    [-30,-10,-14,  0,  0,-14,-10,-30],
-    [-13,  0,  0,  8,  8,  0,  0,-13],
-    [-16,  0, 14, 13, 13, 14,  0,-16],
-    [-14,  0, 12, 13, 13, 12,  0,-14],
-    [-24,  5,  3,  5,  5,  3,  5,-24],
-    [-25,-16,  0,  1,  1,  0,-16,-25],
-    [-37,-34,-30,-19,-19,-30,-34,-37]
-])
-
-# SF11-inspired EG: rooks more active, penalize confinement less, reward 7th-rank
-ROOK_PST_EG = _create_pst([
-    [ 18,  0, 19, 13, 13, 19,  0, 18],
-    [  4,  5, 20, -5, -5, 20,  5,  4],
-    [  6, -8, -2,  8,  8, -2, -8,  6],
-    [ -6,  1, -9,  7,  7, -9,  1, -6],
-    [ -5,  8,  7, -6, -6,  7,  8, -5],
-    [  6,  1, -7, 10, 10, -7,  1,  6],
-    [ -12, -9, -1, -2, -2, -1, -9,-12],
-    [ -9,-13,-10, -9, -9,-10,-13, -9]
-])
-
-# SF11-inspired EG: queens centralize more aggressively, avoid corners
-QUEEN_PST_EG = _create_pst([
-    [-75,-52,-43,-36,-36,-43,-52,-75],
-    [-57,-31,-22, -4, -4,-22,-31,-57],
-    [-47,-18, -9,  3,  3, -9,-18,-47],
-    [-26, -3, 13, 24, 24, 13, -3,-26],
-    [-29, -6,  9, 21, 21,  9, -6,-29],
-    [-39,-18,-12,  1,  1,-12,-18,-39],
-    [-55,-27,-24, -8, -8,-24,-27,-55],
-    [-69,-57,-47,-36,-36,-47,-57,-69]
-])
-
-KING_PST_EG = _create_pst([
-    [-50,-40,-30,-20,-20,-30,-40,-50],
-    [-30,-20,-10,  0,  0,-10,-20,-30],
-    [-30,-10, 20, 30, 30, 20,-10,-30],
-    [-30,-10, 30, 40, 40, 30,-10,-30],
-    [-30,-10, 30, 40, 40, 30,-10,-30],
-    [-30,-10, 20, 30, 30, 20,-10,-30],
-    [-30,-30,  0,  0,  0,  0,-30,-30],
-    [-50,-30,-30,-30,-30,-30,-30,-50]
-])
-
-
-# --- Aggregated PSTs for easier access / 聚合 PST 以便於訪問 ---
-# The order must match the piece index mapping / 順序必須與棋子索引映射匹配
-# PAWN, KNIGHT, BISHOP, ROOK, QUEEN, KING
+# White's perspective; Black uses sq ^ 56. Flat 8x8, index 0=A1, 63=H8.
+# Shape (6, 64): PAWN, KNIGHT, BISHOP, ROOK, QUEEN, KING.
+# Single source of truth for evaluation (no per-piece PAWN_PST_* tables).
+# 白方視角；黑方 sq^56。形狀 (6,64)。評估唯一 PST 來源。
 
 PST_MG = np.array([
-    PAWN_PST_MG, KNIGHT_PST_MG, BISHOP_PST_MG, ROOK_PST_MG, QUEEN_PST_MG, KING_PST_MG
-])
-
+    [0, 0, 0, 0, 0, 0, 0, 0, -9, -8, -5, -6, -10, -7, 10, 5, -13, -20, -17, -9, -11, -3, -10, -5, -8, -14, -6, 7, 9, -2, 9, -11, 5, -2, -10, 16, 21, 10, -1, 9, 9, 11, 17, 27, 30, 16, 9, 16, 51, 49, 52, 49, 51, 44, 50, 47, 0, 0, 0, 0, 0, 0, 0, 0],
+    [-45, -31, -33, -31, -26, -33, -41, -47, -41, -22, -7, -10, -7, 2, -19, -36, -29, -2, -2, 8, 13, 9, 8, -26, -11, 5, 13, 13, 14, 18, -4, -27, -28, 5, 12, 21, 11, 18, 8, -27, -26, 2, 11, 18, 13, 4, 0, -18, -48, -25, -3, 2, 0, -5, -22, -44, -40, -42, -38, -24, -32, -29, -44, -48],
+    [-13, -2, -13, -10, -6, -14, -7, -21, -5, -11, 8, -13, 4, 3, 4, -13, -1, 16, -3, 10, 5, 1, 11, -3, -8, 2, 5, 9, 11, 7, -3, -5, -11, 4, 2, 8, 9, 9, -2, -8, -4, 6, 6, 11, 10, 1, 0, -10, -3, 1, 1, -5, 0, -1, -3, -7, -24, -9, -6, -8, -14, -4, -8, -19],
+    [-10, 2, 0, 8, 4, -10, -4, 9, -4, 1, -4, 1, 1, 0, -1, -7, -5, -2, 0, -2, 4, -2, 1, -9, -6, 2, 5, 0, -1, 5, -2, -13, -8, 7, 1, 2, -1, 2, 2, -12, -3, 5, -1, -4, 3, -4, 2, -3, 7, 13, 8, 12, 15, 9, 12, 10, 7, -2, 1, 1, -4, -4, 3, -3],
+    [-13, -8, -6, -9, -7, -13, -8, -21, -9, 2, 2, 1, -3, 6, 2, -8, -10, 6, 0, -5, 2, 12, 10, -3, 7, 0, 7, -3, 1, 6, 11, -2, -4, 2, 9, -3, 4, 2, 2, 0, -9, 0, 7, 5, 5, 5, -4, -6, -8, -2, 6, 2, -5, 3, 2, -7, -19, -10, -6, -7, -6, -14, -11, -18],
+    [17, 33, 15, 2, 17, 11, 26, 20, 20, 22, -2, 0, -12, -6, 22, 20, -5, -17, -21, -20, -16, -23, -21, -10, -16, -30, -27, -42, -42, -35, -23, -18, -26, -41, -42, -50, -51, -38, -36, -32, -26, -35, -41, -54, -46, -38, -41, -27, -33, -37, -40, -50, -51, -40, -41, -26, -27, -45, -40, -52, -50, -37, -36, -30],
+], dtype=np.int32)
 PST_EG = np.array([
-    PAWN_PST_EG, KNIGHT_PST_EG, BISHOP_PST_EG, ROOK_PST_EG, QUEEN_PST_EG, KING_PST_EG
-])
-
-
+    [0, 0, 0, 0, 0, 0, 0, 0, 11, 12, 16, 14, 23, 19, 10, 1, 11, 7, 11, 13, 11, 12, 6, 1, 10, 9, 5, 3, 3, 3, 6, 7, 28, 16, 13, 19, 10, 12, 17, 13, 46, 42, 43, 52, 51, 41, 43, 46, 75, 72, 83, 74, 80, 85, 74, 73, 0, 0, 0, 0, 0, 0, 0, 0],
+    [-50, -38, -35, -28, -26, -34, -37, -49, -38, -20, -9, -5, -2, 2, -22, -37, -30, -4, 2, 11, 14, -7, -3, -28, -18, -2, 18, 17, 17, 16, 7, -24, -28, -2, 16, 22, 24, 16, 4, -21, -30, 3, 9, 14, 13, 8, 5, -37, -37, -16, -7, 14, 6, -8, -23, -40, -49, -43, -33, -31, -26, -27, -35, -56],
+    [-37, -32, -25, -15, -16, -20, -35, -35, -20, -22, -9, -10, -2, -2, -18, -21, -21, 6, 2, 4, 3, -1, 0, -22, -15, 0, 6, 6, 14, 4, 1, -17, -16, 4, 11, 15, 6, 17, -3, -7, -18, 0, 5, 3, 4, 1, -6, -6, -29, -9, -18, 5, 5, -8, -17, -29, -44, -19, -31, -11, -9, -33, -24, -43],
+    [-10, -17, -9, -13, -14, -8, -17, -17, -15, -10, -6, -4, -2, -3, -9, -13, 2, 1, -3, 2, -1, -6, 3, 5, -4, 4, 12, 0, -3, 8, 1, -5, -1, 8, 2, 10, 8, -3, -3, -4, 12, -2, 6, 11, 11, 0, -9, 9, 2, 4, 20, 1, 0, 20, 6, 7, 12, 5, 17, 17, 10, 19, 5, 18],
+    [-65, -53, -47, -31, -35, -45, -56, -70, -57, -34, -22, -11, -11, -26, -30, -61, -42, -17, -12, -8, -4, -11, -20, -41, -34, -5, 0, 12, 17, 4, -6, -26, -29, 2, 13, 24, 24, 12, -2, -20, -46, -15, -8, 1, 6, -8, -21, -38, -50, -31, -18, -7, 0, -19, -28, -53, -75, -52, -43, -35, -39, -42, -44, -77],
+    [-50, -26, -23, -28, -30, -31, -28, -52, -30, -25, -9, -7, -13, -12, -17, -30, -33, -12, 15, 11, 9, 2, -4, -30, -27, -7, 25, 32, 24, 19, -3, -26, -27, -9, 34, 36, 42, 35, -4, -24, -24, -9, 20, 31, 28, 20, -8, -25, -26, -11, -5, -2, -2, -7, -16, -30, -53, -38, -30, -23, -16, -27, -35, -48],
+], dtype=np.int32)
 # =============================================================================
 # --- Other Evaluation Constants / 其他評估常量 ---
 # =============================================================================
@@ -238,40 +102,34 @@ PST_EG = np.array([
 # 動態複雜度主動權修正，防止簡單殘局中的和棋漂移。
 
 # Middlegame (MG) weights - scaled by Pawn ratio MG = 100/128 ≈ 0.78 / 中局主動權/複雜度係數
-INITIATIVE_PASSED_WEIGHT_MG = np.int32(7)      # 9  * 0.78 ≈ 7 / 通路兵權重
-INITIATIVE_PAWN_WEIGHT_MG = np.int32(9)        # 11 * 0.78 ≈ 9 / 兵數量權重
-INITIATIVE_OUTFLANKING_WEIGHT_MG = np.int32(7) # 9  * 0.78 ≈ 7 / 側翼國王相對位置權重
-INITIATIVE_INFILTRATION_WEIGHT_MG = np.int32(9)  # 12 * 0.78 ≈ 9 / 國王滲透權重
-INITIATIVE_BOTH_FLANKS_WEIGHT_MG = np.int32(16)  # 21 * 0.78 ≈ 16 / 雙翼皆有兵權重
-INITIATIVE_PAWN_ENDGAME_WEIGHT_MG = np.int32(40) # 51 * 0.78 ≈ 40 / 純王兵殘局權重
-INITIATIVE_ALMOST_UNWIN_WEIGHT_MG = np.int32(34) # 43 * 0.78 ≈ 34 / 幾乎不可獲勝局面懲罰權重
-INITIATIVE_OFFSET_MG = np.int32(-78)             # -100 * 0.78 ≈ -78 / 複雜度基礎偏置
+INITIATIVE_PASSED_WEIGHT_MG = 7
+INITIATIVE_PAWN_WEIGHT_MG = 10
+INITIATIVE_OUTFLANKING_WEIGHT_MG = 7
+INITIATIVE_INFILTRATION_WEIGHT_MG = 9
+INITIATIVE_BOTH_FLANKS_WEIGHT_MG = 15
+INITIATIVE_PAWN_ENDGAME_WEIGHT_MG = 41
+INITIATIVE_ALMOST_UNWIN_WEIGHT_MG = 33
+INITIATIVE_OFFSET_MG = -78
 INITIATIVE_MG_OFFSET = np.int32(39)              # +50 * 0.78 ≈ 39 / 主動權分數修正偏置
 
 # Endgame (EG) weights - scaled by Pawn ratio EG = 120/213 ≈ 0.563 / 殘局主動權/複雜度係數
 INITIATIVE_PASSED_WEIGHT_EG = np.int32(5)      # 9  * 0.563 ≈ 5 / 通路兵權重
-INITIATIVE_PAWN_WEIGHT_EG = np.int32(6)        # 11 * 0.563 ≈ 6 / 兵數量權重
-INITIATIVE_OUTFLANKING_WEIGHT_EG = np.int32(5) # 9  * 0.563 ≈ 5 / 側翼國王相對位置權重
-INITIATIVE_INFILTRATION_WEIGHT_EG = np.int32(7)  # 12 * 0.563 ≈ 7 / 國王滲透權重
-INITIATIVE_BOTH_FLANKS_WEIGHT_EG = np.int32(12)  # 21 * 0.563 ≈ 12 / 雙翼皆有兵權重
-INITIATIVE_PAWN_ENDGAME_WEIGHT_EG = np.int32(29) # 51 * 0.563 ≈ 29 / 純王兵殘局權重
-INITIATIVE_ALMOST_UNWIN_WEIGHT_EG = np.int32(24) # 43 * 0.563 ≈ 24 / 幾乎不可獲勝局面懲罰權重
-INITIATIVE_OFFSET_EG = np.int32(-56)             # -100 * 0.563 ≈ -56 / 複雜度基礎偏置
-
-TEMPO_BONUS = np.int32(22)                       # Positional bonus for the side to move / 輪行方（先手/Tempo）的位置分數獎勵 (SF11 S(28) scaled by 100/128)
+INITIATIVE_PAWN_WEIGHT_EG = 5
+INITIATIVE_OUTFLANKING_WEIGHT_EG = 3
+INITIATIVE_INFILTRATION_WEIGHT_EG = 7
+INITIATIVE_BOTH_FLANKS_WEIGHT_EG = 15
+INITIATIVE_PAWN_ENDGAME_WEIGHT_EG = 28
+INITIATIVE_ALMOST_UNWIN_WEIGHT_EG = 24
+INITIATIVE_OFFSET_EG = -53
+TEMPO_BONUS = 19
 LAZY_EVAL_THRESHOLD = np.int32(1100)             # Dynamic evaluation exit threshold / 動態評估提早結束閥值 (SF11 1400 scaled by 100/128)
 
 # --- King-Pawn Endgame Specifics / 王兵殘局特定常數 ---
-UNSTOPPABLE_PAWN_BONUS = np.int32(800)       # 王兵殘局中不可阻擋通路兵的額外獎勵（接近一個后）/ Unstoppable passed pawn bonus in king-pawn endgame
-KING_PAWN_PROXIMITY_FACTOR = np.int32(5)     # 王兵殘局中，國王親近所有兵的加分係數（每格曼哈頓距離）/ King proximity to all pawns factor
-
-# --- Space Evaluation Constants / 空間控制評估常數 ---
-# SPACE_THRESHOLD scaled from SF11's 12222: 6400 * (12222 / 16604) ≈ 4710
-SPACE_THRESHOLD = np.int32(4700)             # 啟用空間評估的最小非兵子力閥值 / Minimum non-pawn material to enable space eval
-SPACE_BONUS_DIVISOR = np.int32(16)           # 空間控制基礎分數除數 / Space bonus divisor
-SPACE_SCALE_DIVISOR = np.int32(4)            # 空間控制縮放除數 / Space scale divisor
-
-
+UNSTOPPABLE_PAWN_BONUS = 800
+KING_PAWN_PROXIMITY_FACTOR = 5
+SPACE_THRESHOLD = 4701
+SPACE_BONUS_DIVISOR = 15
+SPACE_SCALE_DIVISOR = 6
 # =============================================================================
 # --- Mobility Constants / 機動性常量 ---
 # =============================================================================
@@ -282,38 +140,79 @@ SPACE_SCALE_DIVISOR = np.int32(4)            # 空間控制縮放除數 / Space 
 
 # --- Knight Mobility (SF11 MobilityBonus × Pawn ratio MG×0.585 EG×0.42) --- max 8 squares
 KNIGHT_MOBILITY_BONUS = np.array([
-    [-36, -34], [-31, -23], [ -7, -13], [ -2,  -6],
-    [  2,   3], [  8,   6], [ 13,  10], [ 17,  11], [ 20,  14]
-], dtype=np.int32)  # index 0..8
-
-# --- Bishop Mobility (SF11 MobilityBonus × Pawn ratio MG×0.585 EG×0.42) --- max 13 squares
+    [-17, -26],
+    [-16, -20],
+    [1, -6],
+    [2, 12],
+    [2, 12],
+    [6, 12],
+    [10, 12],
+    [11, 13],
+    [13, 13],
+], dtype=np.int32)
 BISHOP_MOBILITY_BONUS = np.array([
-    [-28, -25], [-12, -10], [  9,  -2], [ 15,   5],
-    [ 23,  10], [ 30,  18], [ 32,  23], [ 37,  24],
-    [ 37,  27], [ 40,  31], [ 47,  33], [ 47,  36],
-    [ 53,  37], [ 57,  41]
-], dtype=np.int32)  # index 0..13
-
-# --- Rook Mobility (SF11 MobilityBonus × Pawn ratio MG×0.585 EG×0.42) --- max 14 squares
+    [-10, -18],
+    [-1, -11],
+    [17, 2],
+    [21, 9],
+    [26, 18],
+    [27, 23],
+    [30, 29],
+    [30, 32],
+    [33, 32],
+    [35, 33],
+    [43, 33],
+    [50, 33],
+    [51, 39],
+    [60, 40],
+], dtype=np.int32)
 ROOK_MOBILITY_BONUS = np.array([
-    [-34, -32], [-16,  -8], [ -9,  12], [ -6,  23],
-    [ -3,  29], [ -2,  35], [  5,  47], [  9,  50],
-    [ 17,  56], [ 17,  60], [ 19,  65], [ 23,  69],
-    [ 27,  70], [ 28,  71], [ 34,  72]
-], dtype=np.int32)  # index 0..14
-
-# --- Queen Mobility (SF11 MobilityBonus × Pawn ratio MG×0.585 EG×0.42) --- max 27 squares
+    [-27, -32],
+    [-4, -1],
+    [10, 22],
+    [13, 32],
+    [13, 38],
+    [15, 45],
+    [16, 53],
+    [18, 55],
+    [24, 58],
+    [25, 62],
+    [26, 66],
+    [27, 68],
+    [28, 70],
+    [28, 71],
+    [33, 72],
+], dtype=np.int32)
 QUEEN_MOBILITY_BONUS = np.array([
-    [-23, -15], [-12,  -6], [  2,   3], [  2,   8],
-    [  8,  14], [ 13,  23], [ 17,  26], [ 24,  31],
-    [ 26,  33], [ 28,  39], [ 33,  40], [ 35,  44],
-    [ 35,  47], [ 38,  50], [ 39,  52], [ 41,  53],
-    [ 41,  56], [ 43,  57], [ 47,  59], [ 52,  60],
-    [ 52,  62], [ 58,  70], [ 60,  71], [ 60,  74],
-    [ 62,  77], [ 64,  80], [ 66,  86], [ 68,  89]
-], dtype=np.int32)  # index 0..27
-
-
+    [-26, -10],
+    [-14, -3],
+    [4, 6],
+    [12, 7],
+    [20, 17],
+    [23, 23],
+    [23, 33],
+    [28, 33],
+    [31, 37],
+    [34, 42],
+    [36, 42],
+    [38, 45],
+    [41, 51],
+    [41, 51],
+    [41, 54],
+    [41, 58],
+    [43, 62],
+    [44, 66],
+    [45, 68],
+    [53, 69],
+    [57, 69],
+    [58, 70],
+    [60, 73],
+    [63, 74],
+    [65, 75],
+    [66, 87],
+    [74, 89],
+    [74, 95],
+], dtype=np.int32)
 # =============================================================================
 # --- Piece Coordination Constants / 棋子協同常量 ---
 # =============================================================================
@@ -321,93 +220,54 @@ QUEEN_MOBILITY_BONUS = np.array([
 # --- Bishop Pair / 雙象優勢 ---
 # Bonus for having both bishops. This bonus is generally stronger in open positions.
 # 擁有雙象的獎勵。這個獎勵在開放局面中通常更強。
-BISHOP_PAIR_BONUS = np.array([20, 30], dtype=np.int32) # MG, EG
-
-# --- Rook on Open/Semi-Open File / 車在開放線/半開放線 ---
-# Bonus for a rook on a file with no friendly pawns (semi-open)
-# or no pawns at all (open).
-# 車在沒有己方兵（半開放線）或完全沒有兵（開放線）的直線上的獎勵。
-ROOK_ON_SEMI_OPEN_FILE_BONUS = np.array([15, 10], dtype=np.int32) # MG, EG
-ROOK_ON_OPEN_FILE_BONUS = np.array([25, 15], dtype=np.int32) # MG, EG
-
-# ROOK_ON_SEVENTH_BONUS removed (SF11 has no standalone rook-on-7th term;
-# 7th-rank pressure is covered by PST, mobility, and threats).
-
+BISHOP_PAIR_BONUS = np.array([8, 15], dtype=np.int32)
+BISHOP_PAIR_PAWN_SCALE = np.array([19, 32], dtype=np.int32)
+ROOK_ON_SEMI_OPEN_FILE_BONUS = np.array([21, 5], dtype=np.int32)
+ROOK_ON_OPEN_FILE_BONUS = np.array([24, 15], dtype=np.int32)
 # =============================================================================
 # --- Pawn Structure Constants / 兵型結構常量 ---
 # =============================================================================
 
 # --- Passed Pawns / 通路兵 ---
-# Bonus for having a passed pawn, scaled by its rank. (Values increased significantly)
-# Index corresponds to the pawn's rank (1-8, though rank 1 and 8 are not used for pawns).
-# 通路兵的獎勵，根據其橫排進行縮放。（數值已顯著增加）
-# 索引對應於兵的橫排（1-8，雖然 1 和 8 橫排不用於兵）。
+# SF11 PassedRank * 100/PawnValueEg(213) — same display scale as N/B/R/Q material.
+# Index = rank (0..7); ranks 1 and 8 unused for pawns.
 PASSED_PAWN_BONUS = np.array([
-    # MG, EG
-    [  0,   0], # Rank 1
-    [  6,  20], # Rank 2
-    [ 10,  23], # Rank 3
-    [ 12,  30], # Rank 4
-    [ 37,  50], # Rank 5
-    [100, 124], # Rank 6
-    [166, 182], # Rank 7
-    [  0,   0]  # Rank 8
+    [0, 0],
+    [3, 4],
+    [0, 0],
+    [6, 22],
+    [27, 40],
+    [75, 74],
+    [133, 110],
+    [0, 0],
 ], dtype=np.int32)
+PASSED_FILE_BONUS = np.array([18, 4], dtype=np.int32)
+CANDIDATE_PASSER_DIVISOR = 2
 
-# PassedFile adjustment constants (SF11: PassedFile = S(11, 8), scaled by edge_distance)
-PASSED_FILE_BONUS = np.array([7, 5], dtype=np.int32) # MG, EG
-
-# --- Passed Pawn Evaluation Refinements / 通路兵動態安全與比例評估參數 ---
-# PASSED_SCALE_FULL/HALF/MIN removed (aligned with SF11): SF11 passed() does not
-# down-scale passer bonuses by non-pawn material deficit. Candidate /2 remains.
-CANDIDATE_PASSER_DIVISOR = np.int32(2)    # 候選通路兵（非真正通路兵）的加成折半除數 / Divisor for candidate passed pawn bonus
-
-# Path Safety coefficients (SF11 dynamic bonus, *3/5 for our ~100cp material scale)
-# SF11 raw: 35 / 20 / 9 / +5  →  ours: 21 / 12 / 5 / +3
-PASSED_PATH_SAFE_NONE_ATTACK = np.int32(21)  # 前進路徑無人控制 / Safe path weight (no enemy attacks)
-PASSED_PATH_SAFE_EDGE_ATTACK = np.int32(12)  # 僅路徑邊緣受控 / Safe path weight (attacks on adjacent files only)
-PASSED_PATH_SAFE_BLOCK_ONLY = np.int32(5)    # 僅前方阻擋格安全 / Safe path weight (attacks on blocker square only)
-PASSED_PATH_SUPPORT_BONUS = np.int32(3)      # 友方車后在後方支援或控制阻擋格的額外安全係數 / Support from behind bonus
-
-# Passed pawn rank-based scaling formula / 通路兵動態加分成長公式參數 (5 * rank - 13)
-PASSED_DYNAMICS_MULT = np.int32(5)           # 行動加分排數乘數 / Rank multiplier
-PASSED_DYNAMICS_OFFSET = np.int32(-13)       # 行動加分偏置 / Rank offset
-
-# King Proximity in Passed Pawn Endgames / 通路兵殘局國王親近度參數
-KING_PROXIMITY_MAX_DIST = np.int32(5)        # 距離計算上限格數 / Cap for Chebyshev distance
-KING_PROX_ENEMY_MULT = np.int32(19)          # 敵方王距離權重乘數 / Enemy king distance weight
-KING_PROX_ENEMY_DIV = np.int32(4)            # 敵方王距離權重除數 / Enemy king distance divisor (19/4)
-KING_PROX_FRIENDLY_MULT = np.int32(2)        # 己方王距離權重乘數 / Friendly king distance weight
-KING_PROX_MIN_BONUS = np.int32(-150)         # 國王親近度最小懲罰 / Proximity bonus lower bound
-KING_PROX_MAX_BONUS = np.int32(150)          # 國王親近度最大加分 / Proximity bonus upper bound
-
-# --- Isolated Pawns / 孤兵 ---
-# Penalty for each isolated pawn on a file.
-# 每一個孤兵的懲罰。
-ISOLATED_PAWN_PENALTY = np.array([-4, -8], dtype=np.int32) # MG, EG (SF11 S(5, 15) * scale)
-
-# --- Doubled Pawns / 重疊兵 ---
-# Penalty for each doubled pawn on a file.
-# 每一個重疊兵的懲罰。
-DOUBLED_PAWN_PENALTY = np.array([-8, -31], dtype=np.int32) # MG, EG (SF11 S(11, 56) * scale)
-
-# --- Weak Lever & Weak Unopposed / 弱對決兵與開放線弱兵 ---
-# Penalty for a weak pawn under pressure (lever) / 弱兵對決時的懲罰
-WEAK_LEVER_PENALTY = np.array([0, -31], dtype=np.int32)      # MG, EG (SF11 S(0, 56) * scale)
-# Penalty for an unopposed weak pawn on an open/semi-open file / 開放線或半開放線上無敵兵對決的弱兵懲罰
-WEAK_UNOPPOSED_PENALTY = np.array([-10, -15], dtype=np.int32) # MG, EG (SF11 S(13, 27) * scale)
-
-# --- Connected Pawn Bonus by Rank (SF11) / SF11 連結兵獎勵（按橫排） ---
-# Applied to ALL pawns that are in phalanx (side-by-side) or supported (diagonally behind).
-# 適用於所有處於並列或受支撐狀態 of the pawns.
-CONNECTED_BONUS = np.array([0, 5, 6, 9, 23, 37, 67, 0], dtype=np.int32) # SF11 S(Connected) * 0.78
-CONNECTED_BONUS_EG = np.array([0, 4, 5, 7, 16, 27, 48, 0], dtype=np.int32) # SF11 * 0.563
-CONNECTED_SUPPORT_WEIGHT = np.int32(16)  # SF11 21 * 0.78 ≈ 16
-CONNECTED_SUPPORT_WEIGHT_EG = np.int32(12)  # SF11 21 * 0.563 ≈ 12
-
-# --- Connected Passed Pawns / 連結通路兵 --- (legacy, kept for reference)
-CONNECTED_PASSED_PAWN_BONUS = np.array([15, 35], dtype=np.int32) # MG, EG (not used in evaluation)
-
+# Path Safety (SF11 35/20/9/+5 * 100/213) — was *3/5; now same display scale as material
+PASSED_PATH_SAFE_NONE_ATTACK = 11
+PASSED_PATH_SAFE_EDGE_ATTACK = 7
+PASSED_PATH_SAFE_BLOCK_ONLY = 3
+PASSED_PATH_SUPPORT_BONUS = 4
+PASSED_DYNAMICS_MULT = 4
+PASSED_DYNAMICS_OFFSET = -11
+KING_PROXIMITY_MAX_DIST = 6
+KING_PROX_ENEMY_MULT = 7
+KING_PROX_ENEMY_DIV = 4
+KING_PROX_FRIENDLY_MULT = 1
+KING_PROX_MIN_BONUS = -74
+KING_PROX_MAX_BONUS = 79
+ISOLATED_PAWN_PENALTY = np.array([-1, -6], dtype=np.int32)
+DOUBLED_PAWN_PENALTY = np.array([-20, -37], dtype=np.int32)
+WEAK_LEVER_PENALTY = np.array([-4, -27], dtype=np.int32)
+WEAK_UNOPPOSED_PENALTY = np.array([-15, -10], dtype=np.int32)
+CONNECTED_BONUS = np.array([0, 1, 4, 4, 7, 38, 69, 0], dtype=np.int32)
+CONNECTED_BONUS_EG = np.array([0, 2, 2, 11, 14, 25, 37, 0], dtype=np.int32)
+CONNECTED_SUPPORT_WEIGHT = 11
+CONNECTED_SUPPORT_WEIGHT_EG = 8
+CONNECTED_PASSED_PAWN_BONUS = np.array([15, 35], dtype=np.int32) # MG, EG (legacy)
+PASSED_CONNECTED_BONUS = np.array([0, 2, 3, 7, 17, 24, 59, 0], dtype=np.int32)
+PASSED_PHALANX_BONUS = np.array([0, 2, 4, 12, 25, 42, 75, 0], dtype=np.int32)
 # =============================================================================
 # --- Outpost Constants / 前哨常量 ---
 # =============================================================================
@@ -419,32 +279,26 @@ CONNECTED_PASSED_PAWN_BONUS = np.array([15, 35], dtype=np.int32) # MG, EG (not u
 # Values: [MG, EG]
 # 騎士前哨獎勵
 OUTPOST_BONUS_KNIGHT = np.array([
-    [0, 0],    # Rank 1
-    [0, 0],    # Rank 2
-    [10, 5],   # Rank 3
-    [30, 15],  # Rank 4
-    [50, 40],  # Rank 5
-    [40, 30],  # Rank 6 (Octopus)
-    [20, 10],  # Rank 7
-    [0, 0]     # Rank 8
+    [0, 0],
+    [0, 0],
+    [16, 5],
+    [28, 17],
+    [41, 25],
+    [35, 26],
+    [24, 5],
+    [0, 0],
 ], dtype=np.int32)
-
-# 主教前哨獎勵
 OUTPOST_BONUS_BISHOP = np.array([
-    [0, 0],    # Rank 1
-    [0, 0],    # Rank 2
-    [10, 5],   # Rank 3
-    [20, 15],  # Rank 4
-    [30, 25],  # Rank 5
-    [20, 15],  # Rank 6
-    [10, 5],   # Rank 7
-    [0, 0]     # Rank 8
+    [0, 0],
+    [0, 0],
+    [2, 2],
+    [17, 14],
+    [26, 18],
+    [26, 17],
+    [11, 5],
+    [0, 0],
 ], dtype=np.int32)
-
-# OUTPOST_HOLE_BONUS removed: SF11 Outpost already requires
-# attackedBy[Us][PAWN] & ~pawn_attacks_span(Them) (no separate hole term).
-REACHABLE_OUTPOST_BONUS = np.array([16, 5], dtype=np.int32) # MG, EG (SF11: S(32, 10) scaled)
-
+REACHABLE_OUTPOST_BONUS = np.array([17, 13], dtype=np.int32)
 # =============================================================================
 # --- King Safety Constants (NEW - based on Chessprogramming Wiki) / 王的安全常量 ---
 # =============================================================================
@@ -471,38 +325,33 @@ _MG_SCALE_DEN = 128  # SF pawn MG
 def _sf_danger_to_ours(sf_val: int) -> np.int32:
     return np.int32((int(sf_val) * _MG_SCALE_NUM) // _MG_SCALE_DEN)
 
-KING_ATTACK_WEIGHTS = np.array([
-    0,
-    0,
-    _sf_danger_to_ours(81),   # Knight
-    _sf_danger_to_ours(52),   # Bishop
-    _sf_danger_to_ours(44),   # Rook
-    _sf_danger_to_ours(10),   # Queen
-], dtype=np.int32)
+KING_ATTACK_WEIGHTS = np.array([0, 0, 46, 14, 15, 1], dtype=np.int32)
 KING_SAFETY_ATTACK_UNITS = KING_ATTACK_WEIGHTS[1:].copy()  # legacy alias P,N,B,R,Q
 
 # Safe checks (SF raw -> our danger space)
-SAFE_CHECK_QUEEN = _sf_danger_to_ours(780)
-SAFE_CHECK_ROOK = _sf_danger_to_ours(1080)
-SAFE_CHECK_BISHOP = _sf_danger_to_ours(635)
-SAFE_CHECK_KNIGHT = _sf_danger_to_ours(790)
-
-# Linear kingDanger coefficients (SF raw -> our danger space)
-KING_DANGER_WEAK_SQ = _sf_danger_to_ours(185)
-KING_DANGER_UNSAFE_CHECK = _sf_danger_to_ours(148)
-KING_DANGER_BLOCKERS = _sf_danger_to_ours(98)
-KING_DANGER_ATTACK_ON_KING_SQ = _sf_danger_to_ours(69)
-KING_DANGER_NO_QUEEN = _sf_danger_to_ours(873)
-KING_DANGER_KNIGHT_DEF = _sf_danger_to_ours(100)
-KING_DANGER_OFFSET = _sf_danger_to_ours(37)
-KING_DANGER_THRESHOLD = _sf_danger_to_ours(100)  # ≈ 78
-
-# kd already in our-scaled danger space:
-#   pen_mg = kd² / (4096 * s) = kd² * 128 / (4096 * 100)
-#   pen_eg = (kd/s)/16 * (120/213) = kd * 128 * 120 / (100 * 16 * 213)
+# G4 match-SPSA best (L2 accept iter 19, score 0.526 vs prior; frozen 2026-07-20).
+# Source: tournament_analysis/spsa_eval best_params / G4_FROZEN_INT.
+SAFE_CHECK_QUEEN = 569
+SAFE_CHECK_ROOK = 825
+SAFE_CHECK_BISHOP = 480
+SAFE_CHECK_KNIGHT = 609
+KING_DANGER_WEAK_SQ = 114
+KING_DANGER_UNSAFE_CHECK = 100
+KING_DANGER_BLOCKERS = 71
+KING_DANGER_ATTACK_ON_KING_SQ = 19
+KING_DANGER_NO_QUEEN = 560
+# Rookless attackers need substantially more no-queen suppression than rook
+# attackers.  This single split removes the opposite Texel gradients of rook
+# endings and minor-only endings without material-combination special cases.
+KING_DANGER_NO_QUEEN_ROOKLESS = 810
+KING_DANGER_KNIGHT_DEF = 96
+KING_DANGER_OFFSET = 0
+KING_DANGER_THRESHOLD = 69
 KING_DANGER_QUAD_DIV = np.int32(4096)
 KING_DANGER_EG_DIV = np.int32(16)
-KING_DANGER_OUT_MG_NUM = np.int32(_MG_SCALE_DEN)          # 128
+# Match-SPSA A-block best (L2 iter 74, score 0.534; source spsa_eval_a123/best_params.json).
+# Was _MG_SCALE_DEN (=128). Passed/material/passed_rank blocks had no L2 accept.
+KING_DANGER_OUT_MG_NUM = np.int32(131)
 KING_DANGER_OUT_MG_DEN = np.int32(4096 * _MG_SCALE_NUM)   # 409600
 KING_DANGER_OUT_EG_NUM = np.int32(_MG_SCALE_DEN * 120)    # 128*120
 KING_DANGER_OUT_EG_DEN = np.int32(_MG_SCALE_NUM * 16 * 213)  # 100*16*213
@@ -521,36 +370,28 @@ KING_DANGER_EG_DEN = KING_DANGER_OUT_EG_DEN
 # --- Phase 4: Advanced & Dynamic / 進階與動態 ---
 SCALING_WEIGHTS = np.array([0, 4, 4, 6, 10], dtype=np.int32)  # legacy
 MAX_SCALING_MATERIAL = (2 * 4 + 2 * 4 + 2 * 6 + 1 * 10)
-# Phase B: no extra EG damp after SF kd/16 conversion
-EG_SAFETY_SCALE = 1.0
+# Match-SPSA A: weight 96/100 → float scale (was 1.0)
+EG_SAFETY_SCALE = 0.96
 
 # --- SF11-aligned King Shelter & Storm Tables ---
 # ShelterStrength: friendly pawn shield defense values (MG)
 SHELTER_STRENGTH = np.array([
-    [ -5,  63,  72,  45,  30,  14,  19,   0], # d=0 (A/H file)
-    [-33,  47,  27, -38, -22,  -8, -49,   0], # d=1 (B/G file)
-    [ -7,  58,  17,  -1,  24,   2, -35,   0], # d=2 (C/F file)
-    [-30, -10, -22, -40, -37, -52, -129,  0]  # d=3 (D/E file)
+    [10, 49, 55, 51, 32, 19, 24, 0],
+    [-36, 23, 21, -31, -26, -4, -48, 0],
+    [1, 62, 24, 7, 24, -5, -39, 0],
+    [-19, -4, -8, -16, -31, -52, -130, 0],
 ], dtype=np.int32)
-
-# UnblockedStorm: enemy pawn storm threat penalties (MG)
 UNBLOCKED_STORM = np.array([
-    [ -66,  225,  129,  -75,  -39,  -35,  -39,   0], # d=0
-    [ -35,   19,  -95,  -35,  -28,    7,  -15,   0], # d=1
-    [   4,  -39, -131,  -26,    1,   17,   10,   0], # d=2
-    [  11,    8,  -78,   -3,   -8,   11,   22,   0]  # d=3
+    [-68, 219, 130, -71, -40, -36, -39, 0],
+    [-30, 15, -92, -34, -29, -9, -19, 0],
+    [12, -35, -129, -21, 0, 15, 27, 0],
+    [8, 7, -79, -2, 3, 23, 16, 0],
 ], dtype=np.int32)
-
-BLOCKED_STORM = np.int32(-64) # SF11: -82 * 0.78 ≈ -64
-BLOCKED_STORM_EG = np.int32(-46) # SF11: -82 * 0.563 ≈ -46
-SHELTER_BASE_MG = np.int32(4) # SF11: 5 * 0.78 ≈ 4
-SHELTER_BASE_EG = np.int32(3) # SF11: 5 * 0.563 ≈ 3
-KING_PAWN_DIST_PENALTY_EG = np.int32(-9) # SF11: -16 * 0.563 ≈ -9
-
-# Flank / shelter terms inside kingDanger (same space as scaled coeffs + our scores)
-# flank: + 3 * fa * fa / 8   (dimensionless popcounts — leave unscaled; matches SF)
-# shelter: - 6 * mg_shield / 8  (mg_shield already ~100cp)
-# flank defense: - 4 * defense
+BLOCKED_STORM = -61
+BLOCKED_STORM_EG = -41
+SHELTER_BASE_MG = 19
+SHELTER_BASE_EG = 5
+KING_PAWN_DIST_PENALTY_EG = -6
 KING_FLANK_ATTACK_NUM = np.int32(3)
 KING_FLANK_ATTACK_DEN = np.int32(8)
 KING_SHELTER_FEEDBACK_NUM = np.int32(6)
@@ -558,12 +399,9 @@ KING_SHELTER_FEEDBACK_DEN = np.int32(8)
 KING_FLANK_DEFENSE_MULT = np.int32(4)
 
 # --- Pawnless Flank & Flank Attacks (SF11-inspired) ---
-# Penalty when own king flank has no pawns / 己方國王側翼完全無兵時的防禦缺失懲罰（中局與殘局）
-PAWNLESS_FLANK = np.array([-13, -53], dtype=np.int32) # MG, EG (SF11 S(17, 95) * scale)
-# Penalty factor per flank attack square when king flank is attacked / 國王側翼遭受攻擊時，每格受控格的危險度加成懲罰（中局與殘局）
-FLANK_ATTACKS = np.array([-6, 0], dtype=np.int32) # MG, EG (SF11 S(8, 0) * scale)
-
-
+# Match-SPSA A best: was [-14,-51] / [-2,0]
+PAWNLESS_FLANK = np.array([-13, -55], dtype=np.int32)
+FLANK_ATTACKS = np.array([-1, 0], dtype=np.int32)
 # =============================================================================
 # --- Threat Evaluation Constants / 威脅評估常量 ---
 # =============================================================================
@@ -576,60 +414,30 @@ FLANK_ATTACKS = np.array([-6, 0], dtype=np.int32) # MG, EG (SF11 S(8, 0) * scale
 
 # ThreatBySafePawn: Friendly safe pawn attacks enemy non-pawn piece.
 # 安全兵的威脅：己方安全兵攻擊敵方非兵棋子。
-THREAT_SAFE_PAWN = np.array([70, 45], dtype=np.int32)  # SF11: (173, 94)
-
-# KnightOnQueen: Knight attacks squares that attack queen.
-# 騎士攻擊能攻擊后的方格的獎勵。
-THREAT_KNIGHT_ON_QUEEN = np.array([12, 7], dtype=np.int32)
-
-# SliderOnQueen: Bishop/Rook attacks squares that attack queen.
-# 滑動棋子（象/車）攻擊能攻擊后的方格的獎勵。
-THREAT_SLIDER_ON_QUEEN = np.array([46, 10], dtype=np.int32)
-
-# ThreatByMinor[target_piece_type]: Minor (N/B) attacks piece of given type.
-# Index: 0=Pawn, 1=Knight, 2=Bishop, 3=Rook, 4=Queen, 5=King
-# SF11 evaluate.cpp ThreatByMinor[PAWN..QUEEN] = (6,32),(59,41),(79,56),(90,119),(79,161)
-# Scaled MG×0.78 / EG×0.56 (same convention as THREAT_BY_ROOK).
-# 輕子威脅：馬/象攻擊對應類型棋子的獎勵。
+# SF11 S(173, 94). Full 0.78/0.56 scale (~135,53) regressed in match play → keep damped values.
+THREAT_SAFE_PAWN = np.array([70, 41], dtype=np.int32)
+THREAT_KNIGHT_ON_QUEEN = np.array([9, 0], dtype=np.int32)
+THREAT_SLIDER_ON_QUEEN = np.array([21, 1], dtype=np.int32)
 THREAT_BY_MINOR = np.array([
-    [ 5, 18],  # vs Pawn    (SF11: 6, 32)
-    [46, 23],  # vs Knight  (SF11: 59, 41)
-    [62, 31],  # vs Bishop  (SF11: 79, 56)
-    [70, 67],  # vs Rook    (SF11: 90, 119)
-    [62, 90],  # vs Queen   (SF11: 79, 161)
-    [ 0,  0],  # vs King    (SF uses ThreatByKing; not this table)
+    [4, 17],
+    [24, 23],
+    [54, 29],
+    [74, 58],
+    [52, 82],
+    [0, 0],
 ], dtype=np.int32)
-
-# ThreatByRook[target_piece_type]: Rook attacks piece of given type (only if weak).
-# Index: 0=Pawn, 1=Knight, 2=Bishop, 3=Rook, 4=Queen, 5=King
-# 車威脅：車攻擊對應類型棋子的獎勵。
 THREAT_BY_ROOK = np.array([
-    [ 2, 25],  # vs Pawn    (SF11: 3, 44)
-    [30, 40],  # vs Knight  (SF11: 38, 71)
-    [30, 34],  # vs Bishop  (SF11: 38, 61)
-    [ 0, 21],  # vs Rook    (SF11: 0, 38)
-    [40, 21],  # vs Queen   (SF11: 51, 38)
-    [ 0,  0],  # vs King    (should not occur)
+    [3, 22],
+    [20, 30],
+    [27, 26],
+    [0, 21],
+    [41, 22],
+    [0, 0],
 ], dtype=np.int32)
-
-# ThreatByKing: King attacks a weakly defended enemy piece.
-# 王攻擊弱子：王攻擊敵方弱子的獎勵。
-THREAT_BY_KING = np.array([19, 50], dtype=np.int32)  # SF11: (24, 89)
-
-# Hanging: Enemy piece is attacked + not strongly protected.
-# 懸掛子：敵方棋子被攻擊且未被強力保護。
-THREAT_HANGING = np.array([54, 20], dtype=np.int32)  # SF11: (69, 36)
-
-# RestrictedPiece: Enemy piece moves are restricted by our attacks.
-# 限制棋子行動力：敵方棋子的走子受到我方攻擊限制。
-THREAT_RESTRICTED_PIECE = np.array([5, 4], dtype=np.int32)  # SF11: (7, 7)
-
-# ThreatByPawnPush: Pawn push threatens enemy pieces on next move.
-# 兵推威脅：兵推進後能威脅敵子。
-THREAT_PAWN_PUSH = np.array([37, 22], dtype=np.int32)  # SF11: (48, 39)
-
-# --- Legacy aliases (kept for backward compatibility, now unused in threats) ---
-# Minor Attacking Major (replaced by THREAT_BY_MINOR)
+THREAT_BY_KING = np.array([17, 38], dtype=np.int32)
+THREAT_HANGING = np.array([13, 21], dtype=np.int32)
+THREAT_RESTRICTED_PIECE = np.array([2, 0], dtype=np.int32)
+THREAT_PAWN_PUSH = np.array([11, 10], dtype=np.int32)
 THREAT_MINOR_ON_MAJOR = np.array([25, 15], dtype=np.int32)  # kept for reference
 # Rook Attacking Queen (replaced by THREAT_BY_ROOK)
 THREAT_ROOK_ON_QUEEN = np.array([20, 10], dtype=np.int32)   # kept for reference
@@ -640,36 +448,15 @@ THREAT_ROOK_ON_QUEEN = np.array([20, 10], dtype=np.int32)   # kept for reference
 
 # KingProtector: Penalty for minor piece being far from own king.
 # 王保護者：輕子距離己方王越遠，懲罰越重（每格切比雪夫距離）。
-# SF11: (7, 8). Scaled to 0.75× of our previous value (which itself was already below SF11)
-# to compensate for mobility being scaled down 0.75×.
-KING_PROTECTOR = np.array([4, 3], dtype=np.int32)  # mg, eg — per distance unit
-
-# MinorBehindPawn: Bonus for minor piece sheltered behind a pawn.
-# 輕子藏兵後：輕子站在兵後方的獎勵。
-MINOR_BEHIND_PAWN = np.array([14, 2], dtype=np.int32)  # SF11: S(18, 3) * scale
-
-# BishopPawns: Penalty per own pawn on same color as bishop.
-# 壞象懲罰：象同色上的己方兵數量懲罰（含封閉中心加重）。
-BISHOP_PAWNS_PENALTY = np.array([2, 4], dtype=np.int32)  # SF11: (3, 7)
-BISHOP_PAWNS_CENTER_BLOCKED_FACTOR = np.int32(1)  # 中心鎖死時的壞象懲罰加重因子 / Bad bishop penalty multiplier in blocked center
-
-# TrappedRook: Penalty for rook with mobility <= 3 trapped by own king.
-# 困車懲罰：車移動格數 ≤ 3 且在己方王同側。
-TRAPPED_ROOK = np.array([41, 6], dtype=np.int32)  # SF11: (52, 10)
-
-# LongDiagonalBishop: Bishop on long diagonal seeing both center squares.
-# 長對角線象：象在長對角線上，且能穿過兵阻擋看到兩個中心方格。
-LONG_DIAGONAL_BISHOP = np.array([35, 0], dtype=np.int32)
-
-# RookOnQueenFile: Rook on same file as queen (both colors).
-# 車后同列：車在與任何一方的后同一列上。
-ROOK_ON_QUEEN_FILE = np.array([5, 3], dtype=np.int32)
-
-# WeakQueen: Queen in relative pin or discovered attack line.
-# 弱勢后：后處於被牽制或發現攻擊射線上。
-WEAK_QUEEN = np.array([38, 8], dtype=np.int32)
-
-# --- Endgame Scale Factors / 殘局縮放因子 ---
+# SF11 S(7, 8). P3a full scale (5,4) not kept after neutral/slightly-negative match → (4,3).
+KING_PROTECTOR = np.array([0, 0], dtype=np.int32)
+MINOR_BEHIND_PAWN = np.array([13, 3], dtype=np.int32)
+BISHOP_PAWNS_PENALTY = np.array([2, 0], dtype=np.int32)
+BISHOP_PAWNS_CENTER_BLOCKED_FACTOR = 1
+TRAPPED_ROOK = np.array([14, 2], dtype=np.int32)
+LONG_DIAGONAL_BISHOP = np.array([22, 4], dtype=np.int32)
+ROOK_ON_QUEEN_FILE = np.array([0, 3], dtype=np.int32)
+WEAK_QUEEN = np.array([29, 3], dtype=np.int32)
 SCALE_FACTOR_NORMAL = 64              # Normal scaling (64/64 = 1.0) / 正常殘局縮放因子（無縮減）
 SCALE_FACTOR_DRAW = 0                 # Scaling for forced draw positions (0/64 = 0.0) / 強制和棋局面縮放因子
 SCALE_FACTOR_OCB_ONE_PAWN = 16        # Opposite-colored bishops endgame with 1 pawn / 異色象殘局且僅有 1 兵時的縮放因子
@@ -696,31 +483,24 @@ SCALE_FACTOR_KQKRPs_FORTRESS = 8      # King + Queen vs King + Rook + Pawns (for
 # 最終不平衡 = (white_bonus - black_bonus) / 16
 
 IMBALANCE_QUADRATIC_OURS = np.array([
-    #  BP   Pawn  Knight Bishop  Rook  Queen
-    [1438,    0,    0,    0,    0,    0],  # Bishop pair
-    [  40,   38,    0,    0,    0,    0],  # Pawn
-    [  32,  255,  -62,    0,    0,    0],  # Knight
-    [   0,  104,    4,    0,    0,    0],  # Bishop
-    [ -26,   -2,   47,  105, -208,    0],  # Rook
-    [-189,   24,  117,  133, -134,   -6],  # Queen
+    [1435, 0, 0, 0, 0, 0],
+    [33, 23, 0, 0, 0, 0],
+    [32, 249, -62, 0, 0, 0],
+    [0, 95, 4, 0, 0, 0],
+    [-23, -3, 44, 110, -207, 0],
+    [-186, 19, 118, 137, -136, -6],
 ], dtype=np.int32)
-
 IMBALANCE_QUADRATIC_THEIRS = np.array([
-    #  BP   Pawn  Knight Bishop  Rook  Queen
-    [   0,    0,    0,    0,    0,    0],  # Bishop pair
-    [  36,    0,    0,    0,    0,    0],  # Pawn
-    [   9,   63,    0,    0,    0,    0],  # Knight
-    [  59,   65,   42,    0,    0,    0],  # Bishop
-    [  46,   39,   24,  -24,    0,    0],  # Rook
-    [  97,  100,  -42,  137,  268,    0],  # Queen
+    [0, 0, 0, 0, 0, 0],
+    [35, 0, 0, 0, 0, 0],
+    [10, 69, 0, 0, 0, 0],
+    [58, 71, 49, 0, 0, 0],
+    [50, 45, 27, -23, 0, 0],
+    [98, 104, -39, 138, 272, 0],
 ], dtype=np.int32)
-
-IMBALANCE_DIVISOR = np.int32(16)  # SF11 divides raw imbalance by 16
-
-# Scaling from SF11's internal centipawn scale (PawnMg=128) to our scale (PawnMg=100)
-IMBALANCE_SCALE_MG = np.int32(78)   # 100/128 ≈ 0.78, stored as percentage for integer math
-IMBALANCE_SCALE_EG = np.int32(56)   # 120/213 ≈ 0.563, stored as percentage for integer math
-
+IMBALANCE_DIVISOR = 20
+IMBALANCE_SCALE_MG = 61
+IMBALANCE_SCALE_EG = 51
 # =============================================================================
 # --- Search Constants / 搜尋常量 ---
 # =============================================================================
@@ -732,6 +512,208 @@ MATE_IN_MAX_PLY = MATE_SCORE - MAX_PLY
 VALUE_KNOWN_WIN = 10000
 NO_MOVE = np.uint16(0)
 
+# --- Search tree efficiency diagnostics (uint64 counters on SearchContext.diag_stats) ---
+DIAG_CUT_NODES = 0          # beta cutoffs from move loop (non-root tracked too)
+DIAG_CUT_FIRST = 1          # beta cutoff on first legal move tried
+DIAG_CUT_MOVE_SUM = 2       # sum of searched_legal_moves at cutoff (avg = sum/cuts)
+DIAG_LMR_TRY = 3            # reduced-depth LMR searches launched
+DIAG_LMR_RESEARCH = 4       # LMR fail-high re-searches
+DIAG_TT_CUT = 5             # TT direct cutoffs
+DIAG_NMP_CUT = 6            # null-move cutoffs
+DIAG_RFP_CUT = 7            # reverse futility cutoffs
+DIAG_RAZOR_CUT = 8          # razoring cutoffs
+DIAG_LMP_SKIP = 9           # late-move prunes (quiet skips)
+DIAG_FP_SKIP = 10           # futility prunes (quiet skips)
+DIAG_PROBCUT = 11           # ProbCut cutoffs
+# NMP funnel (tournament_analysis/NMP_EXPERIMENT_PLAN.md)
+DIAG_NMP_ELIGIBLE = 12      # hard guards passed; about to evaluate gate
+DIAG_NMP_GATE_PASS = 13     # static gate passed
+DIAG_NMP_NULL_TRY = 14      # null-move child search launched
+DIAG_NMP_NULL_FH = 15       # null score >= beta
+DIAG_NMP_VERIFY_TRY = 16    # verification search launched
+DIAG_NMP_VERIFY_FAIL = 17   # verification failed (score < beta)
+# History infrastructure diagnostics (Phase full history)
+DIAG_HIST_QUIET_BONUS = 18  # quiet cutoff bonus applications (best move)
+DIAG_HIST_QUIET_MALUS = 19  # quiet malus applications (failed quiets)
+DIAG_HIST_CAP_BONUS = 20    # capture history bonus
+DIAG_HIST_CAP_MALUS = 21    # capture history malus
+DIAG_HIST_CONT_UPD = 22     # continuation gravity writes (any layer)
+DIAG_HIST_FAIL_LOW = 23     # fail-low opponent-move feedback events
+DIAG_HIST_TT_HIT = 24       # TT quiet fail-high history updates
+DIAG_HIST_REVERSE = 25      # reverse-quiet main-history writes
+DIAG_HIST_PRUNE = 26        # history-based quiet prunes
+DIAG_HIST_AGE = 27          # history aging runs (per ID root entry / iteration)
+DIAG_HIST_MAIN_UPD = 28     # main_history gravity writes
+DIAG_HIST_PIECE_TO_UPD = 29 # piece-to (history_table) gravity writes
+DIAG_HIST_PAWN_UPD = 30     # pawn_history gravity writes
+DIAG_HIST_LPH_UPD = 31      # low-ply history gravity writes
+# QSearch / SEE / extension funnel. These counters are opt-in at runtime;
+# production UCI searches keep diagnostics disabled to avoid hot-path writes.
+DIAG_Q_TT_CUT = 32          # qsearch TT direct cutoffs
+DIAG_Q_STANDPAT_CUT = 33    # qsearch stand-pat beta cutoffs
+DIAG_Q_IN_CHECK = 34        # qsearch nodes entered while in check
+DIAG_Q_MOVES = 35           # pseudo-legal qsearch moves generated
+DIAG_Q_DELTA_SKIP = 36      # qsearch delta-pruned captures
+DIAG_Q_SEE_SKIP = 37        # qsearch SEE-pruned captures
+DIAG_Q_ILLEGAL_SKIP = 38    # qsearch pseudo-legal moves rejected as illegal
+DIAG_Q_BETA_CUT = 39        # qsearch move-loop beta cutoffs
+DIAG_SEE_CAP_SKIP = 40      # main-search capture SEE prunes
+DIAG_SEE_QUIET_SKIP = 41    # main-search quiet SEE prunes
+DIAG_CHECK_EXT = 42         # check extensions applied
+DIAG_SINGULAR_TRY = 43      # singular exclusion searches launched
+DIAG_SINGULAR_EXT = 44      # singular extensions applied
+DIAG_DOUBLE_EXT = 45        # double singular extensions applied
+DIAG_Q_SEE_TRY = 46         # qsearch SEE calls
+DIAG_PICKER_SEE_TRY = 47    # main MovePicker good/bad capture SEE calls
+DIAG_MAIN_CAP_SEE_TRY = 48  # shallow capture-pruning SEE calls
+DIAG_MAIN_QUIET_SEE_TRY = 49 # shallow quiet-pruning SEE calls
+DIAG_LMR_CAP_SEE_TRY = 50   # lazy capture-LMR SEE calls
+DIAG_PROBCUT_SEE_TRY = 51   # ProbCut SEE filter calls
+DIAG_CHECK_GATE_SEE_TRY = 52 # non-PV check-extension SEE calls
+DIAG_Q_CHECK_PROTECT = 53  # checking captures rescued from qsearch delta pruning
+DIAG_Q_EVASION_PREFILTER = 54 # in-check qsearch evasions rejected before make/unmake
+DIAG_MAIN_CHECK_SEE_ROUTE = 55 # quiet checks routed through capture/check SEE margin
+# P1 main quiet SEE / legality / check-geometry classification.
+DIAG_MAIN_QUIET_SEE_PRECHECK = 56       # quiet SEE candidates classified before SEE
+DIAG_MAIN_QUIET_PRE_PIN_ILLEGAL = 57    # pre-SEE pinned move is provably illegal
+DIAG_MAIN_QUIET_PRE_KING_ILLEGAL = 58   # pre-SEE king destination is attacked
+DIAG_MAIN_QUIET_SEE_PASS = 59           # quiet/checking quiet SEE passed
+DIAG_MAIN_QUIET_POST_PIN_ILLEGAL = 60   # SEE-pass candidate rejected by pin test
+DIAG_MAIN_QUIET_POST_KING_ILLEGAL = 61  # SEE-pass candidate rejected by king test
+DIAG_MAIN_QUIET_FALLBACK_TRY = 62       # SEE-pass candidate requiring make fallback
+DIAG_MAIN_QUIET_FALLBACK_REJECT = 63    # fallback candidate rejected after make
+DIAG_MAIN_GEOMETRY_NODE = 64            # main node precomputed check geometry
+DIAG_MAIN_SCORE_GEOMETRY_REBUILD = 65   # score_quiets rebuilt the same geometry
+
+# P2 aspiration-window diagnostics.  These are kept in the same opt-in
+# uint64 buffer as the hot-path counters, but use one fixed slot per search
+# depth so the Python iterative-deepening loop can expose where re-searches
+# occur.  MAX_PLY is also the legal depth bound used by the recursive search.
+DIAG_ASPIRATION_DEPTH_SLOTS = MAX_PLY + 1
+DIAG_ASPIRATION_ITERATIONS_BASE = 66       # completed aspiration iterations
+DIAG_ASPIRATION_FAIL_LOW_BASE = (
+    DIAG_ASPIRATION_ITERATIONS_BASE + DIAG_ASPIRATION_DEPTH_SLOTS
+)
+DIAG_ASPIRATION_FAIL_HIGH_BASE = (
+    DIAG_ASPIRATION_FAIL_LOW_BASE + DIAG_ASPIRATION_DEPTH_SLOTS
+)
+DIAG_ASPIRATION_RESEARCH_BASE = (
+    DIAG_ASPIRATION_FAIL_HIGH_BASE + DIAG_ASPIRATION_DEPTH_SLOTS
+)
+DIAG_ASPIRATION_MAX_DELTA_BASE = (
+    DIAG_ASPIRATION_RESEARCH_BASE + DIAG_ASPIRATION_DEPTH_SLOTS
+)
+DIAG_ASPIRATION_WASTED_NODES_BASE = (
+    DIAG_ASPIRATION_MAX_DELTA_BASE + DIAG_ASPIRATION_DEPTH_SLOTS
+)
+
+# P3 deep-cost diagnostics.  These counters remain opt-in and deliberately
+# do not change the qsearch/main-search/TT decision path.  Q cap forcing counts
+# are pseudo-candidate upper bounds: the cap path does not pay make/unmake just
+# to prove legality.  Main in-check counters classify the picker output with
+# the same single/double-check geometry used by P0; EP/unknown geometry is a
+# conservative fallback.  TT verify ``skip`` means the existing guard could
+# not validate the move (for example pseudo-illegal/king-illegal), while the
+# legacy cutoff is preserved for A/B safety.
+DIAG_Q_CAP_NONCHECK = (
+    DIAG_ASPIRATION_WASTED_NODES_BASE + DIAG_ASPIRATION_DEPTH_SLOTS
+)
+DIAG_Q_CAP_CHECK = DIAG_Q_CAP_NONCHECK + 1
+DIAG_Q_CAP_FORCING = DIAG_Q_CAP_NONCHECK + 2
+DIAG_Q_CAP_FORCING_MOVES = DIAG_Q_CAP_NONCHECK + 3
+DIAG_MAIN_IN_CHECK_NODE = DIAG_Q_CAP_NONCHECK + 4
+DIAG_MAIN_IN_CHECK_PICK_TRY = DIAG_Q_CAP_NONCHECK + 5
+DIAG_MAIN_IN_CHECK_PRE_ILLEGAL = DIAG_Q_CAP_NONCHECK + 6
+DIAG_MAIN_IN_CHECK_PRE_PASS = DIAG_Q_CAP_NONCHECK + 7
+DIAG_MAIN_IN_CHECK_FALLBACK = DIAG_Q_CAP_NONCHECK + 8
+DIAG_TT_VERIFY_TRY = DIAG_Q_CAP_NONCHECK + 9
+DIAG_TT_VERIFY_PASS = DIAG_Q_CAP_NONCHECK + 10
+DIAG_TT_VERIFY_REJECT = DIAG_Q_CAP_NONCHECK + 11
+DIAG_TT_VERIFY_SAVED_CUT = DIAG_Q_CAP_NONCHECK + 12
+DIAG_TT_VERIFY_SKIP = DIAG_Q_CAP_NONCHECK + 13
+
+# P4 decision-quality diagnostics.  Source counters use the MovePicker stage
+# observed when a legal move is actually searched.  All writes are guarded by
+# ``diag_enabled`` and must not affect ordering, history, LMR, or re-search.
+MOVE_ORDER_SOURCE_TT = 0
+MOVE_ORDER_SOURCE_GOOD_CAPTURE = 1
+MOVE_ORDER_SOURCE_GOOD_QUIET = 2
+MOVE_ORDER_SOURCE_BAD_CAPTURE = 3
+MOVE_ORDER_SOURCE_BAD_QUIET = 4
+MOVE_ORDER_SOURCE_OTHER = 5
+DIAG_ORDER_SOURCE_COUNT = 6
+DIAG_ORDER_TRY_BASE = DIAG_TT_VERIFY_SKIP + 1
+DIAG_ORDER_CUT_BASE = DIAG_ORDER_TRY_BASE + DIAG_ORDER_SOURCE_COUNT
+DIAG_ORDER_KILLER1_TRY = DIAG_ORDER_CUT_BASE + DIAG_ORDER_SOURCE_COUNT
+DIAG_ORDER_KILLER1_CUT = DIAG_ORDER_KILLER1_TRY + 1
+DIAG_ORDER_KILLER2_TRY = DIAG_ORDER_KILLER1_TRY + 2
+DIAG_ORDER_KILLER2_CUT = DIAG_ORDER_KILLER1_TRY + 3
+DIAG_ORDER_COUNTER_TRY = DIAG_ORDER_KILLER1_TRY + 4
+DIAG_ORDER_COUNTER_CUT = DIAG_ORDER_KILLER1_TRY + 5
+DIAG_ORDER_QUIET_CUT = DIAG_ORDER_KILLER1_TRY + 6
+DIAG_ORDER_QUIET_CUT_RANK_SUM = DIAG_ORDER_KILLER1_TRY + 7
+DIAG_ORDER_NODES_BEFORE_CUT_SUM = DIAG_ORDER_KILLER1_TRY + 8
+
+DIAG_LMR_R1_TRY = DIAG_ORDER_KILLER1_TRY + 9
+DIAG_LMR_R2_TRY = DIAG_LMR_R1_TRY + 1
+DIAG_LMR_R3P_TRY = DIAG_LMR_R1_TRY + 2
+DIAG_LMR_R1_FAIL_HIGH = DIAG_LMR_R1_TRY + 3
+DIAG_LMR_R2_FAIL_HIGH = DIAG_LMR_R1_TRY + 4
+DIAG_LMR_R3P_FAIL_HIGH = DIAG_LMR_R1_TRY + 5
+DIAG_LMR_QUIET_TRY = DIAG_LMR_R1_TRY + 6
+DIAG_LMR_QUIET_FAIL_HIGH = DIAG_LMR_R1_TRY + 7
+DIAG_LMR_CAPTURE_TRY = DIAG_LMR_R1_TRY + 8
+DIAG_LMR_CAPTURE_FAIL_HIGH = DIAG_LMR_R1_TRY + 9
+DIAG_LMR_RESEARCH_KEEP = DIAG_LMR_R1_TRY + 10
+DIAG_LMR_RESEARCH_REJECT = DIAG_LMR_R1_TRY + 11
+DIAG_LMR_RESEARCH_DEEPER = DIAG_LMR_R1_TRY + 12
+DIAG_LMR_RESEARCH_SHALLOWER = DIAG_LMR_R1_TRY + 13
+DIAG_LMR_FAIL_HIGH_UNVERIFIED = DIAG_LMR_R1_TRY + 14
+
+# Counterfactual SF11-style post-LMR continuation-history samples.  These do
+# not update a table: bonus/malus mean the verified result that a future
+# experiment would have learned from.  Sign counters compare the current LMR
+# statScore with the missing move-specific butterfly signal.
+DIAG_POST_LMR_BONUS_SAMPLE = DIAG_LMR_R1_TRY + 15
+DIAG_POST_LMR_MALUS_SAMPLE = DIAG_LMR_R1_TRY + 16
+DIAG_POST_LMR_UNVERIFIED_SAMPLE = DIAG_LMR_R1_TRY + 17
+DIAG_POST_LMR_BONUS_BUTTERFLY_NONNEG = DIAG_LMR_R1_TRY + 18
+DIAG_POST_LMR_MALUS_BUTTERFLY_NONNEG = DIAG_LMR_R1_TRY + 19
+DIAG_POST_LMR_BONUS_STAT_NONNEG = DIAG_LMR_R1_TRY + 20
+DIAG_POST_LMR_MALUS_STAT_NONNEG = DIAG_LMR_R1_TRY + 21
+
+# P5 history-prune attribution.  Layer order is deliberately stable because
+# reports persist the numeric counters: piece-to, butterfly, pawn, then
+# continuation offsets 1/2/3/4/6 ply.  Attribution is shadow-only and runs
+# only after the production prune predicate has already evaluated true.
+HIST_PRUNE_LAYER_MAIN = 0
+HIST_PRUNE_LAYER_BUTTERFLY = 1
+HIST_PRUNE_LAYER_PAWN = 2
+HIST_PRUNE_LAYER_CONT_1 = 3
+HIST_PRUNE_LAYER_CONT_2 = 4
+HIST_PRUNE_LAYER_CONT_3 = 5
+HIST_PRUNE_LAYER_CONT_4 = 6
+HIST_PRUNE_LAYER_CONT_6 = 7
+HIST_PRUNE_LAYER_COUNT = 8
+DIAG_HP_NEG_COUNT_BASE = DIAG_POST_LMR_MALUS_STAT_NONNEG + 1
+DIAG_HP_NEG_ABS_SUM_BASE = DIAG_HP_NEG_COUNT_BASE + HIST_PRUNE_LAYER_COUNT
+DIAG_HP_DECISIVE_BASE = DIAG_HP_NEG_ABS_SUM_BASE + HIST_PRUNE_LAYER_COUNT
+DIAG_HP_DOMINANT_BASE = DIAG_HP_DECISIVE_BASE + HIST_PRUNE_LAYER_COUNT
+DIAG_HP_CONT_COALITION_DECISIVE = DIAG_HP_DOMINANT_BASE + HIST_PRUNE_LAYER_COUNT
+DIAG_HP_NONCONT_ALREADY_PRUNES = DIAG_HP_CONT_COALITION_DECISIVE + 1
+DIAG_HP_LMR_ELIGIBLE = DIAG_HP_CONT_COALITION_DECISIVE + 2
+DIAG_HP_MAIN_GATE_NEAR_ZERO = DIAG_HP_CONT_COALITION_DECISIVE + 3
+DIAG_HP_MARGIN_NEAR = DIAG_HP_CONT_COALITION_DECISIVE + 4
+DIAG_HP_MARGIN_MID = DIAG_HP_CONT_COALITION_DECISIVE + 5
+DIAG_HP_MARGIN_FAR = DIAG_HP_CONT_COALITION_DECISIVE + 6
+DIAG_HP_MARGIN_SUM = DIAG_HP_CONT_COALITION_DECISIVE + 7
+DIAG_HP_DEPTH_SUM = DIAG_HP_CONT_COALITION_DECISIVE + 8
+DIAG_HP_MOVE_INDEX_SUM = DIAG_HP_CONT_COALITION_DECISIVE + 9
+DIAG_HP_CONT1_CAP_HIT = DIAG_HP_MOVE_INDEX_SUM + 1
+DIAG_HP_CONT1_CAP_RELIEF_SUM = DIAG_HP_MOVE_INDEX_SUM + 2
+DIAG_HP_CONT1_CAP_RESCUE = DIAG_HP_MOVE_INDEX_SUM + 3
+DIAG_SIZE = DIAG_HP_CONT1_CAP_RESCUE + 1
+
 # Move Ordering Bonuses
 SCORE_TT_MOVE = 100000
 SCORE_GOOD_CAPTURE_BONUS = 20000
@@ -740,6 +722,11 @@ SCORE_KILLER_2 = 14000
 SCORE_COUNTER_MOVE = 10000
 SCORE_BAD_CAPTURE_PENALTY = -5000
 GOOD_QUIET_THRESHOLD = -1200
+
+# QSearch check-evasion ordering.  Captures keep a separate score bucket so
+# large accumulated quiet-history values cannot jump ahead of every capture.
+QS_EVASION_CAPTURE_BUCKET = 20000
+QS_EVASION_QUIET_CLAMP = 5000
 
 # Contempt Factor: Score penalty for draws when the engine is winning.
 # This encourages the engine to prefer winning lines over draws.
@@ -751,16 +738,39 @@ PAWN_PUSH_ATTACK_BONUS = 3000
 KING_ATTACK_BONUS = 2000 # Bonus for quiet moves attacking the opponent's King zone
 ROOK_QUEEN_BATTERY_BONUS = 5000 # Bonus for Rook moving to same file/rank as Queen
 
-# History Heuristics Constants
-MAX_HISTORY = 16384 # Max value for history table to prevent overflow and saturation
+# History Heuristics Constants (full history reform — HCE-conservative SF structure)
+MAX_HISTORY = 16384  # legacy alias; prefer HISTORY_MAX_*
+# Compatibility mode: Phase-1a read/write semantics on modern tables.
+# 2026-07-16: full/soft full hist ~-30 Elo vs Old1a → default back to 1a behavior.
+# Tables keep 7D cont / main shape for future experiments; ic/cap forced to 0 when True.
+HISTORY_COMPAT_1A = True
+# Restored Phase 1a ceilings (match classical_old gravity saturation)
 HISTORY_MAX_MAIN = 16384
-HISTORY_MAX_BUTTERFLY = 8192
-HISTORY_MAX_CAPTURE = 8192
+HISTORY_MAX_PIECE_TO = 16384
+# E10 kept 10240; E14 kept 12288 (marginal +5 Elo; stop deeper BF for now).
+HISTORY_MAX_BUTTERFLY = 12288
+# E15 kept: capture ceiling 8192→10240.
+HISTORY_MAX_CAPTURE = 10240
+# E16 14336 rolled back (48.25% / −12 Elo). Keep 12288.
 HISTORY_MAX_CONTINUATION = 12288
 HISTORY_MAX_PAWN = 4096
 
 PAWN_HISTORY_SIZE = 8192
 PAWN_HISTORY_MASK = 8191
+
+# Continuation: [in_check][is_capture][ply_idx 0..4][prev_pc][prev_to][curr_pc][curr_to]
+CONT_PLY_OFFSETS = (1, 2, 3, 4, 6)  # ply_idx i ↔ ply - CONT_PLY_OFFSETS[i]
+CONT_NUM_PLY = 5
+# Update weights (SF-ish, sum style); applied at write, reads are 1:1
+CONT_WEIGHT_0 = 1040
+CONT_WEIGHT_1 = 780
+CONT_WEIGHT_2 = 300
+CONT_WEIGHT_3 = 537
+CONT_WEIGHT_4 = 423
+CONT_WEIGHT_SUM_DIV = 131072  # cont_bonus * w * cmhc // this
+CONT_NEAR_BIAS = 71           # +bias for ply_idx < 2
+# CMHC multipliers (1024 = neutral); index by agreement count 0..6 (clamped)
+CONT_CMHC_TABLE = (96, 113, 101, 105, 127, 121, 126)
 
 # 50-move rule constants
 FIFTY_MOVE_RULE_LIMIT = 100
@@ -771,19 +781,87 @@ FIFTY_MOVE_MAX_SCALE = 256
 SEE_HISTORY_DIVISOR = 512
 LMR_HISTORY_DIVISOR = 10240
 
-# History Score Weighting in LMR (must be int)
-HISTORY_WEIGHT_MAIN = 2
-HISTORY_WEIGHT_CONT_1 = 4
+# Quiet ordering weights
+# 1a-compat: piece-to * 2 + main (as butterfly) * 1 + cont read-weights 4,2,1,2,1
+# full mode: 2*main + piece_to*W/1024 + unweighted cont sum
+# E8/H1 kept: main/piece-to weight 2→3 (1a-compat read path).
+HISTORY_WEIGHT_MAIN = 3          # full: main*2; 1a-compat: piece-to uses this scale
+HISTORY_WEIGHT_PIECE_TO = 256
+HISTORY_WEIGHT_PIECE_TO_DEN = 1024
+# E9/H2 kept: cont-1 weight 4→5 (1a-compat).
+HISTORY_WEIGHT_CONT_1 = 5        # 1a-compat read weights (full mode ignores, uses 1)
 HISTORY_WEIGHT_CONT_2 = 2
 HISTORY_WEIGHT_CONT_3 = 1
 HISTORY_WEIGHT_CONT_4 = 2
 HISTORY_WEIGHT_CONT_5 = 1
+# P6: history pruning alone must not let one sparse cont-1 cell contribute an
+# arbitrarily large negative veto.  This is a weighted-score floor; ordering,
+# LMR statScore, and the underlying continuation table remain unchanged.
+HISTORY_PRUNE_CONT1_FLOOR = -4096
+# 1a write: full bonus to piece-to and main (butterfly), cont raw bonus per layer
+HISTORY_QUIET_MAIN_SCALE_NUM_1A = 1024
+HISTORY_QUIET_PIECE_TO_SCALE_NUM_1A = 1024
+HISTORY_QUIET_CONT_SCALE_NUM_1A = 1024
 
 LOW_PLY_HISTORY_SIZE = 5
 LOW_PLY_HISTORY_MAX = 7183
+LOW_PLY_HISTORY_FILL = 100       # soft age: reset low-ply toward this each iteration
 
+# --- Write scales (HCE soft full — after -31 Elo @200k nodes) ---
+HISTORY_QUIET_MAIN_SCALE_NUM = 824
+HISTORY_QUIET_MAIN_SCALE_DEN = 1024
+HISTORY_QUIET_PIECE_TO_SCALE_NUM = 384   # was 512; less piece-to churn
+HISTORY_QUIET_PIECE_TO_SCALE_DEN = 1024
+HISTORY_QUIET_CONT_SCALE_NUM = 512       # was 820; damp cont writes (long-game pollution)
+HISTORY_QUIET_CONT_SCALE_DEN = 1024
+HISTORY_QUIET_MALUS_SCALE_NUM = 1024     # was 1136; milder failed-quiet penalty
+HISTORY_QUIET_MALUS_SCALE_DEN = 1024
+HISTORY_QUIET_MALUS_DECAY_NUM = 956
+HISTORY_QUIET_MALUS_DECAY_DEN = 1024
+HISTORY_CAP_BONUS_SCALE_NUM = 1152       # was 1280
+HISTORY_CAP_BONUS_SCALE_DEN = 1024
+HISTORY_CAP_MALUS_SCALE_NUM = 1126       # back toward Phase 1a
+HISTORY_CAP_MALUS_SCALE_DEN = 1024
+HISTORY_REFUTE_SCALE_NUM = 512           # was 680
+HISTORY_REFUTE_SCALE_DEN = 1024
+HISTORY_TT_MOVE_BONUS_EXTRA = 0          # was 280; TT quiet bump noisy on HCE
+HISTORY_PARENT_STAT_DIV = 64             # was 40; weaker parent-stat feed
+# Malus only updates shallow cont (ply offsets 1–2), reduces deep-history pollution
+HISTORY_MALUS_SHALLOW_CONT = True
+
+# Pawn history asymmetric gravity input (SF: 1038 if bonus > -7 else 525)
+HISTORY_PAWN_BONUS_NUM = 1038
+HISTORY_PAWN_MALUS_NUM = 525
+HISTORY_PAWN_SCALE_DEN = 1024
+HISTORY_PAWN_MALUS_THRESHOLD = -7
+
+# Low-ply history write scale (SF)
+HISTORY_LPH_SCALE_NUM = 663
+HISTORY_LPH_SCALE_DEN = 1024
+
+# Reverse quiet: off after match regression (pollutes main in HCE)
+ENABLE_REVERSE_QUIET = False
+
+# Quiet check ordering
+# E1 (2026-07-16): experiment CHECK_SEE_GATE=True (SEE >= -75 before CHECK_BONUS)
 CHECK_BONUS = 20000
+CHECK_SEE_THRESHOLD = -75
+ENABLE_CHECK_SEE_GATE = True
+
+# Threat reordering — disabled (regressed when enabled)
+ENABLE_THREAT_REORDERING = False
 THREAT_MULTIPLIER = 20
+
+# Capture history victim dimension: piece type 0..5 (SF CapturePieceToHistory)
+CAPTURE_HISTORY_VICTIM_TYPES = 6
+
+# History prune threshold. More negative = harder to prune.
+# E3: -4000→-4500 kept; E12/H5: -4500→-5000 kept (2026-07-17).
+PRUNING_HISTORY_THRESHOLD = -6500  # E23 keep; E25B −7000 aborted ~negative @n10k
+
+# Continuation history prune threshold (SF17 Step 14: -4313 * depth, scaled by table capacity 28672 / 68192 ≈ 0.42)
+ENABLE_CONTINUATION_HISTORY_PRUNING = True
+PRUNING_CONTINUATION_THRESHOLD = -1800
 
 CORRECTION_HISTORY_SIZE = 16384
 CORRECTION_HISTORY_MASK = 16383
@@ -809,20 +887,70 @@ NON_PAWN_KEY_WHITE_INDEX = 7
 NON_PAWN_KEY_BLACK_INDEX = 8
 
 # --- Aspiration Windows / 期望窗口 ---
-ASPIRATION_WINDOW_SIZE = 25 # centipawns (H8: tightened from 100 to detect score instability)
+ASPIRATION_WINDOW_SIZE = 70 # centipawns (tuned via sweep experiment for optimal search efficiency)
 ASPIRATION_WINDOW_MIN = 15         # HCE 適配最低初始窗口
-ASPIRATION_WINDOW_BASE = 20        # 動態基礎窗口
+ASPIRATION_WINDOW_BASE = 20        # Match baseline / SF11-style HCE starting window
 ASPIRATION_WINDOW_SCALE_DIV = 120  # 分數縮放除數，數值越小，分數高時窗口擴張越快
 
 # --- Pruning Techniques / 剪枝技術 ---
 # Master switches for new pruning techniques / 新剪枝技術的總開關
 ENABLE_LMP = True           # Late Move Pruning
-ENABLE_PROBCUT = True       # ProbCut
+ENABLE_PROBCUT = True       # default on; runtime knob / sweep may disable via SearchContext
 ENABLE_DELTA_PRUNING = True # Delta Pruning in Quiescence Search
+
+# --- Runtime tune indices (SearchContext.tune[int32]) for one-compile sweeps ---
+# Values initialized from the scalar constants below; scripts mutate ctx.tune in Python.
+TUNE_RFP_MULT = 0
+TUNE_RAZOR_MARGIN = 1
+TUNE_FP_BASE = 2
+TUNE_FP_MULT = 3
+TUNE_SEE_CAP_MARGIN = 4
+TUNE_SEE_QUIET_MARGIN = 5
+TUNE_LMR_BASE_OFFSET = 6
+TUNE_LMR_HIST_SCALE = 7
+TUNE_DELTA_MARGIN = 8
+TUNE_PROBCUT_MARGIN = 9
+TUNE_BAD_CAP_BONUS = 10
+TUNE_GOOD_CAP_RELIEF = 11
+TUNE_LMP_SCALE = 12          # percent: 100 = SF11-table limit; lower → prune earlier
+TUNE_KILLER_RELIEF = 13      # LMR r subtract for killer/counter (1024 scale)
+TUNE_QS_SEE = 14             # QS SEE threshold (more negative = prune more losing caps)
+# Round-3 structural LMR (previously hard-coded; still SF11-capped in grids)
+TUNE_LMR_CUTNODE = 15        # +r on cut nodes (default LMR_CUTNODE_BONUS)
+TUNE_LMR_NO_TTMOVE = 16      # +r on cut when no TT move
+TUNE_LMR_TTCAP = 17          # +r when TT move is capture
+TUNE_LMR_MC_FACTOR = 18      # r -= mc * factor (higher → softer LMR)
+TUNE_LMR_TTMOVE_RED = 19     # r subtract for researching TT move
+# Structural experiment modes (runtime; see NMP_* production defaults below)
+# NMP_SCOPE: 0=cut only, 1=all non-PV, 2=non-PV&d>=mind, 3=cut OR (non-PV&d>=mind)
+TUNE_NMP_SCOPE = 20
+# NMP_GATE: 0 = legacy, 1 = SF11 raw, 2 = SF11*78, 3 = custom G_* tune slots
+TUNE_NMP_GATE = 21
+# NMP_R: 0 = legacy 7+d//3, 1 = SF11, 2 = custom R_BASE + d//R_DIV + eval_margin
+TUNE_NMP_R = 22
+# PROBCUT_STYLE: 0 = flat TUNE_PROBCUT_MARGIN, 1 = SF 189-45*imp (*78/100), 2 = force off
+TUNE_PROBCUT_STYLE = 23
+# LMR base table (E2): scale REDUCTIONS product; not-improving numerator (SF uses 194/512)
+TUNE_LMR_TABLE_SCALE = 24   # percent on REDUCTIONS[d]*REDUCTIONS[mc]
+TUNE_LMR_NOT_IMP = 25       # not-improving numerator (higher → more reduction)
+# NMP continuous params (gate=3 / r=2); defaults match legacy so gate=0 path still primary
+TUNE_NMP_G_BASE = 26        # custom: threshold = beta - G_DEPTH*d - G_IMP*imp + G_BASE
+TUNE_NMP_G_DEPTH = 27
+TUNE_NMP_G_IMP = 28
+TUNE_NMP_NEED_BETA = 29     # 0/1: also require static >= beta
+TUNE_NMP_R_BASE = 30        # custom R base (legacy 7)
+TUNE_NMP_R_DIV = 31         # custom R: base + depth//div (legacy 3)
+TUNE_NMP_VERIFY_D = 32      # verification min depth (legacy 8; 999 = off)
+TUNE_NMP_SCOPE_MIND = 33    # for scope 2/3: min depth for non-PV NMP
+TUNE_SIZE = 34
+# E2 tried 70 (puzzle +6 pass, nodes +25%); match @200k nodes: depth↓, no Elo.
+# 2026-07-16: revert to 100 after New100/New85 dual match vs Old.
+LMR_TABLE_SCALE_PERCENT = 100
+LMR_NOT_IMP_NUM = 194
 ENABLE_IIR = True           # Internal Iterative Reduction (Replaces old IID)
 ENABLE_SINGULAR_EXTENSIONS = True # Singular Extensions
 ENABLE_MATE_DISTANCE_PRUNING = True # Mate Distance Pruning
-ENABLE_MULTICUT = False  # Multi-Cut Pruning (disabled — causes regression, needs redesign)
+ENABLE_MULTICUT = True  # Multi-Cut Pruning (Phase 2: Enabled with corrected exclusion_score >= beta)
 
 # Multi-Cut Parameters
 MULTICUT_MIN_DEPTH = 5  # Only apply Multi-Cut at this depth or higher
@@ -839,11 +967,12 @@ SINGULAR_DOUBLE_EXT_MULTIPLIER = 2     # Double margin = 2 * depth (total offset
 ENABLE_SHALLOW_SEE_PRUNING = True  # Enable SEE pruning for captures/quiets at shallow depth
 ENABLE_HISTORY_PRUNING = True      # Enable pruning based on History Score
 
-# NEW: Pruning Parameters (Tightened for Performance/Strength Balance)
-PRUNING_SHALLOW_DEPTH = 12         # Prune moves only if depth is below this (was 8)
-PRUNING_CAPTURE_SEE_MARGIN = -100 # Stockfish dynamic margin: -100 * depth
-PRUNING_QUIET_SEE_MARGIN = -25    # Stockfish dynamic margin: -25 * depth^2
-PRUNING_HISTORY_THRESHOLD = -4000 # Adjusted from -1000 to match V2 linear history scale
+# Pruning parameters — SF11 is a *reference*, not a hard aggression ceiling
+# (policy lifted 2026-07-19). Prefer Elo/pass gates over "must not exceed SF11".
+# SEE: SF11 capture ~-194 internal → ~-151 @0.78; current values stay until A/B.
+PRUNING_SHALLOW_DEPTH = 12
+PRUNING_CAPTURE_SEE_MARGIN = -100  # SF11 ~-194 internal; currently milder
+PRUNING_QUIET_SEE_MARGIN = -25
 
 # Master switches for existing pruning techniques / 現有剪枝技術的總開關
 ENABLE_NMP = True           # Null Move Pruning
@@ -851,41 +980,84 @@ ENABLE_RAZORING = True      # Razoring
 ENABLE_FP = True            # Futility Pruning
 ENABLE_RFP = True           # Reverse Futility Pruning
 ENABLE_LMR = True           # Late Move Reductions
+ENABLE_ALPHA_RAISE_DEPTH_REDUCTION = False  # rejected 2026-07-20: δ1≈0 Elo, δ2≈−30 @n30k
+ENABLE_FOLLOW_PV = False  # E27 rejected mid-match (unstable / not clearly +); re-test later if needed
+# SF-style: quiet FP / quiet SEE use history-adjusted lmrDepth instead of raw depth
+ENABLE_HIST_LMR_DEPTH_PRUNING = True  # E28 adopted (≈50% @n30k; keep; production ON)
+# SF18 capture futility + captHist term on capture SEE margin (Phase 4 refactored)
+ENABLE_CAPTURE_FUTILITY = True
+
+# Capture futility (HCE cp; SF-inspired). fut ≈ static + BASE + MULT*lmrDepth + victim + hist
+CAP_FP_MAX_LMR_DEPTH = 6       # apply only if pruning_lmr_depth < this (SF: lmrDepth < 7)
+CAP_FP_BASE = 110              # SF: 231 (scaled to HCE 100cp pawn)
+CAP_FP_LMR_MULT = 100          # SF: 232 (scaled to HCE 100cp pawn)
+CAP_FP_CAPTHIST_NUM = 131      # + captHist * NUM // DEN
+CAP_FP_CAPTHIST_DEN = 1024
+# Capture SEE: threshold = SEE_CAP_MARGIN * depth - captHist * NUM // DEN
+# (good/high captHist → more negative threshold → harder to prune; matches SF sign)
+CAP_SEE_CAPTHIST_NUM = 34
+CAP_SEE_CAPTHIST_DEN = 1024
+
+# Alpha-raise depth reduction (kept for re-enable experiments; production OFF).
+# SF18: depth>2 && depth<13 && depth-=2. HCE A/B: band 5–12, ply>0; δ1 neutral, δ2 negative.
+ALPHA_RAISE_DEPTH_LO = 4
+ALPHA_RAISE_DEPTH_HI = 13
+ALPHA_RAISE_DEPTH_DELTA = 1
+ALPHA_RAISE_MIN_IMPROVEMENT = 0
 
 NULL_MOVE_REDUCTION = 2
 MAX_QUIESCENCE_DEPTH = 5
 
-# Razoring
-RAZORING_MARGIN = 600 # Tightened from 700
+# --- Prune margins (HCE cp; SF11 formulas remain useful baselines) ---
 
-# Futility Pruning
-FP_BASE = 150      # aligned with SF11 HCE (78 cp)
-FP_MULTIPLIER = 150 # aligned with SF11 HCE (57 cp)
+# Razoring — SF19 Step 8: eval < alpha - RAZORING_COEFF * depth * depth
+RAZORING_MARGIN = 250  # Retained for runtime tune slot compatibility
+RAZORING_MAX_DEPTH = 3
+RAZORING_COEFF = 482
 
-# Reverse Futility Pruning
-RFP_MAX_DEPTH = 10            # aligned with SF11 HCE (SF11 is 5, 8 is safe for HCE)
-RFP_BASE_MULT = 150           # aligned with SF11 HCE (72 cp)
-RFP_NO_TT_PENALTY = 40       # Adjusted penalty
+# Futility: larger mult → larger margin → harder to skip (softer FP).
+# E25A 130→140 failed 1000@n10k 49.0%/−7 Elo → keep 130.
+FP_BASE = 180
+FP_MULTIPLIER = 125
 
-NMP_STATIC_MARGIN = 150
+RFP_MAX_DEPTH = 8
+RFP_BASE_MULT = 170  # E24 180 aborted ~900@n10k ~49.6%/Elo−3 → rollback
+RFP_NO_TT_PENALTY = 30
+
+NMP_STATIC_MARGIN = 150      # not used as primary NMP gate
 NMP_MIN_SIDE_NON_PAWNS = 2
-NMP_VERIFICATION_DEPTH = 8
+NMP_VERIFICATION_DEPTH = 8   # verification from this depth (tunable via TUNE_NMP_VERIFY_D)
 LOW_MATERIAL_PRUNING_PIECE_COUNT = 7
+# Production NMP structure: cut_node only (legacy).
+# N1 tried scope=3 (cut OR non-PV&d>=6): 1000@n10k 49.0%/Elo−6.6 → rollback.
+# 0=cut only, 1=all non-PV (S1a pass−7), 2=non-PV&d>=mind only, 3=cut∨(nonPV&d>=mind)
+NMP_SCOPE_MODE = 0
+NMP_SCOPE_MIN_DEPTH = 6
+# Runtime mode defaults.  These used to be hard-coded as zero while the
+# corresponding SearchContext slots were already mutable.  Keeping the
+# defaults in constants lets the UCI/SPSA adapter select a mode before the
+# first Numba compilation without changing the production defaults.
+NMP_GATE_MODE = 0          # 0=legacy, 1=SF11 raw, 2=SF11*78, 3=custom G slots
+NMP_R_MODE = 0             # 0=legacy, 1=SF11, 2=custom R slots
+PROBCUT_STYLE_MODE = 0     # 0=flat, 1=SF-style, 2=off
+NMP_NEED_BETA = 0          # 0/1: custom NMP gate also requires static >= beta
 
 # Late Move Reductions (LMR)
-LMR_MIN_DEPTH = 3           # Minimum depth to apply LMR (H4: lowered from 4 to match Stockfish)
-LMR_MIN_QUIET_MOVE_INDEX = 3 # Minimum number of quiet moves before LMR (Lowered to 2 for aggressive LMR)
-LMR_REDUCTION = 1           # Depth reduction for LMR / LMR 的深度減少值
+LMR_MIN_DEPTH = 3
+# SF11: LMR when moveCount > 1 (+ root extras). Quiet index 2 ≈ not on first quiet.
+LMR_MIN_QUIET_MOVE_INDEX = 2
+LMR_REDUCTION = 1
 
-# Late Move Pruning (LMP) - Prune moves after a certain number of quiet moves have been searched
-# 晚期移動剪枝（LMP） - 在搜尋了一定數量的寧靜步後剪枝
+# Late Move Pruning — SF11: (5 + depth^2) * (1+improving) / 2 - 1
+# improving factor applied at search-time (// (2 - improving))
 LMP_MOVE_COUNT = np.array([
-    0 if d == 0 else 3 + 2 * d * d for d in range(MAX_PLY)
+    0 if d == 0 else max(1, (5 + d * d) // 2 - 1) for d in range(MAX_PLY)
 ], dtype=np.int32)
+# Percent scale on LMP limit (100=table). Higher → later prune (fatter tree).
+# E4: 100→105 kept (+15.7 Elo @100k). E22: 105→110 aborted ~300@n10k ~48% — rollback.
+LMP_SCALE_PERCENT = 105
 
-# LMR Table (Precomputed)
-# A1: Formula tuned — divisor 2.25→2.0, offset 0.5→0.77 (matching modern Stockfish)
-# Using 256 as max move count (enough for almost all positions)
+# LMR Table (legacy integer plies; live path uses 1024-scale REDUCTIONS)
 LMR_TABLE = np.zeros((MAX_PLY, 256), dtype=np.int32)
 for d in range(MAX_PLY):
     for mc in range(256):
@@ -894,42 +1066,219 @@ for d in range(MAX_PLY):
         else:
             LMR_TABLE[d, mc] = int(0.77 + math.log(d) * math.log(mc) / 2.0)
 
-# --- 1024-scale LMR (Phase B) ---
+# --- 1024-scale LMR — base table matches SF11 (24.8 * log), not above ---
 REDUCTIONS = np.zeros(256, dtype=np.int32)
 for i in range(1, 256):
-    REDUCTIONS[i] = int(20.0 * math.log(i))
+    REDUCTIONS[i] = int(24.8 * math.log(i))
 
-LMR_BASE_OFFSET = 512          # r += 512
-LMR_TTPV_INCREASE = 768        # r += 768 (ttPv nodes)
-LMR_TTPV_DECREASE_BASE = 2048  # r -= 2048 (ttPv decrease)
-LMR_TTPV_PV_BONUS = 768        # r -= PvNode * 768
-LMR_CUTNODE_BONUS = 1024       # r += 1024 * cutNode
-LMR_TTCAPTURE_BONUS = 768      # r += 768 * ttCapture
-LMR_MOVECOUNT_FACTOR = 40      # r -= moveCount * 40
-LMR_HISTORY_SCALE = 150        # r -= statScore * 150 / 4096
-LMR_CUTOFF_CNT_BASE = 128      # r += 128
-LMR_CUTOFF_CNT_EXTRA = 512     # r += 512 * (cutoffCnt > 2)
-LMR_ALLNODE_EXTRA = 512        # r += 512 * allNode
-LMR_TTMOVE_REDUCTION = 1024    # r -= 1024 for ttMove
-LMR_NO_TTMOVE_BONUS = 512      # r += 512 * !ttMove (cutNode)
-LMR_CORRECTION_DIVISOR = 32768 # r -= abs(correctionValue) / 32768
+# LMR_BASE: E7 kept 480 (was 512). History scale: R1 210 mixed; restore Old 150 (less soft on good hist).
+LMR_BASE_OFFSET = 460  # E20 keep (was 448; 300@150k +8 Elo)
+LMR_TTPV_INCREASE = 768
+LMR_TTPV_DECREASE_BASE = 2048
+LMR_TTPV_PV_BONUS = 768
+LMR_CUTNODE_BONUS = 2048       # SF11 cutNode: +2 plies ≈ +2048 on 1024-scale
+LMR_TTCAPTURE_BONUS = 1024     # SF11 ttCapture: +1 ply
+# Match classical_old hard-coded LMR (±1024). P1 1536 withdrawn 2026-07-16.
+LMR_BAD_CAPTURE_BONUS = 1024
+LMR_GOOD_CAPTURE_RELIEF = 1024
+LMR_LATE_CAPTURE_BONUS = 0
+LMR_KILLER_COUNTER_RELIEF = 1024
+LMR_MOVECOUNT_FACTOR = 40
+LMR_HISTORY_SCALE = 150
+LMR_CUTOFF_CNT_BASE = 128
+LMR_CUTOFF_CNT_EXTRA = 512
+LMR_ALLNODE_EXTRA = 512
+LMR_TTMOVE_REDUCTION = 1024
+LMR_NO_TTMOVE_BONUS = 1024     # SF11-ish: extra reduction without TT move on cut nodes
+LMR_CORRECTION_DIVISOR = 32768
 
-LMR_ALLNODE_SCALE_NUM = 150    # r += r * 150 / (256*depth + 285)
+# SF19 Step 18: Scale up reductions for expected ALL nodes: r += r * 276 / (256 * depth + 268)
+LMR_ALLNODE_SCALE_NUM = 276
 LMR_ALLNODE_SCALE_DENOM_BASE = 256
-LMR_ALLNODE_SCALE_DENOM_OFFSET = 285
+LMR_ALLNODE_SCALE_DENOM_OFFSET = 268
 
 
-# ProbCut
-PROBCUT_R = 4
-PROBCUT_MARGIN = 150 # centipawns
+# ProbCut — multi-pack 180 regressed with stack → keep 150 default
+PROBCUT_R = 4  # Retained for tuning registry backwards compatibility
+PROBCUT_MARGIN = 150
+PROBCUT_MIN_DEPTH = 5  # Retained for tuning registry backwards compatibility
+# SF19 Step 12: Dynamic ProbCut reduction based on improving flag
+PROBCUT_R_IMPROVING = 5
+PROBCUT_R_NOT_IMPROVING = 3
+# ProbCut style=1 (SF11-ish): raisedBeta = beta + (BASE - IMP*improving) * HCE_SCALE
+PROBCUT_SF_BASE = 189
+PROBCUT_SF_IMPROVING = 45
+PROBCUT_TT_DEPTH_OFFSET = 3  # store TT at depth - 3 after ProbCut cut
 
-# Delta Pruning
-DELTA_PRUNING_MARGIN = 400
+# Step 12: TT-based ProbCut Shortcut (SF 18 Step 12: 428 * 78 // 100 ≈ 334)
+ENABLE_PROBCUT_TT_SHORTCUT = True
+PROBCUT_TT_SHORTCUT_MARGIN = 334
+
+
+# Delta Pruning (QS) — keep milder than aggressive node-exp values
+# QS delta (P0 try 300 regressed fixed-depth suite nodes → keep 350)
+DELTA_PRUNING_MARGIN = 350
 
 # --- Static Exchange Evaluation (SEE) Threshold / SEE 閾值 ---
-SEE_THRESHOLD = 0  # centipawns (H6: tightened from -200, only search non-losing captures in QSearch)
-QS_SEE_THRESHOLD = -80  # Stockfish-style qsearch tolerance: keep slightly losing tactical captures
-ENABLE_SEE_IN_QUIESCENCE = True # Master switch to enable/disable SEE in quiescence search / 啟用/禁用靜態搜尋中 SEE 的總開關
+SEE_THRESHOLD = 0
+# QS SEE (P0 try -60: puzzle OK but no clear node win on suite → keep -80)
+QS_SEE_THRESHOLD = -80
+ENABLE_SEE_IN_QUIESCENCE = True
+
+# =============================================================================
+# --- Search internals (formerly hard-coded in search.py) ---
+# Tunable margins / formula coeffs only — not structural sentinels (TT empty, piece ids).
+# =============================================================================
+
+# HCE scale used when adapting SF internal cp → our HCE (≈100/128 MG)
+HCE_SCALE_NUM = 78
+HCE_SCALE_DEN = 100
+
+# --- Hindsight / depth adjustment (parent reduction + opponent worsening) ---
+HINDSIGHT_REDUCE_MIN_PRIOR = 3   # prior_reduction >= this and not worsening → depth += 1
+HINDSIGHT_INCREASE_MIN_PRIOR = 2  # prior_reduction >= this and depth>=2 → maybe depth -= 1
+HINDSIGHT_EVAL_SUM_MARGIN = 200   # static + parent_eval > this → shallower
+
+# --- Dissonance (TT score vs static) ---
+DISSONANCE_TT_DEPTH_SLACK = 2    # trust TT when tt.depth >= depth - slack
+RAZOR_DISSONANCE_MAX = 250       # skip razor if |tt-static| above this
+FP_DISSONANCE_THRESHOLD = 190    # add dissonance//2 to FP margin when above
+
+# Force full HCE when lazy/TT static near known-win band
+FULL_EVAL_KNOWN_WIN_MARGIN = 500  # abs(static) >= VALUE_KNOWN_WIN - this
+
+# --- TT cutoff gates ---
+TT_CUTOFF_HALFMOVE_MAX = 96      # skip TT score cut near 50-move GHI
+TT_CONSISTENCY_MIN_DEPTH = 4     # cutNode consistency: or depth > this
+TT_DEEP_VERIFY_DEPTH = 7         # child-TT verification at depth >= this
+TT_PENALIZE_MIN_DEPTH = 5        # penalize mismatched bound when depth > this
+
+# --- History bonus / malus on cutoffs ---
+# 2026-07-16: quadratic regressed (~-31 Elo). Prefer Phase-1a linear for HCE.
+# USE_LINEAR: stat = min(SCALE * depth, CAP); else SF11 quadratic skeleton.
+HISTORY_USE_LINEAR_BONUS = True
+HISTORY_BONUS_QUAD_A = 16
+HISTORY_BONUS_QUAD_B = 96
+HISTORY_MALUS_QUAD_A = 18
+HISTORY_MALUS_QUAD_B = 88
+HISTORY_BONUS_DEPTH_CLAMP = 14
+HISTORY_BONUS_SCALE = 120
+HISTORY_BONUS_CAP = 1800
+HISTORY_MALUS_CAP = 1600         # was 2000; match 1a malus cap
+HISTORY_NODE_WIDTH_DIV = 256     # non-PV: bonus += bonus * (q+c) // div
+CAPTURE_MALUS_SCALE_NUM = 1126
+CAPTURE_MALUS_SCALE_DEN = 1024
+FAIL_LOW_MIN_LEGAL_MOVES = 4     # gate fail-low feedback (1a); reduce noise
+# Fail-low structured feedback (conservative vs SF)
+FAIL_LOW_PARENT_STAT_DIV = 120
+FAIL_LOW_DEPTH_BONUS_SCALE = 40
+FAIL_LOW_DEPTH_BONUS_CAP = 320
+FAIL_LOW_MOVECOUNT_THR = 8
+FAIL_LOW_MOVECOUNT_BONUS = 120
+FAIL_LOW_STATIC_MARGIN = 90
+FAIL_LOW_STATIC_BONUS = 90
+FAIL_LOW_PARENT_STATIC_MARGIN = 70
+FAIL_LOW_PARENT_STATIC_BONUS = 90
+FAIL_LOW_BASE_DEPTH_MULT = 100
+FAIL_LOW_BASE_OFFSET = 60
+FAIL_LOW_BASE_CAP = 1000
+FAIL_LOW_SCALE_DIV = 512
+FAIL_LOW_CONT_NUM = 200
+FAIL_LOW_CONT_DEN = 16384
+FAIL_LOW_MAIN_NUM = 180
+FAIL_LOW_MAIN_DEN = 32768
+FAIL_LOW_PAWN_NUM = 260
+FAIL_LOW_PAWN_DEN = 8192
+FAIL_LOW_CAP_DEPTH_MULT = 40
+FAIL_LOW_CAP_BASE = 200
+FAIL_LOW_CAP_CAP = 700
+
+# --- Quiet move ordering (score_quiets additive bonuses) ---
+# Live path adds these on top of history; SCORE_KILLER_* are absolute scores elsewhere.
+QUIET_ORDER_KILLER_1 = 400000
+QUIET_ORDER_KILLER_2 = 350000
+QUIET_ORDER_COUNTER = 300000
+LPH_ORDER_SCALE = 8              # score += scale * lph // (1+ply)
+
+# --- NMP formula coeffs ---
+NMP_MIN_DEPTH = 3
+# Legacy gate: static >= beta - DEPTH_COEF*d - IMP*improving + BASE
+NMP_LEGACY_DEPTH_COEF = 14
+NMP_LEGACY_IMPROVING_COEF = 45
+# Legacy gate: static >= beta - 14*d - 45*imp + BASE
+# d=10 !imp: BASE200 → β+60; BASE160 → β+20; BASE80 was match-negative → avoid.
+NMP_LEGACY_BASE = 200
+# SF11 gate margin: -DEPTH_COEF*d + BASE - IMP*improving (optionally * HCE scale)
+NMP_SF_MARGIN_DEPTH_COEF = 32
+NMP_SF_MARGIN_BASE = 292
+NMP_SF_MARGIN_IMPROVING = 30
+# R: SF (BASE + DEPTH*d) // DIV + eval_margin; legacy BASE + d//DEPTH_DIV + eval_margin
+NMP_EVAL_MARGIN_DIV = 150
+NMP_EVAL_MARGIN_MAX = 3
+NMP_SF_R_BASE = 854
+NMP_SF_R_DEPTH = 68
+NMP_SF_R_DIV = 258
+NMP_LEGACY_R_BASE = 7
+NMP_LEGACY_R_DEPTH_DIV = 3
+
+# --- IIR / FP / LMP / check extension depth gates ---
+IIR_MIN_DEPTH = 4
+FP_MAX_DEPTH = 6
+LMP_MIN_LIMIT = 2                # floor after table * scale
+# SF19 Step 17: Check extension eliminated to prevent check explosion
+ENABLE_CHECK_EXTENSION = False
+CHECK_EXT_NON_PV_MAX_DEPTH = 5   # non-PV non-TT: extend only if depth <= this (when enabled)
+
+# Search/timer synchronization. Must remain 2^n - 1 because hot paths use
+# ``nodes & mask`` instead of modulo. This bounds stop latency to about 4k
+# nodes instead of the former 32k-node staircase.
+STOP_CHECK_MASK = 4095
+
+# --- Singular extension ---
+SINGULAR_TT_DEPTH_SLACK = 3      # tt.depth >= depth - slack
+SINGULAR_MARGIN_BASE = 60        # margin = (BASE + ttpv_bonus) * depth // DIV
+SINGULAR_TTPV_BONUS = 70
+SINGULAR_MARGIN_DIV = 59
+SINGULAR_DOUBLE_EXT_MIN_DEPTH = 10
+
+# --- LMR (remaining hard-codes → named) ---
+LMR_REDUCTION_BASE_ADD = 1027    # r = scale + BASE_ADD (+ not-imp term)
+LMR_NOT_IMP_DEN = 512            # not-imp: scale * num // DEN
+LMR_TT_SCORE_GT_ALPHA = 838      # ttPv && tt_score > alpha → r -=
+LMR_TT_DEPTH_GE = 923            # tt.depth >= depth → r -=
+LMR_TT_DEPTH_GE_CUT = 955        # extra when cut_node
+LMR_ADVANCED_PAWN_RELIEF = 1536  # -1.5 ply on advanced pawn push
+LMR_ADVANCED_PAWN_WHITE_RANK = 5 # white to_rank >= this
+LMR_ADVANCED_PAWN_BLACK_RANK = 2 # black to_rank <= this
+LMR_LATE_CAPTURE_MAX_DEPTH = 8   # when LMR_LATE_CAPTURE_BONUS > 0
+LMR_LATE_CAPTURE_MIN_MC = 2
+LMR_TTMOVE_CUTNODE_EXTRA = 150   # tt-move LMR: +extra on cut nodes
+LMR_R_FLOOR = -10                # clamp r before ply conversion
+LMR_D_MAX_EXTRA = 2              # d <= search_depth + this
+LMR_CAPTURE_VICTIM_SCALE = 809   # SF18: 809 * PieceValue / 128 + captHist
+LMR_CAPTURE_VICTIM_DIV = 128
+LMR_STAT_SCORE_DIV = 4096        # r -= stat * hist_scale // DIV
+LMR_RESEARCH_DEEPER_MARGIN = 32  # eval > max_eval + this → +1 depth research
+LMR_RESEARCH_SHALLOWER_MARGIN = 15
+
+# --- QS fail-high / stand-pat smoothing (a*score + b*beta) // div ---
+QS_STANDPAT_SMOOTH_A = 467
+QS_STANDPAT_SMOOTH_B = 557
+QS_FAILHIGH_SMOOTH_A = 481
+QS_FAILHIGH_SMOOTH_B = 543
+QS_SMOOTH_DIV = 1024
+
+# --- Correction history write scales ---
+CORRECTION_CNTCV_WEIGHT = 10000  # HCE: weight * (val_2 + val_4); SF18 ~8363
+CORRECTION_BONUS_HAS_MOVE_DIV = 10
+CORRECTION_BONUS_NO_MOVE_DIV = 8
+CORRECTION_MINOR_SCALE_NUM = 155
+CORRECTION_MINOR_SCALE_DEN = 128
+CORRECTION_NP_SCALE_NUM = 181
+CORRECTION_NP_SCALE_DEN = 128
+CORRECTION_CONT_2PLY_NUM = 136
+CORRECTION_CONT_4PLY_NUM = 68
+CORRECTION_CONT_SCALE_DEN = 128
 
 # =============================================================================
 # --- Bitboard Utilities Constants / 位元棋盤工具常量 ---
@@ -964,15 +1313,13 @@ DE_BRUIJN_INDEX = np.array([
 # --- Transposition Table Constants / 置換表常量 ---
 # =============================================================================
 
-TT_SIZE_MB = 256
+TT_SIZE_MB = 128
 
 # --- Backward Pawns / 後兵 ---
 # Penalty for a backward pawn.
 # 後兵的懲罰。
 # Negative values, applied with += (consistent with ISOLATED_PAWN_PENALTY and DOUBLED_PAWN_PENALTY)
-BACKWARD_PAWN_PENALTY = np.array([-7, -13], dtype=np.int32) # MG, EG (SF11 S(9, 24) * scale)
-
-# File constants
+BACKWARD_PAWN_PENALTY = np.array([0, -6], dtype=np.int32)
 NOT_A_FILE = ~np.uint64(0x0101010101010101)
 NOT_H_FILE = ~np.uint64(0x8080808080808080)
 QUEEN_SIDE_BB = np.uint64(0x0F0F0F0F0F0F0F0F)

@@ -9,19 +9,19 @@ import time
 import numpy as np
 
 def main():
-    dataset_path = "tuner/ultimate_halfka_farseerT75.npz"
+    dataset_path = "tuner/data/nnue/ultimate_halfka_farseerT75.npz"
     if not os.path.exists(dataset_path):
         # 嘗試向上尋找
         levels = ['../', '../../']
         found = False
         for lv in levels:
-            alt_path = os.path.join(lv, 'tuner/ultimate_halfka_farseerT75.npz')
+            alt_path = os.path.join(lv, 'tuner/data/nnue/ultimate_halfka_farseerT75.npz')
             if os.path.exists(alt_path):
                 dataset_path = alt_path
                 found = True
                 break
         if not found:
-            print("❌ 錯誤：找不到 tuner/ultimate_halfka_farseerT75.npz 檔案。")
+            print("❌ 錯誤：找不到 tuner/data/nnue/ultimate_halfka_farseerT75.npz 檔案。")
             return
 
     print(f"正在載入資料集：{dataset_path} ... (可能需要數十秒，請耐心等待)")

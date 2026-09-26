@@ -153,13 +153,14 @@ def make_context(engine: dict, transposition_table, pawn_history=None):
         np.zeros((max_ply, max_ply), dtype=np.uint16),
         np.zeros((12, 64), dtype=np.int32),
         np.zeros((64, 64), dtype=np.int32),
-        np.zeros((3, 12, 64, 12, 64), dtype=np.int16),
-        np.zeros((12, 64, 12), dtype=np.int32),
+        np.zeros((5, 12, 64, 12, 64), dtype=np.int16),
+        np.zeros((12, 64, 6), dtype=np.int32),
         pawn_history,
         np.zeros(correction_size, dtype=np.int16),
         np.zeros(correction_size, dtype=np.int16),
         np.zeros(correction_size, dtype=np.int16),
         np.zeros(correction_size, dtype=np.int16),
+        enable_diagnostics=True,
     )
 
 

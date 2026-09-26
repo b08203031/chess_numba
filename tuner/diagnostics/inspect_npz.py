@@ -72,7 +72,7 @@ def print_record(features, targets, piece_counts, i):
     print()
 
 def main():
-    npz_path = "tuner/ultimate_halfka_farseerT75.npz"
+    npz_path = "tuner/data/nnue/ultimate_halfka_farseerT75.npz"
     print("讀取大檔案資料中... (可能需要幾秒鐘)")
     try:
         data = np.load(npz_path)
