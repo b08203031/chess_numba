@@ -859,9 +859,9 @@ CAPTURE_HISTORY_VICTIM_TYPES = 6
 # E3: -4000→-4500 kept; E12/H5: -4500→-5000 kept (2026-07-17).
 PRUNING_HISTORY_THRESHOLD = -6500  # E23 keep; E25B −7000 aborted ~negative @n10k
 
-# Continuation history prune threshold (SF17 Step 14: -4313 * depth, scaled by table capacity 28672 / 68192 ≈ 0.42)
+# Continuation history prune threshold (SF19 Step 14: -4136 * depth, tuned from -1800 to -1500)
 ENABLE_CONTINUATION_HISTORY_PRUNING = True
-PRUNING_CONTINUATION_THRESHOLD = -1800
+PRUNING_CONTINUATION_THRESHOLD = -1500
 
 CORRECTION_HISTORY_SIZE = 16384
 CORRECTION_HISTORY_MASK = 16383
