@@ -11,6 +11,9 @@ from chess_engine.classical.constants import (
     HISTORY_MAX_MAIN, HISTORY_MAX_BUTTERFLY, HISTORY_MAX_CAPTURE, HISTORY_MAX_CONTINUATION,
     HISTORY_MAX_PAWN, LMR_HISTORY_DIVISOR, HISTORY_WEIGHT_MAIN, HISTORY_WEIGHT_CONT_1,
     HISTORY_WEIGHT_CONT_2, HISTORY_WEIGHT_CONT_3, HISTORY_WEIGHT_CONT_4, HISTORY_WEIGHT_CONT_5,
+    ORDERING_WEIGHT_MAIN, ORDERING_WEIGHT_PAWN, ORDERING_WEIGHT_BUTTERFLY,
+    ORDERING_WEIGHT_CONT_1, ORDERING_WEIGHT_CONT_2, ORDERING_WEIGHT_CONT_3,
+    ORDERING_WEIGHT_CONT_4, ORDERING_WEIGHT_CONT_5,
     QS_SEE_THRESHOLD, REDUCTIONS, CHECK_BONUS, CHECK_SEE_THRESHOLD, THREAT_MULTIPLIER,
     KNIGHT, BISHOP, ROOK, QUEEN, PAWN, MG_MATERIAL_VALUES,
     HISTORY_PAWN_BONUS_NUM, HISTORY_PAWN_MALUS_NUM, HISTORY_PAWN_SCALE_DEN,
@@ -198,6 +201,54 @@ def get_quiet_stat_score(
         prev_piece = search_context.piece_stack[ply - 6]
         if prev_move != NO_MOVE and prev_piece != -1:
             score += search_context.continuation_history[4, prev_piece, get_to_square(prev_move), aggressor_type, to_sq] * HISTORY_WEIGHT_CONT_5
+
+    return score
+
+@numba.njit(cache=True, boundscheck=False, fastmath=True)
+def get_quiet_ordering_score(
+    search_context, ply, from_sq, to_sq, aggressor_type, pawn_key_idx,
+):
+    """
+    Decoupled MovePicker quiet move scoring.
+    Uses ORDERING_WEIGHT_* so move ordering can be tuned independently of history pruning.
+    """
+    score = search_context.history_table[aggressor_type, to_sq] * ORDERING_WEIGHT_MAIN
+    score += search_context.pawn_history[pawn_key_idx, aggressor_type, to_sq] * ORDERING_WEIGHT_PAWN
+    score += search_context.butterfly_history[from_sq, to_sq] * ORDERING_WEIGHT_BUTTERFLY
+
+    if ply > 0:
+        prev_move = search_context.move_stack[ply - 1]
+        prev_piece = search_context.piece_stack[ply - 1]
+        if prev_move != NO_MOVE and prev_piece != -1:
+            score += (
+                search_context.continuation_history[
+                    0, prev_piece, get_to_square(prev_move), aggressor_type, to_sq
+                ] * ORDERING_WEIGHT_CONT_1
+            )
+
+    if ply > 1:
+        prev_move = search_context.move_stack[ply - 2]
+        prev_piece = search_context.piece_stack[ply - 2]
+        if prev_move != NO_MOVE and prev_piece != -1:
+            score += search_context.continuation_history[1, prev_piece, get_to_square(prev_move), aggressor_type, to_sq] * ORDERING_WEIGHT_CONT_2
+
+    if ply > 2:
+        prev_move = search_context.move_stack[ply - 3]
+        prev_piece = search_context.piece_stack[ply - 3]
+        if prev_move != NO_MOVE and prev_piece != -1:
+            score += search_context.continuation_history[2, prev_piece, get_to_square(prev_move), aggressor_type, to_sq] * ORDERING_WEIGHT_CONT_3
+
+    if ply > 3:
+        prev_move = search_context.move_stack[ply - 4]
+        prev_piece = search_context.piece_stack[ply - 4]
+        if prev_move != NO_MOVE and prev_piece != -1:
+            score += search_context.continuation_history[3, prev_piece, get_to_square(prev_move), aggressor_type, to_sq] * ORDERING_WEIGHT_CONT_4
+
+    if ply > 5:
+        prev_move = search_context.move_stack[ply - 6]
+        prev_piece = search_context.piece_stack[ply - 6]
+        if prev_move != NO_MOVE and prev_piece != -1:
+            score += search_context.continuation_history[4, prev_piece, get_to_square(prev_move), aggressor_type, to_sq] * ORDERING_WEIGHT_CONT_5
 
     return score
 
@@ -473,7 +524,7 @@ def score_quiets(
         aggressor_type = find_piece_type_on_square_side(piece_bbs, from_sq, side_to_move)
         search_context.aggressor_cache[ply, i] = aggressor_type
         
-        score = get_quiet_stat_score(search_context, ply, from_sq, to_square, aggressor_type, pawn_key_idx)
+        score = get_quiet_ordering_score(search_context, ply, from_sq, to_square, aggressor_type, pawn_key_idx)
 
         if ply < LOW_PLY_HISTORY_SIZE:
             lph_score = search_context.low_ply_history[ply, move]

@@ -203,6 +203,7 @@ python -m tests.perft divide --depth 4
 * **[殘局 vs Stockfish 驗證](chess_engine/classical/ENDGAME_SF_VERIFICATION.md)**：專用殘局說明；日常測 `tests/test_endgame_conformance.py`，可選 oracle `tools/verify_endgame_vs_sf.py`。
 * **[歷史啟發](chess_engine/classical/HISTORY_HEURISTICS_CN.md)**：主 / 蝴蝶 / 吃子 / 延續 / 糾錯歷史與重力公式；**現用基線 Phase 1a**。
 * **[歷史啟發重構工程計畫](chess_engine/classical/HISTORY_REFORM_PLAN.md)**：五階段閘門紀錄；**1a 凍結、P2 已回退、P3–5 暫緩**；下一段方向見 §11（timeman / 剪枝尺度 / HCE 單項）。
+* **[走步排序與歷史剪枝解耦計畫書](chess_engine/classical/QUIET_ORDERING_DECOUPLING_PLAN.md)**：MovePicker 走步排序評分與 Step 14b 歷史剪枝架構解耦、0-Node Tree Delta 驗證與 SF19 平滑權重路線圖。
 * **[搜尋優化候選提案 (E47–E50)](tournament_analysis/SEARCH_PROPOSALS_E47_E50.md)**：ProbCut 深度動態自適應、LMR ALL-Node / CutNode 減深對齊、廢除將軍延伸方案規劃。
 
 ### 3. 對戰、聯賽與調參

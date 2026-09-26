@@ -781,7 +781,17 @@ FIFTY_MOVE_MAX_SCALE = 256
 SEE_HISTORY_DIVISOR = 512
 LMR_HISTORY_DIVISOR = 10240
 
-# Quiet ordering weights
+# Quiet ordering weights (MovePicker) - Decoupled from history pruning
+ORDERING_WEIGHT_MAIN = 3
+ORDERING_WEIGHT_PAWN = 2
+ORDERING_WEIGHT_BUTTERFLY = 1
+ORDERING_WEIGHT_CONT_1 = 5
+ORDERING_WEIGHT_CONT_2 = 2
+ORDERING_WEIGHT_CONT_3 = 1
+ORDERING_WEIGHT_CONT_4 = 2
+ORDERING_WEIGHT_CONT_5 = 1
+
+# History pruning weights & thresholds (Step 14b History Pruning)
 # 1a-compat: piece-to * 2 + main (as butterfly) * 1 + cont read-weights 4,2,1,2,1
 # full mode: 2*main + piece_to*W/1024 + unweighted cont sum
 # E8/H1 kept: main/piece-to weight 2→3 (1a-compat read path).
