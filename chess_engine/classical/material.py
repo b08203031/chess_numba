@@ -27,16 +27,19 @@ def compute_imbalance(cnt_0, cnt_1, cnt_2, cnt_3, cnt_4, cnt_6, cnt_7, cnt_8, cn
     Compute polynomial material imbalance (SF11 material.cpp style).
     Scale MG/EG are runtime-tunable via ew (match-SPSA). Quadratic tables fixed.
     """
+    if cnt_0 == cnt_6 and cnt_1 == cnt_7 and cnt_2 == cnt_8 and cnt_3 == cnt_9 and cnt_4 == cnt_10:
+        return np.int32(0), np.int32(0)
+
     scale_mg = _ew_get_mat(ew, use_ew, _EW_IMB_SCALE_MG, IMBALANCE_SCALE_MG)
     scale_eg = _ew_get_mat(ew, use_ew, _EW_IMB_SCALE_EG, IMBALANCE_SCALE_EG)
 
     w_bp = np.int32(1) if cnt_2 > 1 else np.int32(0)
     b_bp = np.int32(1) if cnt_8 > 1 else np.int32(0)
 
-    w = np.array([w_bp, np.int32(cnt_0), np.int32(cnt_1), np.int32(cnt_2),
-                  np.int32(cnt_3), np.int32(cnt_4)], dtype=np.int32)
-    b = np.array([b_bp, np.int32(cnt_6), np.int32(cnt_7), np.int32(cnt_8),
-                  np.int32(cnt_9), np.int32(cnt_10)], dtype=np.int32)
+    w = (w_bp, np.int32(cnt_0), np.int32(cnt_1), np.int32(cnt_2),
+         np.int32(cnt_3), np.int32(cnt_4))
+    b = (b_bp, np.int32(cnt_6), np.int32(cnt_7), np.int32(cnt_8),
+         np.int32(cnt_9), np.int32(cnt_10))
 
     w_bonus = np.int32(0)
     for pt1 in range(6):

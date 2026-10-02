@@ -78,38 +78,38 @@ def clear_transposition_table(tt):
         tt[i]['best_move'] = np.uint16(0)
         tt[i]['is_pv'] = False
 
-@nb.njit(cache=True)
+@nb.njit(cache=True, boundscheck=False, fastmath=True)
 def hashfull(tt, current_generation):
     """
     計算置換表的使用率（以千分比表示，0 到 1000）。
     掃描前 1000 個 bucket (共 4000 個 entry) 中，
     屬於當前世代且已被佔用的項目數量。
     """
-    num_buckets = len(tt) // 4
+    num_buckets = len(tt) >> 2
     scan_buckets = min(1000, num_buckets)
     if scan_buckets <= 0:
         return 0
         
     cnt = 0
     for i in range(scan_buckets):
-        base = i * 4
+        base = i << 2
         for j in range(4):
             entry = tt[base + j]
             if entry['flag'] != TT_FLAG_NONE:
                 if entry['generation'] == current_generation:
                     cnt += 1
                     
-    return (cnt * 1000) // (scan_buckets * 4)
+    return (cnt * 1000) // (scan_buckets << 2)
 
-@nb.njit(cache=True)
+@nb.njit(cache=True, boundscheck=False, fastmath=True)
 def penalize_tt(tt, zobrist_key, penalty):
     """
     降低與 zobrist_key 匹配的置換表項目的深度。
     """
     if len(tt) < 4:
         return
-    num_buckets = len(tt) // 4
-    base_index = np.int64(((zobrist_key >> np.uint64(32)) & np.uint64(num_buckets - 1)) * np.uint64(4))
+    num_buckets_minus_1 = np.uint64((len(tt) >> 2) - 1)
+    base_index = np.int64(((zobrist_key >> np.uint64(32)) & num_buckets_minus_1) << np.uint64(2))
     key32 = np.uint32(zobrist_key)
     for i in range(4):
         idx = base_index + i
@@ -118,7 +118,7 @@ def penalize_tt(tt, zobrist_key, penalty):
             tt[idx]['depth'] = np.uint8(new_depth)
             break
 
-@nb.njit(cache=True)
+@nb.njit(cache=True, boundscheck=False, fastmath=True, inline='always')
 def probe_tt(tt, zobrist_key):
     """
     在置換表 (Bucket=4) 中查找項目。
@@ -134,11 +134,11 @@ def probe_tt(tt, zobrist_key):
     if len(tt) < 4:
         return _EMPTY_TT_ENTRY
         
-    num_buckets = len(tt) // 4
+    num_buckets_minus_1 = np.uint64((len(tt) >> 2) - 1)
     # The TT is allocated as a power-of-two number of 4-entry buckets.
     # Use the high 32 bits for the bucket and the low 32 bits as the lock key:
     # this avoids the expensive 64x64 mul_hi index computation on every probe.
-    base_index = np.int64(((zobrist_key >> np.uint64(32)) & np.uint64(num_buckets - 1)) * np.uint64(4))
+    base_index = np.int64(((zobrist_key >> np.uint64(32)) & num_buckets_minus_1) << np.uint64(2))
     
     key32 = np.uint32(zobrist_key)
     for i in range(4):
@@ -148,7 +148,7 @@ def probe_tt(tt, zobrist_key):
 
     return _EMPTY_TT_ENTRY
 
-@nb.njit(cache=True)
+@nb.njit(cache=True, boundscheck=False, fastmath=True)
 def store_tt(tt, zobrist_key, depth, score, static_eval, flag, best_move, current_generation, is_pv=False):
     """
     使用 Stockfish 風格的 4-Way Set Associative (四路組相聯) 策略存取置換表，並套用智能替換決策。
@@ -167,9 +167,9 @@ def store_tt(tt, zobrist_key, depth, score, static_eval, flag, best_move, curren
     if len(tt) < 4:
         return
         
-    num_buckets = len(tt) // 4
+    num_buckets_minus_1 = np.uint64((len(tt) >> 2) - 1)
     # Match probe_tt(): power-of-two bucket mask using high key bits.
-    base_index = np.int64(((zobrist_key >> np.uint64(32)) & np.uint64(num_buckets - 1)) * np.uint64(4))
+    base_index = np.int64(((zobrist_key >> np.uint64(32)) & num_buckets_minus_1) << np.uint64(2))
     key32 = np.uint32(zobrist_key)
     
     # 1. 尋找完全相同的局面 (Exact Match)

@@ -690,7 +690,7 @@ def evaluate_attacks_mobility_threats(piece_bbs, occupancy_bbs, white_king_sq, b
     while temp_bb:
         sq = get_lsb_index(temp_bb)
         att = KNIGHT_ATTACKS[sq]
-        if pinned_white & (np.uint64(1) << np.uint64(sq)):
+        if pinned_white & BB_SQUARES[sq]:
             att = np.uint64(0)
         white_attacks2 |= (white_attacks & att)
         white_attacks |= att
@@ -735,8 +735,8 @@ def evaluate_attacks_mobility_threats(piece_bbs, occupancy_bbs, white_king_sq, b
         sq = get_lsb_index(temp_bb)
         # X-Ray: bishop attacks through all queens
         att = get_bishop_attacks(sq, bishop_xray_occ)
-        if pinned_white & (np.uint64(1) << np.uint64(sq)):
-            sq_bb = np.uint64(1) << np.uint64(sq)
+        sq_bb = BB_SQUARES[sq]
+        if pinned_white & sq_bb:
             if sq_bb & BISHOP_RAYS[white_king_sq]:
                 att &= BISHOP_RAYS[white_king_sq]
             else:
@@ -800,8 +800,8 @@ def evaluate_attacks_mobility_threats(piece_bbs, occupancy_bbs, white_king_sq, b
         sq = get_lsb_index(temp_bb)
         # X-Ray: rook attacks through all queens + own rooks
         att = get_rook_attacks(sq, white_rook_xray_occ)
-        if pinned_white & (np.uint64(1) << np.uint64(sq)):
-            sq_bb = np.uint64(1) << np.uint64(sq)
+        sq_bb = BB_SQUARES[sq]
+        if pinned_white & sq_bb:
             if sq_bb & ROOK_RAYS[white_king_sq]:
                 att &= ROOK_RAYS[white_king_sq]
             else:
@@ -842,8 +842,8 @@ def evaluate_attacks_mobility_threats(piece_bbs, occupancy_bbs, white_king_sq, b
     while temp_bb:
         sq = get_lsb_index(temp_bb)
         att = get_queen_attacks(sq, all_occupancy)
-        if pinned_white & (np.uint64(1) << np.uint64(sq)):
-            sq_bb = np.uint64(1) << np.uint64(sq)
+        sq_bb = BB_SQUARES[sq]
+        if pinned_white & sq_bb:
             if sq_bb & ROOK_RAYS[white_king_sq]:
                 att &= ROOK_RAYS[white_king_sq]
             elif sq_bb & BISHOP_RAYS[white_king_sq]:
@@ -898,7 +898,7 @@ def evaluate_attacks_mobility_threats(piece_bbs, occupancy_bbs, white_king_sq, b
     while temp_bb:
         sq = get_lsb_index(temp_bb)
         att = KNIGHT_ATTACKS[sq]
-        if pinned_black & (np.uint64(1) << np.uint64(sq)):
+        if pinned_black & BB_SQUARES[sq]:
             att = np.uint64(0)
         black_attacks2 |= (black_attacks & att)
         black_attacks |= att
@@ -944,8 +944,8 @@ def evaluate_attacks_mobility_threats(piece_bbs, occupancy_bbs, white_king_sq, b
         sq = get_lsb_index(temp_bb)
         # X-Ray: bishop attacks through all queens
         att = get_bishop_attacks(sq, bishop_xray_occ)
-        if pinned_black & (np.uint64(1) << np.uint64(sq)):
-            sq_bb = np.uint64(1) << np.uint64(sq)
+        sq_bb = BB_SQUARES[sq]
+        if pinned_black & sq_bb:
             if sq_bb & BISHOP_RAYS[black_king_sq]:
                 att &= BISHOP_RAYS[black_king_sq]
             else:
@@ -1010,8 +1010,8 @@ def evaluate_attacks_mobility_threats(piece_bbs, occupancy_bbs, white_king_sq, b
         sq = get_lsb_index(temp_bb)
         # X-Ray: rook attacks through all queens + own rooks
         att = get_rook_attacks(sq, black_rook_xray_occ)
-        if pinned_black & (np.uint64(1) << np.uint64(sq)):
-            sq_bb = np.uint64(1) << np.uint64(sq)
+        sq_bb = BB_SQUARES[sq]
+        if pinned_black & sq_bb:
             if sq_bb & ROOK_RAYS[black_king_sq]:
                 att &= ROOK_RAYS[black_king_sq]
             else:
@@ -1052,8 +1052,8 @@ def evaluate_attacks_mobility_threats(piece_bbs, occupancy_bbs, white_king_sq, b
     while temp_bb:
         sq = get_lsb_index(temp_bb)
         att = get_queen_attacks(sq, all_occupancy)
-        if pinned_black & (np.uint64(1) << np.uint64(sq)):
-            sq_bb = np.uint64(1) << np.uint64(sq)
+        sq_bb = BB_SQUARES[sq]
+        if pinned_black & sq_bb:
             if sq_bb & ROOK_RAYS[black_king_sq]:
                 att &= ROOK_RAYS[black_king_sq]
             elif sq_bb & BISHOP_RAYS[black_king_sq]:

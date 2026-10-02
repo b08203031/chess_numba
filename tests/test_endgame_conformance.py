@@ -215,5 +215,33 @@ class TestEndgameConformance(unittest.TestCase):
         self.assertNotEqual(black_sf, int(SCALE_FACTOR_DRAW))
 
 
+    # ----- King-Pawn Endgame Hardening Tests -----
+    def test_kpsk_scale_factor_draw(self):
+        # Two rook pawns blocked by defending king in front -> theoretical draw (SF11 KPsK)
+        fen = "8/k7/8/P7/P7/8/8/7K w - - 0 1"
+        piece_bbs, occupancy_bbs, game_state = parse_fen(fen)
+        val, _, _ = evaluate_position(piece_bbs, occupancy_bbs, game_state)
+        self.assertEqual(val, 0)
+
+    def test_kpkp_scale_factor_draw(self):
+        # Symmetrical blocked pawns (e4 vs e5, kings e2 vs e7) -> theoretical draw (SF11 KPKP)
+        fen = "8/4k3/8/4p3/4P3/8/4K3/8 w - - 0 1"
+        piece_bbs, occupancy_bbs, game_state = parse_fen(fen)
+        val, _, _ = evaluate_position(piece_bbs, occupancy_bbs, game_state)
+        self.assertEqual(val, 0)
+
+    def test_doubled_pawns_front_blocks_rear_unstoppable(self):
+        # White has doubled pawns on a2 and a3, black king far away on h8.
+        # Rear pawn on a2 cannot be unstoppable because a3 blocks its path.
+        fen_doubled = "7k/8/8/8/8/P7/P7/7K w - - 0 1"
+        fen_single = "7k/8/8/8/8/P7/8/7K w - - 0 1"
+        p1, o1, g1 = parse_fen(fen_doubled)
+        p2, o2, g2 = parse_fen(fen_single)
+        v1, _, _ = evaluate_position(p1, o1, g1)
+        v2, _, _ = evaluate_position(p2, o2, g2)
+        diff = v1 - v2
+        self.assertLess(diff, 500, f"Doubled pawn scored extra {diff} cp, likely double-counting unstoppable bonus!")
+
+
 if __name__ == "__main__":
     unittest.main()

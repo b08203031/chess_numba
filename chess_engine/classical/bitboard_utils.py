@@ -240,7 +240,7 @@ def find_piece_type_on_square_side(piece_bbs, square, side):
             return nb.int8(piece_type)
     return nb.int8(-1)
 
-@nb.njit(nb.int32(nb.uint64), cache=True)
+@nb.njit(nb.int32(nb.uint64), cache=True, inline='always')
 def count_bits(bb: np.uint64) -> np.int32:
     """
     Uses hardware POPCNT intrinsic via LLVM to find the number of set bits.

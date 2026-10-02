@@ -217,6 +217,7 @@ Old 與 New 應一致，除非 New 正在跑實驗項：
 | E51 | **LMR TT Move 減深減免對齊**（對齊 SF19 Step 18） | 中止（194 局均勢；查明 `move == tt_move` 在 LMR 分支為死碼） | **中止 / 關閉** | 2026-09-26 |
 | E52 | **SE 雙重延伸深度門檻解禁 (10->7)**（對齊 SF19 Step 16） | **118@n300k 中止: 44.5% (21W 63D 34L) · Elo -38.43 ±45.18 · 深度 -0.21 · 長局崩盤 38.1%** | **回滾** | 2026-09-26 |
 | E53 | **延續歷史剪枝門檻放寬 (-1800->-1500)**（對齊 SF19 Step 14） | **400@n300k: 52.6% (105W 211D 84L) · Elo +18.26 ±23.40 · 淨勝 +21 局 · 長局 55.4%** | **採納進生產 / 基線** | 2026-09-26 |
+| E54 | **安靜步排序權重平滑化對齊 SF19 (2:2:1:1:1:1:1)**（架構解耦後首測） | 暖機與前 36 步呈現完全對稱鏡像和棋，裁定回滾 | **回滾** | 2026-09-26 |
 
 #### E26 Alpha-raise（否決）
 
@@ -1532,6 +1533,30 @@ LMP skip 體積 ≫ RFP ≈ FP/Razor/hist-prune 帶 ≫ NMP ≫ ProbCut
   2. **中淺層劣步精準剃除**：同深度節點開銷在 depth 7~12 全面下降 0.4%~1.0%，證明門檻由 -1800 放寬至 -1500 正好抵銷了 E50 深度暴漲帶來的門檻嚴苛化，在中深層更及時地剪除了無效安靜步。
   3. **通過門檻判定**：勝率 **52.62%**（超越 52% 明確正向門檻），Elo **+18.26**，全場淨勝 +21 局，完全達到**「明確正向」採納門檻**！
 * **判定：** **留下 (KEEP)**。備份 PGN：`tournament_analysis/match_cont_pruning_thresh1500_sf19_n300k_e53_adopted.pgn`。建議執行 `python tools/sync_classical_old.py --sync` 同步進生產基線。
+
+#### E54 安靜步排序權重平滑化對齊 SF19 (2:2:1:1:1:1:1)（架構解耦後首測）
+
+* **代碼：** `chess_engine/classical/constants.py`
+  * `ORDERING_WEIGHT_MAIN`: 3 -> **2**
+  * `ORDERING_WEIGHT_PAWN`: 2 -> **2**
+  * `ORDERING_WEIGHT_BUTTERFLY`: 1 -> **1**
+  * `ORDERING_WEIGHT_CONT_1`: 5 -> **1**
+  * `ORDERING_WEIGHT_CONT_2`: 2 -> **1**
+  * `ORDERING_WEIGHT_CONT_3`: 1 -> **1**
+  * `ORDERING_WEIGHT_CONT_4`: 2 -> **1**
+  * `ORDERING_WEIGHT_CONT_5`: 1 -> **1**
+* **背景與動機：**
+  * 在完成走步排序（MovePicker）與歷史剪枝的架構解耦（詳見 [`QUIET_ORDERING_DECOUPLING_PLAN.md`](../chess_engine/classical/QUIET_ORDERING_DECOUPLING_PLAN.md)）後，走步排序權重已不再受到剪枝門檻的綁架。
+  * 舊版 `ORDERING_WEIGHT_CONT_1 = 5` 為歷史 Phase 1a 遺留的極端放大權重，容易造成開局與中局在特定延續步上局部過度偏好，干擾全域走步排序。
+  * Stockfish 19 在 `movepick.cpp` 中採用乾淨、平滑的 `2*main + 2*pawn + 1*cont_sum`（2:2:1:1:1:1:1 比例）。
+  * 本實驗將走步排序全面對齊 SF19 平滑權重，而歷史剪枝門檻（`-1500 * depth` 與 `-6500 * depth`）分毫未動。
+* **對戰設定：** 400 場 × 300,000 nodes（10 並行），對抗生產基線 E53（`classical_old`）。
+* **對戰觀察：**
+  * 暖機 Kiwipete depth 14 節點數完全一致（282,345 vs 282,345）。
+  * 前 36 步統計（Round 1、2、15、16）呈現絕對鏡像和棋（New/Old 深度 18.31 完全一致）。
+  * 查明在開局庫初期與戰術吃子盤面下，走步主要被吃子（MVV-LVA / SEE）與 Killer/Counter 主導，安靜步延續歷史權重調整在開局階段難以迅速打破對稱性。
+* **判定：** **回滾 (REVERT)**。已完全復原 `ORDERING_WEIGHT_*` 為基線數值 (3, 2, 1, 5, 2, 1, 2, 1)，雙目錄邏輯 100% 保持一致。
+
 
 ---
 

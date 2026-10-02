@@ -245,19 +245,23 @@ def is_square_attacked(piece_bbs, occupancy_bbs, sq, attacker_side):
         if PAWN_ATTACKS[WHITE, sq] & wp: return True
         if KING_ATTACKS[sq] & wk: return True
         if KNIGHT_ATTACKS[sq] & wn: return True
-        if (wb | wq):
-            if get_bishop_attacks(sq, all_pieces_bb) & (wb | wq): return True
-        if (wr | wq):
-            if get_rook_attacks(sq, all_pieces_bb) & (wr | wq): return True
+        diag_sliders = wb | wq
+        if (diag_sliders & BISHOP_RAYS[sq]) and (get_bishop_attacks(sq, all_pieces_bb) & diag_sliders):
+            return True
+        orth_sliders = wr | wq
+        if (orth_sliders & ROOK_RAYS[sq]) and (get_rook_attacks(sq, all_pieces_bb) & orth_sliders):
+            return True
     else: # Attacker is BLACK
         bp, bn, bb, br, bq, bk = piece_bbs[6], piece_bbs[7], piece_bbs[8], piece_bbs[9], piece_bbs[10], piece_bbs[11]
         if PAWN_ATTACKS[BLACK, sq] & bp: return True
         if KING_ATTACKS[sq] & bk: return True
         if KNIGHT_ATTACKS[sq] & bn: return True
-        if (bb | bq):
-            if get_bishop_attacks(sq, all_pieces_bb) & (bb | bq): return True
-        if (br | bq):
-            if get_rook_attacks(sq, all_pieces_bb) & (br | bq): return True
+        diag_sliders = bb | bq
+        if (diag_sliders & BISHOP_RAYS[sq]) and (get_bishop_attacks(sq, all_pieces_bb) & diag_sliders):
+            return True
+        orth_sliders = br | bq
+        if (orth_sliders & ROOK_RAYS[sq]) and (get_rook_attacks(sq, all_pieces_bb) & orth_sliders):
+            return True
         
     return False
 
@@ -283,9 +287,9 @@ def check_legality_and_gives_check(piece_bbs, occupancy_bbs, our_king_sq, their_
             is_legal = False
         elif KNIGHT_ATTACKS[our_king_sq] & bn:
             is_legal = False
-        elif (bb | bq) and (get_bishop_attacks(our_king_sq, all_pieces_bb) & (bb | bq)):
+        elif ((bb | bq) & BISHOP_RAYS[our_king_sq]) and (get_bishop_attacks(our_king_sq, all_pieces_bb) & (bb | bq)):
             is_legal = False
-        elif (br | bq) and (get_rook_attacks(our_king_sq, all_pieces_bb) & (br | bq)):
+        elif ((br | bq) & ROOK_RAYS[our_king_sq]) and (get_rook_attacks(our_king_sq, all_pieces_bb) & (br | bq)):
             is_legal = False
             
         if not is_legal:
@@ -300,9 +304,9 @@ def check_legality_and_gives_check(piece_bbs, occupancy_bbs, our_king_sq, their_
             gives_check = True
         elif KNIGHT_ATTACKS[their_king_sq] & wn:
             gives_check = True
-        elif (wb | wq) and (get_bishop_attacks(their_king_sq, all_pieces_bb) & (wb | wq)):
+        elif ((wb | wq) & BISHOP_RAYS[their_king_sq]) and (get_bishop_attacks(their_king_sq, all_pieces_bb) & (wb | wq)):
             gives_check = True
-        elif (wr | wq) and (get_rook_attacks(their_king_sq, all_pieces_bb) & (wr | wq)):
+        elif ((wr | wq) & ROOK_RAYS[their_king_sq]) and (get_rook_attacks(their_king_sq, all_pieces_bb) & (wr | wq)):
             gives_check = True
             
         return True, gives_check
@@ -318,9 +322,9 @@ def check_legality_and_gives_check(piece_bbs, occupancy_bbs, our_king_sq, their_
             is_legal = False
         elif KNIGHT_ATTACKS[our_king_sq] & wn:
             is_legal = False
-        elif (wb | wq) and (get_bishop_attacks(our_king_sq, all_pieces_bb) & (wb | wq)):
+        elif ((wb | wq) & BISHOP_RAYS[our_king_sq]) and (get_bishop_attacks(our_king_sq, all_pieces_bb) & (wb | wq)):
             is_legal = False
-        elif (wr | wq) and (get_rook_attacks(our_king_sq, all_pieces_bb) & (wr | wq)):
+        elif ((wr | wq) & ROOK_RAYS[our_king_sq]) and (get_rook_attacks(our_king_sq, all_pieces_bb) & (wr | wq)):
             is_legal = False
             
         if not is_legal:
@@ -335,9 +339,9 @@ def check_legality_and_gives_check(piece_bbs, occupancy_bbs, our_king_sq, their_
             gives_check = True
         elif KNIGHT_ATTACKS[their_king_sq] & bn:
             gives_check = True
-        elif (bb | bq) and (get_bishop_attacks(their_king_sq, all_pieces_bb) & (bb | bq)):
+        elif ((bb | bq) & BISHOP_RAYS[their_king_sq]) and (get_bishop_attacks(their_king_sq, all_pieces_bb) & (bb | bq)):
             gives_check = True
-        elif (br | bq) and (get_rook_attacks(their_king_sq, all_pieces_bb) & (br | bq)):
+        elif ((br | bq) & ROOK_RAYS[their_king_sq]) and (get_rook_attacks(their_king_sq, all_pieces_bb) & (br | bq)):
             gives_check = True
             
         return True, gives_check
@@ -363,25 +367,25 @@ def get_pinned_pieces(piece_bbs, occupancy_bbs, side):
     enemy_bishops = piece_bbs[BISHOP + enemy_offset] | piece_bbs[QUEEN + enemy_offset]
 
     # Orthogonal pinners: enemy rooks/queens on same rank or file as king
-    pinners = ROOK_RAYS[king_sq] & enemy_rooks
-    while pinners:
-        pinner_sq = get_lsb_index(pinners)
-        between = SQUARES_BETWEEN[king_sq, pinner_sq]
-        blockers = between & occupied
-        # If exactly one piece between king and pinner, and it belongs to side, it's pinned
-        if count_bits(blockers) == 1 and (blockers & own_pieces):
-            pinned |= blockers
-        pinners &= pinners - np.uint64(1)
+    if enemy_rooks:
+        pinners = ROOK_RAYS[king_sq] & enemy_rooks
+        while pinners:
+            pinner_sq = get_lsb_index(pinners)
+            blockers = SQUARES_BETWEEN[king_sq, pinner_sq] & occupied
+            # If exactly one piece between king and pinner, and it belongs to side, it's pinned
+            if (blockers & own_pieces) and (blockers & (blockers - np.uint64(1))) == np.uint64(0):
+                pinned |= blockers
+            pinners &= pinners - np.uint64(1)
 
     # Diagonal pinners: enemy bishops/queens on same diagonal as king
-    pinners = BISHOP_RAYS[king_sq] & enemy_bishops
-    while pinners:
-        pinner_sq = get_lsb_index(pinners)
-        between = SQUARES_BETWEEN[king_sq, pinner_sq]
-        blockers = between & occupied
-        if count_bits(blockers) == 1 and (blockers & own_pieces):
-            pinned |= blockers
-        pinners &= pinners - np.uint64(1)
+    if enemy_bishops:
+        pinners = BISHOP_RAYS[king_sq] & enemy_bishops
+        while pinners:
+            pinner_sq = get_lsb_index(pinners)
+            blockers = SQUARES_BETWEEN[king_sq, pinner_sq] & occupied
+            if (blockers & own_pieces) and (blockers & (blockers - np.uint64(1))) == np.uint64(0):
+                pinned |= blockers
+            pinners &= pinners - np.uint64(1)
 
     return pinned
 
@@ -409,19 +413,23 @@ def is_square_attacked_with_occ(piece_bbs, sq, occ, attacker_side):
         if PAWN_ATTACKS[WHITE, sq] & wp: return True
         if KING_ATTACKS[sq] & wk: return True
         if KNIGHT_ATTACKS[sq] & wn: return True
-        if (wb | wq):
-            if get_bishop_attacks(sq, occ) & (wb | wq): return True
-        if (wr | wq):
-            if get_rook_attacks(sq, occ) & (wr | wq): return True
+        diag_sliders = wb | wq
+        if (diag_sliders & BISHOP_RAYS[sq]) and (get_bishop_attacks(sq, occ) & diag_sliders):
+            return True
+        orth_sliders = wr | wq
+        if (orth_sliders & ROOK_RAYS[sq]) and (get_rook_attacks(sq, occ) & orth_sliders):
+            return True
     else:
         bp, bn, bb, br, bq, bk = piece_bbs[6], piece_bbs[7], piece_bbs[8], piece_bbs[9], piece_bbs[10], piece_bbs[11]
         if PAWN_ATTACKS[BLACK, sq] & bp: return True
         if KING_ATTACKS[sq] & bk: return True
         if KNIGHT_ATTACKS[sq] & bn: return True
-        if (bb | bq):
-            if get_bishop_attacks(sq, occ) & (bb | bq): return True
-        if (br | bq):
-            if get_rook_attacks(sq, occ) & (br | bq): return True
+        diag_sliders = bb | bq
+        if (diag_sliders & BISHOP_RAYS[sq]) and (get_bishop_attacks(sq, occ) & diag_sliders):
+            return True
+        orth_sliders = br | bq
+        if (orth_sliders & ROOK_RAYS[sq]) and (get_rook_attacks(sq, occ) & orth_sliders):
+            return True
     
     return False
 
@@ -465,28 +473,26 @@ def get_blockers_for_king(piece_bbs, occupancy_bbs, king_side):
     enemy_bishops = piece_bbs[BISHOP + enemy_offset] | piece_bbs[QUEEN + enemy_offset]
 
     # Orthogonal snipers
-    snipers = ROOK_RAYS[king_sq] & enemy_rooks
-    while snipers:
-        sniper_sq = get_lsb_index(snipers)
-        between = SQUARES_BETWEEN[king_sq, sniper_sq]
-        b = between & occupied
-        if b and count_bits(b) == 1:
-            blockers |= b
-            if b & own_pieces:
-                pinners_bb |= BB_SQUARES[sniper_sq]
-        snipers &= snipers - np.uint64(1)
+    if enemy_rooks:
+        snipers = ROOK_RAYS[king_sq] & enemy_rooks
+        while snipers:
+            sniper_sq = get_lsb_index(snipers)
+            between = SQUARES_BETWEEN[king_sq, sniper_sq]
+            b = between & occupied
+            if b and (b & (b - np.uint64(1))) == np.uint64(0):
+                blockers |= b
+            snipers &= snipers - np.uint64(1)
 
     # Diagonal snipers
-    snipers = BISHOP_RAYS[king_sq] & enemy_bishops
-    while snipers:
-        sniper_sq = get_lsb_index(snipers)
-        between = SQUARES_BETWEEN[king_sq, sniper_sq]
-        b = between & occupied
-        if b and count_bits(b) == 1:
-            blockers |= b
-            if b & own_pieces:
-                pinners_bb |= BB_SQUARES[sniper_sq]
-        snipers &= snipers - np.uint64(1)
+    if enemy_bishops:
+        snipers = BISHOP_RAYS[king_sq] & enemy_bishops
+        while snipers:
+            sniper_sq = get_lsb_index(snipers)
+            between = SQUARES_BETWEEN[king_sq, sniper_sq]
+            b = between & occupied
+            if b and (b & (b - np.uint64(1))) == np.uint64(0):
+                blockers |= b
+            snipers &= snipers - np.uint64(1)
 
     return blockers, pinners_bb
 
@@ -590,7 +596,7 @@ def is_move_pseudo_legal(piece_bbs, occupancy_bbs, game_state, move):
             promo_rank = 0
             attacks = PAWN_ATTACKS[BLACK, to_sq]
             
-        is_promo = (to_sq // 8 == promo_rank)
+        is_promo = ((to_sq >> 3) == promo_rank)
         
         # Check promotion flag matches destination rank
         if is_promo and special_flag != SPECIAL_MOVE_FLAG_PROMOTION: return False
@@ -608,7 +614,7 @@ def is_move_pseudo_legal(piece_bbs, occupancy_bbs, game_state, move):
             return True
             
         # Double push
-        if from_sq // 8 == start_rank and from_sq + dir * 2 == to_sq:
+        if (from_sq >> 3) == start_rank and from_sq + dir * 2 == to_sq:
             if (BB_SQUARES[from_sq + dir] | to_bb) & all_pieces_bb: return False
             return True
 
@@ -682,7 +688,11 @@ def generate_pseudo_legal_moves_buffer(piece_bbs, occupancy_bbs, game_state, mov
             to_sq = get_lsb_index(pushes)
             from_sq = to_sq - 8
             if to_sq >= 56: # Promotion
-                for p_type in [PROMO_QUEEN, PROMO_ROOK, PROMO_BISHOP, PROMO_KNIGHT]: moves_buffer[ply, move_count] = encode_move(from_sq, to_sq, p_type, SPECIAL_MOVE_FLAG_PROMOTION); move_count += 1
+                moves_buffer[ply, move_count] = encode_move(from_sq, to_sq, PROMO_QUEEN, SPECIAL_MOVE_FLAG_PROMOTION)
+                moves_buffer[ply, move_count + 1] = encode_move(from_sq, to_sq, PROMO_ROOK, SPECIAL_MOVE_FLAG_PROMOTION)
+                moves_buffer[ply, move_count + 2] = encode_move(from_sq, to_sq, PROMO_BISHOP, SPECIAL_MOVE_FLAG_PROMOTION)
+                moves_buffer[ply, move_count + 3] = encode_move(from_sq, to_sq, PROMO_KNIGHT, SPECIAL_MOVE_FLAG_PROMOTION)
+                move_count += 4
             else:
                 moves_buffer[ply, move_count] = encode_move(from_sq, to_sq, 0, SPECIAL_MOVE_FLAG_NORMAL); move_count += 1
             pushes &= (pushes - np.uint64(1))
@@ -700,7 +710,11 @@ def generate_pseudo_legal_moves_buffer(piece_bbs, occupancy_bbs, game_state, mov
             to_sq = get_lsb_index(caps_west)
             from_sq = to_sq - 7
             if to_sq >= 56: # Promotion
-                for p_type in [PROMO_QUEEN, PROMO_ROOK, PROMO_BISHOP, PROMO_KNIGHT]: moves_buffer[ply, move_count] = encode_move(from_sq, to_sq, p_type, SPECIAL_MOVE_FLAG_PROMOTION); move_count += 1
+                moves_buffer[ply, move_count] = encode_move(from_sq, to_sq, PROMO_QUEEN, SPECIAL_MOVE_FLAG_PROMOTION)
+                moves_buffer[ply, move_count + 1] = encode_move(from_sq, to_sq, PROMO_ROOK, SPECIAL_MOVE_FLAG_PROMOTION)
+                moves_buffer[ply, move_count + 2] = encode_move(from_sq, to_sq, PROMO_BISHOP, SPECIAL_MOVE_FLAG_PROMOTION)
+                moves_buffer[ply, move_count + 3] = encode_move(from_sq, to_sq, PROMO_KNIGHT, SPECIAL_MOVE_FLAG_PROMOTION)
+                move_count += 4
             else:
                 moves_buffer[ply, move_count] = encode_move(from_sq, to_sq, 0, SPECIAL_MOVE_FLAG_NORMAL); move_count += 1
             caps_west &= (caps_west - np.uint64(1))
@@ -710,7 +724,11 @@ def generate_pseudo_legal_moves_buffer(piece_bbs, occupancy_bbs, game_state, mov
             to_sq = get_lsb_index(caps_east)
             from_sq = to_sq - 9
             if to_sq >= 56: # Promotion
-                for p_type in [PROMO_QUEEN, PROMO_ROOK, PROMO_BISHOP, PROMO_KNIGHT]: moves_buffer[ply, move_count] = encode_move(from_sq, to_sq, p_type, SPECIAL_MOVE_FLAG_PROMOTION); move_count += 1
+                moves_buffer[ply, move_count] = encode_move(from_sq, to_sq, PROMO_QUEEN, SPECIAL_MOVE_FLAG_PROMOTION)
+                moves_buffer[ply, move_count + 1] = encode_move(from_sq, to_sq, PROMO_ROOK, SPECIAL_MOVE_FLAG_PROMOTION)
+                moves_buffer[ply, move_count + 2] = encode_move(from_sq, to_sq, PROMO_BISHOP, SPECIAL_MOVE_FLAG_PROMOTION)
+                moves_buffer[ply, move_count + 3] = encode_move(from_sq, to_sq, PROMO_KNIGHT, SPECIAL_MOVE_FLAG_PROMOTION)
+                move_count += 4
             else:
                 moves_buffer[ply, move_count] = encode_move(from_sq, to_sq, 0, SPECIAL_MOVE_FLAG_NORMAL); move_count += 1
             caps_east &= (caps_east - np.uint64(1))
@@ -743,7 +761,11 @@ def generate_pseudo_legal_moves_buffer(piece_bbs, occupancy_bbs, game_state, mov
             to_sq = get_lsb_index(pushes)
             from_sq = to_sq + 8
             if to_sq <= 7: # Promotion
-                for p_type in [PROMO_QUEEN, PROMO_ROOK, PROMO_BISHOP, PROMO_KNIGHT]: moves_buffer[ply, move_count] = encode_move(from_sq, to_sq, p_type, SPECIAL_MOVE_FLAG_PROMOTION); move_count += 1
+                moves_buffer[ply, move_count] = encode_move(from_sq, to_sq, PROMO_QUEEN, SPECIAL_MOVE_FLAG_PROMOTION)
+                moves_buffer[ply, move_count + 1] = encode_move(from_sq, to_sq, PROMO_ROOK, SPECIAL_MOVE_FLAG_PROMOTION)
+                moves_buffer[ply, move_count + 2] = encode_move(from_sq, to_sq, PROMO_BISHOP, SPECIAL_MOVE_FLAG_PROMOTION)
+                moves_buffer[ply, move_count + 3] = encode_move(from_sq, to_sq, PROMO_KNIGHT, SPECIAL_MOVE_FLAG_PROMOTION)
+                move_count += 4
             else:
                 moves_buffer[ply, move_count] = encode_move(from_sq, to_sq, 0, SPECIAL_MOVE_FLAG_NORMAL); move_count += 1
             pushes &= (pushes - np.uint64(1))
@@ -760,7 +782,11 @@ def generate_pseudo_legal_moves_buffer(piece_bbs, occupancy_bbs, game_state, mov
             to_sq = get_lsb_index(caps_west)
             from_sq = to_sq + 7
             if to_sq <= 7: # Promotion
-                for p_type in [PROMO_QUEEN, PROMO_ROOK, PROMO_BISHOP, PROMO_KNIGHT]: moves_buffer[ply, move_count] = encode_move(from_sq, to_sq, p_type, SPECIAL_MOVE_FLAG_PROMOTION); move_count += 1
+                moves_buffer[ply, move_count] = encode_move(from_sq, to_sq, PROMO_QUEEN, SPECIAL_MOVE_FLAG_PROMOTION)
+                moves_buffer[ply, move_count + 1] = encode_move(from_sq, to_sq, PROMO_ROOK, SPECIAL_MOVE_FLAG_PROMOTION)
+                moves_buffer[ply, move_count + 2] = encode_move(from_sq, to_sq, PROMO_BISHOP, SPECIAL_MOVE_FLAG_PROMOTION)
+                moves_buffer[ply, move_count + 3] = encode_move(from_sq, to_sq, PROMO_KNIGHT, SPECIAL_MOVE_FLAG_PROMOTION)
+                move_count += 4
             else:
                 moves_buffer[ply, move_count] = encode_move(from_sq, to_sq, 0, SPECIAL_MOVE_FLAG_NORMAL); move_count += 1
             caps_west &= (caps_west - np.uint64(1))
@@ -770,7 +796,11 @@ def generate_pseudo_legal_moves_buffer(piece_bbs, occupancy_bbs, game_state, mov
             to_sq = get_lsb_index(caps_east)
             from_sq = to_sq + 9
             if to_sq <= 7: # Promotion
-                for p_type in [PROMO_QUEEN, PROMO_ROOK, PROMO_BISHOP, PROMO_KNIGHT]: moves_buffer[ply, move_count] = encode_move(from_sq, to_sq, p_type, SPECIAL_MOVE_FLAG_PROMOTION); move_count += 1
+                moves_buffer[ply, move_count] = encode_move(from_sq, to_sq, PROMO_QUEEN, SPECIAL_MOVE_FLAG_PROMOTION)
+                moves_buffer[ply, move_count + 1] = encode_move(from_sq, to_sq, PROMO_ROOK, SPECIAL_MOVE_FLAG_PROMOTION)
+                moves_buffer[ply, move_count + 2] = encode_move(from_sq, to_sq, PROMO_BISHOP, SPECIAL_MOVE_FLAG_PROMOTION)
+                moves_buffer[ply, move_count + 3] = encode_move(from_sq, to_sq, PROMO_KNIGHT, SPECIAL_MOVE_FLAG_PROMOTION)
+                move_count += 4
             else:
                 moves_buffer[ply, move_count] = encode_move(from_sq, to_sq, 0, SPECIAL_MOVE_FLAG_NORMAL); move_count += 1
             caps_east &= (caps_east - np.uint64(1))
@@ -901,9 +931,11 @@ def _generate_tactical_moves_jit(piece_bbs, occupancy_bbs, game_state):
         while promo_pushes:
             to_sq = get_lsb_index(promo_pushes)
             from_sq = to_sq - 8
-            for p_type in [PROMO_QUEEN, PROMO_ROOK, PROMO_BISHOP, PROMO_KNIGHT]:
-                moves[move_count] = encode_move(from_sq, to_sq, p_type, SPECIAL_MOVE_FLAG_PROMOTION)
-                move_count += 1
+            moves[move_count] = encode_move(from_sq, to_sq, PROMO_QUEEN, SPECIAL_MOVE_FLAG_PROMOTION)
+            moves[move_count + 1] = encode_move(from_sq, to_sq, PROMO_ROOK, SPECIAL_MOVE_FLAG_PROMOTION)
+            moves[move_count + 2] = encode_move(from_sq, to_sq, PROMO_BISHOP, SPECIAL_MOVE_FLAG_PROMOTION)
+            moves[move_count + 3] = encode_move(from_sq, to_sq, PROMO_KNIGHT, SPECIAL_MOVE_FLAG_PROMOTION)
+            move_count += 4
             promo_pushes &= (promo_pushes - np.uint64(1))
 
         # Capture Promotions
@@ -911,18 +943,22 @@ def _generate_tactical_moves_jit(piece_bbs, occupancy_bbs, game_state):
         while promo_caps_west:
             to_sq = get_lsb_index(promo_caps_west)
             from_sq = to_sq - 7
-            for p_type in [PROMO_QUEEN, PROMO_ROOK, PROMO_BISHOP, PROMO_KNIGHT]:
-                moves[move_count] = encode_move(from_sq, to_sq, p_type, SPECIAL_MOVE_FLAG_PROMOTION)
-                move_count += 1
+            moves[move_count] = encode_move(from_sq, to_sq, PROMO_QUEEN, SPECIAL_MOVE_FLAG_PROMOTION)
+            moves[move_count + 1] = encode_move(from_sq, to_sq, PROMO_ROOK, SPECIAL_MOVE_FLAG_PROMOTION)
+            moves[move_count + 2] = encode_move(from_sq, to_sq, PROMO_BISHOP, SPECIAL_MOVE_FLAG_PROMOTION)
+            moves[move_count + 3] = encode_move(from_sq, to_sq, PROMO_KNIGHT, SPECIAL_MOVE_FLAG_PROMOTION)
+            move_count += 4
             promo_caps_west &= (promo_caps_west - np.uint64(1))
             
         promo_caps_east = captures_east & RANK_8
         while promo_caps_east:
             to_sq = get_lsb_index(promo_caps_east)
             from_sq = to_sq - 9
-            for p_type in [PROMO_QUEEN, PROMO_ROOK, PROMO_BISHOP, PROMO_KNIGHT]:
-                moves[move_count] = encode_move(from_sq, to_sq, p_type, SPECIAL_MOVE_FLAG_PROMOTION)
-                move_count += 1
+            moves[move_count] = encode_move(from_sq, to_sq, PROMO_QUEEN, SPECIAL_MOVE_FLAG_PROMOTION)
+            moves[move_count + 1] = encode_move(from_sq, to_sq, PROMO_ROOK, SPECIAL_MOVE_FLAG_PROMOTION)
+            moves[move_count + 2] = encode_move(from_sq, to_sq, PROMO_BISHOP, SPECIAL_MOVE_FLAG_PROMOTION)
+            moves[move_count + 3] = encode_move(from_sq, to_sq, PROMO_KNIGHT, SPECIAL_MOVE_FLAG_PROMOTION)
+            move_count += 4
             promo_caps_east &= (promo_caps_east - np.uint64(1))
 
         # Regular Captures
@@ -965,9 +1001,11 @@ def _generate_tactical_moves_jit(piece_bbs, occupancy_bbs, game_state):
         while promo_pushes:
             to_sq = get_lsb_index(promo_pushes)
             from_sq = to_sq + 8
-            for p_type in [PROMO_QUEEN, PROMO_ROOK, PROMO_BISHOP, PROMO_KNIGHT]:
-                moves[move_count] = encode_move(from_sq, to_sq, p_type, SPECIAL_MOVE_FLAG_PROMOTION)
-                move_count += 1
+            moves[move_count] = encode_move(from_sq, to_sq, PROMO_QUEEN, SPECIAL_MOVE_FLAG_PROMOTION)
+            moves[move_count + 1] = encode_move(from_sq, to_sq, PROMO_ROOK, SPECIAL_MOVE_FLAG_PROMOTION)
+            moves[move_count + 2] = encode_move(from_sq, to_sq, PROMO_BISHOP, SPECIAL_MOVE_FLAG_PROMOTION)
+            moves[move_count + 3] = encode_move(from_sq, to_sq, PROMO_KNIGHT, SPECIAL_MOVE_FLAG_PROMOTION)
+            move_count += 4
             promo_pushes &= (promo_pushes - np.uint64(1))
 
         # Capture Promotions
@@ -975,18 +1013,22 @@ def _generate_tactical_moves_jit(piece_bbs, occupancy_bbs, game_state):
         while promo_caps_west:
             to_sq = get_lsb_index(promo_caps_west)
             from_sq = to_sq + 7
-            for p_type in [PROMO_QUEEN, PROMO_ROOK, PROMO_BISHOP, PROMO_KNIGHT]:
-                moves[move_count] = encode_move(from_sq, to_sq, p_type, SPECIAL_MOVE_FLAG_PROMOTION)
-                move_count += 1
+            moves[move_count] = encode_move(from_sq, to_sq, PROMO_QUEEN, SPECIAL_MOVE_FLAG_PROMOTION)
+            moves[move_count + 1] = encode_move(from_sq, to_sq, PROMO_ROOK, SPECIAL_MOVE_FLAG_PROMOTION)
+            moves[move_count + 2] = encode_move(from_sq, to_sq, PROMO_BISHOP, SPECIAL_MOVE_FLAG_PROMOTION)
+            moves[move_count + 3] = encode_move(from_sq, to_sq, PROMO_KNIGHT, SPECIAL_MOVE_FLAG_PROMOTION)
+            move_count += 4
             promo_caps_west &= (promo_caps_west - np.uint64(1))
             
         promo_caps_east = captures_east & RANK_1
         while promo_caps_east:
             to_sq = get_lsb_index(promo_caps_east)
             from_sq = to_sq + 9
-            for p_type in [PROMO_QUEEN, PROMO_ROOK, PROMO_BISHOP, PROMO_KNIGHT]:
-                moves[move_count] = encode_move(from_sq, to_sq, p_type, SPECIAL_MOVE_FLAG_PROMOTION)
-                move_count += 1
+            moves[move_count] = encode_move(from_sq, to_sq, PROMO_QUEEN, SPECIAL_MOVE_FLAG_PROMOTION)
+            moves[move_count + 1] = encode_move(from_sq, to_sq, PROMO_ROOK, SPECIAL_MOVE_FLAG_PROMOTION)
+            moves[move_count + 2] = encode_move(from_sq, to_sq, PROMO_BISHOP, SPECIAL_MOVE_FLAG_PROMOTION)
+            moves[move_count + 3] = encode_move(from_sq, to_sq, PROMO_KNIGHT, SPECIAL_MOVE_FLAG_PROMOTION)
+            move_count += 4
             promo_caps_east &= (promo_caps_east - np.uint64(1))
 
         # Regular Captures
@@ -1063,16 +1105,6 @@ def _is_in_check_jit(piece_bbs, occupancy_bbs, game_state):
 def is_in_check(piece_bbs, occupancy_bbs, game_state):
     return _is_in_check_jit(piece_bbs, occupancy_bbs, game_state)
 
-@numba.njit(numba.int32(numba.uint64), cache=True, inline='always')
-def count_bits_local(bb: np.uint64) -> numba.int32:
-    # Standard software popcount that compiles to the hardware popcnt instruction in LLVM
-    bb = bb - ((bb >> np.uint64(1)) & np.uint64(0x5555555555555555))
-    bb = (bb & np.uint64(0x3333333333333333)) + ((bb >> np.uint64(2)) & np.uint64(0x3333333333333333))
-    bb = (bb + (bb >> np.uint64(4))) & np.uint64(0x0F0F0F0F0F0F0F0F)
-    bb = bb + (bb >> np.uint64(8))
-    bb = bb + (bb >> np.uint64(16))
-    bb = bb + (bb >> np.uint64(32))
-    return numba.int32(bb & np.uint64(0x7F))
 
 @numba.njit(numba.boolean(piece_bbs_signature), cache=True, boundscheck=False, fastmath=True)
 def has_sufficient_material(piece_bbs):
@@ -1091,10 +1123,10 @@ def has_sufficient_material(piece_bbs):
     b_knights = piece_bbs[7]
     b_bishops = piece_bbs[8]
 
-    wn_cnt = count_bits_local(w_knights)
-    wb_cnt = count_bits_local(w_bishops)
-    bn_cnt = count_bits_local(b_knights)
-    bb_cnt = count_bits_local(b_bishops)
+    wn_cnt = count_bits(w_knights)
+    wb_cnt = count_bits(w_bishops)
+    bn_cnt = count_bits(b_knights)
+    bb_cnt = count_bits(b_bishops)
 
     w_minors = wn_cnt + wb_cnt
     b_minors = bn_cnt + bb_cnt
@@ -1155,9 +1187,11 @@ def generate_pseudo_legal_quiets_buffer(piece_bbs, occupancy_bbs, game_state, mo
             to_sq = get_lsb_index(pushes)
             from_sq = to_sq - 8
             if to_sq >= 56: # Promotion
-                for p_type in [PROMO_QUEEN, PROMO_ROOK, PROMO_BISHOP, PROMO_KNIGHT]:
-                    moves_buffer[ply, move_count] = encode_move(from_sq, to_sq, p_type, SPECIAL_MOVE_FLAG_PROMOTION)
-                    move_count += 1
+                moves_buffer[ply, move_count] = encode_move(from_sq, to_sq, PROMO_QUEEN, SPECIAL_MOVE_FLAG_PROMOTION)
+                moves_buffer[ply, move_count + 1] = encode_move(from_sq, to_sq, PROMO_ROOK, SPECIAL_MOVE_FLAG_PROMOTION)
+                moves_buffer[ply, move_count + 2] = encode_move(from_sq, to_sq, PROMO_BISHOP, SPECIAL_MOVE_FLAG_PROMOTION)
+                moves_buffer[ply, move_count + 3] = encode_move(from_sq, to_sq, PROMO_KNIGHT, SPECIAL_MOVE_FLAG_PROMOTION)
+                move_count += 4
             else:
                 moves_buffer[ply, move_count] = encode_move(from_sq, to_sq, 0, SPECIAL_MOVE_FLAG_NORMAL)
                 move_count += 1
@@ -1186,9 +1220,11 @@ def generate_pseudo_legal_quiets_buffer(piece_bbs, occupancy_bbs, game_state, mo
             to_sq = get_lsb_index(pushes)
             from_sq = to_sq + 8
             if to_sq <= 7: # Promotion
-                for p_type in [PROMO_QUEEN, PROMO_ROOK, PROMO_BISHOP, PROMO_KNIGHT]:
-                    moves_buffer[ply, move_count] = encode_move(from_sq, to_sq, p_type, SPECIAL_MOVE_FLAG_PROMOTION)
-                    move_count += 1
+                moves_buffer[ply, move_count] = encode_move(from_sq, to_sq, PROMO_QUEEN, SPECIAL_MOVE_FLAG_PROMOTION)
+                moves_buffer[ply, move_count + 1] = encode_move(from_sq, to_sq, PROMO_ROOK, SPECIAL_MOVE_FLAG_PROMOTION)
+                moves_buffer[ply, move_count + 2] = encode_move(from_sq, to_sq, PROMO_BISHOP, SPECIAL_MOVE_FLAG_PROMOTION)
+                moves_buffer[ply, move_count + 3] = encode_move(from_sq, to_sq, PROMO_KNIGHT, SPECIAL_MOVE_FLAG_PROMOTION)
+                move_count += 4
             else:
                 moves_buffer[ply, move_count] = encode_move(from_sq, to_sq, 0, SPECIAL_MOVE_FLAG_NORMAL)
                 move_count += 1
@@ -1258,9 +1294,11 @@ def generate_pseudo_legal_captures_buffer(piece_bbs, occupancy_bbs, game_state, 
         while promo_pushes:
             to_sq = get_lsb_index(promo_pushes)
             from_sq = to_sq - 8
-            for p_type in [PROMO_QUEEN, PROMO_ROOK, PROMO_BISHOP, PROMO_KNIGHT]:
-                moves_buffer[ply, move_count] = encode_move(from_sq, to_sq, p_type, SPECIAL_MOVE_FLAG_PROMOTION)
-                move_count += 1
+            moves_buffer[ply, move_count] = encode_move(from_sq, to_sq, PROMO_QUEEN, SPECIAL_MOVE_FLAG_PROMOTION)
+            moves_buffer[ply, move_count + 1] = encode_move(from_sq, to_sq, PROMO_ROOK, SPECIAL_MOVE_FLAG_PROMOTION)
+            moves_buffer[ply, move_count + 2] = encode_move(from_sq, to_sq, PROMO_BISHOP, SPECIAL_MOVE_FLAG_PROMOTION)
+            moves_buffer[ply, move_count + 3] = encode_move(from_sq, to_sq, PROMO_KNIGHT, SPECIAL_MOVE_FLAG_PROMOTION)
+            move_count += 4
             promo_pushes &= (promo_pushes - np.uint64(1))
 
         # Capture Promotions
@@ -1268,18 +1306,22 @@ def generate_pseudo_legal_captures_buffer(piece_bbs, occupancy_bbs, game_state, 
         while promo_caps_west:
             to_sq = get_lsb_index(promo_caps_west)
             from_sq = to_sq - 7
-            for p_type in [PROMO_QUEEN, PROMO_ROOK, PROMO_BISHOP, PROMO_KNIGHT]:
-                moves_buffer[ply, move_count] = encode_move(from_sq, to_sq, p_type, SPECIAL_MOVE_FLAG_PROMOTION)
-                move_count += 1
+            moves_buffer[ply, move_count] = encode_move(from_sq, to_sq, PROMO_QUEEN, SPECIAL_MOVE_FLAG_PROMOTION)
+            moves_buffer[ply, move_count + 1] = encode_move(from_sq, to_sq, PROMO_ROOK, SPECIAL_MOVE_FLAG_PROMOTION)
+            moves_buffer[ply, move_count + 2] = encode_move(from_sq, to_sq, PROMO_BISHOP, SPECIAL_MOVE_FLAG_PROMOTION)
+            moves_buffer[ply, move_count + 3] = encode_move(from_sq, to_sq, PROMO_KNIGHT, SPECIAL_MOVE_FLAG_PROMOTION)
+            move_count += 4
             promo_caps_west &= (promo_caps_west - np.uint64(1))
 
         promo_caps_east = captures_east & RANK_8
         while promo_caps_east:
             to_sq = get_lsb_index(promo_caps_east)
             from_sq = to_sq - 9
-            for p_type in [PROMO_QUEEN, PROMO_ROOK, PROMO_BISHOP, PROMO_KNIGHT]:
-                moves_buffer[ply, move_count] = encode_move(from_sq, to_sq, p_type, SPECIAL_MOVE_FLAG_PROMOTION)
-                move_count += 1
+            moves_buffer[ply, move_count] = encode_move(from_sq, to_sq, PROMO_QUEEN, SPECIAL_MOVE_FLAG_PROMOTION)
+            moves_buffer[ply, move_count + 1] = encode_move(from_sq, to_sq, PROMO_ROOK, SPECIAL_MOVE_FLAG_PROMOTION)
+            moves_buffer[ply, move_count + 2] = encode_move(from_sq, to_sq, PROMO_BISHOP, SPECIAL_MOVE_FLAG_PROMOTION)
+            moves_buffer[ply, move_count + 3] = encode_move(from_sq, to_sq, PROMO_KNIGHT, SPECIAL_MOVE_FLAG_PROMOTION)
+            move_count += 4
             promo_caps_east &= (promo_caps_east - np.uint64(1))
 
         # Regular Captures (non-promotion)
@@ -1322,9 +1364,11 @@ def generate_pseudo_legal_captures_buffer(piece_bbs, occupancy_bbs, game_state, 
         while promo_pushes:
             to_sq = get_lsb_index(promo_pushes)
             from_sq = to_sq + 8
-            for p_type in [PROMO_QUEEN, PROMO_ROOK, PROMO_BISHOP, PROMO_KNIGHT]:
-                moves_buffer[ply, move_count] = encode_move(from_sq, to_sq, p_type, SPECIAL_MOVE_FLAG_PROMOTION)
-                move_count += 1
+            moves_buffer[ply, move_count] = encode_move(from_sq, to_sq, PROMO_QUEEN, SPECIAL_MOVE_FLAG_PROMOTION)
+            moves_buffer[ply, move_count + 1] = encode_move(from_sq, to_sq, PROMO_ROOK, SPECIAL_MOVE_FLAG_PROMOTION)
+            moves_buffer[ply, move_count + 2] = encode_move(from_sq, to_sq, PROMO_BISHOP, SPECIAL_MOVE_FLAG_PROMOTION)
+            moves_buffer[ply, move_count + 3] = encode_move(from_sq, to_sq, PROMO_KNIGHT, SPECIAL_MOVE_FLAG_PROMOTION)
+            move_count += 4
             promo_pushes &= (promo_pushes - np.uint64(1))
 
         # Capture Promotions
@@ -1332,18 +1376,22 @@ def generate_pseudo_legal_captures_buffer(piece_bbs, occupancy_bbs, game_state, 
         while promo_caps_west:
             to_sq = get_lsb_index(promo_caps_west)
             from_sq = to_sq + 7
-            for p_type in [PROMO_QUEEN, PROMO_ROOK, PROMO_BISHOP, PROMO_KNIGHT]:
-                moves_buffer[ply, move_count] = encode_move(from_sq, to_sq, p_type, SPECIAL_MOVE_FLAG_PROMOTION)
-                move_count += 1
+            moves_buffer[ply, move_count] = encode_move(from_sq, to_sq, PROMO_QUEEN, SPECIAL_MOVE_FLAG_PROMOTION)
+            moves_buffer[ply, move_count + 1] = encode_move(from_sq, to_sq, PROMO_ROOK, SPECIAL_MOVE_FLAG_PROMOTION)
+            moves_buffer[ply, move_count + 2] = encode_move(from_sq, to_sq, PROMO_BISHOP, SPECIAL_MOVE_FLAG_PROMOTION)
+            moves_buffer[ply, move_count + 3] = encode_move(from_sq, to_sq, PROMO_KNIGHT, SPECIAL_MOVE_FLAG_PROMOTION)
+            move_count += 4
             promo_caps_west &= (promo_caps_west - np.uint64(1))
 
         promo_caps_east = captures_east & RANK_1
         while promo_caps_east:
             to_sq = get_lsb_index(promo_caps_east)
             from_sq = to_sq + 9
-            for p_type in [PROMO_QUEEN, PROMO_ROOK, PROMO_BISHOP, PROMO_KNIGHT]:
-                moves_buffer[ply, move_count] = encode_move(from_sq, to_sq, p_type, SPECIAL_MOVE_FLAG_PROMOTION)
-                move_count += 1
+            moves_buffer[ply, move_count] = encode_move(from_sq, to_sq, PROMO_QUEEN, SPECIAL_MOVE_FLAG_PROMOTION)
+            moves_buffer[ply, move_count + 1] = encode_move(from_sq, to_sq, PROMO_ROOK, SPECIAL_MOVE_FLAG_PROMOTION)
+            moves_buffer[ply, move_count + 2] = encode_move(from_sq, to_sq, PROMO_BISHOP, SPECIAL_MOVE_FLAG_PROMOTION)
+            moves_buffer[ply, move_count + 3] = encode_move(from_sq, to_sq, PROMO_KNIGHT, SPECIAL_MOVE_FLAG_PROMOTION)
+            move_count += 4
             promo_caps_east &= (promo_caps_east - np.uint64(1))
 
         # Regular Captures (non-promotion)

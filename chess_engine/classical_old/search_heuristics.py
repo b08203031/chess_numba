@@ -78,7 +78,7 @@ def update_capture_history(capture_history, piece_type, to_square, victim_type, 
     new_value = current_value + clamped_bonus - (current_value * abs(clamped_bonus)) // HISTORY_MAX_CAPTURE
     capture_history[piece_type, to_square, victim_rel] = new_value
 
-@numba.njit(cache=True, boundscheck=False, fastmath=True)
+@numba.njit(cache=True, boundscheck=False, fastmath=True, inline='always')
 def capture_victim_index(victim_type):
     """Map absolute (0..11) or relative (0..5) piece id to capture-history victim slot 0..5."""
     if victim_type < 0:
@@ -204,7 +204,7 @@ def get_quiet_stat_score(
 
     return score
 
-@numba.njit(cache=True, boundscheck=False, fastmath=True)
+@numba.njit(cache=True, boundscheck=False, fastmath=True, inline='always')
 def get_quiet_ordering_score(
     search_context, ply, from_sq, to_sq, aggressor_type, pawn_key_idx,
 ):
@@ -252,7 +252,7 @@ def get_quiet_ordering_score(
 
     return score
 
-@numba.njit(cache=True, boundscheck=False, fastmath=True)
+@numba.njit(cache=True, boundscheck=False, fastmath=True, inline='always')
 def get_continuation_pruning_score(search_context, ply, see_piece, to_sq, pawn_key_idx):
     """
     Computes unweighted continuation history (1-ply, 2-ply) + pawn history

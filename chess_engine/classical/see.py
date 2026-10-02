@@ -31,7 +31,7 @@ SEE_PIECE_VALUES = np.array([100, 320, 330, 500, 900, 20000], dtype=np.int32)
 DIAGONAL_DIRECTIONS = np.array([-9, -7, 7, 9], dtype=np.int32)
 ORTHOGONAL_DIRECTIONS = np.array([-8, -1, 1, 8], dtype=np.int32)
 
-@numba.njit(cache=True)
+@numba.njit(cache=True, boundscheck=False, fastmath=True, inline='always')
 def get_sliding_attacks(square, occupied, is_diagonal):
     """
     Get sliding attacks using Magic Bitboards (O(1) lookup).
@@ -43,7 +43,7 @@ def get_sliding_attacks(square, occupied, is_diagonal):
         return get_rook_attacks(square, occupied)
 
 
-@numba.njit(cache=True)
+@numba.njit(cache=True, boundscheck=False, fastmath=True)
 def get_attackers_for_see(square, occupied, piece_bbs, side_mask):
     """
     Get bitboard of all pieces of 'side_mask' (0=White, 1=Black) attacking 'square'.
@@ -86,7 +86,7 @@ def get_attackers_for_see(square, occupied, piece_bbs, side_mask):
 
     return attackers
 
-@numba.njit(cache=True)
+@numba.njit(cache=True, boundscheck=False, fastmath=True, inline='always')
 def get_lva_and_remove(attackers, piece_bbs, side_mask):
     """
     Finds LVA, returns (value, bitboard, type_idx).
@@ -99,7 +99,7 @@ def get_lva_and_remove(attackers, piece_bbs, side_mask):
             return SEE_PIECE_VALUES[i], np.uint64(sq_bb), i
     return 0, np.uint64(0), -1
 
-@numba.njit(cache=True)
+@numba.njit(cache=True, boundscheck=False, fastmath=True)
 def _see_jit(piece_bbs, occupancy_bbs, side_to_move, from_sq, to_sq, pinned_white, pinned_black, attacker_type=-1, victim_type=-1):
     """
     Static Exchange Evaluation (SEE).
@@ -242,7 +242,7 @@ def _see_jit(piece_bbs, occupancy_bbs, side_to_move, from_sq, to_sq, pinned_whit
     return scores[0]
 
 
-@numba.njit(cache=True)
+@numba.njit(cache=True, boundscheck=False, fastmath=True)
 def _see_ge_jit(piece_bbs, occupancy_bbs, side_to_move, from_sq, to_sq, threshold, pinned_white, pinned_black, attacker_type=-1, victim_type=-1):
     """
     SEE >= Threshold (Stockfish-style).

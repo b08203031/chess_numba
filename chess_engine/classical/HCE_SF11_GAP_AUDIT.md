@@ -49,7 +49,7 @@ Classical HCE 是 **以 Stockfish 11 為藍本、維持 ~100cp 人類可讀尺�
 | 通路兵 | ✅ | 路徑/王鄰近/候選半價；**已移除**非 SF 的材質 `PASSED_SCALE_*` |
 | 空間 | ✅ 啟用 | SF 公式 + 刻意 `// SPACE_SCALE_DIVISOR(4)` |
 | 主動權 (initiative) | ✅ | 雙套 MG/EG 權重（SF 單一 complexity） |
-| 殘局縮放因子 | ✅ 強 | `get_endgame_scale_factor` 多種堡壘 |
+| 殘局縮放因子 | ✅ 強 | `get_endgame_scale_factor` 多種堡壘（含 SF11 KPKP、激活 KPsK 與 50 步衰減） |
 | 專用殘局**評估** | ✅ 十種 | **KXK / KPK / KRKP / KQKP / KBNK / KNNK / KRKB / KRKN / KQKR / KNNKP** |
 | Tempo / Lazy | ✅ | 門檻已縮放 |
 
@@ -165,6 +165,7 @@ Classical HCE 是 **以 Stockfish 11 為藍本、維持 ~100cp 人類可讀尺�
 | C1 KQKR | EG 后−車 + edges + close | ✅ |
 | C1 KNNKP | 2N−P + edges | ✅ |
 | C2 KPK golden 對照 | 獨立 SF11 參考表全表對位（111282 wins）+ 理論 FEN；可選 SF 搜尋抽樣 | ✅ |
+| C3 王兵殘局健全化 | 移植 SF11 KPKP 縮放、修正方形法則自阻擋、打通王兵殘局至 scale factor（激活 KPsK 與 50 步衰減） | ✅ |
 | B5+P2 Elo 定稿 | 352 局 nodes=200k，~+30 Elo 顯著 | ✅ |
 
 **尺度：** 幾何表同 SF11；材質用 `EG_MATERIAL_VALUES`（~100cp），非 SF 213/1380…

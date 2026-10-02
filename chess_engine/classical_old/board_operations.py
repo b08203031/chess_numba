@@ -13,7 +13,7 @@ from chess_engine.classical_old.engine_types import (
     piece_bbs_signature, occupancy_bbs_signature, game_state_signature, unmake_info_signature
 )
 from chess_engine.classical_old.constants import (
-    PAWN_KEY_INDEX, MINOR_KEY_INDEX, NON_PAWN_KEY_WHITE_INDEX, NON_PAWN_KEY_BLACK_INDEX
+    PAWN_KEY_INDEX, MINOR_KEY_INDEX, NON_PAWN_KEY_WHITE_INDEX, NON_PAWN_KEY_BLACK_INDEX, BB_SQUARES
 )
 
 # --- Piece Type Constants / 棋子類型常量 ---
@@ -48,7 +48,7 @@ def find_piece_type_for_square(piece_bbs: np.ndarray, square: int, color: int) -
     Returns:
         int: 棋子類型索引 (0-5)，如果沒有找到則返回 -1。
     """
-    bit = np.uint64(1) << square
+    bit = BB_SQUARES[square]
     start_index = color * 6
     for i in range(6):
         if piece_bbs[start_index + i] & bit:
@@ -99,7 +99,7 @@ def make_move(piece_bbs: np.ndarray, occupancy_bbs: np.ndarray, game_state: np.n
     captured_piece_type = np.int8(-1)
 
     # --- Piece Movement / 棋子移動 ---
-    move_mask = (np.uint64(1) << from_sq) | (np.uint64(1) << to_sq)
+    move_mask = BB_SQUARES[from_sq] | BB_SQUARES[to_sq]
     # Update Zobrist key for moving piece (remove from 'from', add to 'to') / 更新移動棋子的 Zobrist 鍵（從 'from' 移除，添加到 'to'）
     key ^= PIECE_SQUARE_KEYS[moving_piece_bb_idx, from_sq]
     key ^= PIECE_SQUARE_KEYS[moving_piece_bb_idx, to_sq]
@@ -136,13 +136,13 @@ def make_move(piece_bbs: np.ndarray, occupancy_bbs: np.ndarray, game_state: np.n
 
     is_capture = False
     # --- Standard Capture / 標準吃子 ---
-    if occupancy_bbs[1 - side] & (np.uint64(1) << to_sq):
+    if occupancy_bbs[1 - side] & BB_SQUARES[to_sq]:
         is_capture = True
         opponent_color = 1 - side
         captured_piece_type = find_piece_type_for_square(piece_bbs, to_sq, opponent_color)
         captured_piece_bb_idx = opponent_color * 6 + captured_piece_type
 
-        capture_mask = np.uint64(1) << to_sq
+        capture_mask = BB_SQUARES[to_sq]
         piece_bbs[captured_piece_bb_idx] &= ~capture_mask
         occupancy_bbs[opponent_color] &= ~capture_mask
         # Update Zobrist key for captured piece (remove) / 更新被吃棋子的 Zobrist 鍵（移除）
@@ -170,8 +170,8 @@ def make_move(piece_bbs: np.ndarray, occupancy_bbs: np.ndarray, game_state: np.n
         # The pawn was already moved by the initial XOR, so we XOR it again at 'to_sq' to remove it.
         # 正確處理升變：從 'to' 方格移除兵並添加新棋子。
         # 兵已經通過初始 XOR 移動了，所以我們在 'to_sq' 再次 XOR 以將其移除。
-        piece_bbs[moving_piece_bb_idx] ^= (np.uint64(1) << to_sq)
-        piece_bbs[promo_piece_bb_idx] |= (np.uint64(1) << to_sq)
+        piece_bbs[moving_piece_bb_idx] ^= BB_SQUARES[to_sq]
+        piece_bbs[promo_piece_bb_idx] |= BB_SQUARES[to_sq]
         
         # The key was updated for a pawn moving to 'to_sq'. We need to reverse that and apply the key for the promoted piece.
         # 鍵值已更新為兵移動到 'to_sq'。我們需要撤銷該操作並應用升變後棋子的鍵值。
@@ -197,7 +197,7 @@ def make_move(piece_bbs: np.ndarray, occupancy_bbs: np.ndarray, game_state: np.n
         opponent_color = 1 - side
         captured_pawn_bb_idx = opponent_color * 6 + PAWN
         captured_pawn_sq = to_sq + (8 if side == BLACK else -8)
-        capture_mask = np.uint64(1) << captured_pawn_sq
+        capture_mask = BB_SQUARES[captured_pawn_sq]
 
         piece_bbs[captured_pawn_bb_idx] &= ~capture_mask
         occupancy_bbs[opponent_color] &= ~capture_mask
@@ -213,7 +213,7 @@ def make_move(piece_bbs: np.ndarray, occupancy_bbs: np.ndarray, game_state: np.n
         king_side_castle = to_sq > from_sq
         rook_from_sq, rook_to_sq = ((7, 5) if king_side_castle else (0, 3)) if side == WHITE else ((63, 61) if king_side_castle else (56, 59))
         rook_bb_idx = side * 6 + ROOK
-        rook_move_mask = (np.uint64(1) << rook_from_sq) | (np.uint64(1) << rook_to_sq)
+        rook_move_mask = BB_SQUARES[rook_from_sq] | BB_SQUARES[rook_to_sq]
 
         piece_bbs[rook_bb_idx] ^= rook_move_mask
         occupancy_bbs[side] ^= rook_move_mask
@@ -305,7 +305,7 @@ def unmake_move(piece_bbs: np.ndarray, occupancy_bbs: np.ndarray, game_state: np
     moving_piece_bb_idx = side * 6 + moving_piece_type
 
     # --- Restore Piece Movement / 恢復棋子移動 ---
-    move_mask = (np.uint64(1) << from_sq) | (np.uint64(1) << to_sq)
+    move_mask = BB_SQUARES[from_sq] | BB_SQUARES[to_sq]
     # For promotions, the standard XOR trick is incorrect because the piece type changes.
     # It is handled entirely within the promotion block below.
     # 對於升變，標準 XOR 技巧是不正確的，因為棋子類型改變了。它完全在下面的升變區塊中處理。
@@ -323,12 +323,12 @@ def unmake_move(piece_bbs: np.ndarray, occupancy_bbs: np.ndarray, game_state: np
         # 手動撤銷升變：
         # 1. Remove the promoted piece from the to_square.
         # 1. 從 'to' 方格移除升變後的棋子。
-        promo_mask = np.uint64(1) << to_sq
+        promo_mask = BB_SQUARES[to_sq]
         piece_bbs[promo_piece_bb_idx] &= ~promo_mask
 
         # 2. Place the pawn back on the from_square.
         # 2. 將兵放回 'from' 方格。
-        pawn_mask = np.uint64(1) << from_sq
+        pawn_mask = BB_SQUARES[from_sq]
         piece_bbs[moving_piece_bb_idx] |= pawn_mask
 
         # 3. Update occupancy accordingly.
@@ -346,7 +346,7 @@ def unmake_move(piece_bbs: np.ndarray, occupancy_bbs: np.ndarray, game_state: np
         opponent_color = 1 - side
         captured_pawn_bb_idx = opponent_color * 6 + PAWN
         captured_pawn_sq = to_sq + (8 if side == BLACK else -8)
-        capture_mask = np.uint64(1) << captured_pawn_sq
+        capture_mask = BB_SQUARES[captured_pawn_sq]
 
         piece_bbs[captured_pawn_bb_idx] |= capture_mask
         occupancy_bbs[opponent_color] |= capture_mask
@@ -356,7 +356,7 @@ def unmake_move(piece_bbs: np.ndarray, occupancy_bbs: np.ndarray, game_state: np
         king_side_castle = to_sq > from_sq
         rook_from_sq, rook_to_sq = ((7, 5) if king_side_castle else (0, 3)) if side == WHITE else ((63, 61) if king_side_castle else (56, 59))
         rook_bb_idx = side * 6 + ROOK
-        rook_move_mask = (np.uint64(1) << rook_from_sq) | (np.uint64(1) << rook_to_sq)
+        rook_move_mask = BB_SQUARES[rook_from_sq] | BB_SQUARES[rook_to_sq]
 
         piece_bbs[rook_bb_idx] ^= rook_move_mask
         occupancy_bbs[side] ^= rook_move_mask
@@ -366,7 +366,7 @@ def unmake_move(piece_bbs: np.ndarray, occupancy_bbs: np.ndarray, game_state: np
     if captured_piece_type != -1 and flag != SPECIAL_MOVE_FLAG_EN_PASSANT:
         opponent_color = 1 - side
         captured_piece_bb_idx = opponent_color * 6 + captured_piece_type
-        capture_mask = np.uint64(1) << to_sq
+        capture_mask = BB_SQUARES[to_sq]
 
         piece_bbs[captured_piece_bb_idx] |= capture_mask
         occupancy_bbs[opponent_color] |= capture_mask
