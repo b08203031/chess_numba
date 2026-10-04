@@ -42,3 +42,5 @@ tuner/data/
 # IDE & third-party tools
 .vscode/
 .qoder/
+
+*.ipynb

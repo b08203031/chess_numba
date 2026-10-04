@@ -118,7 +118,7 @@ _RUNTIME_SPECS = [
     _spec("FP_BASE", "FP_BASE", 100, 300, 10, "pruning", runtime_attr="TUNE_FP_BASE", spsa_r_end=0.8),
     _spec("FP_MULTIPLIER", "FP_MULTIPLIER", 60, 220, 10, "pruning", runtime_attr="TUNE_FP_MULT", spsa_r_end=0.8),
     _spec("PRUNING_CAPTURE_SEE_MARGIN", "PRUNING_CAPTURE_SEE_MARGIN", -250, 0, 25, "pruning", runtime_attr="TUNE_SEE_CAP_MARGIN", spsa_r_end=0.6),
-    _spec("PRUNING_QUIET_SEE_MARGIN", "PRUNING_QUIET_SEE_MARGIN", -200, 50, 25, "pruning", runtime_attr="TUNE_SEE_QUIET_MARGIN", spsa_r_end=0.6),
+    _spec("PRUNING_QUIET_SEE_MARGIN", "PRUNING_QUIET_SEE_MARGIN", -200, -5, 15, "pruning", runtime_attr="TUNE_SEE_QUIET_MARGIN", spsa_r_end=0.6),
     _spec("LMR_BASE_OFFSET", "LMR_BASE_OFFSET", 250, 700, 25, "lmr", runtime_attr="TUNE_LMR_BASE_OFFSET", spsa_r_end=0.8),
     _spec("LMR_HISTORY_SCALE", "LMR_HISTORY_SCALE", 50, 300, 25, "lmr", runtime_attr="TUNE_LMR_HIST_SCALE", spsa_r_end=0.8),
     _spec("DELTA_PRUNING_MARGIN", "DELTA_PRUNING_MARGIN", 150, 700, 25, "qsearch", runtime_attr="TUNE_DELTA_MARGIN", spsa_r_end=0.8),
