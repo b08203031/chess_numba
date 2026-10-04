@@ -160,6 +160,7 @@ from chess_engine.classical_old.constants import (
     TUNE_LMR_TABLE_SCALE, TUNE_LMR_NOT_IMP,
     TUNE_NMP_G_BASE, TUNE_NMP_G_DEPTH, TUNE_NMP_G_IMP, TUNE_NMP_NEED_BETA,
     TUNE_NMP_R_BASE, TUNE_NMP_R_DIV, TUNE_NMP_VERIFY_D, TUNE_NMP_SCOPE_MIND,
+    PINNED_UNCOMPUTED_SENTINEL,
 )
 from chess_engine.classical_old.bitboard_utils import find_piece_type_on_square_side
 from chess_engine.classical_old.debug_utils import log_info
@@ -321,6 +322,9 @@ full_static_eval_return_type = numba.types.Tuple((numba.int32, numba.int32, numb
 @numba.njit(cache=True, nogil=True, boundscheck=False, fastmath=True)
 def compute_full_corrected_static_eval(piece_bbs, occupancy_bbs, game_state, search_context, ply):
     raw_eval, pinned_white, pinned_black = _evaluate_position_jit(piece_bbs, occupancy_bbs, game_state, False, search_context)
+    if pinned_white == PINNED_UNCOMPUTED_SENTINEL:
+        pinned_white = get_pinned_pieces(piece_bbs, occupancy_bbs, WHITE)
+        pinned_black = get_pinned_pieces(piece_bbs, occupancy_bbs, BLACK)
     corrected_eval = apply_correction_history_score(game_state, search_context, raw_eval, ply)
     search_context.static_eval_stack[ply] = corrected_eval
 
@@ -603,7 +607,7 @@ def quiescence_search(piece_bbs, occupancy_bbs, game_state, alpha, beta, ply, se
         else:
             stand_pat_val, p_w, p_b = _evaluate_position_jit(piece_bbs, occupancy_bbs, game_state, False, search_context)
             stand_pat = np.int32(stand_pat_val)
-            if p_w != np.uint64(18446744073709551615):
+            if p_w != PINNED_UNCOMPUTED_SENTINEL:
                 pinned_white = p_w
                 pinned_black = p_b
                 pinned_computed = True
@@ -1681,7 +1685,7 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
             # We must only try captures.
             pc_move_count = generate_pseudo_legal_captures_buffer(piece_bbs, occupancy_bbs, game_state, search_context.moves_buffer, ply)
             
-            if static_eval_is_full:
+            if static_eval_is_full and cached_pinned_white != PINNED_UNCOMPUTED_SENTINEL:
                 pc_pinned_w = cached_pinned_white
                 pc_pinned_b = cached_pinned_black
             else:
@@ -1988,7 +1992,7 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
     killer_2 = search_context.killer_moves[safe_ply*2+1]
 
     # Optimization: Reuse pinned pieces from full evaluation if available
-    if static_eval_is_full:
+    if static_eval_is_full and cached_pinned_white != PINNED_UNCOMPUTED_SENTINEL:
         pinned_white = cached_pinned_white
         pinned_black = cached_pinned_black
     else:

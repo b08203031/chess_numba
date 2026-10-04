@@ -16,6 +16,8 @@ __pycache__/
 *.log
 *.png
 *.txt
+tune_search/states/
+tune_search/cand_lmr.json
 
 # Model weights
 *.pth

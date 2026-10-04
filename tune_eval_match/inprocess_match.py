@@ -201,16 +201,56 @@ def search_best_move(
     return int(best)
 
 
+def search_best_move_scored(
+    piece_bbs,
+    occupancy_bbs,
+    game_state,
+    ctx: SearchContext,
+    nodes: int,
+    game_history_list: Optional[list] = None,
+    tt_generation: int = 0,
+) -> Tuple[int, int]:
+    """Like :func:`search_best_move` but also returns the root score (stm POV, cp)."""
+    result = iterative_deepening_search(
+        piece_bbs,
+        occupancy_bbs,
+        game_state,
+        64,
+        {"nodes_limit": int(nodes), "maximum_time": 0, "optimum_time": 0},
+        ctx,
+        game_history_list=game_history_list,
+        tt_generation=tt_generation,
+        verbose=False,
+    )
+    best = NO_MOVE
+    score = 0
+    if isinstance(result, (tuple, list)) and len(result) >= 2:
+        best = int(result[0])
+        score = int(result[1])
+    if best == 0 or best == int(NO_MOVE):
+        moves = generate_legal_moves(piece_bbs, occupancy_bbs, game_state)
+        if len(moves) > 0:
+            best = int(moves[0])
+    return int(best), score
+
+
+from tune_search.stats import DEFAULT_ADJUDICATION, _Adjudicator
+
+
 def play_game(
     fen: str,
     ctx_white: SearchContext,
     ctx_black: SearchContext,
     nodes: int,
     max_plies: int = 400,
+    adjudicate: Optional[dict] = None,
 ) -> float:
     """
     Play one game. Returns score for WHITE (1/0.5/0).
     ctx_white / ctx_black already have desired eval_weights.
+
+    ``adjudicate``: ``None`` (default) plays to the end; a dict (possibly empty,
+    see :data:`DEFAULT_ADJUDICATION`) enables score-based win/draw adjudication.
     """
     piece_bbs, occupancy_bbs, game_state = parse_fen(fen)
     # Fresh tables each game (weights preserved)
@@ -221,6 +261,7 @@ def play_game(
     game_zobrist_path: list = [int(game_state[4])]
     tt_gen_w = 0
     tt_gen_b = 0
+    adjudicator = _Adjudicator(adjudicate) if adjudicate is not None else None
 
     for ply in range(max_plies):
         term = _terminal_score_white(piece_bbs, occupancy_bbs, game_state, pos_history)
@@ -230,15 +271,29 @@ def play_game(
         stm = int(game_state[0])
         ctx = ctx_white if stm == 0 else ctx_black
         # Pass full path for repetition awareness inside search
-        best = search_best_move(
-            piece_bbs,
-            occupancy_bbs,
-            game_state,
-            ctx,
-            nodes=nodes,
-            game_history_list=game_zobrist_path,
-            tt_generation=tt_gen_w if stm == 0 else tt_gen_b,
-        )
+        if adjudicator is None:
+            best = search_best_move(
+                piece_bbs,
+                occupancy_bbs,
+                game_state,
+                ctx,
+                nodes=nodes,
+                game_history_list=game_zobrist_path,
+                tt_generation=tt_gen_w if stm == 0 else tt_gen_b,
+            )
+        else:
+            best, stm_score = search_best_move_scored(
+                piece_bbs,
+                occupancy_bbs,
+                game_state,
+                ctx,
+                nodes=nodes,
+                game_history_list=game_zobrist_path,
+                tt_generation=tt_gen_w if stm == 0 else tt_gen_b,
+            )
+            verdict = adjudicator.update(ply, stm_score if stm == 0 else -stm_score)
+            if verdict is not None:
+                return verdict
         if best == 0 or best == int(NO_MOVE):
             # No move → treat as terminal again
             term = _terminal_score_white(piece_bbs, occupancy_bbs, game_state, pos_history)
@@ -260,14 +315,15 @@ def play_match_pair(
     ctx_a: SearchContext,
     ctx_b: SearchContext,
     nodes: int,
+    adjudicate: Optional[dict] = None,
 ) -> Tuple[float, float]:
     """
     Two games (color swap). Returns points for A and B over the pair (each 0..2).
     """
     # Game 1: A white, B black
-    s_w = play_game(fen, ctx_a, ctx_b, nodes=nodes)
+    s_w = play_game(fen, ctx_a, ctx_b, nodes=nodes, adjudicate=adjudicate)
     # Game 2: B white, A black
-    s_w2 = play_game(fen, ctx_b, ctx_a, nodes=nodes)
+    s_w2 = play_game(fen, ctx_b, ctx_a, nodes=nodes, adjudicate=adjudicate)
     pts_a = s_w + (1.0 - s_w2)
     pts_b = (1.0 - s_w) + s_w2
     return pts_a, pts_b
@@ -321,6 +377,8 @@ def run_match(
     early_trash_min_games: int = 0,
     early_trash_max_score: float = 0.45,
     param_setter=None,
+    opening_offset: int = 0,
+    adjudicate: Optional[dict] = None,
 ) -> dict:
     """
     Play `games` games (paired color swap). Score = fraction of points for A.
@@ -332,6 +390,14 @@ def run_match(
     Early trash (optional, for L2):
       If early_trash_min_games > 0 and after that many games score_A < early_trash_max_score,
       stop the match and return early_trash=True (A is hopeless vs B).
+
+    opening_offset:
+      Pair ``i`` plays ``openings[(opening_offset + i) % len(openings)]``.  SPSA
+      callers must advance this every batch; with the default 0 every batch
+      replays the same first ``games // 2`` openings (a systematic overfit).
+
+    The result also carries ``penta``: counts of pair outcomes for A in
+      points (0, 0.5, 1, 1.5, 2) -- the pentanomial statistic used for SPRT/Elo.
     """
     if worker_pool is None:
         if ctx_a is None or ctx_b is None:
@@ -349,6 +415,8 @@ def run_match(
         param_setter(wb, params_b)
 
     n_pairs = max(1, games // 2)
+    penta = [0, 0, 0, 0, 0]
+    opening_offset = int(opening_offset)
     pts_a = 0.0
     pts_b = 0.0
     played = 0
@@ -365,12 +433,12 @@ def run_match(
     def _one_pair(pair_idx: int) -> Tuple[float, float]:
         if stop_submit.is_set():
             return 0.0, 0.0
-        fen = openings[pair_idx % len(openings)]
+        fen = openings[(opening_offset + pair_idx) % len(openings)]
         wa, wb = free_q.get()
         try:
             if stop_submit.is_set():
                 return 0.0, 0.0
-            return play_match_pair(fen, wa, wb, nodes=nodes)
+            return play_match_pair(fen, wa, wb, nodes=nodes, adjudicate=adjudicate)
         finally:
             free_q.put((wa, wb))
 
@@ -412,6 +480,7 @@ def run_match(
             a, b = _one_pair(i)
             pts_a += a
             pts_b += b
+            penta[min(4, max(0, int(round(a * 2))))] += 1
             played += 2
             if log_every and (i + 1) % max(1, log_every // 2) == 0:
                 _log_progress()
@@ -435,6 +504,7 @@ def run_match(
                         continue
                     pts_a += a
                     pts_b += b
+                    penta[min(4, max(0, int(round(a * 2))))] += 1
                     played += 2
                     done_pairs += 1
                     if log_every and done_pairs % max(1, log_every // 2) == 0:
@@ -451,6 +521,8 @@ def run_match(
         "score_a": score_a,
         "pts_a": pts_a,
         "pts_b": pts_b,
+        "penta": penta,
+        "opening_offset": opening_offset,
         "games": played,
         "elapsed_s": time.time() - t0,
         "concurrency": concurrency,

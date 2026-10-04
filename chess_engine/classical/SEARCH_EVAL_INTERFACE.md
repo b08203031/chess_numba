@@ -454,4 +454,21 @@ python tournament_analysis/parse_search_stats.py
 
 ---
 
+## 12. 釘子位元棋盤 Sentinel 安全性修復 (2026-10-02)
+
+### 12.1 根因與危害
+在動態懶惰評估（Dynamic Lazy Eval）中，當局面評估超過閥值（`abs(v) > LAZY_EVAL_THRESHOLD + npm // 64`）時，評估函數為節省運算提早退出，並將釘子位元棋盤回傳為 Sentinel `PINNED_UNCOMPUTED_SENTINEL = np.uint64(18446744073709551615)`（全 1）。
+
+在 `search.py` 中，`compute_full_corrected_static_eval` 原先未檢驗釘子位元棋盤是否為 Sentinel，直接快取為 `cached_pinned_white / cached_pinned_black` 並標記 `static_eval_is_full = True`。導致：
+1. 走步預走合法性判定（Pre-make Legality，`search.py:L2402-L2413`）中，`pinned_us_s` 全是 1，所有不在國王射線上的常規合法走步均被誤判為脫離釘子射線走子，直接被 `continue` 剔除，在勝勢盤面引發合法走步丟棄。
+2. ProbCut 與走步排序中的 SEE 檢驗將所有棋子誤判為釘子。
+
+### 12.2 修復方案
+1. **常數統一**：在 `constants.py` 定義 `PINNED_UNCOMPUTED_SENTINEL = np.uint64(18446744073709551615)`，消除魔法數字。
+2. **評估介面保證**：在 `compute_full_corrected_static_eval` 中，若評估函數因動態懶惰評估回傳 Sentinel，即時呼叫 `get_pinned_pieces(piece_bbs, occupancy_bbs, side)` 補全釘子棋盤，確保快取的釘子棋盤永遠合法且真實。
+3. **搜尋端多層防護**：在 `quiescence_search`、ProbCut 及 `_search` 的走步排序前，加入 `cached_pinned_white != PINNED_UNCOMPUTED_SENTINEL` 防禦檢查，杜絕全 1 遮罩污染合法性檢驗。
+
+---
+
 *本文為 classical 搜尋–評估介面之技術報告。實作以 `search.py` 現況與 `stockfish_11` / `stockfish_repo` 為準；評估對齊仍以 `HCE_SF11_GAP_AUDIT.md` 為準。*
+

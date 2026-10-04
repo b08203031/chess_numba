@@ -51,6 +51,8 @@ def run_match(
     early_trash_min_games: int = 0,
     early_trash_max_score: float = 0.45,
     scale_mode: str = "registry",
+    opening_offset: int = 0,
+    adjudicate: dict | None = None,
 ) -> dict:
     """Run a fixed-node search-parameter match without spawning UCI engines."""
     validate_runtime_params(params_a)
@@ -75,6 +77,8 @@ def run_match(
         early_trash_min_games=int(early_trash_min_games),
         early_trash_max_score=float(early_trash_max_score),
         param_setter=_set_params,
+        opening_offset=int(opening_offset),
+        adjudicate=adjudicate,
     )
 
 

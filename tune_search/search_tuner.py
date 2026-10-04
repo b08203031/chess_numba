@@ -31,6 +31,8 @@ ROOT = Path(__file__).resolve().parents[1]
 # intentionally remain incompatible: their one-step/capped updates do not
 # carry the canonical pair-count iteration and c/a/r schedules.
 SPSA_UPDATE_MODE = "classic_fishtest_v5"
+# Fixed so a resumed campaign sees the identical opening order.
+OPENING_SHUFFLE_SEED = 20260804
 
 
 def _ensure_chess():
@@ -75,7 +77,7 @@ def _find_uci_opening_book():
     return None
 
 
-def _build_inprocess_runner(args, param_names):
+def _build_inprocess_runner(args, param_names, start_batch=0):
     """Construct one persistent fixed-node worker pool for runtime axes."""
     from tune_search.inprocess_match import (
         load_openings,
@@ -96,6 +98,12 @@ def _build_inprocess_runner(args, param_names):
     else:
         openings_path = ROOT / "data" / "hist_diag_openings_500.epd"
     openings = load_openings(openings_path, limit=max(500, args.games * 2))
+    # Shuffle with a private RNG: the global ``random`` stream drives SPSA
+    # deltas and is checkpointed for resume, so it must not be consumed here.
+    openings = list(openings)
+    random.Random(OPENING_SHUFFLE_SEED).shuffle(openings)
+    n_pairs_per_batch = max(1, int(args.games) // 2)
+    batch_counter = {"n": int(start_batch)}
     print(
         f"[inprocess] openings={len(openings)} nodes={args.nodes} "
         f"concurrency={args.concurrency} tt={args.tt_mb}MB",
@@ -112,6 +120,11 @@ def _build_inprocess_runner(args, param_names):
         warmup_jit(ctx_b, nodes=min(800, warmup_nodes))
 
     def _match(params_base, params_test):
+        # Each batch consumes a fresh slice of the shuffled opening list.
+        # Replaying the first N openings every iteration lets SPSA overfit to
+        # those N positions (the previous behaviour).
+        offset = batch_counter["n"] * n_pairs_per_batch
+        batch_counter["n"] += 1
         result = run_match(
             params_base,
             params_test,
@@ -122,6 +135,8 @@ def _build_inprocess_runner(args, param_names):
             worker_pool=worker_pool,
             concurrency=int(args.concurrency),
             scale_mode=args.scale_mode,
+            opening_offset=offset,
+            adjudicate={} if getattr(args, "adjudicate", False) else None,
         )
         # ``SPSAOptimizer.step`` passes (theta_minus, theta_plus) and expects
         # the score of the second argument (plus).  The generic in-process
@@ -712,6 +727,7 @@ class SPSAOptimizer:
             "applied_updates": applied_updates,
             "match": match_metadata,
             "updated_params": dict(self.current_params),
+            "theta": {name: float(value) for name, value in self.theta.items()},
         }
 
 
@@ -774,6 +790,15 @@ def main():
     )
     parser.add_argument("--openings", type=str, default=None, help="EPD/FEN source for inprocess matches")
     parser.add_argument("--log-every", type=int, default=10, help="match progress interval")
+    parser.add_argument(
+        "--adjudicate",
+        action="store_true",
+        help=(
+            "inprocess only: end games early on consistent search scores "
+            "(win >=800cp x6 plies, draw <=10cp x10 plies after ply 60); "
+            "cuts game length, same nodes per move"
+        ),
+    )
     parser.add_argument("--iter", type=int, default=100, help="Iterations")
     parser.add_argument(
         "--profile",
@@ -887,7 +912,9 @@ def main():
     # Compile-time candidates still use the legacy UCI process adapter.  The
     # runtime profile uses one persistent SearchContext worker pool instead.
     if backend == "inprocess":
-        match_runner = _build_inprocess_runner(args, param_names)
+        match_runner = _build_inprocess_runner(
+            args, param_names, start_batch=optimizer.iteration
+        )
         print("[backend] inprocess fixed-node; one JIT for the campaign", flush=True)
     else:
         book_path = _find_uci_opening_book()

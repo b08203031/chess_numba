@@ -761,9 +761,9 @@ def evaluate_attacks_mobility_threats(piece_bbs, occupancy_bbs, white_king_sq, b
             eg_mobility += MINOR_BEHIND_PAWN[1]
 
         # BishopPawns: penalty per own pawn on same color square as bishop
-        # Square color: (rank + file) % 2, where rank = sq//8, file = sq%8
+        # Square color: (rank + file) % 2 == 0 is dark square (sq 0 = a1)
         bishop_color = (sq // 8 + sq % 8) % 2
-        bishop_color_mask = np.uint64(0xAA55AA55AA55AA55) if bishop_color == 1 else np.uint64(0x55AA55AA55AA55AA)
+        bishop_color_mask = DARK_SQUARES if bishop_color == 0 else LIGHT_SQUARES
         same_color_pawns = count_bits(wp_bb & bishop_color_mask)
         blocked_w = wp_bb & (all_occupancy >> np.uint64(8))
         center_blocked = count_bits(blocked_w & CENTER_FILES)
@@ -970,9 +970,9 @@ def evaluate_attacks_mobility_threats(piece_bbs, occupancy_bbs, white_king_sq, b
             eg_mobility -= MINOR_BEHIND_PAWN[1]
 
         # BishopPawns: penalty per own pawn on same color square as bishop
-        # Square color: (rank + file) % 2, where rank = sq//8, file = sq%8
+        # Square color: (rank + file) % 2 == 0 is dark square (sq 0 = a1)
         bishop_color = (sq // 8 + sq % 8) % 2
-        bishop_color_mask = np.uint64(0xAA55AA55AA55AA55) if bishop_color == 1 else np.uint64(0x55AA55AA55AA55AA)
+        bishop_color_mask = DARK_SQUARES if bishop_color == 0 else LIGHT_SQUARES
         same_color_pawns = count_bits(bp_bb & bishop_color_mask)
         blocked_b = bp_bb & (all_occupancy << np.uint64(8))
         center_blocked = count_bits(blocked_b & CENTER_FILES)
@@ -1537,17 +1537,10 @@ def _compute_initiative(mg, eg, piece_bbs, passed_count, white_king_sq, black_ki
     # 5. pawn count
     pawn_count = count_bits(pawns)
 
-    # 6. pure pawn endgame
-    non_pawns = (
-        piece_bbs[1] | piece_bbs[2] | piece_bbs[3] | piece_bbs[4] |
-        piece_bbs[7] | piece_bbs[8] | piece_bbs[9] | piece_bbs[10]
-    )
-    pure_pawn_endgame = (non_pawns == np.uint64(0))
-
     # Convert booleans to int32 to ensure static JIT typing
+    # Note: Pure pawn endgame is intercepted at L1633 before full eval, so pure_pawn_endgame is always 0.
     infiltration_val = np.int32(1) if infiltration else np.int32(0)
     pawns_on_both_flanks_val = np.int32(1) if pawns_on_both_flanks else np.int32(0)
-    pure_pawn_endgame_val = np.int32(1) if pure_pawn_endgame else np.int32(0)
     almost_unwinnable_val = np.int32(1) if almost_unwinnable else np.int32(0)
 
     # Compute MG complexity (weights scaled by 0.78)
@@ -1557,7 +1550,6 @@ def _compute_initiative(mg, eg, piece_bbs, passed_count, white_king_sq, black_ki
         + INITIATIVE_OUTFLANKING_WEIGHT_MG * outflanking
         + INITIATIVE_INFILTRATION_WEIGHT_MG * infiltration_val
         + INITIATIVE_BOTH_FLANKS_WEIGHT_MG * pawns_on_both_flanks_val
-        + INITIATIVE_PAWN_ENDGAME_WEIGHT_MG * pure_pawn_endgame_val
         - INITIATIVE_ALMOST_UNWIN_WEIGHT_MG * almost_unwinnable_val
         + INITIATIVE_OFFSET_MG
     )
@@ -1569,7 +1561,6 @@ def _compute_initiative(mg, eg, piece_bbs, passed_count, white_king_sq, black_ki
         + INITIATIVE_OUTFLANKING_WEIGHT_EG * outflanking
         + INITIATIVE_INFILTRATION_WEIGHT_EG * infiltration_val
         + INITIATIVE_BOTH_FLANKS_WEIGHT_EG * pawns_on_both_flanks_val
-        + INITIATIVE_PAWN_ENDGAME_WEIGHT_EG * pure_pawn_endgame_val
         - INITIATIVE_ALMOST_UNWIN_WEIGHT_EG * almost_unwinnable_val
         + INITIATIVE_OFFSET_EG
     )
@@ -1693,7 +1684,7 @@ def _evaluate_position_jit(piece_bbs, occupancy_bbs, game_state, lazy: bool, sea
     if lazy:
         final_score = (mg_score * phase + eg_score * (MAX_PHASE - phase)) // MAX_PHASE
         val = np.int32(final_score) if side_to_move == 0 else np.int32(-final_score)
-        return val, np.uint64(18446744073709551615), np.uint64(18446744073709551615)
+        return val, PINNED_UNCOMPUTED_SENTINEL, PINNED_UNCOMPUTED_SENTINEL
 
     # --- 4. Pawn Structure (Cached or Uncached) ---
     if search_context is not None:
@@ -1719,7 +1710,7 @@ def _evaluate_position_jit(piece_bbs, occupancy_bbs, game_state, lazy: bool, sea
         if abs(v) > LAZY_EVAL_THRESHOLD + npm // 64:
             final_score = (mg_score * phase + eg_score * (MAX_PHASE - phase)) // MAX_PHASE
             val = np.int32(final_score) if side_to_move == 0 else np.int32(-final_score)
-            return val, np.uint64(18446744073709551615), np.uint64(18446744073709551615)
+            return val, PINNED_UNCOMPUTED_SENTINEL, PINNED_UNCOMPUTED_SENTINEL
 
     # --- Compute Attacks, Mobility, Threats (Optimized Single Pass) ---
     (white_attacks, black_attacks, white_pawn_attacks, black_pawn_attacks,

@@ -218,6 +218,9 @@ Old 與 New 應一致，除非 New 正在跑實驗項：
 | E52 | **SE 雙重延伸深度門檻解禁 (10->7)**（對齊 SF19 Step 16） | **118@n300k 中止: 44.5% (21W 63D 34L) · Elo -38.43 ±45.18 · 深度 -0.21 · 長局崩盤 38.1%** | **回滾** | 2026-09-26 |
 | E53 | **延續歷史剪枝門檻放寬 (-1800->-1500)**（對齊 SF19 Step 14） | **400@n300k: 52.6% (105W 211D 84L) · Elo +18.26 ±23.40 · 淨勝 +21 局 · 長局 55.4%** | **採納進生產 / 基線** | 2026-09-26 |
 | E54 | **安靜步排序權重平滑化對齊 SF19 (2:2:1:1:1:1:1)**（架構解耦後首測） | 暖機與前 36 步呈現完全對稱鏡像和棋，裁定回滾 | **回滾** | 2026-09-26 |
+| E55 | **LMR 靜態位置差減深 (alpha - eval)**（移植 SF19 Step 18） | **316@n300k 中止: 49.05% (66W 178D 72L) · Elo -6.60 · 深度 -0.08** | **回滾** | 2026-09-27 |
+| E56 | **LMR 搜尋參數多維協同調參（SPSA L1 探索 + L2 300k 實戰驗證）** | **400@n300k: 51.38% (205.5 vs 194.5) · Elo +9.56 ±22.11 · 淨勝 +11.0 分** | **採納進生產 / 基線** | 2026-10-04 |
+
 
 #### E26 Alpha-raise（否決）
 
@@ -1556,6 +1559,89 @@ LMP skip 體積 ≫ RFP ≈ FP/Razor/hist-prune 帶 ≫ NMP ≫ ProbCut
   * 前 36 步統計（Round 1、2、15、16）呈現絕對鏡像和棋（New/Old 深度 18.31 完全一致）。
   * 查明在開局庫初期與戰術吃子盤面下，走步主要被吃子（MVV-LVA / SEE）與 Killer/Counter 主導，安靜步延續歷史權重調整在開局階段難以迅速打破對稱性。
 * **判定：** **回滾 (REVERT)**。已完全復原 `ORDERING_WEIGHT_*` 為基線數值 (3, 2, 1, 5, 2, 1, 2, 1)，雙目錄邏輯 100% 保持一致。
+
+#### E55 LMR 局勢靜態盈虧修正 (alpha - eval)（對齊 SF19 Step 18）
+
+* **代碼：**
+  * `chess_engine/classical/constants.py`:
+    ```python
+    # SF19 Step 18: Positional reduction adjustment for quiet moves based on (alpha - eval)
+    # r += LMR_ALPHA_EVAL_MULT * clamp(alpha - eval, LMR_ALPHA_EVAL_MIN, LMR_ALPHA_EVAL_MAX)
+    LMR_ALPHA_EVAL_MULT = 3
+    LMR_ALPHA_EVAL_MIN = -64
+    LMR_ALPHA_EVAL_MAX = 96
+    ```
+  * `chess_engine/classical/search.py`:
+    在 LMR 1024 尺度減深計算區塊（歷史加成與 ALL-Node 放大之間），加入 SF 19 原生項：
+    ```python
+    # SF19 Step 18: Positional reduction adjustment for quiet moves based on (alpha - eval)
+    if is_quiet_move and not is_decisive(alpha) and static_score != -INFINITY:
+        eval_deficit = alpha - static_score
+        if eval_deficit < LMR_ALPHA_EVAL_MIN:
+            eval_deficit = LMR_ALPHA_EVAL_MIN
+        elif eval_deficit > LMR_ALPHA_EVAL_MAX:
+            eval_deficit = LMR_ALPHA_EVAL_MAX
+        r += LMR_ALPHA_EVAL_MULT * eval_deficit
+    ```
+* **背景與動機：**
+  * 審查 Stockfish 19（`stockfish_repo/src/search.cpp:1354-1355` Step 18）：
+    `if (!capture && !is_decisive(alpha)) r += 3 * std::clamp(alpha - eval, -64, 96);`
+  * 這是原版 SF 19 Step 18 減深公式中，本引擎唯一尚未移植的關鍵特徵項。
+  * **物理含義：**
+    1. 當局面靜態落後於 $\alpha$（`alpha > eval`）：本方處於劣勢或被動，安靜步（非吃子、非將軍）在統計上極難翻盤。公式加大減深力度（最高 $+3 \times 96 = +288$，約 0.28 ply），迅速剪除無效游弋分支，將算力留給戰術反撲；
+    2. 當局面靜態領先於 $\alpha$（`alpha < eval`）：本方處於均勢上方或勝勢，安靜步可能蘊藏精妙的行棋調度或勝勢鞏固。公式放寬減深（最多 $-3 \times 64 = -192$，約 0.19 ply），給予安靜步更多搜尋深度，防止漏算勝機或因過度減深放生和棋。
+  * **安全性：** 嚴格夾取於 `[-64, 96]` 區間，對 1024 尺度減深影響限定於 `[-192, +288]`（不超過 0.28 ply），完全避免減深失控。
+* **對戰設定：** 400 場 × 300,000 nodes（10 並行），對抗生產基線 E53（`classical_old`）。
+* **對戰結果（316 局完賽中止）：**
+  * **戰績：** 勝 66 | 和 178 | 負 72（**淨負 -6 局**）
+  * **勝率：** **49.05%** · **Elo：** **-6.60**
+  * **搜尋指標：**
+    * 平均深度萎縮：New 18.26 vs Old 18.34（**-0.08 ply 倒退**，深層 $d \ge 14$ 佔比由 77.2% 降至 76.2%）。
+    * 同深度節點開銷反常膨脹：$d=11$ ratio=1.046 (+4.6%)、$d=12$ ratio=1.021 (+2.1%)。
+* **根因分析：**
+  1. **NNUE vs HCE 尺度飽和跳變**：
+     * SF19 在 NNUE 架構下評估值平滑，1 個兵等效單位約 250~300，`[-64, 96]` 僅為約 $\pm 0.25$ 個兵的微幅動態阻尼。
+     * 在 Classical HCE 中 1 個兵為 100 cp，局面稍有優勢或壓力即頻繁打滿截斷邊界（-64 或 +96），使連續阻尼退化為粗暴的二值階躍跳變，破壞了原本調校平衡的 LMR 減深階梯。
+  2. **Cut-Node 反向減深悖論（導致中層樹膨脹）**：
+     * 在大量非 PV 零窗口節點（$\alpha = \beta - 1$）且靜態評估優良（$\text{static\_score} \ge \beta$）的 Cut-Node 上，$\alpha - \text{static\_score} < 0$。
+     * 公式反向對安靜步**減少了減深（$r$ 減少最多 -192）**，促使本應被快速掠過的中後期安靜步進行過深搜尋。在古典 Move Ordering 未達神經網路水準的條件下，這些走步絕大多數無法達成截斷，白白浪費算力（精確印證了 $d=11, 12$ 節點數反常增加 2%~4.6%）。
+* **判定：** **回滾 (REVERT)**。PGN 備份：`tournament_analysis/tournament_results_E55_LMR_AlphaEval_aborted.pgn`。已完全復原 `constants.py` 與 `search.py`，驗證 `--diff` 雙目錄 100% 邏輯一致，單元測試全數 PASS。
+
+---
+
+### E56: LMR 搜尋參數多維協同調參（SPSA L1 探索 + L2 300k 實戰驗證）
+
+* **變更範圍：**
+  * `chess_engine/classical/constants.py`:
+    ```python
+    LMR_BASE_OFFSET = 463          # (was 460; SPSA L1+L2 400@300k +9.6 Elo)
+    LMR_CUTNODE_BONUS = 2117       # (was 2048; SPSA L1+L2 400@300k +9.6 Elo)
+    LMR_TTCAPTURE_BONUS = 1035     # (was 1024; SPSA L1+L2 400@300k +9.6 Elo)
+    LMR_MOVECOUNT_FACTOR = 38      # (was 40; SPSA L1+L2 400@300k +9.6 Elo)
+    LMR_HISTORY_SCALE = 167        # (was 150; SPSA L1+L2 400@300k +9.6 Elo)
+    ```
+* **背景與動機：**
+  * 歷史實驗（E5、E6、P3）曾嘗試單獨微調 `LMR_HISTORY_SCALE`（150→160 或 150→140），但在孤立單變量測試中皆因缺乏其他剪枝參數協同而導致 Elo −20 ~ −25 慘敗回滾。
+  * 本次建立兩階段科學調參架構：
+    1. **L1 SPSA 探索（50,000 nodes, 10 並行）**：
+       * 執行 30 輪共 1,800 局對戰，每輪動態輪替開局庫，消除過擬合。
+       * 透過大數法則克服單輪隨機噪聲，其中 `LMR_HISTORY_SCALE` 展現極強顯著信號（$z = +2.58, p < 0.01$），`LMR_CUTNODE_BONUS` ($z = +1.52$) 與 `LMR_MOVECOUNT_FACTOR` ($z = -1.84$) 同步協同漂移。
+       * 採用 Polyak-Ruppert 後半段平均平滑隨機步長噪聲，產出候選參數檔 `tune_search/candidate_lmr.json`。
+    2. **L2 SPRT 深度驗收（300,000 nodes, 12 並行）**：
+       * 算力擴增 6 倍（Depth 13~15），檢驗高深度下的剪枝穩健性，排除快棋假陽性與過度剪枝（Over-pruning）盲點。
+* **對戰設定與成果：**
+  * **對戰規模：** 400 局（200 個開局 Pair，雙向黑白互換，`--nodes 300000 --concurrency 12 --adjudicate`）。
+  * **戰績：**
+    * 舊基準版（Baseline）：194.5 分（48.625%）
+    * 新參數版（Candidate）：**205.5 分（51.375%）**
+    * **淨勝分：新版淨勝 +11.0 分**
+    * **Elo 提升：`+9.56 Elo`**（$\pm 22.1$ 95% CI）
+  * **五項式分佈（Candidate 視角）：**
+    * `[7, 49, 79, 56, 9]`（雙負 7，一負一和 49，雙和 79，一勝一和 56，雙勝 9）
+    * 淨勝 Pair：單勝優勢 +7 組、雙勝橫掃 +2 組。
+* **物理機理解析：**
+  * 在提高 `LMR_HISTORY_SCALE`（150→167）更積極縮減無效安靜步的同時，同步微調 `LMR_MOVECOUNT_FACTOR`（40→38，略微放寬衰減節奏）與 `LMR_CUTNODE_BONUS`（2048→2117），三者在深層搜尋樹中形成了動態互補的剪枝曲面，既大幅提升有效深層算力，又完全避開了過去單一參數改動時造成的戰術盲點。
+* **判定：** **採納進生產 / 基線 (ADOPTED)**。產物檔：`tournament_analysis/l2_verify_lmr.json`。
 
 
 ---

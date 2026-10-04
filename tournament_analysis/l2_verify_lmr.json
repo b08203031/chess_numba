@@ -1,0 +1,59 @@
+{
+  "nodes": 300000,
+  "games": 400,
+  "concurrency": 12,
+  "params": [
+    "LMR_BASE_OFFSET",
+    "LMR_HISTORY_SCALE",
+    "LMR_CUTNODE_BONUS",
+    "LMR_TTCAPTURE_BONUS",
+    "LMR_MOVECOUNT_FACTOR",
+    "LMR_TABLE_SCALE_PERCENT"
+  ],
+  "baseline": {
+    "LMR_BASE_OFFSET": 460,
+    "LMR_HISTORY_SCALE": 150,
+    "LMR_CUTNODE_BONUS": 2048,
+    "LMR_TTCAPTURE_BONUS": 1024,
+    "LMR_MOVECOUNT_FACTOR": 40,
+    "LMR_TABLE_SCALE_PERCENT": 100
+  },
+  "candidate": {
+    "LMR_BASE_OFFSET": 463,
+    "LMR_HISTORY_SCALE": 167,
+    "LMR_CUTNODE_BONUS": 2117,
+    "LMR_TTCAPTURE_BONUS": 1035,
+    "LMR_MOVECOUNT_FACTOR": 38,
+    "LMR_TABLE_SCALE_PERCENT": 100
+  },
+  "score_a": 0.48625,
+  "pts_a": 194.5,
+  "pts_b": 205.5,
+  "candidate_score": 0.51375,
+  "candidate_elo": 9.556888220144616,
+  "candidate_elo_err95": 22.108716659297198,
+  "penta_baseline": [
+    9,
+    56,
+    79,
+    49,
+    7
+  ],
+  "penta_candidate": [
+    7,
+    49,
+    79,
+    56,
+    9
+  ],
+  "sprt": {
+    "elo0": 0.0,
+    "elo1": 3.0,
+    "alpha": 0.05,
+    "beta": 0.05,
+    "llr": 0.19019193522178485,
+    "decision": "inconclusive_at_cap"
+  },
+  "opening_seed": 777,
+  "wall_s": 2674.5770831108093
+}

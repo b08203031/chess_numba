@@ -256,6 +256,7 @@ SEARCH_PARAM_BY_NAME: Dict[str, SearchParamSpec] = {
 # experiments, but is never selected implicitly.
 PROFILE_NAMES = (
     "runtime",
+    "runtime_continuous",
     "pruning",
     "nmp",
     "lmr",
@@ -269,6 +270,19 @@ PROFILE_NAMES = (
     "all",
 )
 DEFAULT_PROFILE = "runtime"
+
+# Unordered switches: value 2 is not "between" 1 and 3, so SPSA's finite
+# difference over them carries no gradient information.  Evaluate these with
+# dedicated A/B matches (tools/run_search_param_match.py), never inside SPSA.
+CATEGORICAL_PARAMS = frozenset(
+    {
+        "NMP_SCOPE_MODE",
+        "NMP_GATE_MODE",
+        "NMP_R_MODE",
+        "PROBCUT_STYLE_MODE",
+        "NMP_NEED_BETA",
+    }
+)
 
 
 def validate_registry() -> Tuple[str, ...]:
@@ -322,6 +336,12 @@ def profile_names(profile: str = DEFAULT_PROFILE) -> Tuple[str, ...]:
     key = str(profile).strip().lower()
     if key == "runtime":
         return tuple(spec.name for spec in SEARCH_PARAM_SPECS if spec.is_runtime)
+    if key == "runtime_continuous":
+        return tuple(
+            spec.name
+            for spec in SEARCH_PARAM_SPECS
+            if spec.is_runtime and spec.name not in CATEGORICAL_PARAMS
+        )
     if key == "all":
         return tuple(spec.name for spec in SEARCH_PARAM_SPECS)
     if key == "lmr_runtime":

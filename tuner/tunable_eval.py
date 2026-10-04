@@ -166,16 +166,19 @@ def compute_imbalance(cnt_0, cnt_1, cnt_2, cnt_3, cnt_4, cnt_6, cnt_7, cnt_8, cn
     Compute polynomial material imbalance (SF11 material.cpp style).
     Scale MG/EG are runtime-tunable via ew (match-SPSA). Quadratic tables fixed.
     """
+    if cnt_0 == cnt_6 and cnt_1 == cnt_7 and cnt_2 == cnt_8 and cnt_3 == cnt_9 and cnt_4 == cnt_10:
+        return np.int32(0), np.int32(0)
+
     scale_mg = _ew_get_mat(ew, use_ew, _EW_IMB_SCALE_MG, get_int(theta, IDX_IMBALANCE_SCALE_MG))
     scale_eg = _ew_get_mat(ew, use_ew, _EW_IMB_SCALE_EG, get_int(theta, IDX_IMBALANCE_SCALE_EG))
 
     w_bp = np.int32(1) if cnt_2 > 1 else np.int32(0)
     b_bp = np.int32(1) if cnt_8 > 1 else np.int32(0)
 
-    w = np.array([w_bp, np.int32(cnt_0), np.int32(cnt_1), np.int32(cnt_2),
-                  np.int32(cnt_3), np.int32(cnt_4)], dtype=np.int32)
-    b = np.array([b_bp, np.int32(cnt_6), np.int32(cnt_7), np.int32(cnt_8),
-                  np.int32(cnt_9), np.int32(cnt_10)], dtype=np.int32)
+    w = (w_bp, np.int32(cnt_0), np.int32(cnt_1), np.int32(cnt_2),
+         np.int32(cnt_3), np.int32(cnt_4))
+    b = (b_bp, np.int32(cnt_6), np.int32(cnt_7), np.int32(cnt_8),
+         np.int32(cnt_9), np.int32(cnt_10))
 
     w_bonus = np.int32(0)
     for pt1 in range(6):
@@ -1400,7 +1403,7 @@ def evaluate_attacks_mobility_threats(piece_bbs, occupancy_bbs, white_king_sq, b
     while temp_bb:
         sq = get_lsb_index(temp_bb)
         att = KNIGHT_ATTACKS[sq]
-        if pinned_white & (np.uint64(1) << np.uint64(sq)):
+        if pinned_white & BB_SQUARES[sq]:
             att = np.uint64(0)
         white_attacks2 |= (white_attacks & att)
         white_attacks |= att
@@ -1445,8 +1448,8 @@ def evaluate_attacks_mobility_threats(piece_bbs, occupancy_bbs, white_king_sq, b
         sq = get_lsb_index(temp_bb)
         # X-Ray: bishop attacks through all queens
         att = get_bishop_attacks(sq, bishop_xray_occ)
-        if pinned_white & (np.uint64(1) << np.uint64(sq)):
-            sq_bb = np.uint64(1) << np.uint64(sq)
+        sq_bb = BB_SQUARES[sq]
+        if pinned_white & sq_bb:
             if sq_bb & BISHOP_RAYS[white_king_sq]:
                 att &= BISHOP_RAYS[white_king_sq]
             else:
@@ -1471,9 +1474,9 @@ def evaluate_attacks_mobility_threats(piece_bbs, occupancy_bbs, white_king_sq, b
             eg_mobility += get_array_val(theta, IDX_MINOR_BEHIND_PAWN, 1)
 
         # BishopPawns: penalty per own pawn on same color square as bishop
-        # Square color: (rank + file) % 2, where rank = sq//8, file = sq%8
+        # Square color: (rank + file) % 2 == 0 is dark square (sq 0 = a1)
         bishop_color = (sq // 8 + sq % 8) % 2
-        bishop_color_mask = np.uint64(0xAA55AA55AA55AA55) if bishop_color == 1 else np.uint64(0x55AA55AA55AA55AA)
+        bishop_color_mask = DARK_SQUARES if bishop_color == 0 else LIGHT_SQUARES
         same_color_pawns = count_bits(wp_bb & bishop_color_mask)
         blocked_w = wp_bb & (all_occupancy >> np.uint64(8))
         center_blocked = count_bits(blocked_w & CENTER_FILES)
@@ -1510,8 +1513,8 @@ def evaluate_attacks_mobility_threats(piece_bbs, occupancy_bbs, white_king_sq, b
         sq = get_lsb_index(temp_bb)
         # X-Ray: rook attacks through all queens + own rooks
         att = get_rook_attacks(sq, white_rook_xray_occ)
-        if pinned_white & (np.uint64(1) << np.uint64(sq)):
-            sq_bb = np.uint64(1) << np.uint64(sq)
+        sq_bb = BB_SQUARES[sq]
+        if pinned_white & sq_bb:
             if sq_bb & ROOK_RAYS[white_king_sq]:
                 att &= ROOK_RAYS[white_king_sq]
             else:
@@ -1552,8 +1555,8 @@ def evaluate_attacks_mobility_threats(piece_bbs, occupancy_bbs, white_king_sq, b
     while temp_bb:
         sq = get_lsb_index(temp_bb)
         att = get_queen_attacks(sq, all_occupancy)
-        if pinned_white & (np.uint64(1) << np.uint64(sq)):
-            sq_bb = np.uint64(1) << np.uint64(sq)
+        sq_bb = BB_SQUARES[sq]
+        if pinned_white & sq_bb:
             if sq_bb & ROOK_RAYS[white_king_sq]:
                 att &= ROOK_RAYS[white_king_sq]
             elif sq_bb & BISHOP_RAYS[white_king_sq]:
@@ -1608,7 +1611,7 @@ def evaluate_attacks_mobility_threats(piece_bbs, occupancy_bbs, white_king_sq, b
     while temp_bb:
         sq = get_lsb_index(temp_bb)
         att = KNIGHT_ATTACKS[sq]
-        if pinned_black & (np.uint64(1) << np.uint64(sq)):
+        if pinned_black & BB_SQUARES[sq]:
             att = np.uint64(0)
         black_attacks2 |= (black_attacks & att)
         black_attacks |= att
@@ -1654,8 +1657,8 @@ def evaluate_attacks_mobility_threats(piece_bbs, occupancy_bbs, white_king_sq, b
         sq = get_lsb_index(temp_bb)
         # X-Ray: bishop attacks through all queens
         att = get_bishop_attacks(sq, bishop_xray_occ)
-        if pinned_black & (np.uint64(1) << np.uint64(sq)):
-            sq_bb = np.uint64(1) << np.uint64(sq)
+        sq_bb = BB_SQUARES[sq]
+        if pinned_black & sq_bb:
             if sq_bb & BISHOP_RAYS[black_king_sq]:
                 att &= BISHOP_RAYS[black_king_sq]
             else:
@@ -1680,9 +1683,9 @@ def evaluate_attacks_mobility_threats(piece_bbs, occupancy_bbs, white_king_sq, b
             eg_mobility -= get_array_val(theta, IDX_MINOR_BEHIND_PAWN, 1)
 
         # BishopPawns: penalty per own pawn on same color square as bishop
-        # Square color: (rank + file) % 2, where rank = sq//8, file = sq%8
+        # Square color: (rank + file) % 2 == 0 is dark square (sq 0 = a1)
         bishop_color = (sq // 8 + sq % 8) % 2
-        bishop_color_mask = np.uint64(0xAA55AA55AA55AA55) if bishop_color == 1 else np.uint64(0x55AA55AA55AA55AA)
+        bishop_color_mask = DARK_SQUARES if bishop_color == 0 else LIGHT_SQUARES
         same_color_pawns = count_bits(bp_bb & bishop_color_mask)
         blocked_b = bp_bb & (all_occupancy << np.uint64(8))
         center_blocked = count_bits(blocked_b & CENTER_FILES)
@@ -1720,8 +1723,8 @@ def evaluate_attacks_mobility_threats(piece_bbs, occupancy_bbs, white_king_sq, b
         sq = get_lsb_index(temp_bb)
         # X-Ray: rook attacks through all queens + own rooks
         att = get_rook_attacks(sq, black_rook_xray_occ)
-        if pinned_black & (np.uint64(1) << np.uint64(sq)):
-            sq_bb = np.uint64(1) << np.uint64(sq)
+        sq_bb = BB_SQUARES[sq]
+        if pinned_black & sq_bb:
             if sq_bb & ROOK_RAYS[black_king_sq]:
                 att &= ROOK_RAYS[black_king_sq]
             else:
@@ -1762,8 +1765,8 @@ def evaluate_attacks_mobility_threats(piece_bbs, occupancy_bbs, white_king_sq, b
     while temp_bb:
         sq = get_lsb_index(temp_bb)
         att = get_queen_attacks(sq, all_occupancy)
-        if pinned_black & (np.uint64(1) << np.uint64(sq)):
-            sq_bb = np.uint64(1) << np.uint64(sq)
+        sq_bb = BB_SQUARES[sq]
+        if pinned_black & sq_bb:
             if sq_bb & ROOK_RAYS[black_king_sq]:
                 att &= ROOK_RAYS[black_king_sq]
             elif sq_bb & BISHOP_RAYS[black_king_sq]:
@@ -2247,17 +2250,10 @@ def _compute_initiative(mg, eg, piece_bbs, passed_count, white_king_sq, black_ki
     # 5. pawn count
     pawn_count = count_bits(pawns)
 
-    # 6. pure pawn endgame
-    non_pawns = (
-        piece_bbs[1] | piece_bbs[2] | piece_bbs[3] | piece_bbs[4] |
-        piece_bbs[7] | piece_bbs[8] | piece_bbs[9] | piece_bbs[10]
-    )
-    pure_pawn_endgame = (non_pawns == np.uint64(0))
-
     # Convert booleans to int32 to ensure static JIT typing
+    # Note: Pure pawn endgame is intercepted at L1633 before full eval, so pure_pawn_endgame is always 0.
     infiltration_val = np.int32(1) if infiltration else np.int32(0)
     pawns_on_both_flanks_val = np.int32(1) if pawns_on_both_flanks else np.int32(0)
-    pure_pawn_endgame_val = np.int32(1) if pure_pawn_endgame else np.int32(0)
     almost_unwinnable_val = np.int32(1) if almost_unwinnable else np.int32(0)
 
     # Compute MG complexity (weights scaled by 0.78)
@@ -2267,7 +2263,6 @@ def _compute_initiative(mg, eg, piece_bbs, passed_count, white_king_sq, black_ki
         + get_int(theta, IDX_INITIATIVE_OUTFLANKING_WEIGHT_MG) * outflanking
         + get_int(theta, IDX_INITIATIVE_INFILTRATION_WEIGHT_MG) * infiltration_val
         + get_int(theta, IDX_INITIATIVE_BOTH_FLANKS_WEIGHT_MG) * pawns_on_both_flanks_val
-        + get_int(theta, IDX_INITIATIVE_PAWN_ENDGAME_WEIGHT_MG) * pure_pawn_endgame_val
         - get_int(theta, IDX_INITIATIVE_ALMOST_UNWIN_WEIGHT_MG) * almost_unwinnable_val
         + get_int(theta, IDX_INITIATIVE_OFFSET_MG)
     )
@@ -2279,7 +2274,6 @@ def _compute_initiative(mg, eg, piece_bbs, passed_count, white_king_sq, black_ki
         + get_int(theta, IDX_INITIATIVE_OUTFLANKING_WEIGHT_EG) * outflanking
         + get_int(theta, IDX_INITIATIVE_INFILTRATION_WEIGHT_EG) * infiltration_val
         + get_int(theta, IDX_INITIATIVE_BOTH_FLANKS_WEIGHT_EG) * pawns_on_both_flanks_val
-        + get_int(theta, IDX_INITIATIVE_PAWN_ENDGAME_WEIGHT_EG) * pure_pawn_endgame_val
         - get_int(theta, IDX_INITIATIVE_ALMOST_UNWIN_WEIGHT_EG) * almost_unwinnable_val
         + get_int(theta, IDX_INITIATIVE_OFFSET_EG)
     )
@@ -2319,7 +2313,7 @@ def _evaluate_position_jit(piece_bbs, occupancy_bbs, game_state, lazy, search_co
         ew = _DUMMY_EW
         use_ew = False
 
-    # --- Specialized endgames (SF11): KBNK, KPK, KRKP, KQKP, KXK,
+    # --- Specialized endgames (SF11): KBNK (enhanced), KPK, KRKP, KQKP, KXK,
     #     KNNK, KRKB, KRKN, KQKR, KNNKP ---
     # Score from the specialized evaluator is White's perspective. Pass the
     # active material scale explicitly so generated Texel candidates evaluate
@@ -2403,7 +2397,7 @@ def _evaluate_position_jit(piece_bbs, occupancy_bbs, game_state, lazy, search_co
     if lazy:
         final_score = (mg_score * phase + eg_score * (MAX_PHASE - phase)) // MAX_PHASE
         val = np.int32(final_score) if side_to_move == 0 else np.int32(-final_score)
-        return val, np.uint64(18446744073709551615), np.uint64(18446744073709551615)
+        return val, PINNED_UNCOMPUTED_SENTINEL, PINNED_UNCOMPUTED_SENTINEL
 
     # --- 4. Pawn Structure (Cached or Uncached) ---
     if search_context is not None:
@@ -2429,7 +2423,7 @@ def _evaluate_position_jit(piece_bbs, occupancy_bbs, game_state, lazy, search_co
         if abs(v) > LAZY_EVAL_THRESHOLD + npm // 64:
             final_score = (mg_score * phase + eg_score * (MAX_PHASE - phase)) // MAX_PHASE
             val = np.int32(final_score) if side_to_move == 0 else np.int32(-final_score)
-            return val, np.uint64(18446744073709551615), np.uint64(18446744073709551615)
+            return val, PINNED_UNCOMPUTED_SENTINEL, PINNED_UNCOMPUTED_SENTINEL
 
     # --- Compute Attacks, Mobility, Threats (Optimized Single Pass) ---
     (white_attacks, black_attacks, white_pawn_attacks, black_pawn_attacks,

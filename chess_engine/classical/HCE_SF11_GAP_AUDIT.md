@@ -412,6 +412,18 @@ SF 係數在「pawn MG=128」空間與 SF mobility/shelter 共調。我們材質
 | 教訓 | 結構 bug 修正（B5/P2）有 Elo；純抬 SF 比例係數需單獨長測，且可為負 |
 | 測試 | `tests/test_p3_eval.py` 鎖定定稿常數 |
 
+### 2026-10-03 BishopPawns 遮罩顏色反轉修復
+
+* **問題**：在 `evaluation.py` 中，BishopPawns 計算同色兵懲罰時，原三元條件 `if bishop_color == 1`（1 為淺色格）選擇了 `0xAA55AA55AA55AA55`（深色格），導致深/淺色主教統計的兵格顏色完全顛倒（深色主教統計淺色兵，淺色主教統計深色兵）。
+* **修復**：統一改為 `DARK_SQUARES if bishop_color == 0 else LIGHT_SQUARES`，使主教與同色兵在全 64 格上 100% 精確對齊，還原好壞主教戰略價值。同步重構並重新生成 `tuner/tunable_eval.py`。
+
+### 2026-10-03 _compute_initiative 純王兵殘局死邏輯清除
+
+* **問題**：在 `_evaluate_position_jit:L1633`，若盤面無非兵非王棋子，已先行調用專用王兵殘局並直接 return。因此能執行到最後 `_compute_initiative` 時非兵棋子必然存在，`pure_pawn_endgame` 恆為 False（`0`）。原程式碼在熱路徑中每次皆做 8 次陣列存取與 7 次位元 OR 來判斷不可達條件，純屬浪費 CPU 指令與快取帶寬。
+* **修復**：移除 `_compute_initiative` 中的 `non_pawns` 檢驗與 `pure_pawn_endgame_val` 計算，消除無效開銷。同步重新生成 `tuner/tunable_eval.py`。
+
+
+
 ---
 
 ## 13. 版本對照速查

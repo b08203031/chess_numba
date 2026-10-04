@@ -115,6 +115,12 @@ E-core，共 **12 個實體核心 / 16 個硬體執行緒**。因此 `--concurre
 長時間降頻或結果噪音變大，退回 4。不要開到 8 或 16，因為 E-core、記憶體頻寬與散熱
 會讓每節點速度及結果噪音變差。
 
+> **2026-10-04 修正註記**：`play_match_pair` 在同一個 pair 內是**依序**下兩盤（A 白→B 白），
+> 任一時刻一個 pair 只有 1 個 context 在搜尋，所以 `--concurrency N` 的**實際同時搜尋執行緒
+> 數就是 N**（不是 2N）。`concurrency 6` 只用到 16 個硬體執行緒中的 6 個；上面「不要開到 8
+> 或 16」的理由是以 12 個同時搜尋為前提，並不成立。調參吞吐的第一個槓桿是量測
+> `--concurrency 10/12/14` 的 games/min，而不是減少 JIT。
+
 專案的 JIT 報告顯示，冷啟動約 158 秒、暖啟動仍約 78 秒，而同一 process 的後續搜尋
 才會回到毫秒級。因此最重要的節省不是把編譯器再並行化，而是讓 runtime campaign
 只編譯一次：不要在每個 SPSA iteration 清 cache 或重啟引擎；只有 compile-time 參數
@@ -211,9 +217,55 @@ python -m tune_search.search_tuner --params LMR_MIN_DEPTH \
 
 結果會即時保存至 `tune_search/current_params.txt`。
 
+但請注意：SPSA 每次 iteration 都帶有擾動，最後一個 iteration 往往處於隨機游走噪聲中。
+不要直接取最後一個點，應使用日誌分析工具對後半段 iteration 取平均，並檢驗是否有真正信號：
+
+```bash
+# 檢查信號噪聲比、各參數 drift z-score，並輸出 candidate 參數
+python tune_search/summarize_run.py tune_search/logs/search_spsa_xxx.jsonl --tail 0.5 --out tune_search/candidate_l1.json
+```
+
+*   **信號檢查 (Ratio)**：若 `observed_sd / expected_sd < 1.3`，表示對局勝率波動完全等於抽樣噪聲（純隨機游走），該 run 並未學到真實梯度（需要增加每批局數或迭代數）。
+*   **漂移顯著性 (drift_z)**：`|z| < 2.0` 表示該參數的淨位移在統計上無法與噪聲區分。
+
+### 步驟 5: L2 晉級驗證 (SPRT 快速裁定)
+
+拿到候選參數後，使用獨立工具在更高節點（例如 200k nodes）進行固定對決，並可啟用 SPRT 提早中止：
+
+```bash
+# 使用 SPRT (H0: <=0 Elo, H1: >=3 Elo) 自動在顯著時提前停止，並計算 95% 信賴區間
+python tools/run_search_param_match.py \
+    --params-json tune_search/candidate_l1.json \
+    --nodes 200000 --games 300 --concurrency 10 \
+    --sprt 0,3 --batch-games 50 --adjudicate \
+    --out tournament_analysis/l2_verify_cand.json
+```
+
 ---
 
-## 6. 常見問題
+## 6. 搜尋常數覆蓋率與調參決策 (Parameter Coverage Audit)
+
+`constants.py` 中有約 581 個數值常數，其中約 395 個在搜尋相關檔案中被引用。
+**不需要（且強烈不應該）把所有常數都加入 SPSA**：
+
+1.  **結構/指標型常數（禁止調參，佔約 136 個）**：
+    *   `DIAG_*`（診斷統計陣列索引）
+    *   `STAGE_*`、`MOVE_ORDER_SOURCE_*`（著法生成階段與來源識別碼）
+    *   `PAWN`、`KNIGHT`... `WHITE`、`BLACK`、`MAX_PLY`、`MATE_SCORE`、`INFINITY`。
+    *   這些是資料結構的索引或遊戲規則邊界，不是調參標量。
+2.  **無序離散開關（Categorical Modes，禁止混合 SPSA，約 5 個）**：
+    *   `NMP_GATE_MODE`、`NMP_R_MODE`、`PROBCUT_STYLE_MODE`、`NMP_NEED_BETA` 等。
+    *   值 2 不代表在 1 與 3 之間，SPSA 的差分梯度無數學意義。請單獨以 `tools/run_search_param_match.py` 進行 A/B 比對。
+    *   可用 `--profile runtime_continuous` 自動排除這些離散軸。
+3.  **核心即時調參標量（Runtime 34 軸）**：
+    *   已直接映射到 `SearchContext.tune[]`，免重啟、免重新編譯，為主要的 L1 SPSA 戰場。
+4.  **其餘候選演算法常數（Compile-time，約 90 個）**：
+    *   包含 Correction History 各項權重、Capture FP / SEE 門檻、LATE CAPTURE 獎懲、IIR 深度、50 步規則縮放等。
+    *   處理原則：**先確認主路徑穩定**。當發現某模組（例如 Correction History）成為當前搜尋瓶頸時，才挑選該模組的 2–4 個常數映射到 `SearchContext.tune[]` 新 slot，進行 runtime 調參，切勿一口氣塞入上百維度。
+
+---
+
+## 7. 常見問題
 
 1.  **為什麼一開始要等很久？**
     *   這是正常的 JIT 編譯過程（冷啟動可能超過兩分鐘）。runtime campaign 只需等待一次；看到 warmup 完成後，後續 iteration 不應再次出現同等級等待。
@@ -222,4 +274,4 @@ python -m tune_search.search_tuner --params LMR_MIN_DEPTH \
     *   直接按 `Ctrl+C`。由於使用了進程池，系統會嘗試優雅地關閉所有引擎進程。
 
 3.  **如何應用最佳參數？**
-    *   手動將 `tune_search/current_params.txt` 中的數值更新回 `chess_engine/classical/constants.py`。
+    *   經 L2 驗證確認 Elo 為正後，手動將數值更新回 `chess_engine/classical/constants.py`。

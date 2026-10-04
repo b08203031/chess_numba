@@ -1,0 +1,86 @@
+{
+  "iterations": 30,
+  "games": 1800,
+  "mean_score": 0.506388888888889,
+  "observed_score_sd": 0.04285436866388593,
+  "expected_noise_sd": 0.04940413983586609,
+  "sd_ratio": 0.8674246491540937,
+  "tail_iterations": 15,
+  "averaged_params": {
+    "LMR_BASE_OFFSET": 463,
+    "LMR_HISTORY_SCALE": 167,
+    "LMR_CUTNODE_BONUS": 2117,
+    "LMR_TTCAPTURE_BONUS": 1035,
+    "LMR_MOVECOUNT_FACTOR": 38,
+    "LMR_TABLE_SCALE_PERCENT": 100
+  },
+  "params": [
+    {
+      "name": "LMR_BASE_OFFSET",
+      "default": 460,
+      "start": 460.0,
+      "last": 463.0602725112931,
+      "tail_avg": 462.9864004211335,
+      "moved_pct_of_range": 0.6800605580651286,
+      "drift_z": 0.36252809970996197,
+      "c_end": 25
+    },
+    {
+      "name": "LMR_HISTORY_SCALE",
+      "default": 150,
+      "start": 150.0,
+      "last": 171.74945730213383,
+      "tail_avg": 166.66908862328404,
+      "moved_pct_of_range": 8.699782920853533,
+      "drift_z": 2.5764991177644996,
+      "c_end": 25
+    },
+    {
+      "name": "LMR_CUTNODE_BONUS",
+      "default": 2048,
+      "start": 2048.0,
+      "last": 2113.6038735173556,
+      "tail_avg": 2116.5259931182536,
+      "moved_pct_of_range": 2.186795783911854,
+      "drift_z": 1.5178927790599979,
+      "c_end": 128
+    },
+    {
+      "name": "LMR_TTCAPTURE_BONUS",
+      "default": 1024,
+      "start": 1024.0,
+      "last": 1022.3552183422651,
+      "tail_avg": 1035.4369994451097,
+      "moved_pct_of_range": -0.06579126630939754,
+      "drift_z": -0.03805571329176735,
+      "c_end": 128
+    },
+    {
+      "name": "LMR_MOVECOUNT_FACTOR",
+      "default": 40,
+      "start": 40.0,
+      "last": 37.50927380707487,
+      "tail_avg": 38.36552728230938,
+      "moved_pct_of_range": -2.4907261929251305,
+      "drift_z": -1.8441132086416874,
+      "c_end": 4
+    },
+    {
+      "name": "LMR_TABLE_SCALE_PERCENT",
+      "default": 100,
+      "start": 100.0,
+      "last": 100.880303555099,
+      "tail_avg": 100.46317300220953,
+      "moved_pct_of_range": 1.4671725918316743,
+      "drift_z": 0.5214156154726222,
+      "c_end": 5
+    }
+  ],
+  "penta_total": [
+    86,
+    208,
+    322,
+    211,
+    73
+  ]
+}
