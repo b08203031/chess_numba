@@ -957,7 +957,7 @@ TUNE_SIZE = 34
 # E2 tried 70 (puzzle +6 pass, nodes +25%); match @200k nodes: depth↓, no Elo.
 # 2026-07-16: revert to 100 after New100/New85 dual match vs Old.
 LMR_TABLE_SCALE_PERCENT = 100
-LMR_NOT_IMP_NUM = 194
+LMR_NOT_IMP_NUM = 197  # E57 (was 194; SPSA L1+L2 400@300k +5.2 Elo)
 ENABLE_IIR = True           # Internal Iterative Reduction (Replaces old IID)
 ENABLE_SINGULAR_EXTENSIONS = True # Singular Extensions
 ENABLE_MATE_DISTANCE_PRUNING = True # Mate Distance Pruning
@@ -1065,8 +1065,8 @@ LMP_MOVE_COUNT = np.array([
     0 if d == 0 else max(1, (5 + d * d) // 2 - 1) for d in range(MAX_PLY)
 ], dtype=np.int32)
 # Percent scale on LMP limit (100=table). Higher → later prune (fatter tree).
-# E4: 100→105 kept (+15.7 Elo @100k). E22: 105→110 aborted ~300@n10k ~48% — rollback.
-LMP_SCALE_PERCENT = 105
+# E4: 100→105 kept (+15.7 Elo @100k). E57: 105→107 (+5.2 Elo @300k).
+LMP_SCALE_PERCENT = 107
 
 # LMR Table (legacy integer plies; live path uses 1024-scale REDUCTIONS)
 LMR_TABLE = np.zeros((MAX_PLY, 256), dtype=np.int32)
@@ -1090,8 +1090,8 @@ LMR_TTPV_PV_BONUS = 768
 LMR_CUTNODE_BONUS = 2117     # E56 (was 2048; SPSA L1+L2 400@300k +9.6 Elo)
 LMR_TTCAPTURE_BONUS = 1035   # E56 (was 1024; SPSA L1+L2 400@300k +9.6 Elo)
 # Match classical_old hard-coded LMR (±1024). P1 1536 withdrawn 2026-07-16.
-LMR_BAD_CAPTURE_BONUS = 1024
-LMR_GOOD_CAPTURE_RELIEF = 1024
+LMR_BAD_CAPTURE_BONUS = 1046    # E57 (was 1024; SPSA L1+L2 400@300k +5.2 Elo)
+LMR_GOOD_CAPTURE_RELIEF = 1030  # E57 (was 1024; SPSA L1+L2 400@300k +5.2 Elo)
 LMR_LATE_CAPTURE_BONUS = 0
 LMR_KILLER_COUNTER_RELIEF = 1024
 LMR_MOVECOUNT_FACTOR = 38    # E56 (was 40; SPSA L1+L2 400@300k +9.6 Elo)
@@ -1100,7 +1100,7 @@ LMR_CUTOFF_CNT_BASE = 128
 LMR_CUTOFF_CNT_EXTRA = 512
 LMR_ALLNODE_EXTRA = 512
 LMR_TTMOVE_REDUCTION = 1024
-LMR_NO_TTMOVE_BONUS = 1024     # SF11-ish: extra reduction without TT move on cut nodes
+LMR_NO_TTMOVE_BONUS = 1068     # E57 (was 1024; SPSA L1+L2 400@300k +5.2 Elo)
 LMR_CORRECTION_DIVISOR = 32768
 
 # SF19 Step 18: Scale up reductions for expected ALL nodes: r += r * 276 / (256 * depth + 268)

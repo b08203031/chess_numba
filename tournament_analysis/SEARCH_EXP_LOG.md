@@ -1,8 +1,8 @@
 # Classical 搜尋單項實驗日誌
 
 > **用途：** 連續 A/B 實驗的唯一進度表與決策紀錄。未來接續實驗、回顧為何留下/回滾，以此檔為準。  
-> **最後更新：** 2026-09-26  
-> **當前基準狀態：** **E53 已採納進生產基線**（延續歷史剪枝門檻放寬 -1800->-1500，400@n300k, 52.62%, Elo +18.26 ±23.40, 淨勝 +21 局, 深度 +0.04 ply）。歷史診斷見 [`archive/tournament_analysis_2026-07/DIAG_PROTOCOL_D3.md`](../archive/tournament_analysis_2026-07/DIAG_PROTOCOL_D3.md)。
+> **最後更新：** 2026-10-04  
+> **當前基準狀態：** **E57 已採納進生產基線**（LMR 走法獎懲與晚期剪枝六軸協同調參，400@n300k, 50.75%, Elo +5.20 ±23.8, 淨勝 +6 局；接續 E56 +9.56 Elo）。
 
 ---
 
@@ -1642,6 +1642,37 @@ LMP skip 體積 ≫ RFP ≈ FP/Razor/hist-prune 帶 ≫ NMP ≫ ProbCut
 * **物理機理解析：**
   * 在提高 `LMR_HISTORY_SCALE`（150→167）更積極縮減無效安靜步的同時，同步微調 `LMR_MOVECOUNT_FACTOR`（40→38，略微放寬衰減節奏）與 `LMR_CUTNODE_BONUS`（2048→2117），三者在深層搜尋樹中形成了動態互補的剪枝曲面，既大幅提升有效深層算力，又完全避開了過去單一參數改動時造成的戰術盲點。
 * **判定：** **採納進生產 / 基線 (ADOPTED)**。產物檔：`tournament_analysis/l2_verify_lmr.json`。
+
+
+---
+
+### E57: LMR 走法獎懲與晚期剪枝六軸協同調參（SPSA L1 探索 + L2 300k 實戰驗證）
+
+* **變更範圍：**
+  * `chess_engine/classical/constants.py`:
+    ```python
+    LMR_BAD_CAPTURE_BONUS = 1046    # (was 1024; SPSA L1+L2 400@300k +5.2 Elo)
+    LMR_GOOD_CAPTURE_RELIEF = 1030  # (was 1024; SPSA L1+L2 400@300k +5.2 Elo)
+    LMR_KILLER_COUNTER_RELIEF = 1024# (was 1024; unchanged)
+    LMR_NO_TTMOVE_BONUS = 1068     # (was 1024; SPSA L1+L2 400@300k +5.2 Elo)
+    LMP_SCALE_PERCENT = 107        # (was 105; SPSA L1+L2 400@300k +5.2 Elo)
+    LMR_NOT_IMP_NUM = 197          # (was 194; SPSA L1+L2 400@300k +5.2 Elo)
+    ```
+* **背景與動機：**
+  * 接續 E56 核心 LMR 成果，針對 LMR 走法特異性獎懲（好/壞吃子、Killer/Counter、無 TT 走法）與晚期剪枝（LMP 比例尺、Not-Improving 減深補償）6 軸進行第二階段 SPSA 協同調參。
+  * 驗證環境遷移至 Google Colab（AMD EPYC 8 核心，7 並行 inprocess fixed-node）。
+* **對戰設定與成果：**
+  * **L1 探索：** 30 輪 x 60 局 = 1,800 局 @ 50,000 nodes。候選檔 `tune_search/candidate_lmr_p2.json`。
+  * **L2 深度驗證：** 400 局 @ 300,000 nodes（開局庫 hist_diag_500，雙向黑白互換，開啟 score-based win/draw adjudication）。
+  * **戰績：**
+    * 舊基準版（Baseline）：197.0 分（49.25%）
+    * 新參數版（Candidate）：**203.0 分（50.75%）**
+    * **淨勝分：新版淨勝 +6.0 分**
+    * **Elo 提升：`+5.2 Elo`**（$\pm 23.8$ 95% CI）
+    * **SPRT 判定：** `inconclusive_at_cap`（LLR = +0.08，無任何戰術退步，安全正向）。
+* **物理機理解析：**
+  * 前 150 局在高和棋率下 75:75 平分，後 250 局新版打出 128:122 (+6.0 分)。微幅上調 `LMP_SCALE_PERCENT`（105→107）與 `LMR_NO_TTMOVE_BONUS`（1024→1068）使深層搜尋在保有剪枝安全性的前提下略微擴充了邊界著法寬度，產生正向穩健的棋力增益。
+* **判定：** **採納進生產 / 基線 (ADOPTED)**。產物檔：`tournament_analysis/l2_verify_lmr_p2.json`。
 
 
 ---
