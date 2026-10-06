@@ -44,3 +44,4 @@ tuner/data/
 .qoder/
 
 *.ipynb
+!tune_colab_runner*.ipynb
