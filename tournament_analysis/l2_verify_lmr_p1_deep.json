@@ -1,0 +1,43 @@
+{
+  "nodes": 300000,
+  "games": 600,
+  "concurrency": 7,
+  "params": [
+    "LMR_BASE_OFFSET",
+    "LMR_HISTORY_SCALE",
+    "LMR_CUTNODE_BONUS",
+    "LMR_TTCAPTURE_BONUS",
+    "LMR_MOVECOUNT_FACTOR",
+    "LMR_TABLE_SCALE_PERCENT"
+  ],
+  "baseline": {
+    "LMR_BASE_OFFSET": 463,
+    "LMR_HISTORY_SCALE": 167,
+    "LMR_CUTNODE_BONUS": 2117,
+    "LMR_TTCAPTURE_BONUS": 1035,
+    "LMR_MOVECOUNT_FACTOR": 38,
+    "LMR_TABLE_SCALE_PERCENT": 100
+  },
+  "candidate": {
+    "LMR_BASE_OFFSET": 441,
+    "LMR_HISTORY_SCALE": 204,
+    "LMR_CUTNODE_BONUS": 1862,
+    "LMR_TTCAPTURE_BONUS": 1203,
+    "LMR_MOVECOUNT_FACTOR": 36,
+    "LMR_TABLE_SCALE_PERCENT": 113
+  },
+  "candidate_score": 0.5108333333333334,
+  "pts_candidate": 306.5,
+  "pts_baseline": 293.5,
+  "candidate_elo": 7.5,
+  "candidate_elo_err95": 19.2,
+  "sprt": {
+    "elo0": 0.0,
+    "elo1": 3.0,
+    "alpha": 0.05,
+    "beta": 0.05,
+    "llr": 0.19,
+    "decision": "inconclusive_at_cap"
+  },
+  "openings": "data/openings.epd"
+}

@@ -956,7 +956,7 @@ TUNE_NMP_SCOPE_MIND = 33    # for scope 2/3: min depth for non-PV NMP
 TUNE_SIZE = 34
 # E2 tried 70 (puzzle +6 pass, nodes +25%); match @200k nodes: depth↓, no Elo.
 # 2026-07-16: revert to 100 after New100/New85 dual match vs Old.
-LMR_TABLE_SCALE_PERCENT = 100
+LMR_TABLE_SCALE_PERCENT = 113  # E59 (was 100; SPSA L1 12k + L2 600@300k +7.5 Elo)
 LMR_NOT_IMP_NUM = 197  # E57 (was 194; SPSA L1+L2 400@300k +5.2 Elo)
 ENABLE_IIR = True           # Internal Iterative Reduction (Replaces old IID)
 ENABLE_SINGULAR_EXTENSIONS = True # Singular Extensions
@@ -1082,20 +1082,20 @@ REDUCTIONS = np.zeros(256, dtype=np.int32)
 for i in range(1, 256):
     REDUCTIONS[i] = int(24.8 * math.log(i))
 
-# LMR_BASE: E7 kept 480 (was 512). E20 keep 460. E56 SPSA tuned to 463 (+9.6 Elo).
-LMR_BASE_OFFSET = 463  # E56 keep (was 460; SPSA L1+L2 400@300k +9.6 Elo)
+# LMR_BASE: E7 kept 480 (was 512). E20 keep 460. E56 tuned to 463 (+9.6 Elo). E59 tuned to 441 (+7.5 Elo).
+LMR_BASE_OFFSET = 441  # E59 (was 463; SPSA L1 12k + L2 600@300k +7.5 Elo)
 LMR_TTPV_INCREASE = 768
 LMR_TTPV_DECREASE_BASE = 2048
 LMR_TTPV_PV_BONUS = 768
-LMR_CUTNODE_BONUS = 2117     # E56 (was 2048; SPSA L1+L2 400@300k +9.6 Elo)
-LMR_TTCAPTURE_BONUS = 1035   # E56 (was 1024; SPSA L1+L2 400@300k +9.6 Elo)
+LMR_CUTNODE_BONUS = 1862     # E59 (was 2117; SPSA L1 12k + L2 600@300k +7.5 Elo)
+LMR_TTCAPTURE_BONUS = 1203   # E59 (was 1035; SPSA L1 12k + L2 600@300k +7.5 Elo)
 # Match classical_old hard-coded LMR (±1024). P1 1536 withdrawn 2026-07-16.
 LMR_BAD_CAPTURE_BONUS = 1046    # E57 (was 1024; SPSA L1+L2 400@300k +5.2 Elo)
 LMR_GOOD_CAPTURE_RELIEF = 1030  # E57 (was 1024; SPSA L1+L2 400@300k +5.2 Elo)
 LMR_LATE_CAPTURE_BONUS = 0
 LMR_KILLER_COUNTER_RELIEF = 1024
-LMR_MOVECOUNT_FACTOR = 38    # E56 (was 40; SPSA L1+L2 400@300k +9.6 Elo)
-LMR_HISTORY_SCALE = 167      # E56 (was 150; SPSA L1+L2 400@300k +9.6 Elo)
+LMR_MOVECOUNT_FACTOR = 36    # E59 (was 38; SPSA L1 12k + L2 600@300k +7.5 Elo)
+LMR_HISTORY_SCALE = 204      # E59 (was 167; SPSA L1 12k + L2 600@300k +7.5 Elo)
 LMR_CUTOFF_CNT_BASE = 128
 LMR_CUTOFF_CNT_EXTRA = 512
 LMR_ALLNODE_EXTRA = 512

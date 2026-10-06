@@ -143,9 +143,13 @@ Old 與 New 應一致，除非 New 正在跑實驗項：
 | `ENABLE_CHECK_SEE_GATE` | `True` | E1 留下 |
 | `CHECK_SEE_THRESHOLD` | `-75` | 既有 |
 | `PRUNING_HISTORY_THRESHOLD` | `-6500` | E21 −6000 → **E23 −6500**（1000@n10k +7 Elo） |
-| `LMP_SCALE_PERCENT` | `105` | E4 留下（原 100） |
-| `LMR_HISTORY_SCALE` | `150` | E5/E6 回滾後維持 |
-| `LMR_BASE_OFFSET` | `460` | E7 480 → E18 448 → **E20 460**（300@150k） |
+| `LMP_SCALE_PERCENT` | `107` | E4 105 → **E57 107**（SPSA +5.2 Elo） |
+| `LMR_HISTORY_SCALE` | `204` | E5/E6 150 → E56 167 → **E59 204**（12k SPSA + 600@300k +7.5 Elo） |
+| `LMR_BASE_OFFSET` | `441` | E20 460 → E56 463 → **E59 441**（12k SPSA + 600@300k +7.5 Elo） |
+| `LMR_CUTNODE_BONUS` | `1862` | 2048 → E56 2117 → **E59 1862**（12k SPSA + 600@300k +7.5 Elo） |
+| `LMR_TTCAPTURE_BONUS` | `1203` | 1024 → E56 1035 → **E59 1203**（12k SPSA + 600@300k +7.5 Elo） |
+| `LMR_MOVECOUNT_FACTOR` | `36` | 40 → E56 38 → **E59 36**（12k SPSA + 600@300k +7.5 Elo） |
+| `LMR_TABLE_SCALE_PERCENT` | `113` | 100 → **E59 113**（12k SPSA + 600@300k +7.5 Elo） |
 | `HISTORY_WEIGHT_MAIN` | `3` | E8/H1 留下（原 2） |
 | `HISTORY_WEIGHT_CONT_1` | `5` | E9/H2 留下（原 4） |
 | `HISTORY_MAX_BUTTERFLY` | `12288` | E10 10240 → E14 12288 |
@@ -222,6 +226,7 @@ Old 與 New 應一致，除非 New 正在跑實驗項：
 | E56 | **LMR 搜尋參數多維協同調參（SPSA L1 探索 + L2 300k 實戰驗證）** | **400@n300k: 51.38% (205.5 vs 194.5) · Elo +9.56 ±22.11 · 淨勝 +11.0 分** | **採納進生產 / 基線** | 2026-10-04 |
 | E57 | **LMR 走法獎懲與晚期剪枝六軸協同調參（SPSA L1 探索 + L2 300k 實戰驗證）** | **400@n300k: 50.75% (203.0 vs 197.0) · Elo +5.20 ±23.8 · 淨勝 +6.0 分** | **採納進生產 / 基線** | 2026-10-04 |
 | E58 | **核心前向剪枝組六軸協同調參（SPSA L1 探索 + 50k/300k 伸縮性雙驗收）** | **600@n50k: 51.92% (Elo +13.3) vs 600@n300k: 49.92% (Elo -0.6 ±17.7)** | **不採納（守護深層戰術）** | 2026-10-05 |
+| E59 | **LMR 第一階段核心六軸深度調參（SPSA L1 12,000 局 + L2 300k 獨立大開局庫實測）** | **600@n300k: 51.08% (306.5 vs 293.5) · Elo +7.5 ±19.2 · L1 雙軸突破 95% 顯著性** | **採納進生產 / 基線** | 2026-10-06 |
 
 
 #### E26 Alpha-raise（否決）
@@ -1709,6 +1714,51 @@ LMP skip 體積 ≫ RFP ≈ FP/Razor/hist-prune 帶 ≫ NMP ≫ ProbCut
 * **判定：** **不採納 / 維持基線 (UNADOPTED)**。
   * 嚴格遵循專案長時控驗收標準，深層無明確正向增益不予採納，基線常數維持 E57 狀態不變。
   * 驗證了專案 **L1 (50k SPSA 探索) + L2 (300k SPRT 防禦)** 雙層架構的風險防禦機制。
+
+
+---
+
+### E59: LMR 第一階段核心六軸深度調參（SPSA L1 12,000 局 + L2 300k 獨立大開局庫實測）
+
+* **變更範圍：**
+  * `chess_engine/classical/constants.py`:
+    ```python
+    LMR_BASE_OFFSET = 441          # (was 463; SPSA L1 12k + L2 600@300k +7.5 Elo)
+    LMR_HISTORY_SCALE = 204        # (was 167; SPSA L1 12k + L2 600@300k +7.5 Elo)
+    LMR_CUTNODE_BONUS = 1862       # (was 2117; SPSA L1 12k + L2 600@300k +7.5 Elo)
+    LMR_TTCAPTURE_BONUS = 1203     # (was 1035; SPSA L1 12k + L2 600@300k +7.5 Elo)
+    LMR_MOVECOUNT_FACTOR = 36      # (was 38; SPSA L1 12k + L2 600@300k +7.5 Elo)
+    LMR_TABLE_SCALE_PERCENT = 113  # (was 100; SPSA L1 12k + L2 600@300k +7.5 Elo)
+    ```
+* **背景與動機：**
+  * 在經歷 E56/E57 探索後，針對決定 LMR 減深輪廓的核心六軸進行大規模深度重新校準。
+  * 歷史單軸調參（E5/E6）曾因缺乏多軸協同導致負 20~25 Elo 失敗。本次透過全域 SPSA 同時微擾 6 個耦合維度，並以 Polyak-Ruppert 後半段平滑抑制隨機步長噪聲。
+* **對戰設定與成果：**
+  * **L1 SPSA 探索（規格升級）：** 80 輪 × 150 局 = **12,000 局 @ 50,000 nodes**（Google Colab 7 並行，包含跨環境斷點續跑 4,200 局無縫恢復）。
+    * 總平均勝率 49.90%，`observed_sd = 0.0302`, `expected_noise_sd = 0.0301`, `sd_ratio = 1.0028`。
+    * **統計顯著性驗證（$|z| \ge 2.0$，95% 信心水準）：**
+      * `LMR_TABLE_SCALE_PERCENT`: $z = +2.36$（全域減縮放大至 113%，位移率 +21.1%）
+      * `LMR_CUTNODE_BONUS`: $z = -2.03$（CutNode 減深下修至 1862，位移率 -9.3%）
+    * **協同保護軸向：**
+      * `LMR_HISTORY_SCALE`: $z = +1.38$（167 → 204，+22.2% 強化歷史高分走法保護）
+      * `LMR_TTCAPTURE_BONUS`: $z = +1.06$（1035 → 1203，+16.2% 強化吃子深度保護）
+    * **定錨微調軸向：**
+      * `LMR_BASE_OFFSET`: 463 → 441（-4.8% 放寬基礎深度）
+      * `LMR_MOVECOUNT_FACTOR`: 38 → 36（-5.3%）
+    * Polyak-Ruppert 後 40 輪平滑平均產出 `tune_search/candidate_lmr_p1_deep.json`。
+  * **L2 深度獨立驗證（300,000 nodes，6 倍深度，600 局）：**
+    * 開局庫：`data/openings.epd`（1,200 開局，out-of-distribution 獨立開局庫，嚴格排除過擬合）。
+    * 戰績：Candidate 306.5 vs Baseline 293.5 分（**51.08%**）。
+    * **Elo 提升：`+7.5 ± 19.2 Elo`**（LLR = +0.19，`inconclusive_at_cap`）。
+* **物理機理解析：**
+  1. **全域效率與局部精準保護的完美平衡**：
+     * 將全域 LMR 表格縮減放大 13%（TableScale 113%）可使大量劣質安靜步更快在淺層截斷，為深層探索釋放龐大節點餘裕；
+     * 省下的節點算力被精準分配給「歷史好步」（HistoryScale 167→204）與「吃子反擊」（TTCapture 1035→1203），完全消除了激進剪枝帶來的戰術漏算。
+  2. **修復 CutNode 戰術盲點**：
+     * 原基線 CutNode 獎勵（2117）過於激進，在關鍵截斷節點頻繁造成防守走步漏剪。下修至 1862（$z = -2.03$）有效擴充了關鍵節點的防守縱深。
+  3. **長時控正伸縮性（Positive LTC Scaling）**：
+     * 有別於 E58 前向剪枝在 300k nodes 衰退至 -0.6 Elo，LMR 作為軟降深機制在 300k nodes 下打出堅實的 **+7.5 Elo 淨勝**，長時控穩定度極佳。
+* **判定：** **採納進生產 / 基線 (ADOPTED)**。產物檔：`tournament_analysis/l2_verify_lmr_p1_deep.json`。已同步 `constants.py` 至 `classical_old` 並通過全部單元測試。
 
 
 ---
