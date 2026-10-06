@@ -46,7 +46,7 @@ def _theta_of(row, names):
     return {n: float(row["updated_params"][n]) for n in names}
 
 
-def summarize(iterations, tail_fraction: float = 0.5):
+def summarize(iterations, tail_fraction: float = 0.5, weight_mode: str = "uniform"):
     if not iterations:
         raise ValueError("log contains no iteration records")
     names = list(iterations[0]["params"])
@@ -70,7 +70,11 @@ def summarize(iterations, tail_fraction: float = 0.5):
     for name in names:
         spec = get_spec(name)
         tail_values = [_theta_of(r, names)[name] for r in tail]
-        avg = sum(tail_values) / len(tail_values)
+        if weight_mode == "linear":
+            weights = list(range(1, len(tail_values) + 1))
+            avg = sum(v * w for v, w in zip(tail_values, weights)) / sum(weights)
+        else:
+            avg = sum(tail_values) / len(tail_values)
         averaged[name] = int(round(min(spec.maximum, max(spec.minimum, avg))))
         updates = [float(r["raw_updates"][name]) for r in iterations if "raw_updates" in r]
         first = _theta_of(iterations[0], names)[name] - float(iterations[0]["raw_updates"][name]) \
@@ -98,6 +102,7 @@ def summarize(iterations, tail_fraction: float = 0.5):
         "expected_noise_sd": expected_sd,
         "sd_ratio": observed_sd / expected_sd if expected_sd > 0 else float("nan"),
         "tail_iterations": tail_n,
+        "weight_mode": weight_mode,
         "averaged_params": averaged,
         "params": report,
         "penta_total": total_penta,
@@ -108,10 +113,16 @@ def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("log", type=Path, help="JSONL written by search_tuner --log")
     ap.add_argument("--tail", type=float, default=0.5, help="fraction of final iterations to average")
+    ap.add_argument(
+        "--weight-mode",
+        choices=["uniform", "linear"],
+        default="uniform",
+        help="weighting method for tail averaging: uniform (default) or linear",
+    )
     ap.add_argument("--out", type=Path, default=None, help="write averaged params JSON here")
     args = ap.parse_args()
 
-    result = summarize(load_iterations(args.log), tail_fraction=args.tail)
+    result = summarize(load_iterations(args.log), tail_fraction=args.tail, weight_mode=args.weight_mode)
     print(
         f"iterations={result['iterations']} games={result['games']} "
         f"mean_score={result['mean_score']:.4f}"
@@ -134,8 +145,10 @@ def main() -> None:
             f"{row['name']:32s} {row['default']:8d} {row['last']:9.1f} {row['tail_avg']:9.1f} "
             f"{row['moved_pct_of_range']:9.2f} {row['drift_z']:8.2f}{flag}"
         )
-    print("\naveraged candidate (last "
-          f"{result['tail_iterations']} iterations):")
+    print(
+        f"\naveraged candidate (last "
+        f"{result['tail_iterations']} iterations, weight_mode={result['weight_mode']}):"
+    )
     print(" ".join(f"--param {k}={v}" for k, v in result["averaged_params"].items()))
     if args.out:
         args.out.parent.mkdir(parents=True, exist_ok=True)
