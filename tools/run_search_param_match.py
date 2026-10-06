@@ -75,8 +75,9 @@ def _parse_overrides(raw_values: list[str], names: tuple[str, ...]) -> dict[str,
     return out
 
 
-def _load_params_json(path: Path) -> dict[str, int]:
+def _load_params_json(path: Path | str) -> dict[str, int]:
     """Accept ``summarize_run.py --out`` JSON or a flat ``{name: value}`` map."""
+    path = Path(path)
     data = json.loads(path.read_text(encoding="utf-8"))
     if isinstance(data, dict) and "averaged_params" in data:
         data = data["averaged_params"]
