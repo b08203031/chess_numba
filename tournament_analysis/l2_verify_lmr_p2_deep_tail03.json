@@ -1,0 +1,43 @@
+{
+  "nodes": 300000,
+  "games": 600,
+  "concurrency": 7,
+  "params": [
+    "LMR_BAD_CAPTURE_BONUS",
+    "LMR_GOOD_CAPTURE_RELIEF",
+    "LMR_KILLER_COUNTER_RELIEF",
+    "LMR_NO_TTMOVE_BONUS",
+    "LMR_TTMOVE_REDUCTION",
+    "LMR_NOT_IMP_NUM"
+  ],
+  "baseline": {
+    "LMR_BAD_CAPTURE_BONUS": 1046,
+    "LMR_GOOD_CAPTURE_RELIEF": 1030,
+    "LMR_KILLER_COUNTER_RELIEF": 1024,
+    "LMR_NO_TTMOVE_BONUS": 1068,
+    "LMR_TTMOVE_REDUCTION": 1024,
+    "LMR_NOT_IMP_NUM": 197
+  },
+  "candidate": {
+    "LMR_BAD_CAPTURE_BONUS": 1060,
+    "LMR_GOOD_CAPTURE_RELIEF": 1046,
+    "LMR_KILLER_COUNTER_RELIEF": 921,
+    "LMR_NO_TTMOVE_BONUS": 1132,
+    "LMR_TTMOVE_REDUCTION": 934,
+    "LMR_NOT_IMP_NUM": 208
+  },
+  "candidate_score": 0.4875,
+  "pts_candidate": 292.5,
+  "pts_baseline": 307.5,
+  "candidate_elo": -8.7,
+  "candidate_elo_err95": 17.7,
+  "sprt": {
+    "elo0": 0.0,
+    "elo1": 3.0,
+    "alpha": 0.05,
+    "beta": 0.05,
+    "llr": -0.37,
+    "decision": "inconclusive_at_cap"
+  },
+  "openings": "data/openings.epd"
+}
