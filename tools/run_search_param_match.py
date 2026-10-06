@@ -101,6 +101,10 @@ def main() -> None:
              "its keys define --params",
     )
     ap.add_argument(
+        "--baseline-json", type=Path, default=None,
+        help="baseline parameters from JSON (defaults to engine registry defaults)",
+    )
+    ap.add_argument(
         "--sprt", default=None, metavar="ELO0,ELO1",
         help="run in batches and stop on SPRT decision, e.g. 0,3 (H0: <=0 Elo, H1: >=3 Elo)",
     )
@@ -145,6 +149,8 @@ def main() -> None:
         ap.error("at least one --param candidate override (or --params-json) is required")
 
     base = get_default_params(names=names)
+    if args.baseline_json:
+        base.update(_load_params_json(args.baseline_json))
     candidate = dict(base)
     candidate.update(overrides)
     openings = list(load_openings(args.openings, limit=max(500, args.games * 2)))
