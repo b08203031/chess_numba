@@ -957,7 +957,13 @@ TUNE_NMP_R_BASE = 30        # custom R base (legacy 7)
 TUNE_NMP_R_DIV = 31         # custom R: base + depth//div (legacy 3)
 TUNE_NMP_VERIFY_D = 32      # verification min depth (legacy 8; 999 = off)
 TUNE_NMP_SCOPE_MIND = 33    # for scope 2/3: min depth for non-PV NMP
-TUNE_SIZE = 34
+# Phase 4 History & Move Ordering runtime slots
+TUNE_HIST_BONUS_SCALE = 34  # stat bonus linear slope (HISTORY_BONUS_SCALE)
+TUNE_HIST_BONUS_CAP = 35    # stat bonus cap (HISTORY_BONUS_CAP)
+TUNE_HIST_MALUS_CAP = 36    # stat malus cap (HISTORY_MALUS_CAP)
+TUNE_ORDER_KILLER_1 = 37    # quiet move ordering killer 1 bonus (QUIET_ORDER_KILLER_1)
+TUNE_ORDER_COUNTER = 38     # quiet move ordering counter move bonus (QUIET_ORDER_COUNTER)
+TUNE_SIZE = 39
 # E2 tried 70 (puzzle +6 pass, nodes +25%); match @200k nodes: depth↓, no Elo.
 LMR_TABLE_SCALE_PERCENT = 113  # E60 tuned (was 100; SPSA L1 12k + L2 600@300k +15.6 Elo)
 LMR_NOT_IMP_NUM = 197  # E57 (was 194; SPSA L1+L2 400@300k +5.2 Elo)

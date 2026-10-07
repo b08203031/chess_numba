@@ -45,3 +45,4 @@ tuner/data/
 
 *.ipynb
 !tune_colab_runner*.ipynb
+ag-*.json

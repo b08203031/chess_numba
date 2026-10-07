@@ -20,6 +20,7 @@ from chess_engine.classical.constants import (
     HISTORY_PAWN_MALUS_THRESHOLD, ENABLE_CHECK_SEE_GATE, ENABLE_THREAT_REORDERING,
     HISTORY_LPH_SCALE_NUM, HISTORY_LPH_SCALE_DEN, LOW_PLY_HISTORY_MAX,
     QUIET_ORDER_KILLER_1, QUIET_ORDER_KILLER_2, QUIET_ORDER_COUNTER, LPH_ORDER_SCALE,
+    TUNE_ORDER_KILLER_1, TUNE_ORDER_COUNTER,
     LOW_PLY_HISTORY_SIZE, LMR_REDUCTION_BASE_ADD, LMR_NOT_IMP_DEN, LMR_NOT_IMP_NUM,
     LMR_TABLE_SCALE_PERCENT, PAWN_KEY_INDEX, PAWN_HISTORY_MASK,
     QS_EVASION_CAPTURE_BUCKET, QS_EVASION_QUIET_CLAMP,
@@ -531,11 +532,11 @@ def score_quiets(
             score += LPH_ORDER_SCALE * lph_score // (1 + ply)
 
         if move == killer_1:
-            score += QUIET_ORDER_KILLER_1
+            score += search_context.tune[TUNE_ORDER_KILLER_1]
         elif move == killer_2:
             score += QUIET_ORDER_KILLER_2
         elif move == counter_move:
-            score += QUIET_ORDER_COUNTER
+            score += search_context.tune[TUNE_ORDER_COUNTER]
         else:
             # Lazy Check Squares (baseline production path).
             if not check_sq_computed:

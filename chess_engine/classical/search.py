@@ -160,6 +160,7 @@ from chess_engine.classical.constants import (
     TUNE_LMR_TABLE_SCALE, TUNE_LMR_NOT_IMP,
     TUNE_NMP_G_BASE, TUNE_NMP_G_DEPTH, TUNE_NMP_G_IMP, TUNE_NMP_NEED_BETA,
     TUNE_NMP_R_BASE, TUNE_NMP_R_DIV, TUNE_NMP_VERIFY_D, TUNE_NMP_SCOPE_MIND,
+    TUNE_HIST_BONUS_SCALE, TUNE_HIST_BONUS_CAP, TUNE_HIST_MALUS_CAP,
     PINNED_UNCOMPUTED_SENTINEL,
 )
 from chess_engine.classical.bitboard_utils import find_piece_type_on_square_side
@@ -1435,7 +1436,7 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                                 if not tt_is_capture and not tt_is_promotion:
                                     tt_aggressor = find_piece_type_on_square_side(piece_bbs, tt_from, our_side)
                                     if tt_aggressor != -1 and ((occupancy_bbs[our_side] & BB_SQUARES[tt_to]) == 0):
-                                        tt_bonus = min(HISTORY_BONUS_SCALE * depth, HISTORY_BONUS_CAP)
+                                        tt_bonus = min(search_context.tune[TUNE_HIST_BONUS_SCALE] * depth, search_context.tune[TUNE_HIST_BONUS_CAP])
                                         update_quiet_stats_on_tt_hit(search_context, tt_move, tt_aggressor, tt_to, pawn_key_idx, tt_bonus, ply)
                                         _diag_add(search_context, DIAG_HIST_TT_HIT)
                                         _diag_add(search_context, DIAG_HIST_QUIET_BONUS)
@@ -3042,8 +3043,8 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
     # for best_move and penalize inferior searched moves with malus.
     if final_flag != TT_FLAG_ALPHA and best_move != NO_MOVE:
         # Phase 1a: linear bonus/malus
-        bonus = min(HISTORY_BONUS_SCALE * depth, HISTORY_BONUS_CAP)
-        malus = min(HISTORY_BONUS_SCALE * depth, HISTORY_MALUS_CAP)
+        bonus = min(search_context.tune[TUNE_HIST_BONUS_SCALE] * depth, search_context.tune[TUNE_HIST_BONUS_CAP])
+        malus = min(search_context.tune[TUNE_HIST_BONUS_SCALE] * depth, search_context.tune[TUNE_HIST_MALUS_CAP])
 
         # Node Width Scaling
         if not is_pv:
@@ -3236,7 +3237,7 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                 prev_from = get_from_square(prev_move)
                 pawn_key_idx = game_state[PAWN_KEY_INDEX] & PAWN_HISTORY_MASK
                 
-                base_bonus = min(HISTORY_BONUS_SCALE * depth, HISTORY_BONUS_CAP)
+                base_bonus = min(search_context.tune[TUNE_HIST_BONUS_SCALE] * depth, search_context.tune[TUNE_HIST_BONUS_CAP])
                 sub_bonus = base_bonus // 4
                 
                 update_pawn_history(search_context.pawn_history, pawn_key_idx, prev_piece, prev_to, sub_bonus)

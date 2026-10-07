@@ -110,7 +110,7 @@ def _spec(
 
 
 # ---------------------------------------------------------------------------
-# Runtime-backed axes (one compile; 34 slots in SearchContext.tune[])
+# Runtime-backed axes (one compile; 39 slots in SearchContext.tune[])
 # ---------------------------------------------------------------------------
 _RUNTIME_SPECS = [
     _spec("RFP_BASE_MULT", "RFP_BASE_MULT", 120, 230, 5, "pruning", runtime_attr="TUNE_RFP_MULT", spsa_r_end=0.8),
@@ -147,6 +147,11 @@ _RUNTIME_SPECS = [
     _spec("NMP_LEGACY_R_DEPTH_DIV", "NMP_LEGACY_R_DEPTH_DIV", 1, 8, 1, "nmp", kind="discrete", runtime_attr="TUNE_NMP_R_DIV", spsa_r_end=0.6),
     _spec("NMP_VERIFICATION_DEPTH", "NMP_VERIFICATION_DEPTH", 5, 12, 1, "nmp", kind="discrete", runtime_attr="TUNE_NMP_VERIFY_D", spsa_r_end=0.4),
     _spec("NMP_SCOPE_MIN_DEPTH", "NMP_SCOPE_MIN_DEPTH", 3, 10, 1, "nmp", kind="discrete", runtime_attr="TUNE_NMP_SCOPE_MIND", spsa_r_end=0.4),
+    _spec("HISTORY_BONUS_SCALE", "HISTORY_BONUS_SCALE", 40, 240, 10, "history", runtime_attr="TUNE_HIST_BONUS_SCALE", spsa_r_end=0.8),
+    _spec("HISTORY_BONUS_CAP", "HISTORY_BONUS_CAP", 800, 3000, 100, "history", runtime_attr="TUNE_HIST_BONUS_CAP", spsa_r_end=0.8),
+    _spec("HISTORY_MALUS_CAP", "HISTORY_MALUS_CAP", 800, 3000, 100, "history", runtime_attr="TUNE_HIST_MALUS_CAP", spsa_r_end=0.8),
+    _spec("QUIET_ORDER_KILLER_1", "QUIET_ORDER_KILLER_1", 100000, 600000, 10000, "ordering", runtime_attr="TUNE_ORDER_KILLER_1", spsa_r_end=0.5),
+    _spec("QUIET_ORDER_COUNTER", "QUIET_ORDER_COUNTER", 100000, 500000, 10000, "ordering", runtime_attr="TUNE_ORDER_COUNTER", spsa_r_end=0.5),
 ]
 
 
@@ -211,9 +216,7 @@ _COMPILE_SPECS = [
     _spec("CHECK_BONUS", "CHECK_BONUS", 10000, 30000, 1000, "ordering", spsa_r_end=0.5),
     _spec("CHECK_SEE_THRESHOLD", "CHECK_SEE_THRESHOLD", -200, 0, 10, "ordering", spsa_r_end=0.5),
     _spec("THREAT_MULTIPLIER", "THREAT_MULTIPLIER", 0, 40, 2, "ordering", spsa_r_end=0.5),
-    _spec("QUIET_ORDER_KILLER_1", "QUIET_ORDER_KILLER_1", 100000, 600000, 10000, "ordering", spsa_r_end=0.5),
     _spec("QUIET_ORDER_KILLER_2", "QUIET_ORDER_KILLER_2", 100000, 600000, 10000, "ordering", spsa_r_end=0.5),
-    _spec("QUIET_ORDER_COUNTER", "QUIET_ORDER_COUNTER", 100000, 500000, 10000, "ordering", spsa_r_end=0.5),
     _spec("LPH_ORDER_SCALE", "LPH_ORDER_SCALE", 0, 16, 1, "ordering", spsa_r_end=0.5),
     # History / correction feedback
     _spec("HISTORY_WEIGHT_MAIN", "HISTORY_WEIGHT_MAIN", 1, 6, 1, "history", spsa_r_end=0.5),
@@ -223,9 +226,6 @@ _COMPILE_SPECS = [
     _spec("HISTORY_WEIGHT_CONT_4", "HISTORY_WEIGHT_CONT_4", 0, 8, 1, "history", spsa_r_end=0.5),
     _spec("HISTORY_WEIGHT_CONT_5", "HISTORY_WEIGHT_CONT_5", 0, 8, 1, "history", spsa_r_end=0.5),
     _spec("HISTORY_PRUNE_CONT1_FLOOR", "HISTORY_PRUNE_CONT1_FLOOR", -10000, 0, 256, "history", spsa_r_end=0.5),
-    _spec("HISTORY_BONUS_SCALE", "HISTORY_BONUS_SCALE", 40, 240, 10, "history", spsa_r_end=0.5),
-    _spec("HISTORY_BONUS_CAP", "HISTORY_BONUS_CAP", 800, 3000, 100, "history", spsa_r_end=0.5),
-    _spec("HISTORY_MALUS_CAP", "HISTORY_MALUS_CAP", 800, 3000, 100, "history", spsa_r_end=0.5),
     _spec("HISTORY_NODE_WIDTH_DIV", "HISTORY_NODE_WIDTH_DIV", 64, 512, 16, "history", spsa_r_end=0.5),
     _spec("FAIL_LOW_MIN_LEGAL_MOVES", "FAIL_LOW_MIN_LEGAL_MOVES", 1, 10, 1, "history", kind="discrete", spsa_r_end=0.4),
     _spec("FAIL_LOW_STATIC_MARGIN", "FAIL_LOW_STATIC_MARGIN", 0, 180, 10, "history", spsa_r_end=0.5),

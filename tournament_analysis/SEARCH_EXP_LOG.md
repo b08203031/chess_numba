@@ -1856,11 +1856,29 @@ LMP skip 體積 ≫ RFP ≈ FP/Razor/hist-prune 帶 ≫ NMP ≫ ProbCut
      * 兩項 LTC 測試累計 1,200 局，合計淨勝 24 盤，全程 24 個檢查點 100% 保持在 50% 以上，徹底排除任何深層倒退風險，完全符合生產採納標準。
 * **判定：** **採納進生產 / 基線 (ADOPTED / PRODUCTION BASELINE UPDATED)**。
   * 產物檔：`tournament_analysis/l2_verify_pruning_p3_deep_tail03.json`、`tournament_analysis/l2_verify_pruning_p3_lmp118.json`。
-  * 生產代碼更新：`LMP_SCALE_PERCENT=118`, `RAZORING_MARGIN=215`, `FP_BASE=171`, `RFP_BASE_MULT=171`, `PRUNING_QUIET_SEE_MARGIN=-24`。已同步 `constants.py` 與 `classical_old`。
-
+  * 生產代碼更新：`LMP_SCALE_PERCENT=118`, `FP_BASE=171`, `RFP_BASE_MULT=171`, `PRUNING_QUIET_SEE_MARGIN=-24` 正式實裝落地（+8.1 Elo）。已同步 `constants.py`、`constants_snapshot.py` 與 `classical_old`。
+  * **幽靈參數清理**：代碼審計發現 `RAZORING_MARGIN` 自 E46 改版 SF19 二次剪枝後已退化為未被引用的無效佔位；本次已徹底拔除該歷史殘留，將運行時插槽 1 正式定名為 `TUNE_RAZOR_COEFF`（對接生產真實公式 `search_context.tune[TUNE_RAZOR_COEFF] * depth * depth`，預設 482）。
 
 ---
 
+### 3.63 Phase 4: 歷史表與走步排序啟發式體系六軸 SPSA 調參 (IN PROGRESS)
+
+* **日期：** 2026-10-07
+* **動機：**
+  * 在 Phase 1 (LMR 核心基底)、Phase 2 (LMR 細節修剪)、Phase 3 (前向剪枝體系落地 +8.1 Elo) 穩固建立後，推進第四核心支柱：**歷史表反饋與走步排序啟發式（History Heuristics & Move Ordering）**。
+  * 走步排序決定了 Beta 剪枝的觸發速度（Cut-first rate），而歷史表的加減分曲線直接決定了後續 LMR 的懲罰幅度與靜態剪枝門檻。兩者為緊密咬合的搜尋引擎動力傳動系統。
+* **六軸鎖定與運行時插槽擴展（TUNE_SIZE: 34 → 39）：**
+  1. `LMR_HISTORY_SCALE`（插槽 7，基線 204，範圍 [50, 350]，步長 25）：LMR 歷史衰減係數，控制歷史評分對剪枝深度的微調力道。
+  2. `HISTORY_BONUS_SCALE`（插槽 34，基線 120，範圍 [40, 240]，步長 10）：安靜步剪枝歷史加分斜率（`bonus = min(SCALE * depth, CAP)`）。
+  3. `HISTORY_BONUS_CAP`（插槽 35，基線 1800，範圍 [800, 3000]，步長 100）：安靜步歷史加分上限。
+  4. `HISTORY_MALUS_CAP`（插槽 36，基線 1600，範圍 [800, 3000]，步長 100）：失敗走步歷史懲罰扣分上限。
+  5. `QUIET_ORDER_KILLER_1`（插槽 37，基線 400000，範圍 [100000, 600000]，步長 10000）：第一殺手步（Killer Move 1）安靜步排序加分。
+  6. `QUIET_ORDER_COUNTER`（插槽 38，基線 300000，範圍 [100000, 500000]，步長 10000）：應對步（Counter Move）安靜步排序加分。
+* **調參規格與產物：**
+  * **基準配置**：[`tune_search/baseline_history_p4.json`](../tune_search/baseline_history_p4.json)
+  * **雲端執行器**：[`tune_colab_runner_p4.ipynb`](../tune_colab_runner_p4.ipynb)（80 輪 × 150 局 = 12,000 局 @ 50k nodes，斷點續跑、Polyak-Ruppert Tail 0.3 平滑與 L2 300k LTC SPRT 驗證）
+
+---
 
 ## 4. 常用指令
 
