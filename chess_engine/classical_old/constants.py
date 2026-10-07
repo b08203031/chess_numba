@@ -982,7 +982,7 @@ ENABLE_HISTORY_PRUNING = True      # Enable pruning based on History Score
 # SEE: SF11 capture ~-194 internal → ~-151 @0.78; current values stay until A/B.
 PRUNING_SHALLOW_DEPTH = 12
 PRUNING_CAPTURE_SEE_MARGIN = -100  # SF11 ~-194 internal; currently milder
-PRUNING_QUIET_SEE_MARGIN = -25
+PRUNING_QUIET_SEE_MARGIN = -24     # E62 (was -25; SPSA L1 12k + L2 1200@300k +8.1 Elo)
 
 # Master switches for existing pruning techniques / 現有剪枝技術的總開關
 ENABLE_NMP = True           # Null Move Pruning
@@ -1021,17 +1021,17 @@ MAX_QUIESCENCE_DEPTH = 5
 # --- Prune margins (HCE cp; SF11 formulas remain useful baselines) ---
 
 # Razoring — SF19 Step 8: eval < alpha - RAZORING_COEFF * depth * depth
-RAZORING_MARGIN = 250  # Retained for runtime tune slot compatibility
+RAZORING_MARGIN = 215  # E62 (was 250; SPSA L1 12k + L2 1200@300k +8.1 Elo)
 RAZORING_MAX_DEPTH = 3
 RAZORING_COEFF = 482
 
 # Futility: larger mult → larger margin → harder to skip (softer FP).
 # E25A 130→140 failed 1000@n10k 49.0%/−7 Elo → keep 130.
-FP_BASE = 180
+FP_BASE = 171         # E62 (was 180; SPSA L1 12k + L2 1200@300k +8.1 Elo)
 FP_MULTIPLIER = 125
 
 RFP_MAX_DEPTH = 8
-RFP_BASE_MULT = 170  # E24 180 aborted ~900@n10k ~49.6%/Elo−3 → rollback
+RFP_BASE_MULT = 171   # E62 (was 170; SPSA L1 12k + L2 1200@300k +8.1 Elo)
 RFP_NO_TT_PENALTY = 30
 
 NMP_STATIC_MARGIN = 150      # not used as primary NMP gate
@@ -1064,8 +1064,8 @@ LMP_MOVE_COUNT = np.array([
     0 if d == 0 else max(1, (5 + d * d) // 2 - 1) for d in range(MAX_PLY)
 ], dtype=np.int32)
 # Percent scale on LMP limit (100=table). Higher → later prune (fatter tree).
-# E4: 100→105 kept (+15.7 Elo @100k). E57: 105→107 (+5.2 Elo @300k).
-LMP_SCALE_PERCENT = 107
+# E4: 100→105 kept (+15.7 Elo @100k). E57: 105→107 (+5.2 Elo @300k). E62: 107→118 (+8.1 Elo @300k).
+LMP_SCALE_PERCENT = 118
 
 # LMR Table (legacy integer plies; live path uses 1024-scale REDUCTIONS)
 LMR_TABLE = np.zeros((MAX_PLY, 256), dtype=np.int32)

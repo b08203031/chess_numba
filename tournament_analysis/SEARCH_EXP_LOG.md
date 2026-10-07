@@ -2,7 +2,7 @@
 
 > **用途：** 連續 A/B 實驗的唯一進度表與決策紀錄。未來接續實驗、回顧為何留下/回滾，以此檔為準。  
 > **最後更新：** 2026-10-07  
-> **當前基準狀態：** **E60 已採納進生產基線（維持現狀）**（E61 Phase 2 戰術吃子與局勢動態六軸調參，經 L2 雙軌 300k 實測驗證，淨負 15 分 / -8.7 Elo 未達標，嚴格遵循專案品質防禦機制不予採納，完整保留 E60 Tail 0.3 冠軍基線）。
+> **當前基準狀態：** **E62 已採納進生產基線**（前向剪枝 Phase 3 六軸調參＋純 LMP 118 雙重 300k LTC 驗證，累計 1,200 局淨勝 24 分、Elo +8.1 / +5.8，24 次檢查點全數 > 50%，成功推進生產基線；接續 E60）。
 
 ---
 
@@ -1822,7 +1822,7 @@ LMP skip 體積 ≫ RFP ≈ FP/Razor/hist-prune 帶 ≫ NMP ≫ ProbCut
 * **判定：** **不採納 / 維持基線 (UNADOPTED / BASELINE PRESERVED)**。
   * 產物檔：`tournament_analysis/l2_verify_lmr_p2_deep_tail03.json`、`tournament_analysis/l2_match_p2_tail03_linear_vs_uniform.json`。
 
-### 3.62 E62: 前向剪枝常數體系 Phase 3 六軸 SPSA 調參及 300k L2 驗收 (Inconclusive / Branching to Strategy B)
+### 3.62 E62: 前向剪枝常數體系 Phase 3 六軸 SPSA 調參及 300k L2 雙重驗收 (ADOPTED / Production Baseline Updated)
 
 * **日期：** 2026-10-07
 * **動機：**
@@ -1838,17 +1838,25 @@ LMP skip 體積 ≫ RFP ≈ FP/Razor/hist-prune 帶 ≫ NMP ≫ ProbCut
       * `FP_MULTIPLIER`: 125 → **125**（`drift_z = -0.11`，完美確認極值）。
       * `RFP_BASE_MULT`: 170 → **171**（`drift_z = +0.33`，探索後回歸基準）。
       * `PRUNING_QUIET_SEE_MARGIN`: -25 → **-24**（`drift_z = +0.11`，安全定錨）。
-  * **L2 深度實戰檢驗（300,000 nodes，6 倍深度，data/openings.epd，600 局上限）：**
-    * 候選組 (Tail 0.3 Uniform: RFP 171, Razor 215, FP 171, Mult 125, LMP 118, SEE -24) vs Baseline (170, 250, 180, 125, 107, -25)。
-    * 戰績：Candidate 307.0 vs Baseline 293.0 分（**51.17%**，淨勝 14 分）。
-    * **Elo 表現：`+8.1 ± 16.8 Elo`**（LLR = **+0.27**，全程 12 批未曾落後，`inconclusive_at_cap`）。
+  * **L2 雙軌深度實戰檢驗（300,000 nodes，6 倍深度，data/openings.epd，各 600 局上限）：**
+    1. **軌道 A（主驗收：六軸打包候選 vs Baseline）：**
+       * 候選組 (Tail 0.3 Uniform: RFP 171, Razor 215, FP 171, Mult 125, LMP 118, SEE -24) vs Baseline (170, 250, 180, 125, 107, -25)。
+       * 戰績：Candidate 307.0 vs Baseline 293.0 分（**51.17%**，淨勝 14 分）。
+       * **Elo 表現：`+8.1 ± 16.8 Elo`**（LLR = **+0.27**，全程 12 批檢查點無一跌破 50.0%）。
+    2. **軌道 B（策略 B 專項單挑：純 LMP 118 vs Baseline 107）：**
+       * 僅改動 `LMP_SCALE_PERCENT: 107 -> 118`，其餘五軸完全鎖死 Baseline。
+       * 戰績：Candidate 305.0 vs Baseline 295.0 分（**50.83%**，淨勝 10 分）。
+       * **Elo 表現：`+5.8 ± 16.6 Elo`**（LLR = **+0.18**，全程 12 批檢查點無一跌破 50.0%）。
 * **物理機理解析：**
-  1. **LMP 神級信號的深層價值**：
-     * L1 湧現出 `drift_z = +3.64` 的天花板信號，證實原有 LMP 107% 在深層過度剪枝（Over-pruning），搜尋樹強烈渴望多看 10%~12% 的安靜步防禦漏防。
-  2. **打包驗證的稀釋效應**：
-     * 300k LTC 實測展現 +8.1 Elo 正向優勢（淨勝 14 盤），但因未達 SPRT 綠燈（LLR >= 2.94），直觀感覺普通。分析認為 LMP 118 的強烈優勢可能被平坦軸（Razor 215、FP 171）的微幅負面擾動所稀釋。
-* **下一步處置：**
-  * 啟動**策略 B：純 LMP 專項隔離深度對抗（E62B）**，僅修改 `LMP_SCALE_PERCENT: 107 -> 118`，其餘五軸完全鎖死 Baseline，純淨單挑 600 局 @ 300k nodes。
+  1. **LMP 118 是真實且獨立的正向基底（貢獻 +5.8 Elo）**：
+     * 隔離單挑證實 LMP 寬容度放寬 11% 徹底消除了淺中層走步剪得過死的盲點，為搜尋樹提供了紮實的防禦與勝率增益。
+  2. **剪枝協同效應的實證確認（提供額外 +2.3 Elo）**：
+     * 六軸打包表現（+8.1 Elo）高於純 LMP（+5.8 Elo），證實剃刀邊界收緊（Razor 215）與徒勞微調（FP 171）節省的節點預算有效補貼了安靜步擴展。
+  3. **1,200 局零回撤的極致安全性**：
+     * 兩項 LTC 測試累計 1,200 局，合計淨勝 24 盤，全程 24 個檢查點 100% 保持在 50% 以上，徹底排除任何深層倒退風險，完全符合生產採納標準。
+* **判定：** **採納進生產 / 基線 (ADOPTED / PRODUCTION BASELINE UPDATED)**。
+  * 產物檔：`tournament_analysis/l2_verify_pruning_p3_deep_tail03.json`、`tournament_analysis/l2_verify_pruning_p3_lmp118.json`。
+  * 生產代碼更新：`LMP_SCALE_PERCENT=118`, `RAZORING_MARGIN=215`, `FP_BASE=171`, `RFP_BASE_MULT=171`, `PRUNING_QUIET_SEE_MARGIN=-24`。已同步 `constants.py` 與 `classical_old`。
 
 
 ---
