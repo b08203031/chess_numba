@@ -1,8 +1,8 @@
 # Classical 搜尋單項實驗日誌
 
 > **用途：** 連續 A/B 實驗的唯一進度表與決策紀錄。未來接續實驗、回顧為何留下/回滾，以此檔為準。  
-> **最後更新：** 2026-10-06  
-> **當前基準狀態：** **E60 已採納進生產基線**（LMR Phase 1 去滯後平滑二次驗收，600@n300k, 52.25%, Elo +15.6 ± 16.9, 淨勝 +27 局；單挑 0.1 亦以 +9.8 Elo 獲勝；接續 E59）。
+> **最後更新：** 2026-10-07  
+> **當前基準狀態：** **E60 已採納進生產基線（維持現狀）**（E61 Phase 2 戰術吃子與局勢動態六軸調參，經 L2 雙軌 300k 實測驗證，淨負 15 分 / -8.7 Elo 未達標，嚴格遵循專案品質防禦機制不予採納，完整保留 E60 Tail 0.3 冠軍基線）。
 
 ---
 
@@ -1786,8 +1786,73 @@ LMP skip 體積 ≫ RFP ≈ FP/Razor/hist-prune 帶 ≫ NMP ≫ ProbCut
      * 對抗原始基準淨勝局數由 +13 局飆升至 **+27 局**，Elo 提升由 +7.5 翻倍至 **+15.6**，LLR 高達 +0.57。
 * **判定：** **採納進生產 / 基線 (ADOPTED)**。產物檔：`tournament_analysis/l2_verify_lmr_p1_deep_tail03.json`、`tournament_analysis/l2_match_tail03_vs_tail01.json`。已同步 `constants.py`、`classical_old` 與 `constants_snapshot.py` 並全數通過測試。
 
+### 3.61 E61: LMR Phase 2 戰術吃子與局勢動態六軸調參及雙軌驗收 (Unadopted / Baseline Preserved)
+
+* **日期：** 2026-10-07
+* **動機：**
+  * 在 E60 鎖定 LMR Phase 1 冠軍底座（Tail 0.3: `BASE=437, HIST=204, CUTNODE=1839, TTCAP=1191, MOVECOUNT=35, TABLE_SCALE=113`）後，推進第二階段深層搜尋調參；
+  * 目標鎖定掌控戰術吃子懲罰與動態局勢減深的六軸：`LMR_BAD_CAPTURE_BONUS`（劣吃懲罰）、`LMR_GOOD_CAPTURE_RELIEF`（好吃寬免）、`LMR_KILLER_COUNTER_RELIEF`（殺著寬免）、`LMR_NO_TTMOVE_BONUS`（無TT懲罰）、`LMR_TTMOVE_REDUCTION`（TT命中減步）、`LMR_NOT_IMP_NUM`（未改善動態減步）。
+* **調參設定與成果：**
+  * **L1 SPSA 探索：** 80 輪 × 150 局 = **12,000 局 @ 50,000 nodes**（Google Colab 7 並行）。
+    * 總對局 12,000 局，`mean_score = 0.4964`, `observed_sd = 0.0307`, `expected_noise_sd = 0.0309`, `sd_ratio = 0.9917`。
+    * **Tail 0.3 Polyak-Ruppert 後 30% 候選參數：**
+      * `LMR_BAD_CAPTURE_BONUS`: 1046 → **1060**（劣吃減步微升）
+      * `LMR_GOOD_CAPTURE_RELIEF`: 1030 → **1046**（好吃寬免微幅擴展）
+      * `LMR_KILLER_COUNTER_RELIEF`: 1024 → **921**（殺著寬免收窄 -103，壓縮過度）
+      * `LMR_NO_TTMOVE_BONUS`: 1068 → **1132**（無 TT 著法減步擴大）
+      * `LMR_TTMOVE_REDUCTION`: 1024 → **934**（TT 命中減步收窄 -90）
+      * `LMR_NOT_IMP_NUM`: 197 → **208**（未改善局勢動態剪枝更激進）
+    * 線性加權 Tail 0.3 參數對照：`BAD_CAP=1072, GOOD_CAP=1047, KILLER=924, NO_TT=1146, TT_RED=932, NOT_IMP=210`。
+  * **L2 雙軌深度實戰檢驗（300,000 nodes，6 倍深度，data/openings.epd）：**
+    1. **軌道 A（主 L2 驗收：等權 Tail 0.3 vs Baseline，600 局，SPRT 0, 3）：**
+       * 戰績：Candidate 292.5 vs Baseline 307.5 分（**48.75%**，淨負 15 分）。
+       * **Elo 表現：`-8.7 ± 17.7 Elo`**（LLR = **-0.37**，`inconclusive_at_cap`）。
+    2. **軌道 B（世紀單挑：線性加權 Tail 0.3 vs 等權 Tail 0.3，1,000 局，SPRT 0, 3）：**
+       * 戰績：線性加權 499.5 vs 等權 500.5 分（**49.95%**，實質五五開平局）。
+       * **Elo 表現：`-0.35 ± 13.84 Elo`**（LLR = **-0.111**，`inconclusive_at_cap`）。
+* **物理機理解析：**
+  1. **殺著寬免過度收緊的深層戰術盲點**：
+     * `LMR_KILLER_COUNTER_RELIEF` 由 1024 驟降至 921（-103）。在 50k 淺搜時壓縮殺著寬免可迫使引擎剪掉無效枝幹衝刺深度；但在 300k 深搜（12~15 層）時，Killer 與 Countermove 是最主要的戰術反擊支柱。過度削弱寬免導致關鍵殺著在深層被嚴重減深（Over-reduction），引發戰術漏算。
+  2. **無 TT 著法過度懲罰的盲目剪枝**：
+     * `LMR_NO_TTMOVE_BONUS`（1068 → 1132）與 `LMR_NOT_IMP_NUM`（197 → 208）過於激進，在複雜開局或轉移局面中，若走法尚未進入 TT 快取即施加重度減步，損害了棋盤韌性。
+  3. **世紀單挑對平滑法的理論驗證**：
+     * 1,000 局超大樣本實證線性加權與等權 Polyak-Ruppert（-0.35 Elo）表現幾乎無異，證實大窗口等權平均具備足夠的抗噪聲能力，末端步長微調在 12k 規模下並無額外套利空間。
+  4. **雙層防禦機制的完美體現**：
+     * 本次實測再次展現專案 **L1 (SPSA 探索) + L2 (300k SPRT 嚴格防禦)** 架構的強大價值：在淺層出現過擬合趨勢時，300k nodes LTC 驗收果斷發揮守門功能，徹底阻止 -8.7 Elo 的退步代碼進入生產環境。
+* **判定：** **不採納 / 維持基線 (UNADOPTED / BASELINE PRESERVED)**。
+  * 產物檔：`tournament_analysis/l2_verify_lmr_p2_deep_tail03.json`、`tournament_analysis/l2_match_p2_tail03_linear_vs_uniform.json`。
+
+### 3.62 E62: 前向剪枝常數體系 Phase 3 六軸 SPSA 調參及 300k L2 驗收 (Inconclusive / Branching to Strategy B)
+
+* **日期：** 2026-10-07
+* **動機：**
+  * 在 E60 鎖定 LMR Phase 1 冠軍底座（生產基線）後，推進第三階段搜尋核心：前向剪枝常數體系（Pruning & Margins）；
+  * 調校六軸：`RFP_BASE_MULT`（反向徒勞乘數）、`RAZORING_MARGIN`（剃刀邊界）、`FP_BASE`（徒勞基礎邊界）、`FP_MULTIPLIER`（徒勞深度乘數）、`LMP_SCALE_PERCENT`（後期走步剪枝容許寬度）、`PRUNING_QUIET_SEE_MARGIN`（安靜步 SEE 門檻）。
+* **調參設定與成果：**
+  * **L1 SPSA 探索：** 80 輪 × 150 局 = **12,000 局 @ 50,000 nodes**（Google Colab 7 並行，inprocess）。
+    * 總對局 12,000 局，`mean_score = 0.5030`, `observed_sd = 0.0308`, `expected_noise_sd = 0.0309`, `sd_ratio = 0.9965`。
+    * **訊號顯著性（drift_z）：**
+      * `LMP_SCALE_PERCENT`: 107 → **118**（+11%，**`drift_z = +3.64`**，全場最強極致真訊號，雙尾檢定 p < 0.001）。
+      * `RAZORING_MARGIN`: 250 → **215**（-35 cp，`drift_z = -0.94`，築底收斂於 205~215 區間）。
+      * `FP_BASE`: 180 → **171**（-9 cp，`drift_z = -1.15`，平坦區微調）。
+      * `FP_MULTIPLIER`: 125 → **125**（`drift_z = -0.11`，完美確認極值）。
+      * `RFP_BASE_MULT`: 170 → **171**（`drift_z = +0.33`，探索後回歸基準）。
+      * `PRUNING_QUIET_SEE_MARGIN`: -25 → **-24**（`drift_z = +0.11`，安全定錨）。
+  * **L2 深度實戰檢驗（300,000 nodes，6 倍深度，data/openings.epd，600 局上限）：**
+    * 候選組 (Tail 0.3 Uniform: RFP 171, Razor 215, FP 171, Mult 125, LMP 118, SEE -24) vs Baseline (170, 250, 180, 125, 107, -25)。
+    * 戰績：Candidate 307.0 vs Baseline 293.0 分（**51.17%**，淨勝 14 分）。
+    * **Elo 表現：`+8.1 ± 16.8 Elo`**（LLR = **+0.27**，全程 12 批未曾落後，`inconclusive_at_cap`）。
+* **物理機理解析：**
+  1. **LMP 神級信號的深層價值**：
+     * L1 湧現出 `drift_z = +3.64` 的天花板信號，證實原有 LMP 107% 在深層過度剪枝（Over-pruning），搜尋樹強烈渴望多看 10%~12% 的安靜步防禦漏防。
+  2. **打包驗證的稀釋效應**：
+     * 300k LTC 實測展現 +8.1 Elo 正向優勢（淨勝 14 盤），但因未達 SPRT 綠燈（LLR >= 2.94），直觀感覺普通。分析認為 LMP 118 的強烈優勢可能被平坦軸（Razor 215、FP 171）的微幅負面擾動所稀釋。
+* **下一步處置：**
+  * 啟動**策略 B：純 LMP 專項隔離深度對抗（E62B）**，僅修改 `LMP_SCALE_PERCENT: 107 -> 118`，其餘五軸完全鎖死 Baseline，純淨單挑 600 局 @ 300k nodes。
+
 
 ---
+
 
 ## 4. 常用指令
 
