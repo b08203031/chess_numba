@@ -151,7 +151,7 @@ from chess_engine.classical.constants import (
     DIAG_HP_CONT1_CAP_RESCUE, HISTORY_PRUNE_CONT1_FLOOR,
     HISTORY_MAX_MAIN, HISTORY_MAX_BUTTERFLY, HISTORY_MAX_CAPTURE, HISTORY_MAX_CONTINUATION,
     HISTORY_MAX_PAWN,
-    TUNE_RFP_MULT, TUNE_RAZOR_MARGIN, TUNE_FP_BASE, TUNE_FP_MULT,
+    TUNE_RFP_MULT, TUNE_RAZOR_COEFF, TUNE_FP_BASE, TUNE_FP_MULT,
     TUNE_SEE_CAP_MARGIN, TUNE_SEE_QUIET_MARGIN, TUNE_LMR_BASE_OFFSET, TUNE_LMR_HIST_SCALE,
     TUNE_DELTA_MARGIN, TUNE_PROBCUT_MARGIN, TUNE_BAD_CAP_BONUS, TUNE_GOOD_CAP_RELIEF,
     TUNE_LMP_SCALE, TUNE_KILLER_RELIEF, TUNE_QS_SEE,
@@ -1582,7 +1582,7 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
         if (search_context.enable_razoring and depth <= RAZORING_MAX_DEPTH and not low_material_pruning_guard
                 and not is_win(static_score) and not is_loss(alpha)
                 and abs(alpha) < VALUE_KNOWN_WIN):
-            razor_margin = RAZORING_COEFF * depth * depth
+            razor_margin = search_context.tune[TUNE_RAZOR_COEFF] * depth * depth
             if static_score < alpha - razor_margin:
                 if not static_eval_is_full:
                     raw_static_eval, static_score, improving, cached_pinned_white, cached_pinned_black = compute_full_corrected_static_eval(

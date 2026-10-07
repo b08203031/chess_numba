@@ -912,7 +912,7 @@ ENABLE_DELTA_PRUNING = True # Delta Pruning in Quiescence Search
 # --- Runtime tune indices (SearchContext.tune[int32]) for one-compile sweeps ---
 # Values initialized from the scalar constants below; scripts mutate ctx.tune in Python.
 TUNE_RFP_MULT = 0
-TUNE_RAZOR_MARGIN = 1
+TUNE_RAZOR_COEFF = 1
 TUNE_FP_BASE = 2
 TUNE_FP_MULT = 3
 TUNE_SEE_CAP_MARGIN = 4
@@ -1021,7 +1021,6 @@ MAX_QUIESCENCE_DEPTH = 5
 # --- Prune margins (HCE cp; SF11 formulas remain useful baselines) ---
 
 # Razoring — SF19 Step 8: eval < alpha - RAZORING_COEFF * depth * depth
-RAZORING_MARGIN = 215  # E62 (was 250; SPSA L1 12k + L2 1200@300k +8.1 Elo)
 RAZORING_MAX_DEPTH = 3
 RAZORING_COEFF = 482
 

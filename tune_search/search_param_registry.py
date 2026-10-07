@@ -114,7 +114,7 @@ def _spec(
 # ---------------------------------------------------------------------------
 _RUNTIME_SPECS = [
     _spec("RFP_BASE_MULT", "RFP_BASE_MULT", 120, 230, 5, "pruning", runtime_attr="TUNE_RFP_MULT", spsa_r_end=0.8),
-    _spec("RAZORING_MARGIN", "RAZORING_MARGIN", 100, 500, 25, "pruning", runtime_attr="TUNE_RAZOR_MARGIN", spsa_r_end=0.8),
+    _spec("RAZORING_COEFF", "RAZORING_COEFF", 200, 800, 25, "pruning", runtime_attr="TUNE_RAZOR_COEFF", spsa_r_end=0.8),
     _spec("FP_BASE", "FP_BASE", 100, 300, 10, "pruning", runtime_attr="TUNE_FP_BASE", spsa_r_end=0.8),
     _spec("FP_MULTIPLIER", "FP_MULTIPLIER", 60, 220, 10, "pruning", runtime_attr="TUNE_FP_MULT", spsa_r_end=0.8),
     _spec("PRUNING_CAPTURE_SEE_MARGIN", "PRUNING_CAPTURE_SEE_MARGIN", -250, 0, 25, "pruning", runtime_attr="TUNE_SEE_CAP_MARGIN", spsa_r_end=0.6),
