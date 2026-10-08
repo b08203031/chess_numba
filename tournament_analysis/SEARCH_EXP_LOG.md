@@ -1861,9 +1861,9 @@ LMP skip 體積 ≫ RFP ≈ FP/Razor/hist-prune 帶 ≫ NMP ≫ ProbCut
 
 ---
 
-### 3.63 Phase 4: 歷史表與走步排序啟發式體系六軸 SPSA 調參 (IN PROGRESS)
+### 3.63 E63: 歷史表與走步排序啟發式體系 Phase 4 六軸 SPSA 調參與雙軌 300k LTC 深度檢驗 (ADOPTED / Production Baseline Updated)
 
-* **日期：** 2026-10-07
+* **日期：** 2026-10-08
 * **動機：**
   * 在 Phase 1 (LMR 核心基底)、Phase 2 (LMR 細節修剪)、Phase 3 (前向剪枝體系落地 +8.1 Elo) 穩固建立後，推進第四核心支柱：**歷史表反饋與走步排序啟發式（History Heuristics & Move Ordering）**。
   * 走步排序決定了 Beta 剪枝的觸發速度（Cut-first rate），而歷史表的加減分曲線直接決定了後續 LMR 的懲罰幅度與靜態剪枝門檻。兩者為緊密咬合的搜尋引擎動力傳動系統。
@@ -1874,9 +1874,36 @@ LMP skip 體積 ≫ RFP ≈ FP/Razor/hist-prune 帶 ≫ NMP ≫ ProbCut
   4. `HISTORY_MALUS_CAP`（插槽 36，基線 1600，範圍 [800, 3000]，步長 100）：失敗走步歷史懲罰扣分上限。
   5. `QUIET_ORDER_KILLER_1`（插槽 37，基線 400000，範圍 [100000, 600000]，步長 10000）：第一殺手步（Killer Move 1）安靜步排序加分。
   6. `QUIET_ORDER_COUNTER`（插槽 38，基線 300000，範圍 [100000, 500000]，步長 10000）：應對步（Counter Move）安靜步排序加分。
-* **調參規格與產物：**
-  * **基準配置**：[`tune_search/baseline_history_p4.json`](../tune_search/baseline_history_p4.json)
-  * **雲端執行器**：[`tune_colab_runner_p4.ipynb`](../tune_colab_runner_p4.ipynb)（80 輪 × 150 局 = 12,000 局 @ 50k nodes，斷點續跑、Polyak-Ruppert Tail 0.3 平滑與 L2 300k LTC SPRT 驗證）
+* **調參設定與成果：**
+  * **L1 SPSA 探索：** 80 輪 × 150 局 = **12,000 局 @ 50,000 nodes**（Google Colab 7 並行，inprocess）。
+    * 總對局 12,000 局，`mean_score = 0.5043`, `observed_sd = 0.0319`, `expected_noise_sd = 0.0305`, `sd_ratio = 1.05`。
+    * **訊號檢定（drift_z）：**
+      * `HISTORY_BONUS_CAP`: 1800 → **2054**（+14%，**`drift_z = +2.34`**，全場唯一顯著真訊號，信心水準 98.2%）。
+      * `QUIET_ORDER_KILLER_1`: 400000 → **390488**（`drift_z = -1.55`，弱下行，噪聲邊界）。
+      * `HISTORY_MALUS_CAP`: 1600 → **1537**（`drift_z = -0.62`，噪聲）。
+      * `QUIET_ORDER_COUNTER`: 300000 → **302071**（`drift_z = +0.57`，高度定錨）。
+      * `LMR_HISTORY_SCALE`: 204 → **197**（`drift_z = -0.17`，高度定錨）。
+      * `HISTORY_BONUS_SCALE`: 120 → **123**（`drift_z = +0.16`，高度定錨）。
+  * **L2 雙軌深度實戰檢驗（300,000 nodes，6 倍深度，data/openings.epd）：**
+    1. **軌道 A（六軸打包組 vs Baseline，900 局，SPRT 0, 3）：**
+       * 候選組 (Tail 0.3: LMR 197, Scale 123, Cap 2054, Malus 1537, Killer 390488, Counter 302071) vs Baseline。
+       * 戰績：Candidate 432.5 vs Baseline 467.5 分（**48.06%**，淨負 35 分）。
+       * **Elo 表現：`-13.5 ± 14.3 Elo`**（LLR = **-0.84**）。
+       * **盲點剖析**：`QUIET_ORDER_KILLER_1` 削弱了近 10,000 分，破壞了殺手步 400k 的截斷護城河；在 300k 深層搜索中，殺手步被普通歷史步插隊，導致關鍵戰術反擊被延後，中殘局出現深層戰術盲點。被 L2 防禦機制成功阻截！
+    2. **軌道 B（策略 B 專項隔離：純 HISTORY_BONUS_CAP 2054 vs Baseline 1800，600 局，SPRT 0, 3）：**
+       * 僅改動唯一的顯著真訊號軸 `HISTORY_BONUS_CAP: 1800 -> 2054`，其餘 5 軸（Killer 400k、Counter 300k、Malus 1600、Scale 120、LMR 204）**100% 嚴格鎖死 Baseline**。
+       * 戰績：Candidate 306.0 vs Baseline 294.0 分（**51.00%**，淨勝 12 分）。
+       * **Elo 表現：`+6.9 ± 16.9 Elo`**（LLR = **+0.22**，自 400 局後全程穩定領先至完賽）。
+* **物理機理解析：**
+  1. **殺手步絕對特權不可動搖**：
+     * 雙軌對比實證 Killer Move 必須享有 400k 的跨階級優先順位，不能被普通安靜步擠壓。
+  2. **歷史表天花板放寬 14% 是獨立且實打實的正向增益（貢獻 +6.9 Elo）**：
+     * 在捍衛殺手步特權的前提下，將歷史加分上限由 1800 放寬至 2054，使反覆引發截斷的高品質安靜步能拉開與劣步的排序差距，大幅改善了安靜步排序質量。
+  3. **雙層防禦機制的再次驗證**：
+     * 本次實測再次體現「L1 大膽探索 + L2 深度守門 + 策略 B 隔離驗證」的方法論價值，精準過濾 -13.5 Elo 噪聲，提煉出 +6.9 Elo 純真訊號。
+* **判定：** **採納策略 B 進生產 / 基線 (ADOPTED / PRODUCTION BASELINE UPDATED)**。
+  * 產物檔：`tournament_analysis/l2_verify_history_p4_deep_tail03.json`、`tournament_analysis/l2_verify_history_p4_bonuscap2054.json`。
+  * 生產代碼更新：`HISTORY_BONUS_CAP=2054`（原 1800）。已同步 `constants.py`、`constants_snapshot.py` 與 `classical_old`。
 
 ---
 

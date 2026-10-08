@@ -1,0 +1,42 @@
+{
+  "nodes": 300000,
+  "games": 600,
+  "concurrency": 7,
+  "params": [
+    "LMR_HISTORY_SCALE",
+    "HISTORY_BONUS_SCALE",
+    "HISTORY_BONUS_CAP",
+    "HISTORY_MALUS_CAP",
+    "QUIET_ORDER_KILLER_1",
+    "QUIET_ORDER_COUNTER"
+  ],
+  "baseline": {
+    "LMR_HISTORY_SCALE": 204,
+    "HISTORY_BONUS_SCALE": 120,
+    "HISTORY_BONUS_CAP": 1800,
+    "HISTORY_MALUS_CAP": 1600,
+    "QUIET_ORDER_KILLER_1": 400000,
+    "QUIET_ORDER_COUNTER": 300000
+  },
+  "candidate": {
+    "LMR_HISTORY_SCALE": 204,
+    "HISTORY_BONUS_SCALE": 120,
+    "HISTORY_BONUS_CAP": 2054,
+    "HISTORY_MALUS_CAP": 1600,
+    "QUIET_ORDER_KILLER_1": 400000,
+    "QUIET_ORDER_COUNTER": 300000
+  },
+  "candidate_score": 0.51,
+  "pts_candidate": 306.0,
+  "pts_baseline": 294.0,
+  "candidate_elo": 6.9,
+  "candidate_elo_err95": 16.9,
+  "sprt": {
+    "elo0": 0.0,
+    "elo1": 3.0,
+    "alpha": 0.05,
+    "beta": 0.05,
+    "llr": 0.22,
+    "decision": "inconclusive_at_cap"
+  }
+}
