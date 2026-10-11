@@ -1,0 +1,42 @@
+{
+  "nodes": 300000,
+  "games": 1000,
+  "concurrency": 7,
+  "params": [
+    "LMP_SCALE_PERCENT",
+    "FP_BASE",
+    "FP_MULTIPLIER",
+    "RFP_BASE_MULT",
+    "PRUNING_QUIET_SEE_MARGIN",
+    "PRUNING_CAPTURE_SEE_MARGIN"
+  ],
+  "baseline": {
+    "LMP_SCALE_PERCENT": 118,
+    "FP_BASE": 171,
+    "FP_MULTIPLIER": 125,
+    "RFP_BASE_MULT": 171,
+    "PRUNING_QUIET_SEE_MARGIN": -24,
+    "PRUNING_CAPTURE_SEE_MARGIN": -100
+  },
+  "candidate": {
+    "LMP_SCALE_PERCENT": 137,
+    "FP_BASE": 174,
+    "FP_MULTIPLIER": 96,
+    "RFP_BASE_MULT": 168,
+    "PRUNING_QUIET_SEE_MARGIN": -32,
+    "PRUNING_CAPTURE_SEE_MARGIN": -102
+  },
+  "candidate_score": 0.5125,
+  "pts_candidate": 512.5,
+  "pts_baseline": 487.5,
+  "candidate_elo": 8.7,
+  "candidate_elo_err95": 13.6,
+  "sprt": {
+    "elo0": 0.0,
+    "elo1": 3.0,
+    "alpha": 0.05,
+    "beta": 0.05,
+    "llr": 0.45,
+    "decision": "inconclusive_at_cap"
+  }
+}

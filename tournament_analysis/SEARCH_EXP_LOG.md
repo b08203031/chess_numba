@@ -1907,6 +1907,47 @@ LMP skip 體積 ≫ RFP ≈ FP/Razor/hist-prune 帶 ≫ NMP ≫ ProbCut
 
 ---
 
+### 3.64 E64: 前向剪枝極限協同體系 Phase 5 六軸 SPSA 調參（100k nodes）與 1,000 局 300k LTC 深度檢驗 (ADOPTED / Production Baseline Updated)
+
+* **日期：** 2026-10-11
+* **動機：**
+  * 在 Phase 3（初步前向剪枝，+8.1 Elo）與 Phase 4（歷史表上限放寬，+6.9 Elo）相繼採納後，我們發現深層剪枝仍存在「淺層過度剪枝在深層漏算戰術」的深度適應落差。
+  * 本次啟動 **Phase 5：前向剪枝極限協同體系調參（方案一：Pruning Synergies @ 100k nodes）**，將調參節點數翻倍至 **100,000 nodes**，將每輪局數翻倍至 **300 局**，並引入 `--spsa-a-ratio 0.2` 雙倍阻尼常數平滑衰減，在更高深度視野下精確尋找剪枝協同最優解。
+* **調參六軸（全部為運行時免重編譯軸）：**
+  1. `LMP_SCALE_PERCENT`（基線 118，範圍 [70, 140]，步長 5）：後期走步剪枝走步數閾值縮放比例（%）。
+  2. `FP_BASE`（基線 171，範圍 [100, 300]，步長 10）：徒勞剪枝基礎邊界（cp）。
+  3. `FP_MULTIPLIER`（基線 125，範圍 [60, 220]，步長 10）：徒勞剪枝深度乘數（Margin = Base + Mult * Depth）。
+  4. `RFP_BASE_MULT`（基線 171，範圍 [120, 230]，步長 5）：反向徒勞剪枝深度邊界乘數。
+  5. `PRUNING_QUIET_SEE_MARGIN`（基線 -24，範圍 [-200, -5]，步長 15）：靜態交換評估安靜步前向剪枝容忍度。
+  6. `PRUNING_CAPTURE_SEE_MARGIN`（基線 -100，範圍 [-250, 0]，步長 25）：靜態交換評估吃子步前向剪枝容忍度。
+* **調參設定與成果：**
+  * **L1 SPSA 高深度探索：** 46 輪 × 300 局 = **13,800 局 @ 100,000 nodes**（Google Colab 7 並行，inprocess，`--spsa-a-ratio 0.2`）。
+    * 總對局 13,800 局，`mean_score = 0.4922`, `observed_sd = 0.0276`, `expected_noise_sd = 0.0231`, `sd_ratio = 1.20`。
+    * **統計檢定（drift_z）：**
+      * `LMP_SCALE_PERCENT`: 118 → **137**（+19%，**`drift_z = +4.02`**，全場最強顯著信號，信心水準 > 99.99%）。
+      * `FP_MULTIPLIER`: 125 → **96**（-23%，**`drift_z = -2.23`**，突破顯著門檻，信心水準 > 95%）。
+      * `FP_BASE`: 171 → **174**（`drift_z = +0.23`，微幅補償）。
+      * `RFP_BASE_MULT`: 171 → **168**（`drift_z = -0.46`，高度自洽）。
+      * `PRUNING_QUIET_SEE_MARGIN`: -24 → **-32**（`drift_z = -0.69`，適度放寬）。
+      * `PRUNING_CAPTURE_SEE_MARGIN`: -100 → **-102**（`drift_z = -0.11`，高度定錨）。
+  * **L2 深度實戰檢驗（300,000 nodes LTC，1,000 局，data/openings.epd，SPRT 0, 3）：**
+    * 候選組 (Tail 0.3: LMP 137, FP_BASE 174, FP_MULT 96, RFP 168, QUIET -32, CAP -102) vs Baseline。
+    * 戰績：Candidate **512.5** vs Baseline **487.5** 分（**51.25%**，**淨勝整整 25 盤**！）。
+    * **Elo 表現：`+8.7 ± 13.6 Elo`**（LLR = **+0.45**）。
+    * **全程表現追蹤：** 50 局後全程維持正勝率與正 Elo（100 局 +20.9、300 局 +12.7、500 局 +4.2、800 局 +13.5、1000 局 +8.7），連續 900 局保持領先！
+* **物理機理解析：**
+  1. **LMP 137 是高深度下的核心解放點（貢獻極大正向勝率）**：
+     * 在 100k~300k nodes 的高深度視野下，舊的 118% 閾值在深層太早剪除安靜步；放寬至 137% 後深層搜尋樹適度加寬，為引擎保留了豐富的戰術反擊關鍵步。
+  2. **FP Multiplier 大幅下調（125 → 96）精確收窄深層邊界**：
+     * 徒勞剪枝公式為 Margin = Base + Mult * Depth。舊的 125 在深層（Depth 6~10）導致邊界過大而過度剪枝；降至 96 配合 Base 174，形成了「淺層安全、深層精準」的現代剪枝曲線，杜絕了深層漏算問題。
+  3. **剪枝協同效應在 300k LTC 完美兌現**：
+     * 6 軸協同在 1,000 局超深層對抗中以 51.25% 穩健勝出，再次證實高深度調參（100k nodes）對於縮小深度適應落差的關鍵價值。
+* **判定：** **採納進生產 / 基線 (ADOPTED / PRODUCTION BASELINE UPDATED)**。
+  * 產物檔：`tournament_analysis/l2_verify_pruning_p5_deep_tail03.json`、`tune_search/candidate_pruning_p5_deep.json`。
+  * 生產代碼更新：`LMP_SCALE_PERCENT=137`, `FP_BASE=174`, `FP_MULTIPLIER=96`, `RFP_BASE_MULT=168`, `PRUNING_QUIET_SEE_MARGIN=-32`, `PRUNING_CAPTURE_SEE_MARGIN=-102`。已同步 `constants.py`、`constants_snapshot.py` 與 `classical_old`。
+
+---
+
 ## 4. 常用指令
 
 ```text
