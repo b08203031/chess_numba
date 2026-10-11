@@ -1,0 +1,30 @@
+{
+  "iteration": 46,
+  "spsa_iteration": 6900,
+  "total_pairs": 9000,
+  "theta": {
+    "LMP_SCALE_PERCENT": 137.76047581099064,
+    "FP_BASE": 174.04930242897353,
+    "FP_MULTIPLIER": 95.70370147236586,
+    "RFP_BASE_MULT": 167.9587072424929,
+    "PRUNING_QUIET_SEE_MARGIN": -34.1208457912686,
+    "PRUNING_CAPTURE_SEE_MARGIN": -102.81802525246331
+  },
+  "current_params": {
+    "LMP_SCALE_PERCENT": 138,
+    "FP_BASE": 174,
+    "FP_MULTIPLIER": 96,
+    "RFP_BASE_MULT": 168,
+    "PRUNING_QUIET_SEE_MARGIN": -34,
+    "PRUNING_CAPTURE_SEE_MARGIN": -103
+  },
+  "param_names": [
+    "LMP_SCALE_PERCENT",
+    "FP_BASE",
+    "FP_MULTIPLIER",
+    "RFP_BASE_MULT",
+    "PRUNING_QUIET_SEE_MARGIN",
+    "PRUNING_CAPTURE_SEE_MARGIN"
+  ],
+  "planned_batches": 60
+}
