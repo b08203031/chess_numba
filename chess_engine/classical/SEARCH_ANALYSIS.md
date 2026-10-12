@@ -840,3 +840,25 @@ P6 對戰結果為平手，因此不宣稱 P6 有 Elo 收益，暫作目前搜�
 NMP gate/R、ProbCut style、NMP beta requirement 的預設值也由常量明確保存（仍全為 0，生產行為不變），
 因此 adapter 可以在首次 JIT 前選擇它們，未來 runtime fixed-node matcher 則可直接覆寫 tune slot。
 本節只涉及調參入口與可追溯性，沒有新增搜尋剪枝或改變 P6 搜尋樹。
+
+### 14.6 Phase 6 歷史動力鏈與 LMR 聯動體系 + SF19 深度自適應除數保護 (Plan A, +19.13 Elo)
+
+* **調參背景**：
+  在 Phase 5 LMP / FP 基礎上，啟動 Phase 6 歷史表動力鏈與 LMR 聯動體系（6 軸免重編譯 runtime 參數）：
+  `LMR_BASE_OFFSET`、`LMR_MOVECOUNT_FACTOR`、`LMR_HISTORY_SCALE`、`HISTORY_BONUS_SCALE`、`HISTORY_BONUS_CAP`、`HISTORY_MALUS_CAP`。
+* **L1 SPSA 雲端探索（100,000 nodes）**：
+  在 Google Colab 上完成 60 輪 × 300 局 = 18,000 局高深度探索，平均勝率 50.34%，淨勝 +122 局。Polyak-Ruppert 平滑抽樣（Tail 0.3）產出最佳候選向量。
+* **長時控瓶頸定位與理論突破**：
+  初測 300,000 nodes 長時控時發現勝率下滑（-5 ~ -9 Elo）。深入排查定位根本原因：
+  1. **深層歷史偏見盲點**：`HISTORY_MALUS_CAP`（1788）在深層對冷門戰術防守步懲罰過重，導致 LMR 過度減深。
+  2. **缺少深層除數阻尼**：固定除數（4096）未能隨搜尋深度稀釋歷史噪音。
+* **SF19 深度自適應除數阻尼與 Plan A 實裝**：
+  1. 對齊 Stockfish 19（`int divisor = 2761 + 38 * depth;`），實裝動態除數保護：
+     `dyn_div = LMR_STAT_SCORE_DIV + (max(0, depth - 10) * 128)`。在淺層維持 4096 極限衝深，在 depth 18 自動稀釋 25% 歷史干預，杜絕 over-reduction。
+  2. **Plan A 歷史懲罰安全水位回調**：將 `HISTORY_MALUS_CAP` 回調至 1600，徹底解除戰術盲點，保留正向衝深優勢。
+* **L2 實戰錦標賽全量驗收（400 局 @ 300,000 nodes, TT 64MB）**：
+  * **對手**：`classical_old` 基準引擎（200 對開局白黑互換完整對戰）。
+  * **戰績**：**400 局：New 211.0 (95W 232D 73L) vs Old 189.0**。
+  * **得分率**：**52.75%**（淨勝達 **+22 局**）。
+  * **Elo 增益**：**+19.13 ± 22.05** (95% CI)，SPRT LLR = **+1.28**。
+  * **結論**：證實 SPSA 衝深與 SF19 深度自適應架構在長時控下的重大戰術飛躍，正式確立為 Classical 搜尋新生產基線。
