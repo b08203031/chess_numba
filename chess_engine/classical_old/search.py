@@ -82,7 +82,8 @@ from chess_engine.classical_old.constants import (
     LMR_ADVANCED_PAWN_RELIEF, LMR_ADVANCED_PAWN_WHITE_RANK, LMR_ADVANCED_PAWN_BLACK_RANK,
     LMR_LATE_CAPTURE_MAX_DEPTH, LMR_LATE_CAPTURE_MIN_MC, LMR_TTMOVE_CUTNODE_EXTRA,
     LMR_R_FLOOR, LMR_D_MAX_EXTRA, LMR_CAPTURE_VICTIM_SCALE, LMR_CAPTURE_VICTIM_DIV,
-    LMR_STAT_SCORE_DIV, LMR_RESEARCH_DEEPER_MARGIN, LMR_RESEARCH_SHALLOWER_MARGIN,
+    LMR_STAT_SCORE_DIV, LMR_DIVISOR_MIN_DEPTH, LMR_DIVISOR_DEPTH_STEP,
+    LMR_RESEARCH_DEEPER_MARGIN, LMR_RESEARCH_SHALLOWER_MARGIN,
     QS_STANDPAT_SMOOTH_A, QS_STANDPAT_SMOOTH_B, QS_FAILHIGH_SMOOTH_A, QS_FAILHIGH_SMOOTH_B, QS_SMOOTH_DIV,
     CORRECTION_CNTCV_WEIGHT, CORRECTION_BONUS_HAS_MOVE_DIV, CORRECTION_BONUS_NO_MOVE_DIV,
     CORRECTION_MINOR_SCALE_NUM, CORRECTION_MINOR_SCALE_DEN, CORRECTION_NP_SCALE_NUM, CORRECTION_NP_SCALE_DEN,
@@ -246,7 +247,8 @@ def compute_quiet_pruning_lmr_depth(
     )
     r += search_context.tune[TUNE_LMR_BASE_OFFSET]
     hist = get_lmr_stat_score(search_context, ply, from_sq, to_sq, piece_type)
-    r -= trunc_div(hist * search_context.tune[TUNE_LMR_HIST_SCALE], LMR_STAT_SCORE_DIV)
+    dyn_div = LMR_STAT_SCORE_DIV + (max(0, depth - LMR_DIVISOR_MIN_DEPTH) * LMR_DIVISOR_DEPTH_STEP)
+    r -= trunc_div(hist * search_context.tune[TUNE_LMR_HIST_SCALE], dyn_div)
     if r < 0:
         r = 0
     lmr_d = new_depth - trunc_div(r, 1024)
@@ -2800,8 +2802,10 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                             LMR_CAPTURE_VICTIM_SCALE * victim_piece_val // LMR_CAPTURE_VICTIM_DIV + cap_hist
                         )
 
+                    # SF19 Dynamic Depth Protection: scale up divisor at deeper plies to mitigate over-reduction
+                    dyn_div = LMR_STAT_SCORE_DIV + (max(0, depth - LMR_DIVISOR_MIN_DEPTH) * LMR_DIVISOR_DEPTH_STEP)
                     r -= trunc_div(
-                        lmr_stat_score * search_context.tune[TUNE_LMR_HIST_SCALE], LMR_STAT_SCORE_DIV
+                        lmr_stat_score * search_context.tune[TUNE_LMR_HIST_SCALE], dyn_div
                     )
 
                     # Scale up reductions for expected ALL nodes

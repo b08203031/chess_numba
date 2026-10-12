@@ -205,6 +205,7 @@ python -m tests.perft divide --depth 4
 * **[歷史啟發重構工程計畫](chess_engine/classical/HISTORY_REFORM_PLAN.md)**：五階段閘門紀錄；**1a 凍結、P2 已回退、P3–5 暫緩**；下一段方向見 §11（timeman / 剪枝尺度 / HCE 單項）。
 * **[走步排序與歷史剪枝解耦計畫書](chess_engine/classical/QUIET_ORDERING_DECOUPLING_PLAN.md)**：MovePicker 走步排序評分與 Step 14b 歷史剪枝架構解耦、0-Node Tree Delta 驗證與 SF19 平滑權重路線圖。
 * **[搜尋優化候選提案 (E47–E50)](tournament_analysis/SEARCH_PROPOSALS_E47_E50.md)**：ProbCut 深度動態自適應、LMR ALL-Node / CutNode 減深對齊、廢除將軍延伸方案規劃。
+* **[Phase 7 歷史動力鏈與 SF19 對齊計畫書](chess_engine/classical/PHASE7_HISTORY_LMR_ALIGNMENT_PLAN.md)**：Phase 6 實戰 400 局 @ 300k 大勝（+19.13 Elo）複盤、21 個歷史強耦合參數拓撲、HCE vs NNUE 不變性定律，以及 Phase 7 模組化 5 軸 SPSA 調參計畫。
 
 ### 3. 對戰、聯賽與調參
 
