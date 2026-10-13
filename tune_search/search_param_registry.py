@@ -133,20 +133,20 @@ _RUNTIME_SPECS = [
     _spec("LMR_TTCAPTURE_BONUS", "LMR_TTCAPTURE_BONUS", 0, 2500, 128, "lmr", runtime_attr="TUNE_LMR_TTCAP", spsa_r_end=0.8),
     _spec("LMR_MOVECOUNT_FACTOR", "LMR_MOVECOUNT_FACTOR", 0, 100, 4, "lmr", runtime_attr="TUNE_LMR_MC_FACTOR", spsa_r_end=0.8),
     _spec("LMR_TTMOVE_REDUCTION", "LMR_TTMOVE_REDUCTION", 0, 2500, 128, "lmr", runtime_attr="TUNE_LMR_TTMOVE_RED", spsa_r_end=0.8),
-    _spec("NMP_SCOPE_MODE", "NMP_SCOPE_MODE", 0, 3, 1, "nmp", kind="discrete", runtime_attr="TUNE_NMP_SCOPE", spsa_r_end=0.4),
-    _spec("NMP_GATE_MODE", "NMP_GATE_MODE", 0, 3, 1, "nmp", kind="discrete", runtime_attr="TUNE_NMP_GATE", spsa_r_end=0.4),
-    _spec("NMP_R_MODE", "NMP_R_MODE", 0, 2, 1, "nmp", kind="discrete", runtime_attr="TUNE_NMP_R", spsa_r_end=0.4),
+    _spec("NMP_EVAL_MARGIN_DIV", "NMP_EVAL_MARGIN_DIV", 64, 400, 16, "nmp", runtime_attr="TUNE_NMP_EVAL_DIV", spsa_r_end=0.8),
+    _spec("TUNE_RESERVED_21", "TUNE_RESERVED_21_VAL", 0, 0, 1, "safeguards", kind="discrete", runtime_attr="TUNE_RESERVED_21", spsa_r_end=0.0),
+    _spec("TUNE_RESERVED_22", "TUNE_RESERVED_22_VAL", 0, 0, 1, "safeguards", kind="discrete", runtime_attr="TUNE_RESERVED_22", spsa_r_end=0.0),
     _spec("PROBCUT_STYLE_MODE", "PROBCUT_STYLE_MODE", 0, 2, 1, "pruning", kind="discrete", runtime_attr="TUNE_PROBCUT_STYLE", spsa_r_end=0.4),
     _spec("LMR_TABLE_SCALE_PERCENT", "LMR_TABLE_SCALE_PERCENT", 70, 130, 5, "lmr", runtime_attr="TUNE_LMR_TABLE_SCALE", spsa_r_end=0.8),
     _spec("LMR_NOT_IMP_NUM", "LMR_NOT_IMP_NUM", 0, 384, 16, "lmr", runtime_attr="TUNE_LMR_NOT_IMP", spsa_r_end=0.8),
-    _spec("NMP_LEGACY_BASE", "NMP_LEGACY_BASE", 100, 350, 10, "nmp", runtime_attr="TUNE_NMP_G_BASE", spsa_r_end=0.8),
-    _spec("NMP_LEGACY_DEPTH_COEF", "NMP_LEGACY_DEPTH_COEF", 0, 30, 2, "nmp", runtime_attr="TUNE_NMP_G_DEPTH", spsa_r_end=0.8),
-    _spec("NMP_LEGACY_IMPROVING_COEF", "NMP_LEGACY_IMPROVING_COEF", 0, 90, 5, "nmp", runtime_attr="TUNE_NMP_G_IMP", spsa_r_end=0.8),
-    _spec("NMP_NEED_BETA", "NMP_NEED_BETA", 0, 1, 1, "nmp", kind="discrete", runtime_attr="TUNE_NMP_NEED_BETA", spsa_r_end=0.4),
-    _spec("NMP_LEGACY_R_BASE", "NMP_LEGACY_R_BASE", 4, 12, 1, "nmp", runtime_attr="TUNE_NMP_R_BASE", spsa_r_end=0.6),
-    _spec("NMP_LEGACY_R_DEPTH_DIV", "NMP_LEGACY_R_DEPTH_DIV", 1, 8, 1, "nmp", kind="discrete", runtime_attr="TUNE_NMP_R_DIV", spsa_r_end=0.6),
-    _spec("NMP_VERIFICATION_DEPTH", "NMP_VERIFICATION_DEPTH", 5, 12, 1, "nmp", kind="discrete", runtime_attr="TUNE_NMP_VERIFY_D", spsa_r_end=0.4),
-    _spec("NMP_SCOPE_MIN_DEPTH", "NMP_SCOPE_MIN_DEPTH", 3, 10, 1, "nmp", kind="discrete", runtime_attr="TUNE_NMP_SCOPE_MIND", spsa_r_end=0.4),
+    _spec("NMP_BASE", "NMP_BASE", 100, 350, 10, "nmp", runtime_attr="TUNE_NMP_BASE", spsa_r_end=0.8),
+    _spec("NMP_DEPTH_COEF", "NMP_DEPTH_COEF", 0, 30, 2, "nmp", runtime_attr="TUNE_NMP_DEPTH_COEF", spsa_r_end=0.8),
+    _spec("NMP_IMP_COEF", "NMP_IMP_COEF", 0, 90, 5, "nmp", runtime_attr="TUNE_NMP_IMP_COEF", spsa_r_end=0.8),
+    _spec("TUNE_RESERVED_29", "TUNE_RESERVED_29_VAL", 0, 0, 1, "safeguards", kind="discrete", runtime_attr="TUNE_RESERVED_29", spsa_r_end=0.0),
+    _spec("NMP_R_BASE", "NMP_R_BASE", 4, 12, 1, "nmp", runtime_attr="TUNE_NMP_R_BASE", spsa_r_end=0.6),
+    _spec("NMP_R_DIV", "NMP_R_DIV", 1, 8, 1, "nmp", kind="discrete", runtime_attr="TUNE_NMP_R_DIV", spsa_r_end=0.6),
+    _spec("NMP_VERIFICATION_DEPTH", "NMP_VERIFICATION_DEPTH", 5, 16, 1, "nmp", kind="discrete", runtime_attr="TUNE_NMP_VERIFY_DEPTH", spsa_r_end=0.4),
+    _spec("TUNE_RESERVED_33", "TUNE_RESERVED_33_VAL", 0, 0, 1, "safeguards", kind="discrete", runtime_attr="TUNE_RESERVED_33", spsa_r_end=0.0),
     _spec("HISTORY_BONUS_SCALE", "HISTORY_BONUS_SCALE", 40, 240, 10, "history", runtime_attr="TUNE_HIST_BONUS_SCALE", spsa_r_end=0.8),
     _spec("HISTORY_BONUS_CAP", "HISTORY_BONUS_CAP", 800, 3000, 100, "history", runtime_attr="TUNE_HIST_BONUS_CAP", spsa_r_end=0.8),
     # Phase 7: band narrowed after the Phase 6 SPSA@100k pushed this cap to 1788
@@ -191,7 +191,6 @@ _COMPILE_SPECS = [
     _spec("NMP_SF_MARGIN_DEPTH_COEF", "NMP_SF_MARGIN_DEPTH_COEF", 0, 64, 4, "nmp", spsa_r_end=0.5),
     _spec("NMP_SF_MARGIN_BASE", "NMP_SF_MARGIN_BASE", 150, 450, 10, "nmp", spsa_r_end=0.5),
     _spec("NMP_SF_MARGIN_IMPROVING", "NMP_SF_MARGIN_IMPROVING", 0, 80, 5, "nmp", spsa_r_end=0.5),
-    _spec("NMP_EVAL_MARGIN_DIV", "NMP_EVAL_MARGIN_DIV", 50, 300, 10, "nmp", spsa_r_end=0.5),
     _spec("NMP_EVAL_MARGIN_MAX", "NMP_EVAL_MARGIN_MAX", 0, 6, 1, "nmp", kind="discrete", spsa_r_end=0.4),
     _spec("NMP_SF_R_BASE", "NMP_SF_R_BASE", 500, 1100, 25, "nmp", spsa_r_end=0.5),
     _spec("NMP_SF_R_DEPTH", "NMP_SF_R_DEPTH", 0, 128, 8, "nmp", spsa_r_end=0.5),
@@ -283,11 +282,7 @@ DEFAULT_PROFILE = "runtime"
 # dedicated A/B matches (tools/run_search_param_match.py), never inside SPSA.
 CATEGORICAL_PARAMS = frozenset(
     {
-        "NMP_SCOPE_MODE",
-        "NMP_GATE_MODE",
-        "NMP_R_MODE",
         "PROBCUT_STYLE_MODE",
-        "NMP_NEED_BETA",
     }
 )
 

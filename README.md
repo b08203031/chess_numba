@@ -205,9 +205,11 @@ python -m tests.perft divide --depth 4
 * **[歷史啟發重構工程計畫](chess_engine/classical/HISTORY_REFORM_PLAN.md)**：五階段閘門紀錄；**1a 凍結、P2 已回退、P3–5 暫緩**；下一段方向見 §11（timeman / 剪枝尺度 / HCE 單項）。
 * **[走步排序與歷史剪枝解耦計畫書](chess_engine/classical/QUIET_ORDERING_DECOUPLING_PLAN.md)**：MovePicker 走步排序評分與 Step 14b 歷史剪枝架構解耦、0-Node Tree Delta 驗證與 SF19 平滑權重路線圖。
 * **[搜尋優化候選提案 (E47–E50)](tournament_analysis/SEARCH_PROPOSALS_E47_E50.md)**：ProbCut 深度動態自適應、LMR ALL-Node / CutNode 減深對齊、廢除將軍延伸方案規劃。
-* **[Phase 7 歷史動力鏈與 SF19 對齊計畫書](chess_engine/classical/PHASE7_HISTORY_LMR_ALIGNMENT_PLAN.md)**：Phase 6 實戰 400 局 @ 300k 大勝（+19.13 Elo）複盤、21 個歷史強耦合參數拓撲、HCE vs NNUE 不變性定律，以及 Phase 7 模組化 5 軸 SPSA 調參計畫。
+* **[Phase 7 歷史動力鏈與 SF19 對齊計畫書](chess_engine/classical/PHASE7_HISTORY_LMR_ALIGNMENT_PLAN.md)**：Phase 6 實戰 400 局 @ 300k 大勝（+19.13 Elo）複盤、21 個歷史強耦合參數拓撲、42 槽位免編譯架構、以及 Phase 7 雲端 L1 SPSA 4,800 局 + L2 1,000 局 @ 300k 驗收確證 Plan A 最優平原（+0.7 Elo，凍結維持生產參數）。
+* **[Phase 8 空步剪枝體系 SF19 對齊與調參計畫書](chess_engine/classical/PHASE8_NMP_SF19_ALIGNMENT_PLAN.md)**：徹底廢除 NMP 離散模式選擇器、全面對齊 SF19 Step 10 極簡架構，以及方案甲（分階段解耦：4 軸連續 SPSA + 3 軸離散小整數 LTC 格點 A/B 驗收）實施藍圖。
 
 ### 3. 對戰、聯賽與調參
+
 
 * **[引擎對戰指南](tools/TOURNAMENT_TUTORIAL.md)**：`tools/tournament.py`、SPRT、併發與 JIT 暖機。
 * **[對戰框架說明](tournament_analysis/README.md)**：本目錄角色、成對賽果九宮格、局級/著法級統計圖表與分析腳本。

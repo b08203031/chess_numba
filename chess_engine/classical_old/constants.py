@@ -959,7 +959,11 @@ TUNE_HIST_BONUS_CAP = 35    # stat bonus cap (HISTORY_BONUS_CAP)
 TUNE_HIST_MALUS_CAP = 36    # stat malus cap (HISTORY_MALUS_CAP)
 TUNE_ORDER_KILLER_1 = 37    # quiet move ordering killer 1 bonus (QUIET_ORDER_KILLER_1)
 TUNE_ORDER_COUNTER = 38     # quiet move ordering counter move bonus (QUIET_ORDER_COUNTER)
-TUNE_SIZE = 39
+# Phase 7 History damping runtime slots
+TUNE_HIST_MALUS_DECAY = 39  # failed-quiet geometric decay numerator (HISTORY_QUIET_MALUS_DECAY_NUM / 1024)
+TUNE_LMR_DIV_STEP = 40      # LMR stat-score divisor growth per ply above MIN_DEPTH (LMR_DIVISOR_DEPTH_STEP)
+TUNE_HIST_MALUS_SCALE = 41  # failed-quiet initial malus multiplier numerator (HISTORY_QUIET_MALUS_SCALE_NUM / 1024)
+TUNE_SIZE = 42
 # E2 tried 70 (puzzle +6 pass, nodes +25%); match @200k nodes: depth↓, no Elo.
 LMR_TABLE_SCALE_PERCENT = 113  # E60 tuned (was 100; SPSA L1 12k + L2 600@300k +15.6 Elo)
 LMR_NOT_IMP_NUM = 197  # E57 (was 194; SPSA L1+L2 400@300k +5.2 Elo)

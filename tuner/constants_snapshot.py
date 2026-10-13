@@ -937,26 +937,32 @@ TUNE_LMR_TTCAP = 17          # +r when TT move is capture
 TUNE_LMR_MC_FACTOR = 18      # r -= mc * factor (higher → softer LMR)
 TUNE_LMR_TTMOVE_RED = 19     # r subtract for researching TT move
 # Structural experiment modes (runtime; see NMP_* production defaults below)
-# NMP_SCOPE: 0=cut only, 1=all non-PV, 2=non-PV&d>=mind, 3=cut OR (non-PV&d>=mind)
-TUNE_NMP_SCOPE = 20
-# NMP_GATE: 0 = legacy, 1 = SF11 raw, 2 = SF11*78, 3 = custom G_* tune slots
-TUNE_NMP_GATE = 21
-# NMP_R: 0 = legacy 7+d//3, 1 = SF11, 2 = custom R_BASE + d//R_DIV + eval_margin
-TUNE_NMP_R = 22
-# PROBCUT_STYLE: 0 = flat TUNE_PROBCUT_MARGIN, 1 = SF 189-45*imp (*78/100), 2 = force off
+# NMP Phase 8 continuous parameters & reserved slots
+TUNE_NMP_EVAL_DIV = 20       # dynamic R eval excess divisor (was TUNE_NMP_SCOPE)
+TUNE_RESERVED_21 = 21        # reserved slot (was TUNE_NMP_GATE mode)
+TUNE_RESERVED_22 = 22        # reserved slot (was TUNE_NMP_R mode)
 TUNE_PROBCUT_STYLE = 23
-# LMR base table (E2): scale REDUCTIONS product; not-improving numerator (SF uses 194/512)
-TUNE_LMR_TABLE_SCALE = 24   # percent on REDUCTIONS[d]*REDUCTIONS[mc]
-TUNE_LMR_NOT_IMP = 25       # not-improving numerator (higher → more reduction)
-# NMP continuous params (gate=3 / r=2); defaults match legacy so gate=0 path still primary
-TUNE_NMP_G_BASE = 26        # custom: threshold = beta - G_DEPTH*d - G_IMP*imp + G_BASE
-TUNE_NMP_G_DEPTH = 27
-TUNE_NMP_G_IMP = 28
-TUNE_NMP_NEED_BETA = 29     # 0/1: also require static >= beta
-TUNE_NMP_R_BASE = 30        # custom R base (legacy 7)
-TUNE_NMP_R_DIV = 31         # custom R: base + depth//div (legacy 3)
-TUNE_NMP_VERIFY_D = 32      # verification min depth (legacy 8; 999 = off)
-TUNE_NMP_SCOPE_MIND = 33    # for scope 2/3: min depth for non-PV NMP
+TUNE_LMR_TABLE_SCALE = 24    # percent on REDUCTIONS[d]*REDUCTIONS[mc]
+TUNE_LMR_NOT_IMP = 25        # not-improving numerator (higher → more reduction)
+TUNE_NMP_BASE = 26           # continuous gate base threshold (was TUNE_NMP_G_BASE)
+TUNE_NMP_DEPTH_COEF = 27     # continuous gate depth coefficient (was TUNE_NMP_G_DEPTH)
+TUNE_NMP_IMP_COEF = 28       # continuous gate improving coefficient (was TUNE_NMP_G_IMP)
+TUNE_RESERVED_29 = 29        # reserved slot (was TUNE_NMP_NEED_BETA)
+TUNE_NMP_R_BASE = 30         # dynamic R base (NMP_R_BASE, default 7)
+TUNE_NMP_R_DIV = 31          # dynamic R depth divisor (NMP_R_DIV, default 3)
+TUNE_NMP_VERIFY_DEPTH = 32   # verification search min depth threshold (was TUNE_NMP_VERIFY_D)
+TUNE_RESERVED_33 = 33        # reserved slot (was TUNE_NMP_SCOPE_MIND)
+
+# Backward compatibility aliases for tune slots
+TUNE_NMP_SCOPE = TUNE_NMP_EVAL_DIV
+TUNE_NMP_GATE = TUNE_RESERVED_21
+TUNE_NMP_R = TUNE_RESERVED_22
+TUNE_NMP_G_BASE = TUNE_NMP_BASE
+TUNE_NMP_G_DEPTH = TUNE_NMP_DEPTH_COEF
+TUNE_NMP_G_IMP = TUNE_NMP_IMP_COEF
+TUNE_NMP_NEED_BETA = TUNE_RESERVED_29
+TUNE_NMP_VERIFY_D = TUNE_NMP_VERIFY_DEPTH
+TUNE_NMP_SCOPE_MIND = TUNE_RESERVED_33
 # Phase 4 History & Move Ordering runtime slots
 TUNE_HIST_BONUS_SCALE = 34  # stat bonus linear slope (HISTORY_BONUS_SCALE)
 TUNE_HIST_BONUS_CAP = 35    # stat bonus cap (HISTORY_BONUS_CAP)
@@ -1051,19 +1057,17 @@ NMP_STATIC_MARGIN = 150      # not used as primary NMP gate
 NMP_MIN_SIDE_NON_PAWNS = 2
 NMP_VERIFICATION_DEPTH = 8   # verification from this depth (tunable via TUNE_NMP_VERIFY_D)
 LOW_MATERIAL_PRUNING_PIECE_COUNT = 7
-# Production NMP structure: cut_node only (legacy).
-# N1 tried scope=3 (cut OR non-PV&d>=6): 1000@n10k 49.0%/Elo−6.6 → rollback.
-# 0=cut only, 1=all non-PV (S1a pass−7), 2=non-PV&d>=mind only, 3=cut∨(nonPV&d>=mind)
+# Production NMP structure: cut_node only (Phase 8 SF19 alignment).
 NMP_SCOPE_MODE = 0
 NMP_SCOPE_MIN_DEPTH = 6
-# Runtime mode defaults.  These used to be hard-coded as zero while the
-# corresponding SearchContext slots were already mutable.  Keeping the
-# defaults in constants lets the UCI/SPSA adapter select a mode before the
-# first Numba compilation without changing the production defaults.
-NMP_GATE_MODE = 0          # 0=legacy, 1=SF11 raw, 2=SF11*78, 3=custom G slots
-NMP_R_MODE = 0             # 0=legacy, 1=SF11, 2=custom R slots
+NMP_GATE_MODE = 0
+NMP_R_MODE = 0
 PROBCUT_STYLE_MODE = 0     # 0=flat, 1=SF-style, 2=off
-NMP_NEED_BETA = 0          # 0/1: custom NMP gate also requires static >= beta
+NMP_NEED_BETA = 0
+TUNE_RESERVED_21_VAL = 0
+TUNE_RESERVED_22_VAL = 0
+TUNE_RESERVED_29_VAL = 0
+TUNE_RESERVED_33_VAL = 0
 
 # Late Move Reductions (LMR)
 LMR_MIN_DEPTH = 3
@@ -1224,26 +1228,28 @@ QUIET_ORDER_KILLER_2 = 350000
 QUIET_ORDER_COUNTER = 300000
 LPH_ORDER_SCALE = 8              # score += scale * lph // (1+ply)
 
-# --- NMP formula coeffs ---
+# --- NMP formula coeffs (Phase 8: SF19 aligned, continuous HCE scale) ---
 NMP_MIN_DEPTH = 3
-# Legacy gate: static >= beta - DEPTH_COEF*d - IMP*improving + BASE
-NMP_LEGACY_DEPTH_COEF = 14
-NMP_LEGACY_IMPROVING_COEF = 45
-# Legacy gate: static >= beta - 14*d - 45*imp + BASE
-# d=10 !imp: BASE200 → β+60; BASE160 → β+20; BASE80 was match-negative → avoid.
-NMP_LEGACY_BASE = 200
-# SF11 gate margin: -DEPTH_COEF*d + BASE - IMP*improving (optionally * HCE scale)
+NMP_BASE = 200
+NMP_DEPTH_COEF = 14
+NMP_IMP_COEF = 45
+NMP_EVAL_MARGIN_DIV = 150
+NMP_EVAL_MARGIN_MAX = 3
+NMP_R_BASE = 7
+NMP_R_DIV = 3
+
+# Backward compatibility aliases
+NMP_LEGACY_BASE = NMP_BASE
+NMP_LEGACY_DEPTH_COEF = NMP_DEPTH_COEF
+NMP_LEGACY_IMPROVING_COEF = NMP_IMP_COEF
+NMP_LEGACY_R_BASE = NMP_R_BASE
+NMP_LEGACY_R_DEPTH_DIV = NMP_R_DIV
 NMP_SF_MARGIN_DEPTH_COEF = 32
 NMP_SF_MARGIN_BASE = 292
 NMP_SF_MARGIN_IMPROVING = 30
-# R: SF (BASE + DEPTH*d) // DIV + eval_margin; legacy BASE + d//DEPTH_DIV + eval_margin
-NMP_EVAL_MARGIN_DIV = 150
-NMP_EVAL_MARGIN_MAX = 3
 NMP_SF_R_BASE = 854
 NMP_SF_R_DEPTH = 68
 NMP_SF_R_DIV = 258
-NMP_LEGACY_R_BASE = 7
-NMP_LEGACY_R_DEPTH_DIV = 3
 
 # --- IIR / FP / LMP / check extension depth gates ---
 IIR_MIN_DEPTH = 4

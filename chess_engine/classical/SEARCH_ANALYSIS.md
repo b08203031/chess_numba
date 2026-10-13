@@ -862,3 +862,19 @@ NMP gate/R、ProbCut style、NMP beta requirement 的預設值也由常量明確
   * **得分率**：**52.75%**（淨勝達 **+22 局**）。
   * **Elo 增益**：**+19.13 ± 22.05** (95% CI)，SPRT LLR = **+1.28**。
   * **結論**：證實 SPSA 衝深與 SF19 深度自適應架構在長時控下的重大戰術飛躍，正式確立為 Classical 搜尋新生產基線。
+
+### 15.6 Phase 7：歷史幾何衰減與深層 LMR 聯動調參實測與生產定論（2026-10-13）
+
+* **調參目標**：在 Plan A 基線（`1ed92f0`）上，透過免編譯 42 槽位擴展，嘗試精修 4 個歷史阻尼參數（`HISTORY_QUIET_MALUS_DECAY_NUM`, `HISTORY_MALUS_CAP`, `LMR_DIVISOR_DEPTH_STEP`, `HISTORY_QUIET_MALUS_SCALE_NUM`）。
+* **L1 SPSA 雲端探索（4,800 局 @ 200,000 nodes）**：
+  * 在 Google Colab（8 vCPU）跑滿 24 輪，平均勝率 49.91%，所有 4 軸漂移分數 $|z| < 1.0$（純蒙地卡羅取樣噪聲），無任何顯著爬坡梯度。
+  * 提取之 Polyak-Ruppert 平滑候選值（`955` / `1596` / `133` / `1032`）與基線差異小於 4%。
+* **L2 深度長時控對戰驗收（1,000 局 @ 300,000 nodes, TT 64MB）**：
+  * **對手**：Plan A 生產基線（`1ed92f0`，非 `classical_old`）。
+  * **戰績**：跑滿 1,000 局上限，**候選得分率 50.10%**（Elo **+0.7 ± 14.0**，SPRT LLR = **-0.05**，停於 `inconclusive_at_cap`）。
+  * 前 50 局開局採樣擾動（-49 Elo）在大樣本下完全均值回歸至 50.1%，證實候選與基線實力 1:1 同質。
+* **生產定論與裁決**：
+  * 嚴格遵守「No gain, no change」原則，**維持 Plan A 生產常數不作更動**。
+  * 實測千局證實 Plan A 基準已處於全局最優解平原中心，阻尼與除數設定高度穩健。
+  * 技術細節與完整數據見 [`PHASE7_HISTORY_LMR_ALIGNMENT_PLAN.md`](PHASE7_HISTORY_LMR_ALIGNMENT_PLAN.md) §6。
+

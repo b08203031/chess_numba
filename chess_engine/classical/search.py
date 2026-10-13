@@ -159,8 +159,10 @@ from chess_engine.classical.constants import (
     TUNE_LMR_CUTNODE, TUNE_LMR_NO_TTMOVE, TUNE_LMR_TTCAP, TUNE_LMR_MC_FACTOR, TUNE_LMR_TTMOVE_RED,
     TUNE_NMP_SCOPE, TUNE_NMP_GATE, TUNE_NMP_R, TUNE_PROBCUT_STYLE,
     TUNE_LMR_TABLE_SCALE, TUNE_LMR_NOT_IMP,
+    TUNE_NMP_BASE, TUNE_NMP_DEPTH_COEF, TUNE_NMP_IMP_COEF, TUNE_NMP_EVAL_DIV,
+    TUNE_NMP_R_BASE, TUNE_NMP_R_DIV, TUNE_NMP_VERIFY_DEPTH,
     TUNE_NMP_G_BASE, TUNE_NMP_G_DEPTH, TUNE_NMP_G_IMP, TUNE_NMP_NEED_BETA,
-    TUNE_NMP_R_BASE, TUNE_NMP_R_DIV, TUNE_NMP_VERIFY_D, TUNE_NMP_SCOPE_MIND,
+    TUNE_NMP_VERIFY_D, TUNE_NMP_SCOPE_MIND,
     TUNE_HIST_BONUS_SCALE, TUNE_HIST_BONUS_CAP, TUNE_HIST_MALUS_CAP,
     TUNE_HIST_MALUS_DECAY, TUNE_LMR_DIV_STEP, TUNE_HIST_MALUS_SCALE,
     PINNED_UNCOMPUTED_SENTINEL,
@@ -1797,178 +1799,111 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                     return (np.int32(probcut_return_score), pc_move, nodes_searched, quiescence_nodes, tt_hits)
 
     # --- Null Move Pruning (guarded by H3) ---
-    # P1: skip when static is already known-win; do not treat unproven big scores as cuts.
-    # Runtime scope (TUNE_NMP_SCOPE):
-    #   0 = cut_node only (legacy production before 2026-07-19)
-    #   1 = all non-PV (S1a: nodes slightly down, pass −7 — not default)
-    #   2 = non-PV only when depth >= mind (does NOT keep shallow cut NMP)
-    #   3 = cut_node OR (non-PV and depth >= mind)  ← production default
-    # gate 0=legacy / 1=SF raw / 2=SF*78 / 3=custom G_*;
-    # R 0=legacy / 1=SF11 / 2=custom R_BASE+d//R_DIV.
-    _nmp_scope = search_context.tune[TUNE_NMP_SCOPE]
-    _nmp_mind = search_context.tune[TUNE_NMP_SCOPE_MIND]
-    if _nmp_scope == 0:
-        _nmp_ok_node = cut_node
-    elif _nmp_scope == 1:
-        _nmp_ok_node = not is_pv
-    elif _nmp_scope == 2:
-        _nmp_ok_node = (not is_pv) and (depth >= _nmp_mind)
-    else:
-        # scope >= 3: keep cut NMP everywhere + add deep non-PV NMP
-        _nmp_ok_node = cut_node or ((not is_pv) and (depth >= _nmp_mind))
-    if (search_context.enable_nmp and _nmp_ok_node and not is_exclusion_search and depth >= NMP_MIN_DEPTH and not is_currently_in_check
+    # =========================================================================
+    # Step 10. Null move search with verification search (100% 對齊 Stockfish 19 Step 10)
+    # =========================================================================
+    if (search_context.enable_nmp and cut_node and not is_exclusion_search
+            and depth >= NMP_MIN_DEPTH and not is_currently_in_check
             and not (ply > 0 and search_context.move_stack[ply - 1] == NO_MOVE)
             and side_non_pawn_count >= NMP_MIN_SIDE_NON_PAWNS
+            and ply >= search_context.nmp_min_ply
+            and beta >= -VALUE_KNOWN_WIN
             and abs(beta) < VALUE_KNOWN_WIN
             and not is_win(static_score)):
 
         _diag_add(search_context, DIAG_NMP_ELIGIBLE)
 
-        _nmp_gate = search_context.tune[TUNE_NMP_GATE]
-        if _nmp_gate == 0:
-            # Legacy: harder mid-depth gate (see SEARCH_ANALYSIS §9.3)
-            nmp_threshold = (beta - NMP_LEGACY_DEPTH_COEF * depth
-                             - NMP_LEGACY_IMPROVING_COEF * (1 if improving else 0)
-                             + NMP_LEGACY_BASE)
-            nmp_need_ge_beta = False
-        elif _nmp_gate == 3:
-            # Custom continuous gate (defaults == legacy when G_* left at init)
-            nmp_threshold = (beta - search_context.tune[TUNE_NMP_G_DEPTH] * depth
-                             - search_context.tune[TUNE_NMP_G_IMP] * (1 if improving else 0)
-                             + search_context.tune[TUNE_NMP_G_BASE])
-            nmp_need_ge_beta = search_context.tune[TUNE_NMP_NEED_BETA] != 0
-        else:
-            # SF11: eval >= beta and staticEval >= beta + margin
-            # gate=1 raw SF coeffs; gate=2 scale margin by HCE_SCALE
-            _sf_margin = (-NMP_SF_MARGIN_DEPTH_COEF * depth + NMP_SF_MARGIN_BASE
-                          - NMP_SF_MARGIN_IMPROVING * (1 if improving else 0))
-            if _nmp_gate == 2:
-                _sf_margin = _sf_margin * HCE_SCALE_NUM // HCE_SCALE_DEN
-            nmp_threshold = beta + _sf_margin
-            nmp_need_ge_beta = True
+        # 1. 統一連續線性門檻 (beta - depth_coef*d - imp_coef*imp + base)
+        nmp_threshold = (beta - search_context.tune[TUNE_NMP_DEPTH_COEF] * depth
+                              - search_context.tune[TUNE_NMP_IMP_COEF] * (1 if improving else 0)
+                              + search_context.tune[TUNE_NMP_BASE])
 
-        nmp_gate_ok = static_score >= nmp_threshold
-        if nmp_need_ge_beta:
-            nmp_gate_ok = nmp_gate_ok and (static_score >= beta)
-
-        if nmp_gate_ok:
+        if static_score >= nmp_threshold:
             if not static_eval_is_full:
-                raw_static_eval, static_score, improving, cached_pinned_white, cached_pinned_black = compute_full_corrected_static_eval(piece_bbs, occupancy_bbs, game_state, search_context, ply)
+                raw_static_eval, static_score, improving, cached_pinned_white, cached_pinned_black = compute_full_corrected_static_eval(
+                    piece_bbs, occupancy_bbs, game_state, search_context, ply
+                )
                 static_eval_is_full = True
-                if _nmp_gate == 0:
-                    nmp_threshold = (beta - NMP_LEGACY_DEPTH_COEF * depth
-                                     - NMP_LEGACY_IMPROVING_COEF * (1 if improving else 0)
-                                     + NMP_LEGACY_BASE)
-                elif _nmp_gate == 3:
-                    nmp_threshold = (beta - search_context.tune[TUNE_NMP_G_DEPTH] * depth
-                                     - search_context.tune[TUNE_NMP_G_IMP] * (1 if improving else 0)
-                                     + search_context.tune[TUNE_NMP_G_BASE])
-                else:
-                    _sf_margin = (-NMP_SF_MARGIN_DEPTH_COEF * depth + NMP_SF_MARGIN_BASE
-                                  - NMP_SF_MARGIN_IMPROVING * (1 if improving else 0))
-                    if _nmp_gate == 2:
-                        _sf_margin = _sf_margin * HCE_SCALE_NUM // HCE_SCALE_DEN
-                    nmp_threshold = beta + _sf_margin
-                nmp_gate_ok = static_score >= nmp_threshold
-                if nmp_need_ge_beta:
-                    nmp_gate_ok = nmp_gate_ok and (static_score >= beta)
+                nmp_threshold = (beta - search_context.tune[TUNE_NMP_DEPTH_COEF] * depth
+                                      - search_context.tune[TUNE_NMP_IMP_COEF] * (1 if improving else 0)
+                                      + search_context.tune[TUNE_NMP_BASE])
 
-        # Re-check after full eval: specialized EG may raise static into known-win band
-        if nmp_gate_ok and not is_win(static_score):
-            _diag_add(search_context, DIAG_NMP_GATE_PASS)
-            nmp_saved_side = game_state[0]
-            nmp_saved_ep   = game_state[2]
-            nmp_saved_hmc  = game_state[3]
-            nmp_saved_key  = game_state[4]
+            if static_score >= nmp_threshold and not is_win(static_score):
+                _diag_add(search_context, DIAG_NMP_GATE_PASS)
 
-            search_context.move_stack[ply] = NO_MOVE
-            search_context.piece_stack[ply] = -1
+                nmp_saved_side = game_state[0]
+                nmp_saved_ep   = game_state[2]
+                nmp_saved_hmc  = game_state[3]
+                nmp_saved_key  = game_state[4]
 
-            make_null_move(game_state)
-            _diag_add(search_context, DIAG_NMP_NULL_TRY)
+                search_context.move_stack[ply] = NO_MOVE
+                search_context.piece_stack[ply] = -1
 
-            # R formula: legacy / SF11 / custom
-            eval_margin = (static_score - beta) // NMP_EVAL_MARGIN_DIV
-            if eval_margin < 0:
-                eval_margin = 0
-            elif eval_margin > NMP_EVAL_MARGIN_MAX:
-                eval_margin = NMP_EVAL_MARGIN_MAX
-            _nmp_r_mode = search_context.tune[TUNE_NMP_R]
-            if _nmp_r_mode == 1:
-                nmp_reduction = (NMP_SF_R_BASE + NMP_SF_R_DEPTH * depth) // NMP_SF_R_DIV + eval_margin
-            elif _nmp_r_mode == 2:
-                _r_div = search_context.tune[TUNE_NMP_R_DIV]
-                if _r_div < 1:
-                    _r_div = 1
-                nmp_reduction = search_context.tune[TUNE_NMP_R_BASE] + depth // _r_div + eval_margin
-            else:
-                nmp_reduction = NMP_LEGACY_R_BASE + depth // NMP_LEGACY_R_DEPTH_DIV + eval_margin
-            search_depth = max(0, depth - nmp_reduction)
-            search_context.reduction_stack[ply + 1] = nmp_reduction
-            res_nm = _search(
-                piece_bbs, occupancy_bbs, game_state, _i32(search_depth),
-                _i32(-beta), _i32(-beta + 1), search_context, _i32(ply + 1),
-                _u16(NO_MOVE), _b_false(), not cut_node,
-            )
-            null_move_score = res_nm[0]
-            child_nodes = res_nm[2]
-            child_q_nodes = res_nm[3]
-            child_tt_hits = res_nm[4]
+                make_null_move(game_state)
+                _diag_add(search_context, DIAG_NMP_NULL_TRY)
 
-            game_state[0] = nmp_saved_side
-            game_state[2] = nmp_saved_ep
-            game_state[3] = nmp_saved_hmc
-            game_state[4] = nmp_saved_key
-            null_move_score = -null_move_score
+                # 2. 動態減深 R (SF19: R_BASE + d//R_DIV + max(0, (static - beta)//EVAL_DIV))
+                _eval_div = max(1, search_context.tune[TUNE_NMP_EVAL_DIV])
+                _r_div = max(1, search_context.tune[TUNE_NMP_R_DIV])
+                eval_margin = max(0, (static_score - beta) // _eval_div)
 
-            nodes_searched += child_nodes; quiescence_nodes += child_q_nodes; tt_hits += child_tt_hits
+                nmp_reduction = (search_context.tune[TUNE_NMP_R_BASE]
+                                 + depth // _r_div
+                                 + eval_margin)
+                search_depth = max(0, depth - nmp_reduction)
+                search_context.reduction_stack[ply + 1] = nmp_reduction
 
-            if search_context.stop_flag[0]:
-                return (np.int32(0), NO_MOVE, nodes_searched, quiescence_nodes, tt_hits)
+                res_nm = _search(
+                    piece_bbs, occupancy_bbs, game_state, _i32(search_depth),
+                    _i32(-beta), _i32(-beta + 1), search_context, _i32(ply + 1),
+                    _u16(NO_MOVE), _b_false(), not cut_node,
+                )
+                null_move_score = -res_nm[0]
+                nodes_searched += res_nm[2]; quiescence_nodes += res_nm[3]; tt_hits += res_nm[4]
 
-            if null_move_score >= beta:
-                _diag_add(search_context, DIAG_NMP_NULL_FH)
-                # Cap unproven wins (KNOWN_WIN or mate-distance) to beta — SF18 !is_win(null)
-                if is_win(null_move_score) or is_decisive(null_move_score):
-                    null_move_score = beta
-                null_cutoff_verified = True
+                game_state[0] = nmp_saved_side
+                game_state[2] = nmp_saved_ep
+                game_state[3] = nmp_saved_hmc
+                game_state[4] = nmp_saved_key
 
-                _nmp_verify_d = search_context.tune[TUNE_NMP_VERIFY_D]
-                if depth >= _nmp_verify_d and abs(null_move_score) < MATE_IN_MAX_PLY:
-                    _diag_add(search_context, DIAG_NMP_VERIFY_TRY)
-                    nmp_was_enabled = search_context.enable_nmp
-                    search_context.enable_nmp = False
-                    verification_depth = max(1, depth - nmp_reduction)
-                    search_context.reduction_stack[ply] = 0
-                    res_verify = _search(
-                        piece_bbs, occupancy_bbs, game_state, _i32(verification_depth),
-                        _i32(beta - 1), _i32(beta), search_context, _i32(ply),
-                        _u16(NO_MOVE), _b_false(), cut_node,
-                    )
-                    search_context.enable_nmp = nmp_was_enabled
+                if search_context.stop_flag[0]:
+                    return (np.int32(0), NO_MOVE, nodes_searched, quiescence_nodes, tt_hits)
 
-                    verify_score = res_verify[0]
-                    nodes_searched += res_verify[2]
-                    quiescence_nodes += res_verify[3]
-                    tt_hits += res_verify[4]
+                # 3. SF19: Do not return unproven mate or TB scores (!is_win)
+                if null_move_score >= beta and not is_win(null_move_score) and not is_decisive(null_move_score):
+                    _diag_add(search_context, DIAG_NMP_NULL_FH)
 
-                    if search_context.stop_flag[0]:
-                        return (np.int32(0), NO_MOVE, nodes_searched, quiescence_nodes, tt_hits)
+                    # 4. SF19: Verification search at high depths
+                    _verify_threshold = search_context.tune[TUNE_NMP_VERIFY_DEPTH]
+                    if search_context.nmp_min_ply == 0 and depth >= _verify_threshold:
+                        _diag_add(search_context, DIAG_NMP_VERIFY_TRY)
 
-                    if verify_score < beta:
-                        null_cutoff_verified = False
-                        _diag_add(search_context, DIAG_NMP_VERIFY_FAIL)
-                    else:
-                        # Cap verification fail-high the same way
-                        if is_win(verify_score) or is_decisive(verify_score):
-                            null_move_score = beta
-                        else:
+                        # SF19: nmpMinPly = ss->ply + 3 * (depth - R) / 4
+                        search_context.nmp_min_ply = ply + 3 * (depth - nmp_reduction) // 4
+                        verification_depth = max(1, depth - nmp_reduction)
+                        search_context.reduction_stack[ply] = 0
+
+                        res_verify = _search(
+                            piece_bbs, occupancy_bbs, game_state, _i32(verification_depth),
+                            _i32(beta - 1), _i32(beta), search_context, _i32(ply),
+                            _u16(NO_MOVE), _b_false(), _b_false(),
+                        )
+                        search_context.nmp_min_ply = 0
+
+                        verify_score = res_verify[0]
+                        nodes_searched += res_verify[2]; quiescence_nodes += res_verify[3]; tt_hits += res_verify[4]
+
+                        if search_context.stop_flag[0]:
+                            return (np.int32(0), NO_MOVE, nodes_searched, quiescence_nodes, tt_hits)
+
+                        if verify_score < beta:
+                            _diag_add(search_context, DIAG_NMP_VERIFY_FAIL)
                             null_move_score = verify_score
 
-                if null_cutoff_verified:
-                    search_context.pv_table[ply, ply] = NO_MOVE
-                    _diag_add(search_context, DIAG_NMP_CUT)
-                    return (np.int32(null_move_score), NO_MOVE, nodes_searched, quiescence_nodes, tt_hits)
+                    if null_move_score >= beta:
+                        search_context.pv_table[ply, ply] = NO_MOVE
+                        _diag_add(search_context, DIAG_NMP_CUT)
+                        return (np.int32(null_move_score), NO_MOVE, nodes_searched, quiescence_nodes, tt_hits)
     # --- M1: IIR (Internal Iterative Reduction) replaces IID ---
     # Mild IIR only (1 ply). Skip on last-iteration PV path (SF !followPV gate) —
     # reducing depth on the critical line hides tactics for little gain.

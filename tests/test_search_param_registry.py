@@ -84,10 +84,11 @@ class TestSearchParamRegistry(unittest.TestCase):
         self.assertEqual(quantize_integer_value("LMR_CUTNODE_BONUS", 99999), 3000)
 
     def test_runtime_mode_defaults_are_explicit_constants(self):
-        self.assertEqual(get_spec("NMP_GATE_MODE").default, 0)
-        self.assertEqual(get_spec("NMP_R_MODE").default, 0)
+        self.assertEqual(get_spec("NMP_BASE").default, 200)
+        self.assertEqual(get_spec("NMP_DEPTH_COEF").default, 14)
+        self.assertEqual(get_spec("NMP_IMP_COEF").default, 45)
+        self.assertEqual(get_spec("NMP_EVAL_MARGIN_DIV").default, 150)
         self.assertEqual(get_spec("PROBCUT_STYLE_MODE").default, 0)
-        self.assertEqual(get_spec("NMP_NEED_BETA").default, 0)
 
     def test_runtime_bridge_mutates_only_runtime_slots(self):
         class FakeContext:
@@ -95,11 +96,11 @@ class TestSearchParamRegistry(unittest.TestCase):
                 self.tune = np.zeros(int(C.TUNE_SIZE), dtype=np.int32)
 
         ctx = FakeContext()
-        apply_runtime_params(ctx, {"LMR_BASE_OFFSET": 999999, "NMP_GATE_MODE": 2})
+        apply_runtime_params(ctx, {"LMR_BASE_OFFSET": 999999, "NMP_BASE": 999})
         self.assertEqual(int(ctx.tune[get_spec("LMR_BASE_OFFSET").runtime_index]), 700)
-        self.assertEqual(int(ctx.tune[get_spec("NMP_GATE_MODE").runtime_index]), 2)
-        values = read_runtime_params(ctx, ("LMR_BASE_OFFSET", "NMP_GATE_MODE"))
-        self.assertEqual(values, {"LMR_BASE_OFFSET": 700, "NMP_GATE_MODE": 2})
+        self.assertEqual(int(ctx.tune[get_spec("NMP_BASE").runtime_index]), 350)
+        values = read_runtime_params(ctx, ("LMR_BASE_OFFSET", "NMP_BASE"))
+        self.assertEqual(values, {"LMR_BASE_OFFSET": 700, "NMP_BASE": 350})
         apply_runtime_params(ctx, {"LMR_BASE_OFFSET": 459}, scale_mode="integer")
         self.assertEqual(
             int(ctx.tune[get_spec("LMR_BASE_OFFSET").runtime_index]), 459
@@ -108,7 +109,7 @@ class TestSearchParamRegistry(unittest.TestCase):
             apply_runtime_params(ctx, {"ASPIRATION_WINDOW_BASE": 30})
 
     def test_spsa_uses_registry_scales_and_integer_axes(self):
-        names = ("LMR_BASE_OFFSET", "NMP_GATE_MODE")
+        names = ("LMR_BASE_OFFSET", "NMP_BASE")
         initial = {name: get_spec(name).default for name in names}
         optimizer = SPSAOptimizer(names, initial)
         captured = {}
