@@ -110,7 +110,7 @@ def _spec(
 
 
 # ---------------------------------------------------------------------------
-# Runtime-backed axes (one compile; 39 slots in SearchContext.tune[])
+# Runtime-backed axes (one compile; 42 slots in SearchContext.tune[])
 # ---------------------------------------------------------------------------
 _RUNTIME_SPECS = [
     _spec("RFP_BASE_MULT", "RFP_BASE_MULT", 120, 230, 5, "pruning", runtime_attr="TUNE_RFP_MULT", spsa_r_end=0.8),
@@ -149,9 +149,16 @@ _RUNTIME_SPECS = [
     _spec("NMP_SCOPE_MIN_DEPTH", "NMP_SCOPE_MIN_DEPTH", 3, 10, 1, "nmp", kind="discrete", runtime_attr="TUNE_NMP_SCOPE_MIND", spsa_r_end=0.4),
     _spec("HISTORY_BONUS_SCALE", "HISTORY_BONUS_SCALE", 40, 240, 10, "history", runtime_attr="TUNE_HIST_BONUS_SCALE", spsa_r_end=0.8),
     _spec("HISTORY_BONUS_CAP", "HISTORY_BONUS_CAP", 800, 3000, 100, "history", runtime_attr="TUNE_HIST_BONUS_CAP", spsa_r_end=0.8),
-    _spec("HISTORY_MALUS_CAP", "HISTORY_MALUS_CAP", 800, 3000, 100, "history", runtime_attr="TUNE_HIST_MALUS_CAP", spsa_r_end=0.8),
+    # Phase 7: band narrowed after the Phase 6 SPSA@100k pushed this cap to 1788
+    # and it regressed at 300k nodes (see PHASE7_HISTORY_LMR_ALIGNMENT_PLAN.md).
+    _spec("HISTORY_MALUS_CAP", "HISTORY_MALUS_CAP", 1200, 2000, 50, "history", runtime_attr="TUNE_HIST_MALUS_CAP", spsa_r_end=0.8),
     _spec("QUIET_ORDER_KILLER_1", "QUIET_ORDER_KILLER_1", 100000, 600000, 10000, "ordering", runtime_attr="TUNE_ORDER_KILLER_1", spsa_r_end=0.5),
     _spec("QUIET_ORDER_COUNTER", "QUIET_ORDER_COUNTER", 100000, 500000, 10000, "ordering", runtime_attr="TUNE_ORDER_COUNTER", spsa_r_end=0.5),
+    # Phase 7 history damping (slots 39-41). DECAY/MALUS_SCALE shape the geometric
+    # failed-quiet penalty; DEPTH_STEP shapes the SF19-style deep LMR divisor ramp.
+    _spec("HISTORY_QUIET_MALUS_DECAY_NUM", "HISTORY_QUIET_MALUS_DECAY_NUM", 880, 1000, 8, "history", runtime_attr="TUNE_HIST_MALUS_DECAY", spsa_r_end=0.8),
+    _spec("LMR_DIVISOR_DEPTH_STEP", "LMR_DIVISOR_DEPTH_STEP", 0, 256, 16, "lmr", runtime_attr="TUNE_LMR_DIV_STEP", spsa_r_end=0.8),
+    _spec("HISTORY_QUIET_MALUS_SCALE_NUM", "HISTORY_QUIET_MALUS_SCALE_NUM", 768, 1280, 32, "history", runtime_attr="TUNE_HIST_MALUS_SCALE", spsa_r_end=0.8),
 ]
 
 

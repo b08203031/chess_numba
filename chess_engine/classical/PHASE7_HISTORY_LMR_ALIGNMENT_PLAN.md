@@ -130,29 +130,37 @@ $$\text{SNR} \propto \frac{1}{\sqrt{N}}$$
 若將 21 個軸同時放入 SPSA，$\text{SNR}$ 將衰減至原先的 $21.8\%$，噪聲嚴重掩蓋真實梯度，需要數十萬局才能收斂。
 因此，必須採用 **「高內聚子集分階段推進（Staged SPSA Campaign）」**。
 
-### 4.2 Phase 7 核心五軸高內聚子集
-Phase 7 鎖定**「衰減阻尼與深層保護」**核心鏈，精選 5 個強耦合軸：
+### 4.2 Phase 7 核心四軸高內聚子集（2026-10-13 修訂）
+Phase 7 鎖定**「衰減阻尼與深層保護」**核心鏈。原案 5 軸經程式碼審核後修訂為 **4 軸**：
 
-| 參數名稱 | 建議探索範圍 | 步長 (Step) | 當前基線 | 調參目的與預期效果 |
-| :--- | :--- | :--- | :--- | :--- |
-| **`HISTORY_QUIET_MALUS_DECAY_NUM`** | `[900, 960]` | `8` | `956` | 尋找 HCE 下最優幾何衰減速度（向 SF19 921 靠攏，控制總懲罰）。 |
-| **`HISTORY_MALUS_CAP`** | `[1500, 1750]` | `25` | `1600` | 在幾何衰減加速的保護下，尋找 Malus 懲罰上限的最優甜點區。 |
-| **`LMR_DIVISOR_DEPTH_STEP`** | `[64, 192]` | `16` | `128` | 調優 SF19 深度除數擴大步長，平衡淺層衝深與深層客觀度。 |
-| **`LMR_DIVISOR_MIN_DEPTH`** | `[7, 12]` | `1` | `10` | 確定深度保護介入的黃金深度門檻。 |
-| **`HISTORY_REFUTE_SCALE_NUM`** | `[400, 800]` | `32` | `512` | 修復並調優上一層反駁步對 Continuation History 的折扣幅度。 |
+| 參數名稱 | 探索範圍 | 步長 (c) | 當前基線 | tune 槽位 | 調參目的與預期效果 |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| **`HISTORY_QUIET_MALUS_DECAY_NUM`** | `[880, 1000]` | `8` | `956` | 39 | 尋找 HCE 下最優幾何衰減速度（向 SF19 921 靠攏，控制總懲罰）。 |
+| **`HISTORY_MALUS_CAP`** | `[1200, 2000]` | `50` | `1600` | 36（既有） | 在衰減保護下尋找 Malus 上限甜點；範圍收窄以防再次漂到 Phase 6@100k 的 1788。 |
+| **`LMR_DIVISOR_DEPTH_STEP`** | `[0, 256]` | `16` | `128` | 40 | 調優 SF19 深度除數擴大步長，平衡淺層衝深與深層客觀度。 |
+| **`HISTORY_QUIET_MALUS_SCALE_NUM`** | `[768, 1280]` | `32` | `1024` | 41 | 失敗安靜步初始 malus 倍率（/1024），與 DECAY 共同決定幾何總懲罰。 |
 
-### 4.3 免重編譯 Runtime 擴展架構
-為在 Colab 上享受 `inprocess` 高速對戰（免進程重啟、免 JIT 耗時）：
-* 將上述 5 個參數擴展註冊至 `SearchContext.tune[]` 陣列（將 `TUNE_SIZE` 由 39 擴增至 44）。
-* 在 `tune_search/search_param_registry.py` 中建立專屬 Profile `phase7_history_dampening`。
+**自原案剔除 / 固定：**
+* `HISTORY_REFUTE_SCALE_NUM`：**死常數**。[`search.py`](search.py) 的 Refutation Penalty 直接使用 `malus`（`refute_malus = malus`），該常數未被任何搜尋路徑讀取，調它無任何效果。若要「修復」＝讓 refutation 套用 `NUM/DEN` 折扣，屬行為改動，需另開 A/B，不納入本輪 SPSA。
+* `LMR_DIVISOR_MIN_DEPTH`：固定為 10。它與 `DEPTH_STEP` 構成同一條斜坡 `max(0, d - MIN) * STEP`，兩者同調不可辨識；且 [7,12] 的整數範圍使 SPSA 的 ±1 擾動幾乎沒有訊號。
+
+### 4.3 免重編譯 Runtime 擴展架構（已實作）
+* 新增 `SearchContext.tune[]` 槽位：`TUNE_HIST_MALUS_DECAY=39`、`TUNE_LMR_DIV_STEP=40`、`TUNE_HIST_MALUS_SCALE=41`，`TUNE_SIZE` 由 39 → **42**（[`constants.py`](constants.py)、[`engine_types.py`](engine_types.py)）。
+* [`search.py`](search.py) 三處讀取點改讀 `search_context.tune[...]`：LMR 淺層預估 `dyn_div`、主搜尋 `dyn_div`、failed-quiet malus 的初始倍率與逐步衰減。預設值與原常數完全相同，不改變預設行為。
+* 在 `tune_search/search_param_registry.py` 註冊上述 3 個新軸，並將 `HISTORY_MALUS_CAP` 範圍收窄為 `[1200, 2000]`、步長 50。四軸以 `--params` 明確列出（不另建 profile）。
+* 搜尋函式 `cache=False`，新增槽位不會有舊 disk cache 殘留風險。
 
 ### 4.4 兩階段驗收規範（Two-Tier Verification Protocol）
 1. **Tier 1 (雲端 SPSA 探索)**：
-   * 規格：50 輪 × 300 局 = **15,000 局 @ 100,000 nodes**。
-   * 採樣：Polyak-Ruppert 平滑抽樣（Tail 0.3 加權平均）。
+   * **節點數必須能到達深層保護區間**。`dyn_div` 只在 `depth > 10` 啟動；若 100k nodes 的平均深度多半 ≤ 10，SPSA 對 `DEPTH_STEP` 看不到訊號，且 `MALUS_CAP` 會被淺層偏見推高（Phase 6 的重蹈覆轍）。
+   * Colab 8 vCPU 實測吞吐（Phase 6）：300 局 @ 100k ≈ 18 分鐘（7 併發）。節點數線性外推，故預算與節點數需取捨（見 `tune_colab_runner_p7.ipynb` 設定 cell）。
+   * 採樣：Polyak-Ruppert 平滑抽樣（Tail 0.3）。
 2. **Tier 2 (獨立長時控驗收)**：
-   * 規格：**400~600 局 @ 300,000 nodes**，TT 64MB，主開局庫 `data/openings.epd`。
-   * 判定標準：SPRT (0.0, 3.0) 或淨勝局統計顯著。
+   * 規格：**600 局 @ 300,000 nodes**，TT 64MB，主開局庫 `data/openings.epd`。
+   * **對手 = Plan A 基線（`1ed92f0` 預設常數）**，不是 `classical_old`，以免 Phase 6 增益混入。
+   * 判定標準：SPRT (0.0, 3.0)；未達邊界就**加局**，不以 ±22 Elo 誤差棒內的差距採信。
+3. **單軸消融（選）**：L2 通過後，逐軸只套用單一參數做 A/B，確認增益不是單一軸的巧合。
+
 
 ---
 
@@ -166,7 +174,7 @@ Phase 7 鎖定**「衰減阻尼與深層保護」**核心鏈，精選 5 個強�
 2. **關於 Bonus 中是否加入 TT 命中加成**：
    * SF19 公式中包含 `+ 364 * (bestMove == ttMove)`。本引擎是否應在 Phase 7 引入此項動量加成？
 3. **關於 Runtime 槽位擴展**：
-   * 是否贊同將 `TUNE_SIZE` 擴充至 44 以支援 `inprocess` 高速免 JIT 調參？
+   * ✅ 已解決：僅擴充 3 個槽位（`TUNE_SIZE` 39 → 42），因為 `REFUTE_SCALE_NUM` 為死常數、`MIN_DEPTH` 固定。
 
 ---
 *(本計畫書由 Antigravity 引擎架構模組於 2026-10-12 定稿)*

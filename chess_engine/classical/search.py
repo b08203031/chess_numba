@@ -162,6 +162,7 @@ from chess_engine.classical.constants import (
     TUNE_NMP_G_BASE, TUNE_NMP_G_DEPTH, TUNE_NMP_G_IMP, TUNE_NMP_NEED_BETA,
     TUNE_NMP_R_BASE, TUNE_NMP_R_DIV, TUNE_NMP_VERIFY_D, TUNE_NMP_SCOPE_MIND,
     TUNE_HIST_BONUS_SCALE, TUNE_HIST_BONUS_CAP, TUNE_HIST_MALUS_CAP,
+    TUNE_HIST_MALUS_DECAY, TUNE_LMR_DIV_STEP, TUNE_HIST_MALUS_SCALE,
     PINNED_UNCOMPUTED_SENTINEL,
 )
 from chess_engine.classical.bitboard_utils import find_piece_type_on_square_side
@@ -247,7 +248,7 @@ def compute_quiet_pruning_lmr_depth(
     )
     r += search_context.tune[TUNE_LMR_BASE_OFFSET]
     hist = get_lmr_stat_score(search_context, ply, from_sq, to_sq, piece_type)
-    dyn_div = LMR_STAT_SCORE_DIV + (max(0, depth - LMR_DIVISOR_MIN_DEPTH) * LMR_DIVISOR_DEPTH_STEP)
+    dyn_div = LMR_STAT_SCORE_DIV + (max(0, depth - LMR_DIVISOR_MIN_DEPTH) * search_context.tune[TUNE_LMR_DIV_STEP])
     r -= trunc_div(hist * search_context.tune[TUNE_LMR_HIST_SCALE], dyn_div)
     if r < 0:
         r = 0
@@ -2803,7 +2804,7 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                         )
 
                     # SF19 Dynamic Depth Protection: scale up divisor at deeper plies to mitigate over-reduction
-                    dyn_div = LMR_STAT_SCORE_DIV + (max(0, depth - LMR_DIVISOR_MIN_DEPTH) * LMR_DIVISOR_DEPTH_STEP)
+                    dyn_div = LMR_STAT_SCORE_DIV + (max(0, depth - LMR_DIVISOR_MIN_DEPTH) * search_context.tune[TUNE_LMR_DIV_STEP])
                     r -= trunc_div(
                         lmr_stat_score * search_context.tune[TUNE_LMR_HIST_SCALE], dyn_div
                     )
@@ -3173,12 +3174,12 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                     search_context.counter_moves[prev_piece_cm, get_to_square(prev_move_played)] = best_move
 
             # Apply History Malus to all previous quiet moves that failed low
-            actual_malus = malus * HISTORY_QUIET_MALUS_SCALE_NUM // HISTORY_QUIET_MALUS_SCALE_DEN
+            actual_malus = malus * search_context.tune[TUNE_HIST_MALUS_SCALE] // HISTORY_QUIET_MALUS_SCALE_DEN
             for q_idx in range(quiet_moves_tried_count):
                 bad_move = quiet_moves_tried[q_idx]
                 if bad_move == best_move:
                     continue
-                actual_malus = actual_malus * HISTORY_QUIET_MALUS_DECAY_NUM // HISTORY_QUIET_MALUS_DECAY_DEN
+                actual_malus = actual_malus * search_context.tune[TUNE_HIST_MALUS_DECAY] // HISTORY_QUIET_MALUS_DECAY_DEN
                 bad_from = get_from_square(bad_move)
                 bad_to = get_to_square(bad_move)
                 bad_aggressor = quiet_pieces_tried[q_idx]

@@ -963,7 +963,11 @@ TUNE_HIST_BONUS_CAP = 35    # stat bonus cap (HISTORY_BONUS_CAP)
 TUNE_HIST_MALUS_CAP = 36    # stat malus cap (HISTORY_MALUS_CAP)
 TUNE_ORDER_KILLER_1 = 37    # quiet move ordering killer 1 bonus (QUIET_ORDER_KILLER_1)
 TUNE_ORDER_COUNTER = 38     # quiet move ordering counter move bonus (QUIET_ORDER_COUNTER)
-TUNE_SIZE = 39
+# Phase 7 History damping runtime slots
+TUNE_HIST_MALUS_DECAY = 39  # failed-quiet geometric decay numerator (HISTORY_QUIET_MALUS_DECAY_NUM / 1024)
+TUNE_LMR_DIV_STEP = 40      # LMR stat-score divisor growth per ply above MIN_DEPTH (LMR_DIVISOR_DEPTH_STEP)
+TUNE_HIST_MALUS_SCALE = 41  # failed-quiet initial malus multiplier numerator (HISTORY_QUIET_MALUS_SCALE_NUM / 1024)
+TUNE_SIZE = 42
 # E2 tried 70 (puzzle +6 pass, nodes +25%); match @200k nodes: depth↓, no Elo.
 LMR_TABLE_SCALE_PERCENT = 113  # E60 tuned (was 100; SPSA L1 12k + L2 600@300k +15.6 Elo)
 LMR_NOT_IMP_NUM = 197  # E57 (was 194; SPSA L1+L2 400@300k +5.2 Elo)
@@ -1091,7 +1095,8 @@ for i in range(1, 256):
     REDUCTIONS[i] = int(24.8 * math.log(i))
 
 # LMR_BASE: E7 kept 480 (was 512). E20 keep 460. E56 tuned to 463 (+9.6 Elo). E60 tuned to 437 (+15.6 Elo).
-LMR_BASE_OFFSET = 437  # E60 (was 463; SPSA L1 12k + L2 600@300k +15.6 Elo)
+# Phase 6 SPSA 60 iters: 449 / 29 / 200
+LMR_BASE_OFFSET = 449  # SPSA P6 (was 450)
 LMR_TTPV_INCREASE = 768
 LMR_TTPV_DECREASE_BASE = 2048
 LMR_TTPV_PV_BONUS = 768
@@ -1102,8 +1107,8 @@ LMR_BAD_CAPTURE_BONUS = 1046    # E57 (was 1024; SPSA L1+L2 400@300k +5.2 Elo)
 LMR_GOOD_CAPTURE_RELIEF = 1030  # E57 (was 1024; SPSA L1+L2 400@300k +5.2 Elo)
 LMR_LATE_CAPTURE_BONUS = 0
 LMR_KILLER_COUNTER_RELIEF = 1024
-LMR_MOVECOUNT_FACTOR = 35    # E60 (was 38; SPSA L1 12k + L2 600@300k +15.6 Elo)
-LMR_HISTORY_SCALE = 204      # E60 (was 167; SPSA L1 12k + L2 600@300k +15.6 Elo)
+LMR_MOVECOUNT_FACTOR = 29    # SPSA P6 (was 29)
+LMR_HISTORY_SCALE = 200      # SPSA P6 (was 182)
 LMR_CUTOFF_CNT_BASE = 128
 LMR_CUTOFF_CNT_EXTRA = 512
 LMR_ALLNODE_EXTRA = 512
@@ -1181,9 +1186,9 @@ HISTORY_BONUS_QUAD_B = 96
 HISTORY_MALUS_QUAD_A = 18
 HISTORY_MALUS_QUAD_B = 88
 HISTORY_BONUS_DEPTH_CLAMP = 14
-HISTORY_BONUS_SCALE = 120
-HISTORY_BONUS_CAP = 2054         # E63 (was 1800; SPSA L1 12k + L2 600@300k +6.9 Elo)
-HISTORY_MALUS_CAP = 1600         # was 2000; match 1a malus cap
+HISTORY_BONUS_SCALE = 137        # SPSA P6 (was 136)
+HISTORY_BONUS_CAP = 2026         # SPSA P6 (was 2025; SPSA L1 12k + L2 600@300k +6.9 Elo)
+HISTORY_MALUS_CAP = 1600         # Plan A rollback (was 1788; prevents over-penalization in 300k search)
 HISTORY_NODE_WIDTH_DIV = 256     # non-PV: bonus += bonus * (q+c) // div
 CAPTURE_MALUS_SCALE_NUM = 1126
 CAPTURE_MALUS_SCALE_DEN = 1024
@@ -1277,6 +1282,9 @@ LMR_D_MAX_EXTRA = 2              # d <= search_depth + this
 LMR_CAPTURE_VICTIM_SCALE = 809   # SF18: 809 * PieceValue / 128 + captHist
 LMR_CAPTURE_VICTIM_DIV = 128
 LMR_STAT_SCORE_DIV = 4096        # r -= stat * hist_scale // DIV
+# SF19 Dynamic Depth Protection: scale up divisor at deeper plies to mitigate over-reduction
+LMR_DIVISOR_MIN_DEPTH = 10       # Depth threshold where dynamic divisor kicks in (<=10 maintains SPSA agility)
+LMR_DIVISOR_DEPTH_STEP = 128     # Divisor increment per depth ply above threshold (+25% at d=18, matching SF19)
 LMR_RESEARCH_DEEPER_MARGIN = 32  # eval > max_eval + this → +1 depth research
 LMR_RESEARCH_SHALLOWER_MARGIN = 15
 
