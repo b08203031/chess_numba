@@ -1054,8 +1054,8 @@ RFP_BASE_MULT = 168   # E64 (was 171; SPSA L1 13.8k + L2 1000@300k +8.7 Elo)
 RFP_NO_TT_PENALTY = 30
 
 NMP_STATIC_MARGIN = 150      # not used as primary NMP gate
-NMP_MIN_SIDE_NON_PAWNS = 2
-NMP_VERIFICATION_DEPTH = 8   # verification from this depth (tunable via TUNE_NMP_VERIFY_D)
+NMP_MIN_SIDE_NON_PAWNS = 1   # SF19: pos.non_pawn_material(us) != 0 (was 2 before Phase 8b)
+NMP_VERIFICATION_DEPTH = 16  # SF19: verify only when depth >= 16 (was 8 before Phase 8b)
 LOW_MATERIAL_PRUNING_PIECE_COUNT = 7
 # Production NMP structure: cut_node only (Phase 8 SF19 alignment).
 NMP_SCOPE_MODE = 0
@@ -1229,7 +1229,9 @@ QUIET_ORDER_COUNTER = 300000
 LPH_ORDER_SCALE = 8              # score += scale * lph // (1+ply)
 
 # --- NMP formula coeffs (Phase 8: SF19 aligned, continuous HCE scale) ---
-NMP_MIN_DEPTH = 3
+NMP_MIN_DEPTH = 1            # SF19 has no NMP depth floor (was 3 before Phase 8b)
+# SF19 `beta >= -2000` (NNUE internal units, PawnValue~208) scaled to HCE cp: -2000*100/208.
+NMP_BETA_FLOOR = -960
 NMP_BASE = 200
 NMP_DEPTH_COEF = 14
 NMP_IMP_COEF = 45
