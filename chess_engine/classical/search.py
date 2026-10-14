@@ -2513,7 +2513,7 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                     elif exclusion_score >= exclusion_beta and not is_pv:
                         # Negative extensions when not singular (SF18/19 Step 16: check se_tt_score >= beta)
                         if se_tt_score >= beta:
-                            singular_extension = -2
+                            singular_extension = -1
                         elif cut_node:
                             singular_extension = -1
                         elif se_tt_score <= exclusion_score:
