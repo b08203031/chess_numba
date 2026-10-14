@@ -1818,22 +1818,23 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
 
         _diag_add(search_context, DIAG_NMP_ELIGIBLE)
 
-        # SF19 uses ss->staticEval (corrected static eval, NOT TT-refined eval).
-        # Our static_score may be lazy and/or TT-refined, so force the full
-        # corrected eval here (it also refreshes improving / static_eval_stack).
-        if not static_eval_is_full:
-            raw_static_eval, static_score, improving, cached_pinned_white, cached_pinned_black = compute_full_corrected_static_eval(
-                piece_bbs, occupancy_bbs, game_state, search_context, ply
-            )
-            static_eval_is_full = True
-
-        # 1. Linear gate: staticEval >= beta - depth_coef*d - imp_coef*imp + base
+        # 1. Linear gate with Lazy Evaluation (do not waste heavy HCE on failing nodes)
         nmp_threshold = (beta - search_context.tune[TUNE_NMP_DEPTH_COEF] * depth
                               - search_context.tune[TUNE_NMP_IMP_COEF] * (1 if improving else 0)
                               + search_context.tune[TUNE_NMP_BASE])
 
         if static_score >= nmp_threshold:
-            _diag_add(search_context, DIAG_NMP_GATE_PASS)
+            if not static_eval_is_full:
+                raw_static_eval, static_score, improving, cached_pinned_white, cached_pinned_black = compute_full_corrected_static_eval(
+                    piece_bbs, occupancy_bbs, game_state, search_context, ply
+                )
+                static_eval_is_full = True
+                nmp_threshold = (beta - search_context.tune[TUNE_NMP_DEPTH_COEF] * depth
+                                      - search_context.tune[TUNE_NMP_IMP_COEF] * (1 if improving else 0)
+                                      + search_context.tune[TUNE_NMP_BASE])
+
+            if static_score >= nmp_threshold:
+                _diag_add(search_context, DIAG_NMP_GATE_PASS)
 
             nmp_saved_side = game_state[0]
             nmp_saved_ep   = game_state[2]
