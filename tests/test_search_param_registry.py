@@ -84,10 +84,10 @@ class TestSearchParamRegistry(unittest.TestCase):
         self.assertEqual(quantize_integer_value("LMR_CUTNODE_BONUS", 99999), 3000)
 
     def test_runtime_mode_defaults_are_explicit_constants(self):
-        self.assertEqual(get_spec("NMP_BASE").default, 200)
-        self.assertEqual(get_spec("NMP_DEPTH_COEF").default, 14)
+        self.assertEqual(get_spec("NMP_BASE").default, 205)
+        self.assertEqual(get_spec("NMP_DEPTH_COEF").default, 12)
         self.assertEqual(get_spec("NMP_IMP_COEF").default, 45)
-        self.assertEqual(get_spec("NMP_EVAL_MARGIN_DIV").default, 150)
+        self.assertEqual(get_spec("NMP_EVAL_MARGIN_DIV").default, 155)
         self.assertEqual(get_spec("PROBCUT_STYLE_MODE").default, 0)
 
     def test_runtime_bridge_mutates_only_runtime_slots(self):

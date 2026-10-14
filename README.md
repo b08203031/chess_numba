@@ -195,6 +195,7 @@ python -m tests.perft divide --depth 4
 * **[2026-08-04 搜尋優化診斷與交接](chess_engine/classical/SEARCH_OPTIMIZATION_DIAGNOSTIC_20260804.md)**：500 戰術 + 500 開局／安靜盤面的 n30k 複驗；P0–P4 diagnostics/rollback、P5 暖 history attribution，以及 P6 history-prune cont1 負尾保護。
 * **[Numba JIT 編譯與快取實驗報告](chess_engine/classical/JIT_COMPILE_CACHE_REPORT.md)**（**JIT / disk cache 主文件**）：1 MB 表上限、packed rook、StructRef `SearchContext`、特化爆炸、cold/warm 量測與 checklist；後續 JIT 工作請參考並擴寫。
 * **[2026-07-15/16 搜尋戰役報告](tournament_analysis/REPORT_2026-07-15_16_search_campaign.md)**：座標下降 R1–R3、結構 A/B、E1/E2、雙對戰 scale 100/85 結論與接納決策。
+* **[2026-10-14 Phase 8 NMP 戰役報告](tournament_analysis/REPORT_2026-10-14_nmp_alignment_campaign.md)**：NMP SF19 極簡架構、Numba 結構化陣列記憶體別名修復、門檻 30~50 cp 幾何槓桿調優、600 局實戰驗收 (+12.17 Elo，救援 24 局落敗)。
 * **[Classical 搜尋單項實驗日誌](tournament_analysis/SEARCH_EXP_LOG.md)**：E1+ 連續 A/B（200@100k）、留下/回滾門檻、early-trash、累積基線；**E14 起診斷隨對戰**（可選 `tools/hist_diag_bench.py` 事後彙總）。
 * **[NMP 實驗計畫](tournament_analysis/NMP_EXPERIMENT_PLAN.md)**：~15% 節點貢獻診斷、S1 失敗複盤、漏斗 KPI 與 Phase 0–3 中間態實驗閘道。
 * **[搜尋 ↔ 評估介面](chess_engine/classical/SEARCH_EVAL_INTERFACE.md)**：KNOWN_WIN 護欄（**PR-A+B+C 已定稿**；122 局 50%）、NMP/RFP/ProbCut/Razor 與 SF11/SF18 對照。

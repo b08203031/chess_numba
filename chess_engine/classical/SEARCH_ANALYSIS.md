@@ -122,14 +122,23 @@ P3 的診斷分成三條 opt-in funnel：
 
 引擎實現了一套激進的剪枝技術來減少搜尋空間。
 
-### 4.1 空著剪枝 (Null Move Pruning, NMP)
+### 4.1 空著剪枝 (Null Move Pruning, NMP, SF19 Step 10 對齊)
 *   **理念**：如果我們跳過自己的一步棋（下空著），而對手**仍然**無法將局面評分提升到 Beta 以上，說明我們佔據了巨大的優勢，可以直接進行截斷。
-*   **邏輯**：
-    *   條件：`static_eval >= beta` 且 `depth >= 3`。
-    *   操作：以降低的深度進行搜尋。
-    *   **動態歸約**：根據靜態評估超出 Beta 的幅度 (`(static_eval - beta) // 200`) 動態增加額外的歸約深度 (最大額外歸約 3 步)。
-    *   驗證：如果返回分數 `>= beta`，則直接返回 Beta（截斷）。
-    *   **安全性**：被將軍時或殘局中不套用（以防雙向無子限制 zugzwang 危害）。
+*   **觸發條件**：
+    *   `cut_node`、非排除搜尋、非將軍、前一步非空著。
+    *   非兵子力防護：`side_non_pawn_count >= NMP_MIN_SIDE_NON_PAWNS (1)`（對齊 SF19 `pos.non_pawn_material(us) != 0`，避免純兵/輕子殘局 Zugzwang）。
+    *   深度與邊界：`depth >= NMP_MIN_DEPTH (1)`、`ply >= nmp_min_ply`、`beta >= NMP_BETA_FLOOR`。
+*   **門檻檢驗與 Lazy Eval**：
+    *   門檻公式：`nmp_threshold = beta - depth_coef * depth - imp_coef * improving + base`。
+    *   雙階檢驗：先以 Lazy Eval（或 TT 修正分）快速篩選；通過後再呼叫 `compute_full_corrected_static_eval` 執行完整評估，確認仍 `>= nmp_threshold` 且非勝負分才執行空步。
+*   **動態歸約 ($R$) 與子搜尋**：
+    *   歸約公式：$R = R_{base} + \lfloor\text{depth} / R_{div}\rfloor + \text{clamp}((\text{static} - \beta) // \text{eval\_div}, 0, \text{MAX})$（預設 $R_{base}=7, R_{div}=3$, 上限 4）。
+    *   子搜尋前清零子節點：`search_context.reduction_stack[ply + 1] = 0`，避免誤觸子節點的 Hindsight 減深/延伸調整。
+*   **高深度驗證搜尋 (Verification Search, SF19)**：
+    *   當 `nmp_min_ply == 0` 且 `depth >= NMP_VERIFICATION_DEPTH (16)` 時啟動驗證搜尋（窗口 `[beta - 1, beta]`，深度 `max(1, depth - R)`）。
+    *   `nmp_min_ply = max(1, ply + 3 * max(1, depth - R) // 4)`：在驗證搜尋的前 3/4 層內全面禁用 NMP。
+    *   **狀態隔離保護**：同 `ply` 遞迴呼叫前後完整保存與還原 `reduction_stack[ply]`、`cutoff_cnt[ply]`、`cutoff_cnt[ply + 1]`、`static_eval_stack[ply]`、`tt_hit_stack[ply]`、`tt_pv_stack[ply]`、`follow_pv_stack[ply]`，並於失敗時重置 `pv_table[ply, ply] = NO_MOVE`，避免驗證搜尋失敗退回常規搜尋時污染 LMR 截斷懲罰與 PV 狀態。
+    *   **TT 參考別名隔離 (Aliasing Protection)**：在 Phase 2 即將 `tt_entry` 的欄位（`tt_flag`, `tt_depth`, `tt_score_raw`, `tt_static_eval_raw`, `tt_is_pv`, `tt_move`）解構成區域純量變數，避免 Verification Search 等同 `ply` 遞迴搜尋在寫入 TT 時就地修改結構化陣列記憶體視圖，造成父節點後續 Singular Extension 與 LMR 讀取到淺層污染資料。
 
 ### 4.2 反向徒勞剪枝 (Reverse Futility Pruning, RFP) / 靜態空著剪枝
 *   **理念**：如果靜態評估值非常高，以至於減去一個很大的安全邊界後依然高於 Beta，我們可以直接進行截斷。
@@ -187,13 +196,16 @@ P3 的診斷分成三條 opt-in funnel：
 *   **Pre-make 架構（SF18 Step 15 完整對齊）**：
     *   **零走棋開銷**：將 SE 與 Multi-Cut 判定前置於 `make_move` 之前，直接在當前 parent 盤面以 `excluded_move = tt_move` 啟動排除搜尋，徹底消除了舊架構 `make -> unmake -> search -> make` 的 4 次走棋往返浪費。
     *   **合法性守護（SF `pos.legal(move)`）**：要求 `skip_post_legality_s` 為真，確保該 TT 著法為嚴格合法著法，絕不在非法/牽制著法上浪費排除搜尋。
-    *   **狀態保存與隔離（Invariant Protection）**：
-        *   排除搜尋在相同 `ply` 下呼叫，結束後必須完整還原 `follow_pv_stack[ply]`、`static_eval_stack[ply]`、`tt_hit_stack[ply]`、`tt_pv_stack[ply]`、`reduction_stack[ply]`、`cutoff_cnt[ply]`，並重置 `pv_table[ply, ply] = NO_MOVE`。
+    *   **狀態保存與隔離（Invariant Protection，2026-10-14 完整加固）**：
+        *   排除搜尋在相同 `ply` 下呼叫，結束後必須完整還原 `follow_pv_stack[ply]`、`static_eval_stack[ply]`、`tt_hit_stack[ply]`、`tt_pv_stack[ply]`、`reduction_stack[ply]`、`cutoff_cnt[ply]` 以及子層截斷次數 **`cutoff_cnt[ply + 1]`**（防止 `res_ex` 內部的大量截斷洩漏給父節點後續兄弟走法，平白觸發額外 LMR 懲罰），並重置 `pv_table[ply, ply] = NO_MOVE`。
         *   **TT 寫入隔離**：排除搜尋（`excluded_move != NO_MOVE`）末端禁止寫入置換表（對齊 SF18 `if (!excludedMove) ttWriter.write(...)`），避免殘缺的走步與評估污染該局面的全局 TT 快取。
-    *   **門檻**：`ply > 0`、`excluded_move == NO_MOVE`、`move == tt_move`、`depth >= MIN_SINGULAR_DEPTH (+1 if ttPv)`（預設 7）；TT bound 為 Lower/Exact 且 TT depth 足夠（`depth - 3`）。
-    *   **Multi-Cut 剪枝（SF18 Step 15）**：若 `exclusion_score >= beta` 且非勝負分，直接回傳 `exclusion_score` 截斷，無需任何 `unmake_move`（**E31 採納**）。
-    *   **單 / 雙延展**：若 `exclusion_score < exclusion_beta`，賦予 `singular_extension = 1`；若差距達到 `double_margin`（`2 * depth`）且 `depth >= 10`，賦予雙延展 `singular_extension = 2`。
-    *   **負延展（SF17 Step 15 對齊，E39 測試中）**：若非 PV 節點且非奇異（其他著法亦能達到 `exclusion_beta`）：若置換表自身評估預期高於邊界（`se_tt_score >= beta`）則賦予 `-3`；若在 `cut_node` 則賦予 `-2`。修復了舊版因 `exclusion_score >= beta` 提前被 Multi-Cut 截斷導致大負延伸成為死碼的問題。
+        *   **全局歷史與校正表隔離（2026-10-14 修復）**：在 `_search` 末端，**Correction History 更新** 與 **Fail-Low 對手走法獎勵** 嚴格加上 `not is_exclusion_search` 守衛，防止人為排除最佳步導致的低分破壞全局評估校正表與歷史表。
+    *   **門檻**：`ply > 0`、`excluded_move == NO_MOVE`、`move == tt_move`、`depth >= MIN_SINGULAR_DEPTH (+1 if ttPv)`（預設 7）；TT bound 為 Lower/Exact 且 TT depth 足夠（`depth - 3`）；以 `abs(se_tt_score) < VALUE_KNOWN_WIN` 排除已知勝負區間。
+    *   **中斷與 Multi-Cut 剪枝（SF18/SF19 Step 15/16）**：
+        *   **超時檢查前置**：優先判定 `search_context.stop_flag[0]`，避免超時返回的 0 在 `beta <= 0` 時誤觸 Multi-Cut。
+        *   若 `exclusion_score >= beta` 且非勝負分（`not is_win` 與 `not is_decisive`），直接回傳 `exclusion_score` 截斷，無需任何 `unmake_move`（**E31 採納**）。
+    *   **單 / 雙延展**：若 `exclusion_score < exclusion_beta`，賦予 `singular_extension = 1`；若非 PV 節點（`not is_pv`）、差距達到 `double_margin`（`2 * depth`）且 `depth >= 10`，賦予雙延展 `singular_extension = 2`（限制在 non-PV 杜絕搜尋樹爆炸）。
+    *   **負延展（SF18/19 Step 15/16 對齊，2026-10-14 死碼修復）**：若非 PV 節點且非奇異（`exclusion_score >= exclusion_beta and not is_pv`）：若置換表自身評估預期高於邊界（`se_tt_score >= beta`）則賦予 `-2`；若在 `cut_node` 則賦予 `-1`；若原步優勢存疑（`se_tt_score <= exclusion_score`）則賦予 `-1`。徹底修復舊版因誤用 `exclusion_score >= beta` 導致負延展 100% 成為死碼的缺陷。
     *   **延展合併與將軍延伸 Pre-make（E36 採納）**：走棋後與將軍延展（`check_extension`）合併：正向延展取較大值（`max`），負向延展在無將軍時覆蓋。對於將軍延伸的 `_see_ge_jit` 檢驗，全面改為在 `make_move` 前直接利用父盤面評估（`check_gate_see_ok`），徹底根除了舊代碼在走棋後 `unmake -> SEE -> remake` 的兩次冗餘棋盤突變開銷。
     *   **實戰驗證（Step 15 Pre-make SE 採納，2026-09-21）**：
         *   對戰條件：400 盤，每步 300,000 nodes，TT 64MB。
@@ -877,4 +889,39 @@ NMP gate/R、ProbCut style、NMP beta requirement 的預設值也由常量明確
   * 嚴格遵守「No gain, no change」原則，**維持 Plan A 生產常數不作更動**。
   * 實測千局證實 Plan A 基準已處於全局最優解平原中心，阻尼與除數設定高度穩健。
   * 技術細節與完整數據見 [`PHASE7_HISTORY_LMR_ALIGNMENT_PLAN.md`](PHASE7_HISTORY_LMR_ALIGNMENT_PLAN.md) §6。
+
+---
+
+## 16. Phase 8：空步剪枝 (NMP) SF19 架構對齊、Numba 記憶體與指標安全修復、與門檻調優實測（2026-10-14，+12.17 Elo）
+
+* **架構重構與致命 Bug 排查**：
+  1. **廢除模式選擇器**：全面廢除 `TUNE_NMP_SCOPE` / `TUNE_NMP_GATE` / `TUNE_NMP_R`，統一為 Stockfish 19 Step 10 極簡連續架構。
+  2. **Full Eval 門檻縮排修復**：修正舊代碼在未快取靜態評估時，因縮排層級錯誤導致 `static_score < nmp_threshold` 盤面依然強行執行空步搜尋之重大缺陷。
+  3. **Numba Structured Array 參考別名指標覆寫修復 (Aliasing Protection)**：
+     * `probe_tt` 回傳指向結構化陣列記憶體的指標視圖。Verification Search 在同 `ply` 遞迴執行 `store_tt` 時，會直接就地覆寫該記憶體槽位。
+     * 退回父節點後，後續的 **Singular Extension** 與 **LMR TT 修正** 讀取到被改寫後的淺層資料。
+     * **修復**：在 Phase 2 即將 `tt_entry` 的必要欄位解構成純量區域變數，徹底杜絕指標別名污染。
+  4. **子節點棧隔離**：空步子搜尋前強制將 `reduction_stack[ply + 1]` 清零，避免子節點誤觸繼承的 Hindsight 延伸/減深。
+  5. **Verification Search 狀態隔離**：完整保存與還原 `reduction_stack`、`cutoff_cnt`、`static_eval_stack`、`tt_hit`、`tt_pv`、`follow_pv`，並於失敗時重置 `pv_table[ply, ply] = NO_MOVE`。
+  6. **溢位夾制保護**：`eval_margin = min(NMP_EVAL_MARGIN_MAX, max(0, (static_score - beta) // _eval_div))`。
+
+* **實測對局與門檻調優機理**：
+  * **初測失利與病因定位**（`DEPTH_COEF=14`, `BASE=200`, `EVAL_DIV=150`）：
+    * 600 局 @ 300k nodes 戰績 126W 335D 139L（48.92%, Elo -7.53 ± 18.65）。
+    * 搜尋深度達 19.14 (+0.52 層)，但 26–80 步中局落敗達 139 場偏高。
+    * 原因分析：在 $d \ge 16$ 時門檻降至 $\beta - 24 \sim \beta - 80$，過於寬鬆的深層門檻在複雜中局引發戰術盲區（Tactical Blindness），導致大量戰術誤剪落敗。
+  * **精細調優突破**（`DEPTH_COEF=12`, `BASE=204`, `EVAL_DIV=156`, `EVAL_MAX=4`）：
+    * 將深層門檻抬高 30~50 cp，嚴格要求局面確實佔優才准發起空步剪枝。
+    * 600 局 @ 300,000 nodes, TT 64MB 全量驗收：
+      * **戰績**：**136 勝 / 349 和 / 115 負**（得分率 **51.75%**，淨勝 **+21 局**）。
+      * **Elo 表現**：**+12.17 ± 17.70** (95% CI [-5.51, +29.90])。
+      * **落敗銳減**：負局由 139 場大幅減少 24 場至 115 場，證明深層戰術盲點被徹底堵死。
+      * **搜尋深度**：平均深度 **19.10 層 vs Old 18.64 層**（**扎實加深 +0.47 層**，Welch $p = 9.28 \times 10^{-5}$）。
+      * **同深度節點節省**：在核心深度 $d=10 \sim 21$，相同深度所需節點僅為 Old 的 96% ~ 98%。
+
+* **生產基線確立與同步**：
+  * 正式透過 `tools/sync_classical_old.py --sync` 同步至 `chess_engine/classical_old/`，確立為新一代戰鬥基線。
+  * 同步更新 `tuner/constants_snapshot.py`、`tests/test_search_param_registry.py`。
+  * 詳細戰報與圖表請參見 [`tournament_analysis/REPORT_2026-10-14_nmp_alignment_campaign.md`](../../tournament_analysis/REPORT_2026-10-14_nmp_alignment_campaign.md)。
+
 

@@ -21,10 +21,11 @@ from chess_engine.classical_old.constants import (
     TUNE_LMR_HIST_SCALE, TUNE_DELTA_MARGIN, TUNE_PROBCUT_MARGIN,
     TUNE_BAD_CAP_BONUS, TUNE_GOOD_CAP_RELIEF, TUNE_LMP_SCALE, TUNE_KILLER_RELIEF, TUNE_QS_SEE,
     TUNE_LMR_CUTNODE, TUNE_LMR_NO_TTMOVE, TUNE_LMR_TTCAP, TUNE_LMR_MC_FACTOR, TUNE_LMR_TTMOVE_RED,
-    TUNE_NMP_SCOPE, TUNE_NMP_GATE, TUNE_NMP_R, TUNE_PROBCUT_STYLE,
+    TUNE_PROBCUT_STYLE,
     TUNE_LMR_TABLE_SCALE, TUNE_LMR_NOT_IMP,
-    TUNE_NMP_G_BASE, TUNE_NMP_G_DEPTH, TUNE_NMP_G_IMP, TUNE_NMP_NEED_BETA,
-    TUNE_NMP_R_BASE, TUNE_NMP_R_DIV, TUNE_NMP_VERIFY_D, TUNE_NMP_SCOPE_MIND,
+    TUNE_NMP_EVAL_DIV, TUNE_NMP_BASE, TUNE_NMP_DEPTH_COEF, TUNE_NMP_IMP_COEF,
+    TUNE_NMP_R_BASE, TUNE_NMP_R_DIV, TUNE_NMP_VERIFY_DEPTH,
+    TUNE_RESERVED_21, TUNE_RESERVED_22, TUNE_RESERVED_29, TUNE_RESERVED_33,
     TUNE_HIST_BONUS_SCALE, TUNE_HIST_BONUS_CAP, TUNE_HIST_MALUS_CAP,
     TUNE_ORDER_KILLER_1, TUNE_ORDER_COUNTER,
     TUNE_HIST_MALUS_DECAY, TUNE_LMR_DIV_STEP, TUNE_HIST_MALUS_SCALE,
@@ -32,10 +33,9 @@ from chess_engine.classical_old.constants import (
     HISTORY_BONUS_SCALE, HISTORY_BONUS_CAP, HISTORY_MALUS_CAP,
     QUIET_ORDER_KILLER_1, QUIET_ORDER_COUNTER,
     LMR_TABLE_SCALE_PERCENT, LMR_NOT_IMP_NUM,
-    NMP_LEGACY_BASE, NMP_LEGACY_DEPTH_COEF, NMP_LEGACY_IMPROVING_COEF,
-    NMP_LEGACY_R_BASE, NMP_LEGACY_R_DEPTH_DIV, NMP_VERIFICATION_DEPTH,
-    NMP_SCOPE_MODE, NMP_SCOPE_MIN_DEPTH, NMP_GATE_MODE, NMP_R_MODE,
-    PROBCUT_STYLE_MODE, NMP_NEED_BETA,
+    NMP_BASE, NMP_DEPTH_COEF, NMP_IMP_COEF, NMP_EVAL_MARGIN_DIV,
+    NMP_R_BASE, NMP_R_DIV, NMP_VERIFICATION_DEPTH,
+    PROBCUT_STYLE_MODE,
 )
 
 """
@@ -114,6 +114,7 @@ search_context_spec = [
     ('capture_victim_tried', numba.int8[:, ::1]),
     ('capture_tosq_tried', numba.int8[:, ::1]),
     ('enable_nmp', numba.boolean),
+    ('nmp_min_ply', numba.int32),
     ('enable_rfp', numba.boolean),
     ('enable_razoring', numba.boolean),
     ('enable_lmr', numba.boolean),
@@ -184,7 +185,7 @@ search_context_type = SearchContextType(tuple(search_context_spec))
 # Generated once: each getter/setter is a tiny njit that reads/writes the field.
 _SCALAR_FIELDS = {
     "nodes_searched", "end_time", "game_history_count", "tt_generation", "diag_enabled",
-    "enable_nmp", "enable_rfp", "enable_razoring", "enable_lmr",
+    "enable_nmp", "nmp_min_ply", "enable_rfp", "enable_razoring", "enable_lmr",
     "enable_see_pruning", "enable_lmp", "enable_fp", "enable_probcut",
     "enable_multicut",
     "last_iteration_pv_len",
@@ -354,20 +355,20 @@ def SearchContext(
     tune[TUNE_LMR_TTCAP] = LMR_TTCAPTURE_BONUS
     tune[TUNE_LMR_MC_FACTOR] = LMR_MOVECOUNT_FACTOR
     tune[TUNE_LMR_TTMOVE_RED] = LMR_TTMOVE_REDUCTION
-    tune[TUNE_NMP_SCOPE] = NMP_SCOPE_MODE
-    tune[TUNE_NMP_GATE] = NMP_GATE_MODE
-    tune[TUNE_NMP_R] = NMP_R_MODE
+    tune[TUNE_NMP_EVAL_DIV] = NMP_EVAL_MARGIN_DIV
+    tune[TUNE_RESERVED_21] = 0
+    tune[TUNE_RESERVED_22] = 0
     tune[TUNE_PROBCUT_STYLE] = PROBCUT_STYLE_MODE
     tune[TUNE_LMR_TABLE_SCALE] = LMR_TABLE_SCALE_PERCENT
     tune[TUNE_LMR_NOT_IMP] = LMR_NOT_IMP_NUM
-    tune[TUNE_NMP_G_BASE] = NMP_LEGACY_BASE
-    tune[TUNE_NMP_G_DEPTH] = NMP_LEGACY_DEPTH_COEF
-    tune[TUNE_NMP_G_IMP] = NMP_LEGACY_IMPROVING_COEF
-    tune[TUNE_NMP_NEED_BETA] = NMP_NEED_BETA
-    tune[TUNE_NMP_R_BASE] = NMP_LEGACY_R_BASE
-    tune[TUNE_NMP_R_DIV] = NMP_LEGACY_R_DEPTH_DIV
-    tune[TUNE_NMP_VERIFY_D] = NMP_VERIFICATION_DEPTH
-    tune[TUNE_NMP_SCOPE_MIND] = NMP_SCOPE_MIN_DEPTH
+    tune[TUNE_NMP_BASE] = NMP_BASE
+    tune[TUNE_NMP_DEPTH_COEF] = NMP_DEPTH_COEF
+    tune[TUNE_NMP_IMP_COEF] = NMP_IMP_COEF
+    tune[TUNE_RESERVED_29] = 0
+    tune[TUNE_NMP_R_BASE] = NMP_R_BASE
+    tune[TUNE_NMP_R_DIV] = NMP_R_DIV
+    tune[TUNE_NMP_VERIFY_DEPTH] = NMP_VERIFICATION_DEPTH
+    tune[TUNE_RESERVED_33] = 0
     tune[TUNE_HIST_BONUS_SCALE] = HISTORY_BONUS_SCALE
     tune[TUNE_HIST_BONUS_CAP] = HISTORY_BONUS_CAP
     tune[TUNE_HIST_MALUS_CAP] = HISTORY_MALUS_CAP
@@ -432,6 +433,7 @@ def SearchContext(
         capture_victim_tried,
         capture_tosq_tried,
         bool(ENABLE_NMP),
+        np.int32(0),
         bool(ENABLE_RFP),
         bool(ENABLE_RAZORING),
         bool(ENABLE_LMR),

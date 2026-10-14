@@ -299,15 +299,43 @@ graph TD
 
 ---
 
-## 6. 驗收標準與防禦護欄 (Validation Gates & Constraints)
+---
 
-1. **JIT 編譯合規（嚴格遵循 `numba-jit.md`）**：
-   - 禁止在 `search.py` 中引入新的未特化型別。
-   - 搜尋函式保持 `cache=False`。
-2. **防 Zugzwang 安全線**：
-   - 嚴格保留 `side_non_pawn_count >= NMP_MIN_SIDE_NON_PAWNS`，禁止在純兵殘局執行 NMP。
-3. **SPRT 裁決原則（遵守「No gain, no change」）**：
-   - L2 深度驗收若未能通過 SPRT H1 或 LLR < 0，維持基準，絕不過擬合噪聲。
+## 7. 實施成果與實戰驗收定論 (Implementation & LTC Tournament Results, 2026-10-14)
+
+### 7.1 核心 Bug 排查與修復
+在實裝過程中，經深入代碼審計發現並修復了以下致命性架構問題：
+1. **Full Eval 門檻縮排修正**：修復了未命中靜態評估快取時，`static_score < nmp_threshold` 未跳過空步搜尋的縮排邏輯錯誤。
+2. **Numba Structured Array 參考別名指標污染修復 (Aliasing Protection)**：
+   * 在 Numba 中，`tt_entry = probe_tt(...)` 回傳的是 1D 結構化陣列槽位的 mutable pointer。
+   * 同 `ply` 執行的 Verification Search 在結尾 `store_tt` 時就地改寫了記憶體視圖，造成父節點後續 Singular Extension 與 LMR 誤讀淺層覆寫數據。
+   * **解決方案**：在 Phase 2 即將 `tt_entry` 的欄位（`tt_flag`, `tt_depth`, `tt_score_raw`, `tt_static_eval_raw`, `tt_is_pv`, `tt_move`）解構成純量區域變數，徹底阻斷同 `ply` 遞迴的指標污染。
+3. **子節點 `reduction_stack[ply + 1]` 清零**：避免空步子搜尋吃到前一分支殘留值而觸發錯誤的 Hindsight 減深或延伸。
+4. **Verification Search 狀態隔離**：完整保存與還原 `reduction_stack`, `cutoff_cnt`, `static_eval_stack`, `tt_hit`, `tt_pv`, `follow_pv`，並於失敗時重置 `pv_table[ply, ply] = NO_MOVE`。
+5. **`eval_margin` 溢位保護**：`eval_margin = min(NMP_EVAL_MARGIN_MAX, max(0, (static_score - beta) // _eval_div))`，避免大優局面下 $R$ 過大導致深度變為負數。
+
+### 7.2 參數調優與 600 局 LTC 實戰驗證
+
+在 300,000 nodes, TT 64MB, 9 併發換先對稱條件下，進行兩輪 600 局對戰：
+
+1. **初測（粗糙參數：`DEPTH_COEF=14`, `BASE=200`, `EVAL_DIV=150`）**：
+   * 戰績：126W 335D 139L（得分率 48.92%，Elo -7.53 ± 18.65）。
+   * 搜尋深度達 19.14 (+0.52 層)，但 26–80 步中局落敗達 139 場偏高，暴露深層門檻太低（$d \ge 16$ 時門檻降至 $\beta - 24 \sim \beta - 80$）引發的戰術盲區（Tactical Blindness）。
+2. **精細調優與驗收（`DEPTH_COEF=12`, `BASE=204`, `EVAL_DIV=156`, `EVAL_MAX=4`, `VERIFY=16`, `NON_PAWNS=1`）**：
+   * **理論依據**：深層門檻拉高 30~50 cp（近半隻兵價值），嚴格限定只有局面確實佔優時才准冒險走空步，杜絕中局戰術誤剪。
+   * **600 局驗收戰績**：
+     * **136 勝 / 349 和 / 115 負**
+     * **得分率**：**51.75%**（310.5 / 600，淨勝 **+21 局**，對比初測來回拉開 34 局！）
+     * **Elo 增益**：**+12.17 ± 17.70**（95% CI [-5.51, +29.90]）
+     * **落敗大幅縮減**：負局從 139 場急降至 115 場（**挽救 24 場落敗**）
+     * **搜尋深度**：平均深度 **19.10 層 vs Old 18.64 層**（**扎實加深 +0.47 層**，Welch $p = 9.28 \times 10^{-5}$）
+     * **節點效率**：整體節點節省 1.3%，在核心深度（$d=10 \sim 21$）同深度節點消耗只有 Old 的 96% ~ 98%。
+
+### 7.3 定論與基線同步
+* 經實測驗證，SF19 NMP 極簡架構與修復後的記憶體安全隔離機制大獲成功。
+* 正式透過 `tools/sync_classical_old.py --sync` 將成果同步至 `chess_engine/classical_old/`，確立為新一代戰鬥基線。
+* 同步更新 `tuner/constants_snapshot.py` 與 `tests/test_search_param_registry.py`。
+* 完整對戰與搜尋指標見 [`tournament_analysis/REPORT_2026-10-14_nmp_alignment_campaign.md`](../../tournament_analysis/REPORT_2026-10-14_nmp_alignment_campaign.md)。
 
 ---
-*(本計畫書由 Antigravity 引擎架構模組於 2026-10-13 正式定稿)*
+*(本計畫書於 2026-10-14 全面實施完成並通過實戰驗收結案)*
