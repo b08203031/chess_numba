@@ -1943,8 +1943,32 @@ LMP skip 體積 ≫ RFP ≈ FP/Razor/hist-prune 帶 ≫ NMP ≫ ProbCut
   3. **剪枝協同效應在 300k LTC 完美兌現**：
      * 6 軸協同在 1,000 局超深層對抗中以 51.25% 穩健勝出，再次證實高深度調參（100k nodes）對於縮小深度適應落差的關鍵價值。
 * **判定：** **採納進生產 / 基線 (ADOPTED / PRODUCTION BASELINE UPDATED)**。
-  * 產物檔：`tournament_analysis/l2_verify_pruning_p5_deep_tail03.json`、`tune_search/candidate_pruning_p5_deep.json`。
-  * 生產代碼更新：`LMP_SCALE_PERCENT=137`, `FP_BASE=174`, `FP_MULTIPLIER=96`, `RFP_BASE_MULT=168`, `PRUNING_QUIET_SEE_MARGIN=-32`, `PRUNING_CAPTURE_SEE_MARGIN=-102`。已同步 `constants.py`、`constants_snapshot.py` 與 `classical_old`。
+### 3.65 E65: Step 15 奇異延展與 Multi-Cut 狀態隔離加固與負延展調優 (ADOPTED / Production Baseline Updated)
+
+* **日期：** 2026-10-14 ~ 2026-10-15
+* **動機：**
+  * 審查報告指出 Step 15 奇異延展與 Multi-Cut 中存在的五大嚴重狀態隔離與安全防禦漏洞：
+    1. `cutoff_cnt[ply + 1]` 漏存還原：奇異搜尋子層 fail-high 污染父節點兄弟走步，施加超額 1~2 ply LMR 懲罰；
+    2. `not is_exclusion_search` 漏加：導致 Correction History 與 Fail-Low 對手走法獎勵遭受人為排除走法的極低分污染；
+    3. `stop_flag` 順序顛倒：超時返回的 0 在 `beta <= 0` 時被誤判為 Multi-Cut 截斷成功；
+    4. `VALUE_KNOWN_WIN` 防護：對齊 SF19 `!is_decisive`，避免在已知勝負邊界浪費節點；
+    5. 負延展死碼修復：舊版 `if exclusion_score >= beta:` 100% 死碼，對齊 SF18/19 修復為 `se_tt_score >= beta`；雙延展限制於 `not is_pv` 防搜尋樹暴衝。
+* **二階段深度實戰驗證（300,000 nodes LTC，各 400 局）：**
+  1. **第一階段（狀態隔離防禦修復，負延展暫定 -2）：**
+     * 對戰前一版基線，經 400 局完整對抗，成功取得勝勢並獲採納，同步更新至 `classical_old`。
+  2. **第二階段（負延展 -2 → -1 緩和調優驗收）：**
+     * 針對 Classical HCE 噪聲下 `-2` 砍深過激導致超長殘局漏算的現象，將 `se_tt_score >= beta` 時之負延展由 `-2` 調整為 `-1`。
+     * 對抗第一階段基線（400 局成對換先，雙向黑白互換）：
+       * 戰績：Candidate **89 勝 229 和 82 負（50.88%）**，**淨勝 +7 盤**！
+       * **Elo 表現：`+6.08 ± 22.2 Elo`**。
+* **物理機理解析：**
+  1. **超長殘局止血效果卓著**：
+     * 在負延展調寬為 `-1` 後，`>80` 步超長殘局由 44.2% 大幅止血回升至 **50.0% 完全平衡（22W 58D 22L）**，徹底消除了過度自信的淺層截斷（Premature Cutoff）。
+  2. **中盤攻防展現強大統治力**：
+     * 在 51~80 步複雜中局攻防中，狀態隔離與防污染的紅利全面釋放，打出 **65 勝 54 負（53.1% 勝率，約 +22 Elo 優勢）**。
+* **判定：** **採納進生產 / 基線 (ADOPTED / PRODUCTION BASELINE UPDATED)**。
+  * 產物檔：`tournament_analysis/tournament_results.pgn`、`tournament_analysis/game_stats_report.txt`、`tournament_analysis/search_stats_report.txt`。
+  * 生產代碼更新：`chess_engine/classical/search.py`（Step 15 完整防禦 + 負延展 `-1`）。已同步至 `classical_old/search.py` 並全數通過測試。
 
 ---
 

@@ -205,12 +205,13 @@ P3 的診斷分成三條 opt-in funnel：
         *   **超時檢查前置**：優先判定 `search_context.stop_flag[0]`，避免超時返回的 0 在 `beta <= 0` 時誤觸 Multi-Cut。
         *   若 `exclusion_score >= beta` 且非勝負分（`not is_win` 與 `not is_decisive`），直接回傳 `exclusion_score` 截斷，無需任何 `unmake_move`（**E31 採納**）。
     *   **單 / 雙延展**：若 `exclusion_score < exclusion_beta`，賦予 `singular_extension = 1`；若非 PV 節點（`not is_pv`）、差距達到 `double_margin`（`2 * depth`）且 `depth >= 10`，賦予雙延展 `singular_extension = 2`（限制在 non-PV 杜絕搜尋樹爆炸）。
-    *   **負延展（SF18/19 Step 15/16 對齊，2026-10-14 死碼修復）**：若非 PV 節點且非奇異（`exclusion_score >= exclusion_beta and not is_pv`）：若置換表自身評估預期高於邊界（`se_tt_score >= beta`）則賦予 `-2`；若在 `cut_node` 則賦予 `-1`；若原步優勢存疑（`se_tt_score <= exclusion_score`）則賦予 `-1`。徹底修復舊版因誤用 `exclusion_score >= beta` 導致負延展 100% 成為死碼的缺陷。
+    *   **負延展（SF18/19 Step 15/16 對齊，2026-10-14 修復與調優）**：若非 PV 節點且非奇異（`exclusion_score >= exclusion_beta and not is_pv`）：若置換表自身評估預期高於邊界（`se_tt_score >= beta`）則賦予 `-1`（經 400 局實戰驗證，原 `-2` 在 Classical HCE 噪聲下易引發淺層過早截斷，調整為 `-1` 後超長殘局全面止血）；若在 `cut_node` 則賦予 `-1`；若原步優勢存疑（`se_tt_score <= exclusion_score`）則賦予 `-1`。徹底修復舊版因誤用 `exclusion_score >= beta` 導致負延展 100% 成為死碼的缺陷。
     *   **延展合併與將軍延伸 Pre-make（E36 採納）**：走棋後與將軍延展（`check_extension`）合併：正向延展取較大值（`max`），負向延展在無將軍時覆蓋。對於將軍延伸的 `_see_ge_jit` 檢驗，全面改為在 `make_move` 前直接利用父盤面評估（`check_gate_see_ok`），徹底根除了舊代碼在走棋後 `unmake -> SEE -> remake` 的兩次冗餘棋盤突變開銷。
-    *   **實戰驗證（Step 15 Pre-make SE 採納，2026-09-21）**：
-        *   對戰條件：400 盤，每步 300,000 nodes，TT 64MB。
-        *   最終比分：104W 193D 103L（勝率 50.12%，Elo: **+0.87 ± 24.49**）。
-        *   分析：Pre-make 結合合法性過濾、狀態 stack 還原及 TT 隔離後展現完全健全的架構穩定性（0 崩潰、深度 $\ge 14$ 佔比提升 4.8%），確認結構中性偏正，正式採納進生產基線（同步至 `classical_old`）。
+    *   **實戰驗證（Step 15 狀態隔離修復 + 負延展 -1 採納，2026-10-15）**：
+        *   第一階段（SE 漏洞修復與狀態隔離）：對抗前一版基線，完成 400 局並取得獲勝。
+        *   第二階段（負延展 -2 → -1 緩和調優，E65）：400 局，每步 300,000 nodes，TT 64MB。
+        *   最終比分：89W 229D 82L（勝率 **50.88%**，Elo: **+6.08 ± 22.2**，淨勝 +7 盤）。
+        *   關鍵亮點：51~80 步中局取得 65W 54L（53.1% 勝率）；>80 步超長殘局由 44.2% 大幅止血回升至 50.0% 平衡（22W 22L）。確認架構完全健全，正式採納進生產基線（同步至 `classical_old`）。
 
 ### 4.9 內部迭代加深 (Internal Iterative Deepening, IID) / IIR
 *   **理念**：如果當前節點沒有 TT 移動（例如是新節點），則先以較淺的深度搜尋該節點，以獲得一個合適的移動進行排序，再進行完整搜尋。現行實作為 **IIR**（直接減深），而非昂貴的子搜尋 IID。

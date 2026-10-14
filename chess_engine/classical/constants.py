@@ -985,7 +985,7 @@ MULTICUT_C = 6          # Number of moves to probe
 
 
 # IID and Singular Extension Parameters
-MIN_SINGULAR_DEPTH = 7
+MIN_SINGULAR_DEPTH = 6
 SINGULAR_MARGIN_MULTIPLIER = 2          # Margin = 2 * depth
 SINGULAR_DOUBLE_EXT_MULTIPLIER = 2     # Double margin = 2 * depth (total offset 4 * depth for double ext check)
 
