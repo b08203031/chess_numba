@@ -985,7 +985,7 @@ MULTICUT_C = 6          # Number of moves to probe
 
 
 # IID and Singular Extension Parameters
-MIN_SINGULAR_DEPTH = 10
+MIN_SINGULAR_DEPTH = 9
 SINGULAR_MARGIN_MULTIPLIER = 2          # Margin = 2 * depth
 SINGULAR_DOUBLE_EXT_MULTIPLIER = 2     # Double margin = 2 * depth (total offset 4 * depth for double ext check)
 
@@ -1264,9 +1264,9 @@ STOP_CHECK_MASK = 4095
 
 # --- Singular extension ---
 SINGULAR_TT_DEPTH_SLACK = 3      # tt.depth >= depth - slack
-SINGULAR_MARGIN_BASE = 60        # margin = (BASE + ttpv_bonus) * depth // DIV
-SINGULAR_TTPV_BONUS = 70
-SINGULAR_MARGIN_DIV = 59
+SINGULAR_MARGIN_BASE = 48        # margin = (BASE + ttpv_bonus) * depth // DIV (rescaled to 100cp HCE)
+SINGULAR_TTPV_BONUS = 52
+SINGULAR_MARGIN_DIV = 64
 SINGULAR_DOUBLE_EXT_MIN_DEPTH = 10
 
 # --- LMR (remaining hard-codes → named) ---
