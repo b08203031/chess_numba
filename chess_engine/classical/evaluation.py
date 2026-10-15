@@ -1624,6 +1624,9 @@ def _evaluate_position_jit(piece_bbs, occupancy_bbs, game_state, lazy: bool, sea
     if all_pieces_except_pawns_and_kings == 0:
         castling_rights = np.uint8(game_state[1])
         score = _evaluate_king_pawn_endgame(piece_bbs, game_state[0], castling_rights)
+        sf = get_endgame_scale_factor(piece_bbs, occupancy_bbs, game_state, np.int32(0), score)
+        if sf == SCALE_FACTOR_DRAW:
+            score = np.int32(0)
         val = np.int32(score) if side_to_move == 0 else np.int32(-score)
         return val, np.uint64(0), np.uint64(0)
 
@@ -1682,7 +1685,12 @@ def _evaluate_position_jit(piece_bbs, occupancy_bbs, game_state, lazy: bool, sea
 
     # --- Lazy Evaluation Checkpoint ---
     if lazy:
-        final_score = (mg_score * phase + eg_score * (MAX_PHASE - phase)) // MAX_PHASE
+        sf = get_endgame_scale_factor(piece_bbs, occupancy_bbs, game_state, phase, eg_score)
+        if sf != SCALE_FACTOR_NORMAL:
+            eg_scaled = eg_score * sf // SCALE_FACTOR_NORMAL
+            final_score = (mg_score * phase + eg_scaled * (MAX_PHASE - phase)) // MAX_PHASE
+        else:
+            final_score = (mg_score * phase + eg_score * (MAX_PHASE - phase)) // MAX_PHASE
         val = np.int32(final_score) if side_to_move == 0 else np.int32(-final_score)
         return val, PINNED_UNCOMPUTED_SENTINEL, PINNED_UNCOMPUTED_SENTINEL
 
@@ -1708,7 +1716,12 @@ def _evaluate_position_jit(piece_bbs, occupancy_bbs, game_state, lazy: bool, sea
     if not lazy:
         v = (mg_score + eg_score) // 2
         if abs(v) > LAZY_EVAL_THRESHOLD + npm // 64:
-            final_score = (mg_score * phase + eg_score * (MAX_PHASE - phase)) // MAX_PHASE
+            sf = get_endgame_scale_factor(piece_bbs, occupancy_bbs, game_state, phase, eg_score)
+            if sf != SCALE_FACTOR_NORMAL:
+                eg_scaled = eg_score * sf // SCALE_FACTOR_NORMAL
+                final_score = (mg_score * phase + eg_scaled * (MAX_PHASE - phase)) // MAX_PHASE
+            else:
+                final_score = (mg_score * phase + eg_score * (MAX_PHASE - phase)) // MAX_PHASE
             val = np.int32(final_score) if side_to_move == 0 else np.int32(-final_score)
             return val, PINNED_UNCOMPUTED_SENTINEL, PINNED_UNCOMPUTED_SENTINEL
 

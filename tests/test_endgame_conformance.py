@@ -242,6 +242,39 @@ class TestEndgameConformance(unittest.TestCase):
         diff = v1 - v2
         self.assertLess(diff, 500, f"Doubled pawn scored extra {diff} cp, likely double-counting unstoppable bonus!")
 
+    def test_kbpsk_wrong_bishop_distance_2_draw(self):
+        # White dark-squared bishop + a3 pawn vs Black king on c7 (distance 2 from a8 light square)
+        fen = "8/2k3B1/8/8/8/P7/8/5K2 w - - 0 1"
+        piece_bbs, occupancy_bbs, game_state = parse_fen(fen)
+        sf = get_endgame_scale_factor(piece_bbs, occupancy_bbs, game_state, np.int32(0), np.int32(500))
+        self.assertEqual(int(sf), int(SCALE_FACTOR_DRAW))
+
+    def test_kbpsk_lazy_eval_draw(self):
+        # Wrong bishop + a-pawn fortress under lazy=True must not leak unscaled material (+648 cp)
+        from chess_engine.classical.evaluation import _evaluate_position_jit
+        fen = "8/Pk6/1B6/1K6/8/8/8/8 w - - 1 72"
+        piece_bbs, occupancy_bbs, game_state = parse_fen(fen)
+        eval_lazy, _, _ = _evaluate_position_jit(piece_bbs, occupancy_bbs, game_state, True, None)
+        self.assertEqual(int(eval_lazy), 0)
+
+    def test_kbpsk_barrier_winning_position_not_draw(self):
+        # White Kb6, Pa6, Bd5 (dark bishop) vs Black Kc8
+        # Black king on c8 is locked out by a6 pawn (controlling b7) and dark bishop (controlling b8)
+        # Must not be falsely judged as SCALE_FACTOR_DRAW
+        fen = "2k5/8/KP6/3B4/8/8/8/8 b - - 0 1"
+        piece_bbs, occupancy_bbs, game_state = parse_fen(fen)
+        sf = get_endgame_scale_factor(piece_bbs, occupancy_bbs, game_state, np.int32(0), np.int32(500))
+        self.assertNotEqual(int(sf), int(SCALE_FACTOR_DRAW))
+
+    def test_pure_pawn_winning_eval_not_discounted(self):
+        # Winning pure king-and-pawn endgame with unstoppable pawn must retain full score (~10000 cp)
+        # and must not be discounted by generic pawn scale factor (36 + 7 * wp)
+        fen = "7k/8/8/8/8/8/P7/7K w - - 0 1"
+        piece_bbs, occupancy_bbs, game_state = parse_fen(fen)
+        val, _, _ = evaluate_position(piece_bbs, occupancy_bbs, game_state)
+        self.assertGreater(val, 9000)
+
 
 if __name__ == "__main__":
     unittest.main()
+

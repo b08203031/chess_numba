@@ -681,10 +681,41 @@ def get_endgame_scale_factor(piece_bbs, occupancy_bbs, game_state, phase, eg_sco
             if wb_color == 0:  # Dark bishop vs White a8 (light)
                 if CHEBYSHEV_DISTANCE[bk_sq, 56] <= 1:
                     return SCALE_FACTOR_DRAW
+                if bp == 0:
+                    pw_temp = piece_bbs[0]
+                    front_wp_rank = -1
+                    while pw_temp != np.uint64(0):
+                        sq = get_lsb_index(pw_temp)
+                        if sq // 8 > front_wp_rank:
+                            front_wp_rank = sq // 8
+                        pw_temp &= np.uint64(pw_temp - 1)
+                    # 兵到 a6 (rank 5) 即會控制淺色格 b7，故必須在兵抵達 a6 前卡進角格區
+                    steps_to_a6 = 3 if front_wp_rank == 1 else (5 - front_wp_rank)
+                    weak_tempo = 1 if game_state[0] == 1 else 0
+                    dist_weak = CHEBYSHEV_DISTANCE[bk_sq, 56] - weak_tempo
+                    dist_strong = CHEBYSHEV_DISTANCE[wk_sq, 56] - (1 - weak_tempo)
+                    weak_not_behind = not (bk_sq % 8 <= 1 and bk_sq // 8 <= front_wp_rank)
+                    if weak_not_behind and dist_weak <= steps_to_a6 and dist_weak < dist_strong - 1:
+                        return SCALE_FACTOR_DRAW
         elif all_on_h:
             if wb_color == 1:  # Light bishop vs White h8 (dark)
                 if CHEBYSHEV_DISTANCE[bk_sq, 63] <= 1:
                     return SCALE_FACTOR_DRAW
+                if bp == 0:
+                    pw_temp = piece_bbs[0]
+                    front_wp_rank = -1
+                    while pw_temp != np.uint64(0):
+                        sq = get_lsb_index(pw_temp)
+                        if sq // 8 > front_wp_rank:
+                            front_wp_rank = sq // 8
+                        pw_temp &= np.uint64(pw_temp - 1)
+                    steps_to_h6 = 3 if front_wp_rank == 1 else (5 - front_wp_rank)
+                    weak_tempo = 1 if game_state[0] == 1 else 0
+                    dist_weak = CHEBYSHEV_DISTANCE[bk_sq, 63] - weak_tempo
+                    dist_strong = CHEBYSHEV_DISTANCE[wk_sq, 63] - (1 - weak_tempo)
+                    weak_not_behind = not (bk_sq % 8 >= 6 and bk_sq // 8 <= front_wp_rank)
+                    if weak_not_behind and dist_weak <= steps_to_h6 and dist_weak < dist_strong - 1:
+                        return SCALE_FACTOR_DRAW
 
         # B/G file case: if weak side has a pawn blocking on 7th rank with a weak king nearby
         # SF11 endgame.cpp lines 359-392
@@ -725,10 +756,40 @@ def get_endgame_scale_factor(piece_bbs, occupancy_bbs, game_state, phase, eg_sco
             if bb_color == 1:  # Light bishop vs Black a1 (dark)
                 if CHEBYSHEV_DISTANCE[wk_sq, 0] <= 1:
                     return SCALE_FACTOR_DRAW
+                if wp == 0:
+                    pb_temp = piece_bbs[6]
+                    front_bp_rank = 8
+                    while pb_temp != np.uint64(0):
+                        sq = get_lsb_index(pb_temp)
+                        if sq // 8 < front_bp_rank:
+                            front_bp_rank = sq // 8
+                        pb_temp &= np.uint64(pb_temp - 1)
+                    steps_to_a3 = 3 if front_bp_rank == 6 else (front_bp_rank - 2)
+                    weak_tempo = 1 if game_state[0] == 0 else 0
+                    dist_weak = CHEBYSHEV_DISTANCE[wk_sq, 0] - weak_tempo
+                    dist_strong = CHEBYSHEV_DISTANCE[bk_sq, 0] - (1 - weak_tempo)
+                    weak_not_behind = not (wk_sq % 8 <= 1 and wk_sq // 8 >= front_bp_rank)
+                    if weak_not_behind and dist_weak <= steps_to_a3 and dist_weak < dist_strong - 1:
+                        return SCALE_FACTOR_DRAW
         elif all_on_h:
             if bb_color == 0:  # Dark bishop vs Black h1 (light)
                 if CHEBYSHEV_DISTANCE[wk_sq, 7] <= 1:
                     return SCALE_FACTOR_DRAW
+                if wp == 0:
+                    pb_temp = piece_bbs[6]
+                    front_bp_rank = 8
+                    while pb_temp != np.uint64(0):
+                        sq = get_lsb_index(pb_temp)
+                        if sq // 8 < front_bp_rank:
+                            front_bp_rank = sq // 8
+                        pb_temp &= np.uint64(pb_temp - 1)
+                    steps_to_h3 = 3 if front_bp_rank == 6 else (front_bp_rank - 2)
+                    weak_tempo = 1 if game_state[0] == 0 else 0
+                    dist_weak = CHEBYSHEV_DISTANCE[wk_sq, 7] - weak_tempo
+                    dist_strong = CHEBYSHEV_DISTANCE[bk_sq, 7] - (1 - weak_tempo)
+                    weak_not_behind = not (wk_sq % 8 >= 6 and wk_sq // 8 >= front_bp_rank)
+                    if weak_not_behind and dist_weak <= steps_to_h3 and dist_weak < dist_strong - 1:
+                        return SCALE_FACTOR_DRAW
 
         # B/G file case (mirror of white's case)
         all_on_b = (piece_bbs[6] & ~FILE_MASKS[1]) == np.uint64(0)

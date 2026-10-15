@@ -1264,9 +1264,9 @@ STOP_CHECK_MASK = 4095
 
 # --- Singular extension ---
 SINGULAR_TT_DEPTH_SLACK = 3      # tt.depth >= depth - slack
-SINGULAR_MARGIN_BASE = 60        # margin = (BASE + ttpv_bonus) * depth // DIV
-SINGULAR_TTPV_BONUS = 70
-SINGULAR_MARGIN_DIV = 59
+SINGULAR_MARGIN_BASE = 48        # margin = (BASE + ttpv_bonus) * depth // DIV (rescaled to 100cp HCE)
+SINGULAR_TTPV_BONUS = 52
+SINGULAR_MARGIN_DIV = 64
 SINGULAR_DOUBLE_EXT_MIN_DEPTH = 10
 
 # --- LMR (remaining hard-codes → named) ---

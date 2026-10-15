@@ -1496,7 +1496,7 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
         static_score = apply_correction_history_score(game_state, search_context, raw_static_eval, ply)
         
         # --- H2 Enhancement: Refine static_score using trusted TT Score Bounds ---
-        if tt_hit:
+        if tt_hit and not is_exclusion_search:
             tt_score = tt_score_raw
             
             # Adjust mate scores relative to current ply
@@ -1893,6 +1893,7 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                         saved_v_reduction = search_context.reduction_stack[ply]
                         saved_v_cutoff_cnt = search_context.cutoff_cnt[ply]
                         saved_v_child_cutoff_cnt = search_context.cutoff_cnt[ply + 1] if (ply + 1 < MAX_PLY) else np.int32(0)
+                        saved_v_grandchild_cutoff_cnt = search_context.cutoff_cnt[ply + 2] if (ply + 2 < MAX_PLY) else np.int32(0)
                         saved_v_static_eval = search_context.static_eval_stack[ply]
                         saved_v_tt_hit = search_context.tt_hit_stack[ply]
                         saved_v_tt_pv = search_context.tt_pv_stack[ply]
@@ -1914,6 +1915,8 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                         search_context.cutoff_cnt[ply] = saved_v_cutoff_cnt
                         if ply + 1 < MAX_PLY:
                             search_context.cutoff_cnt[ply + 1] = saved_v_child_cutoff_cnt
+                        if ply + 2 < MAX_PLY:
+                            search_context.cutoff_cnt[ply + 2] = saved_v_grandchild_cutoff_cnt
                         search_context.static_eval_stack[ply] = saved_v_static_eval
                         search_context.tt_hit_stack[ply] = saved_v_tt_hit
                         search_context.tt_pv_stack[ply] = saved_v_tt_pv
@@ -2103,7 +2106,7 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
         # P1 shadow diagnostics: classify before SEE, but never reject or
         # reorder a production candidate here.  Baseline legality remains
         # after the shallow SEE gate below.
-        if (ply > 0 and move != tt_move and search_context.enable_see_pruning and not is_exclusion_search
+        if (ply > 0 and move != tt_move and search_context.enable_see_pruning and not is_loss(max_eval)
                 and depth <= PRUNING_SHALLOW_DEPTH and not is_currently_in_check
                 and not is_pv and is_pseudo_quiet
                 and not low_material_pruning_guard and not follow_pv):
@@ -2121,7 +2124,7 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                         _diag_add(search_context, DIAG_MAIN_QUIET_PRE_KING_ILLEGAL)
 
         # --- NEW: Shallow Depth Pruning (Stockfish Step 14) ---
-        if (ply > 0 and move != tt_move and search_context.enable_see_pruning and not is_exclusion_search
+        if (ply > 0 and move != tt_move and search_context.enable_see_pruning and not is_loss(max_eval)
                 and depth <= PRUNING_SHALLOW_DEPTH and not is_currently_in_check and not is_pv):
             side_to_move = original_side
 
@@ -2211,7 +2214,7 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                     quiet_counted = True
 
                     # --- Step 14a: Late Move Pruning (LMP) ---
-                    if (search_context.enable_lmp and not is_exclusion_search):
+                    if search_context.enable_lmp:
                         limit = LMP_MOVE_COUNT[min(depth, MAX_PLY - 1)] // (2 - (1 if improving else 0))
                         limit = (limit * search_context.tune[TUNE_LMP_SCALE]) // 100
                         limit = max(limit, LMP_MIN_LIMIT)
@@ -2323,7 +2326,7 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                         continue
 
                     # --- Step 14c: Futility Pruning (FP) ---
-                    if (search_context.enable_fp and not is_exclusion_search and depth <= FP_MAX_DEPTH
+                    if (search_context.enable_fp and depth <= FP_MAX_DEPTH
                             and static_score != -INFINITY):
                         fp_lmr_d = compute_quiet_pruning_lmr_depth(
                             depth, quiet_move_counter, improving, search_context, ply,
@@ -2461,6 +2464,7 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                     saved_reduction = search_context.reduction_stack[ply]
                     saved_cutoff_cnt = search_context.cutoff_cnt[ply]
                     saved_child_cutoff_cnt = search_context.cutoff_cnt[ply + 1] if (ply + 1 < MAX_PLY) else np.int32(0)
+                    saved_grandchild_cutoff_cnt = search_context.cutoff_cnt[ply + 2] if (ply + 2 < MAX_PLY) else np.int32(0)
 
                     search_context.reduction_stack[ply] = 0
                     _diag_add(search_context, DIAG_SINGULAR_TRY)
@@ -2489,6 +2493,8 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                     search_context.cutoff_cnt[ply] = saved_cutoff_cnt
                     if ply + 1 < MAX_PLY:
                         search_context.cutoff_cnt[ply + 1] = saved_child_cutoff_cnt
+                    if ply + 2 < MAX_PLY:
+                        search_context.cutoff_cnt[ply + 2] = saved_grandchild_cutoff_cnt
                     search_context.pv_table[ply, ply] = NO_MOVE
 
                     # 15a. Search stop check (must precede multi-cut so timeout score 0 does not trigger multi-cut)
@@ -2510,7 +2516,7 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                                 and exclusion_score < exclusion_beta - double_margin):
                             singular_extension = 2
                             _diag_add(search_context, DIAG_DOUBLE_EXT)
-                    elif exclusion_score >= exclusion_beta and not is_pv:
+                    elif not is_pv:
                         # Negative extensions when not singular (SF18/19 Step 16: check se_tt_score >= beta)
                         if se_tt_score >= beta:
                             singular_extension = -1
@@ -2981,7 +2987,7 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                         _diag_add(search_context, DIAG_ORDER_COUNTER_CUT)
 
             # Update killer moves on beta cutoff for quiet moves (SF18 Step 20)
-            if is_quiet_move:
+            if is_quiet_move and not is_exclusion_search:
                 if move != search_context.killer_moves[ply * 2]:
                     search_context.killer_moves[ply * 2 + 1] = search_context.killer_moves[ply * 2]
                     search_context.killer_moves[ply * 2] = move
@@ -3017,7 +3023,7 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
     # ==========================================
     # If a move improved alpha (PV node or beta cutoff), update all history tables
     # for best_move and penalize inferior searched moves with malus.
-    if final_flag != TT_FLAG_ALPHA and best_move != NO_MOVE:
+    if final_flag != TT_FLAG_ALPHA and best_move != NO_MOVE and not is_exclusion_search:
         # Phase 1a: linear bonus/malus
         bonus = min(search_context.tune[TUNE_HIST_BONUS_SCALE] * depth, search_context.tune[TUNE_HIST_BONUS_CAP])
         malus = min(search_context.tune[TUNE_HIST_BONUS_SCALE] * depth, search_context.tune[TUNE_HIST_MALUS_CAP])

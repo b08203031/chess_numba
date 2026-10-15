@@ -422,6 +422,16 @@ SF 係數在「pawn MG=128」空間與 SF mobility/shelter 共調。我們材質
 * **問題**：在 `_evaluate_position_jit:L1633`，若盤面無非兵非王棋子，已先行調用專用王兵殘局並直接 return。因此能執行到最後 `_compute_initiative` 時非兵棋子必然存在，`pure_pawn_endgame` 恆為 False（`0`）。原程式碼在熱路徑中每次皆做 8 次陣列存取與 7 次位元 OR 來判斷不可達條件，純屬浪費 CPU 指令與快取帶寬。
 * **修復**：移除 `_compute_initiative` 中的 `non_pawns` 檢驗與 `pure_pawn_endgame_val` 計算，消除無效開銷。同步重新生成 `tuner/tunable_eval.py`。
 
+### 2026-10-16 殘局縮放因子 (Scale Factor) 評估洩漏與 KBPsK 阻截修復
+
+* **問題 1（Lazy 評估洩漏導致 TT 污染）**：`_evaluate_position_jit` 在 `if lazy:` 及動態門檻提早退出時，直接以未縮放的 material/PSQT 分數計算 final_score 並返回，完全跳過了 `get_endgame_scale_factor`。當搜尋調用 `lazy=True` 取得靜態評估並存入 TT 後，QSearch（`stand_pat`）提取該被污染的 +648 cp 高分；若無合法吃子，QSearch 直接以 `TT_FLAG_EXACT` 返回該高分，使整棵搜尋樹深信殘局堡壘和棋為大優必勝。
+* **問題 2（純王兵殘局 scale factor 死碼）**：`_evaluate_position_jit` 在 `all_pieces_except_pawns_and_kings == 0` 時，計算 `_evaluate_king_pawn_endgame` 後直接 return，跳過了 `get_endgame_scale_factor`，導致原本在 `endgame.py` 實作的 `KPsK`（如多重邊兵理論和棋）完全失效。
+* **問題 3（KBPsK 錯色主教邊兵幾何阻截過晚）**：原 `KBPsK` 僅在弱方王到達升變格相鄰 1 格（Chebyshev 距離 $\le 1$）時才判定為和棋。在弱方王已抵達 $c7$（距離 2 步），且步數計算絕對先於或等於強方王到達保護格時，引擎仍給出 +277 cp 的勝勢評估。
+* **修復**：
+  1. 在 `evaluation.py` 的 `if lazy:`、動態 lazy 提早退出中補齊 `get_endgame_scale_factor` 呼叫。在純王兵殘局分支中，僅當 `sf == SCALE_FACTOR_DRAW`（如 `KPsK` 多重邊兵和棋）時將分數歸零，避免一般非和棋純王兵殘局被通用少兵公式（36 + 7 * pawn_count_strong）打折。
+  2. 在 `endgame.py` 為白方與黑方 `KBPsK` 建立嚴謹幾何阻截判定公式：計算弱方王距升變格步數（`dist_weak`）與強方王阻擋/保護步數（`dist_strong`），考量到「兵推至第 6 線（`a6`/`h6`）會與錯色象形成雙色封鎖網」及強方王肩位（Shouldering）反例，嚴格要求弱方王未在側面/後方落後於兵（`weak_not_behind`），且必須在強方兵抵達第 6 線前進角（`dist_weak <= steps_to_a6`，考慮雙步推進，a2/a7 步數為 3），且強方王步數嚴格落後（`dist_weak < dist_strong - 1`），方才判定為 `SCALE_FACTOR_DRAW`。
+  3. 實測實戰第 72 步由原 +648 cp 降為 0 cp（100% 識別和棋），第 63 步 scale factor 由 43 降為 0；同時保證 Troitzky / Averbakh 殺形封鎖局面與必勝純王兵局面的高分不被誤判。單元測試覆蓋於 `tests/test_endgame_conformance.py`。
+
 
 
 ---
