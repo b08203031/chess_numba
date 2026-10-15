@@ -1051,7 +1051,7 @@ RFP_NO_TT_PENALTY = 30
 
 NMP_STATIC_MARGIN = 150      # not used as primary NMP gate
 NMP_MIN_SIDE_NON_PAWNS = 1   # SF19: pos.non_pawn_material(us) != 0 (was 2 before Phase 8b)
-NMP_VERIFICATION_DEPTH = 16  # SF19: verify only when depth >= 16 (was 8 before Phase 8b)
+NMP_VERIFICATION_DEPTH = 15  # SF19: verify only when depth >= 16 (was 8 before Phase 8b)
 LOW_MATERIAL_PRUNING_PIECE_COUNT = 7
 # Production NMP structure: cut_node only (Phase 8 SF19 alignment).
 NMP_SCOPE_MODE = 0
@@ -1267,7 +1267,7 @@ SINGULAR_TT_DEPTH_SLACK = 3      # tt.depth >= depth - slack
 SINGULAR_MARGIN_BASE = 60        # margin = (BASE + ttpv_bonus) * depth // DIV
 SINGULAR_TTPV_BONUS = 70
 SINGULAR_MARGIN_DIV = 59
-SINGULAR_DOUBLE_EXT_MIN_DEPTH = 11
+SINGULAR_DOUBLE_EXT_MIN_DEPTH = 10
 
 # --- LMR (remaining hard-codes → named) ---
 LMR_REDUCTION_BASE_ADD = 1027    # r = scale + BASE_ADD (+ not-imp term)
