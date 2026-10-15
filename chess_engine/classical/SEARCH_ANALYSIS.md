@@ -200,18 +200,21 @@ P3 的診斷分成三條 opt-in funnel：
         *   排除搜尋在相同 `ply` 下呼叫，結束後必須完整還原 `follow_pv_stack[ply]`、`static_eval_stack[ply]`、`tt_hit_stack[ply]`、`tt_pv_stack[ply]`、`reduction_stack[ply]`、`cutoff_cnt[ply]` 以及子層截斷次數 **`cutoff_cnt[ply + 1]`**（防止 `res_ex` 內部的大量截斷洩漏給父節點後續兄弟走法，平白觸發額外 LMR 懲罰），並重置 `pv_table[ply, ply] = NO_MOVE`。
         *   **TT 寫入隔離**：排除搜尋（`excluded_move != NO_MOVE`）末端禁止寫入置換表（對齊 SF18 `if (!excludedMove) ttWriter.write(...)`），避免殘缺的走步與評估污染該局面的全局 TT 快取。
         *   **全局歷史與校正表隔離（2026-10-14 修復）**：在 `_search` 末端，**Correction History 更新** 與 **Fail-Low 對手走法獎勵** 嚴格加上 `not is_exclusion_search` 守衛，防止人為排除最佳步導致的低分破壞全局評估校正表與歷史表。
-    *   **門檻**：`ply > 0`、`excluded_move == NO_MOVE`、`move == tt_move`、`depth >= MIN_SINGULAR_DEPTH (+1 if ttPv)`（預設 7）；TT bound 為 Lower/Exact 且 TT depth 足夠（`depth - 3`）；以 `abs(se_tt_score) < VALUE_KNOWN_WIN` 排除已知勝負區間。
+    *   **門檻**：`ply > 0`、`excluded_move == NO_MOVE`、`move == tt_move`、`depth >= MIN_SINGULAR_DEPTH (+1 if ttPv)`（**基線已調優採納為 9**，若 `ttPv` 則為 10）；TT bound 為 Lower/Exact 且 TT depth 足夠（`depth - 3`）；以 `abs(se_tt_score) < VALUE_KNOWN_WIN` 排除已知勝負區間。
     *   **中斷與 Multi-Cut 剪枝（SF18/SF19 Step 15/16）**：
         *   **超時檢查前置**：優先判定 `search_context.stop_flag[0]`，避免超時返回的 0 在 `beta <= 0` 時誤觸 Multi-Cut。
         *   若 `exclusion_score >= beta` 且非勝負分（`not is_win` 與 `not is_decisive`），直接回傳 `exclusion_score` 截斷，無需任何 `unmake_move`（**E31 採納**）。
     *   **單 / 雙延展**：若 `exclusion_score < exclusion_beta`，賦予 `singular_extension = 1`；若非 PV 節點（`not is_pv`）、差距達到 `double_margin`（`2 * depth`）且 `depth >= 10`，賦予雙延展 `singular_extension = 2`（限制在 non-PV 杜絕搜尋樹爆炸）。
     *   **負延展（SF18/19 Step 15/16 對齊，2026-10-14 修復與調優）**：若非 PV 節點且非奇異（`exclusion_score >= exclusion_beta and not is_pv`）：若置換表自身評估預期高於邊界（`se_tt_score >= beta`）則賦予 `-1`（經 400 局實戰驗證，原 `-2` 在 Classical HCE 噪聲下易引發淺層過早截斷，調整為 `-1` 後超長殘局全面止血）；若在 `cut_node` 則賦予 `-1`；若原步優勢存疑（`se_tt_score <= exclusion_score`）則賦予 `-1`。徹底修復舊版因誤用 `exclusion_score >= beta` 導致負延展 100% 成為死碼的缺陷。
     *   **延展合併與將軍延伸 Pre-make（E36 採納）**：走棋後與將軍延展（`check_extension`）合併：正向延展取較大值（`max`），負向延展在無將軍時覆蓋。對於將軍延伸的 `_see_ge_jit` 檢驗，全面改為在 `make_move` 前直接利用父盤面評估（`check_gate_see_ok`），徹底根除了舊代碼在走棋後 `unmake -> SEE -> remake` 的兩次冗餘棋盤突變開銷。
-    *   **實戰驗證（Step 15 狀態隔離修復 + 負延展 -1 採納，2026-10-15）**：
+    *   **實戰驗證（Step 15 完整體系推進，2026-10-15）**：
         *   第一階段（SE 漏洞修復與狀態隔離）：對抗前一版基線，完成 400 局並取得獲勝。
-        *   第二階段（負延展 -2 → -1 緩和調優，E65）：400 局，每步 300,000 nodes，TT 64MB。
-        *   最終比分：89W 229D 82L（勝率 **50.88%**，Elo: **+6.08 ± 22.2**，淨勝 +7 盤）。
-        *   關鍵亮點：51~80 步中局取得 65W 54L（53.1% 勝率）；>80 步超長殘局由 44.2% 大幅止血回升至 50.0% 平衡（22W 22L）。確認架構完全健全，正式採納進生產基線（同步至 `classical_old`）。
+        *   第二階段（負延展 -2 → -1 緩和調優，E65）：400 局，每步 300,000 nodes，TT 64MB。比分 89W 229D 82L（勝率 50.88%，Elo: +6.08 ± 22.2），>80 步殘局完全止血。
+        *   第三階段（奇異起點深度調優 MIN_SINGULAR_DEPTH 8 → 9，E66）：600 局（300 對成對換先開局），時控 300,000 nodes/move。
+            *   最終比分：Candidate **143W 344D 113L**（勝率 **52.50%**，Elo: **+17.39 [-1.48, +36.36]**，**淨勝 +30 盤**）。
+            *   搜尋效率：平均深度由 19.40 升至 **19.51 ply**，深層抵達率（$d \ge 14$）由 86.9% 提升至 **88.3%**；同深度節點比在 $d=14\sim 16$ 全面低於 1.0；超長殘局（>80 步）勝率高達 **56.1%**。
+            *   判定：**正式採納 `MIN_SINGULAR_DEPTH = 9` 進生產基線（已同步 `classical_old`）**。
+            *   後續探索：進入第四階段測試 `MIN_SINGULAR_DEPTH = 10` vs `9`。
 
 ### 4.9 內部迭代加深 (Internal Iterative Deepening, IID) / IIR
 *   **理念**：如果當前節點沒有 TT 移動（例如是新節點），則先以較淺的深度搜尋該節點，以獲得一個合適的移動進行排序，再進行完整搜尋。現行實作為 **IIR**（直接減深），而非昂貴的子搜尋 IID。

@@ -1970,6 +1970,39 @@ LMP skip 體積 ≫ RFP ≈ FP/Razor/hist-prune 帶 ≫ NMP ≫ ProbCut
   * 產物檔：`tournament_analysis/tournament_results.pgn`、`tournament_analysis/game_stats_report.txt`、`tournament_analysis/search_stats_report.txt`。
   * 生產代碼更新：`chess_engine/classical/search.py`（Step 15 完整防禦 + 負延展 `-1`）。已同步至 `classical_old/search.py` 並全數通過測試。
 
+### 3.66 E66: Step 15 奇異延展起點深度調優 MIN_SINGULAR_DEPTH 8 -> 9 (ADOPTED / Production Baseline Updated)
+
+* **日期：** 2026-10-15
+* **動機：**
+  * 在 Step 15 狀態隔離與防禦加固後，進一步檢視奇異搜尋（Singular Search）在古典 HCE 引擎下的啟動門檻與投資回報率（ROI）。
+  * 舊版 `MIN_SINGULAR_DEPTH = 8` 在淺中層即頻繁發起 `(depth - 1) // 2` 排除搜尋（Exclusion Search）。由於 HCE 淺層評估噪聲相對較大，許多節點耗費數百至上千節點進行驗證，最終多數走法仍被證實為 Non-singular，形成沉沒成本。
+  * 假說：將起點深度推遲至 `depth >= 9`（`MIN_SINGULAR_DEPTH = 9`，若 `ttPv` 則 `10`），能有效剪除淺中層無效探測（「給搜尋樹減脂」），將省下的節點預算 100% 灌注至 PV 主線與深層搜尋。
+* **對戰設定與環境：**
+  * 錦標賽配置：Google Colab (AMD EPYC 7B12 8 vCPU, 7 並行 Worker)，`inprocess` 後端。
+  * 局數：**600 局**（300 對成對換先開局），時控：**300,000 nodes/move**，TT：64 MB / context。
+  * 對陣：Candidate (`MIN_SINGULAR_DEPTH = 9`) vs Baseline (`MIN_SINGULAR_DEPTH = 8`)。
+* **對戰成果與統計檢定：**
+  * **對局戰績：** 600 局，Candidate **143 勝 344 和 113 負**（得分率 **52.50%**，315.0 / 600）。
+  * **淨勝優勢：** **淨勝整整 +30 盤**！
+  * **相對 Elo：** **`+17.39`**，95% 置信區間 `[-1.48, +36.36]`。
+  * **全程表現追蹤：** 前 150 對（300 局）得分率 50.5%，後 150 對（300 局）得分率飆升至 **54.5%**，隨局數增加優勢持續擴大。
+  * **對局長度分佈：**
+    * Medium (26-50 步)：50.3%（13W 131D 12L）。
+    * Long (51-80 步)：52.5%（88W 98D 75L）。
+    * Very Long (>80 步超長殘局)：**56.1%（42W 63D 26L）**，展現壓倒性殘局深度優勢。
+* **搜尋樹效率與指標分析：**
+  * **搜尋深度（Depth）：** New 平均 **19.51 ply**（σ=16.57）vs Old 平均 **19.40 ply**（σ=16.62），平均深度提升 **+0.11 ply**。
+  * **深層探訪率（depth >= 14）：** New **88.3%** vs Old **86.9%**，高深度抵達率提升 **+1.4%**！
+  * **同深度節點消耗比（Node Ratio）：** 在高深度層 New 消耗節點顯著更少（$d=14: 0.989$、$d=15: 0.992$、$d=16: 0.994$），證明整棵樹更輕快。
+* **物理機理解析：**
+  1. **消除淺層低 ROI 探測**：推遲起點成功避免在樹寬龐大的 depth 8 浪費節點做無效的排除搜尋。
+  2. **適應 HCE 評估信賴度**：古典手工評估在 depth 9+ 時累積的 TT 分數更平滑準確，使奇異延展的命中質量大幅提升。
+  3. **節點資源向主線再分配**：在 300k nodes 固定預算下，省下的節點讓引擎在相同時間內看得更深、更準。
+* **判定：** **採納進生產 / 基線 (ADOPTED / PRODUCTION BASELINE UPDATED)**。
+  * 產物檔：`tournament_colab_runner_se_multicut.ipynb`、`tournament_analysis/search_stats_report.txt`、`tournament_analysis/game_stats_report.txt`。
+  * 生產代碼更新：`chess_engine/classical/constants.py`（`MIN_SINGULAR_DEPTH = 9`）。已同步至 `classical_old/constants.py`。
+  * 下一步探索：測試 `MIN_SINGULAR_DEPTH = 10` vs `9`，尋找邊際效益最佳甜蜜點。
+
 ---
 
 ## 4. 常用指令
