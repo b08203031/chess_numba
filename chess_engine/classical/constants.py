@@ -1267,7 +1267,7 @@ SINGULAR_TT_DEPTH_SLACK = 3      # tt.depth >= depth - slack
 SINGULAR_MARGIN_BASE = 60        # margin = (BASE + ttpv_bonus) * depth // DIV
 SINGULAR_TTPV_BONUS = 70
 SINGULAR_MARGIN_DIV = 59
-SINGULAR_DOUBLE_EXT_MIN_DEPTH = 9
+SINGULAR_DOUBLE_EXT_MIN_DEPTH = 11
 
 # --- LMR (remaining hard-codes → named) ---
 LMR_REDUCTION_BASE_ADD = 1027    # r = scale + BASE_ADD (+ not-imp term)
