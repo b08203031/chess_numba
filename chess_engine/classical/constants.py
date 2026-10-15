@@ -985,7 +985,7 @@ MULTICUT_C = 6          # Number of moves to probe
 
 
 # IID and Singular Extension Parameters
-MIN_SINGULAR_DEPTH = 7
+MIN_SINGULAR_DEPTH = 9
 SINGULAR_MARGIN_MULTIPLIER = 2          # Margin = 2 * depth
 SINGULAR_DOUBLE_EXT_MULTIPLIER = 2     # Double margin = 2 * depth (total offset 4 * depth for double ext check)
 
@@ -1051,7 +1051,7 @@ RFP_NO_TT_PENALTY = 30
 
 NMP_STATIC_MARGIN = 150      # not used as primary NMP gate
 NMP_MIN_SIDE_NON_PAWNS = 1   # SF19: pos.non_pawn_material(us) != 0 (was 2 before Phase 8b)
-NMP_VERIFICATION_DEPTH = 15  # SF19: verify only when depth >= 16 (was 8 before Phase 8b)
+NMP_VERIFICATION_DEPTH = 16  # SF19: verify only when depth >= 16 (was 8 before Phase 8b)
 LOW_MATERIAL_PRUNING_PIECE_COUNT = 7
 # Production NMP structure: cut_node only (Phase 8 SF19 alignment).
 NMP_SCOPE_MODE = 0
