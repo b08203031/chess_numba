@@ -2435,7 +2435,7 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
 
         # --- Step 15: Singular Extensions & Multi-Cut (Pre-make, move == tt_move) ---
         if (ENABLE_SINGULAR_EXTENSIONS and ply > 0 and excluded_move == NO_MOVE
-                and move == tt_move and depth >= MIN_SINGULAR_DEPTH + (1 if tt_pv else 0)
+                and move == tt_move and depth >= MIN_SINGULAR_DEPTH
                 and not is_currently_in_check and skip_post_legality_s):
             if ((tt_flag == TT_FLAG_BETA or tt_flag == TT_FLAG_EXACT)
                     and tt_depth >= depth - SINGULAR_TT_DEPTH_SLACK):
