@@ -53,7 +53,7 @@ class TestSearchParamRegistry(unittest.TestCase):
 
     def test_profiles_are_staged_and_nonempty(self):
         self.assertEqual(DEFAULT_PROFILE, "runtime")
-        for profile in ("runtime", "pruning", "nmp", "lmr", "lmr_runtime", "lmr_compile", "qsearch", "history", "ordering", "safeguards", "aspiration", "all"):
+        for profile in ("runtime", "pruning", "nmp", "lmr", "lmr_runtime", "lmr_compile", "qsearch", "history", "ordering", "safeguards", "aspiration", "extensions", "all"):
             names = profile_names(profile)
             self.assertTrue(names, profile)
             self.assertEqual(len(names), len(set(names)))

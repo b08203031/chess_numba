@@ -114,6 +114,10 @@ def main() -> None:
     ap.add_argument("--batch-games", type=int, default=100, help="games per SPRT batch")
     ap.add_argument("--opening-seed", type=int, default=777, help="opening shuffle seed")
     ap.add_argument(
+        "--log-every", type=int, default=2,
+        help="match progress interval (default 2: every pair)",
+    )
+    ap.add_argument(
         "--adjudicate", action="store_true",
         help="score-based win/draw adjudication (use the same setting as the tuning run)",
     )
@@ -190,7 +194,7 @@ def main() -> None:
             openings=openings,
             nodes=int(args.nodes),
             games=int(this_batch),
-            log_every=10,
+            log_every=max(1, int(args.log_every)),
             worker_pool=pool,
             concurrency=int(args.concurrency),
             early_trash_min_games=0,

@@ -134,8 +134,8 @@ _RUNTIME_SPECS = [
     _spec("LMR_MOVECOUNT_FACTOR", "LMR_MOVECOUNT_FACTOR", 0, 100, 4, "lmr", runtime_attr="TUNE_LMR_MC_FACTOR", spsa_r_end=0.8),
     _spec("LMR_TTMOVE_REDUCTION", "LMR_TTMOVE_REDUCTION", 0, 2500, 128, "lmr", runtime_attr="TUNE_LMR_TTMOVE_RED", spsa_r_end=0.8),
     _spec("NMP_EVAL_MARGIN_DIV", "NMP_EVAL_MARGIN_DIV", 120, 450, 16, "nmp", runtime_attr="TUNE_NMP_EVAL_DIV", spsa_r_end=0.8),
-    _spec("TUNE_RESERVED_21", "TUNE_RESERVED_21_VAL", 0, 0, 1, "safeguards", kind="discrete", runtime_attr="TUNE_RESERVED_21", spsa_r_end=0.0),
-    _spec("TUNE_RESERVED_22", "TUNE_RESERVED_22_VAL", 0, 0, 1, "safeguards", kind="discrete", runtime_attr="TUNE_RESERVED_22", spsa_r_end=0.0),
+    _spec("SINGULAR_MARGIN_BASE", "SINGULAR_MARGIN_BASE", 20, 120, 4, "extensions", runtime_attr="TUNE_SINGULAR_MARGIN_BASE", spsa_r_end=0.8),
+    _spec("SINGULAR_TTPV_BONUS", "SINGULAR_TTPV_BONUS", 0, 140, 4, "extensions", runtime_attr="TUNE_SINGULAR_TTPV_BONUS", spsa_r_end=0.8),
     _spec("PROBCUT_STYLE_MODE", "PROBCUT_STYLE_MODE", 0, 2, 1, "pruning", kind="discrete", runtime_attr="TUNE_PROBCUT_STYLE", spsa_r_end=0.4),
     _spec("LMR_TABLE_SCALE_PERCENT", "LMR_TABLE_SCALE_PERCENT", 70, 130, 5, "lmr", runtime_attr="TUNE_LMR_TABLE_SCALE", spsa_r_end=0.8),
     _spec("LMR_NOT_IMP_NUM", "LMR_NOT_IMP_NUM", 0, 384, 16, "lmr", runtime_attr="TUNE_LMR_NOT_IMP", spsa_r_end=0.8),
@@ -209,8 +209,6 @@ _COMPILE_SPECS = [
     _spec("LMR_RESEARCH_SHALLOWER_MARGIN", "LMR_RESEARCH_SHALLOWER_MARGIN", 0, 100, 5, "lmr", spsa_r_end=0.5),
     _spec("CHECK_EXT_NON_PV_MAX_DEPTH", "CHECK_EXT_NON_PV_MAX_DEPTH", 2, 8, 1, "extensions", kind="discrete", spsa_r_end=0.4),
     _spec("MIN_SINGULAR_DEPTH", "MIN_SINGULAR_DEPTH", 5, 10, 1, "extensions", kind="discrete", spsa_r_end=0.4),
-    _spec("SINGULAR_MARGIN_BASE", "SINGULAR_MARGIN_BASE", 20, 120, 5, "extensions", spsa_r_end=0.5),
-    _spec("SINGULAR_TTPV_BONUS", "SINGULAR_TTPV_BONUS", 0, 140, 5, "extensions", spsa_r_end=0.5),
     _spec("SINGULAR_MARGIN_DIV", "SINGULAR_MARGIN_DIV", 30, 100, 5, "extensions", spsa_r_end=0.5),
     _spec("SINGULAR_TT_DEPTH_SLACK", "SINGULAR_TT_DEPTH_SLACK", 1, 6, 1, "extensions", kind="discrete", spsa_r_end=0.4),
     _spec("SINGULAR_DOUBLE_EXT_MIN_DEPTH", "SINGULAR_DOUBLE_EXT_MIN_DEPTH", 7, 14, 1, "extensions", kind="discrete", spsa_r_end=0.4),
@@ -274,6 +272,7 @@ PROFILE_NAMES = (
     "ordering",
     "safeguards",
     "aspiration",
+    "extensions",
     "all",
 )
 DEFAULT_PROFILE = "runtime"

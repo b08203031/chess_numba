@@ -939,8 +939,10 @@ TUNE_LMR_TTMOVE_RED = 19     # r subtract for researching TT move
 # Structural experiment modes (runtime; see NMP_* production defaults below)
 # NMP Phase 8 continuous parameters & reserved slots
 TUNE_NMP_EVAL_DIV = 20       # dynamic R eval excess divisor (was TUNE_NMP_SCOPE)
-TUNE_RESERVED_21 = 21        # reserved slot (was TUNE_NMP_GATE mode)
-TUNE_RESERVED_22 = 22        # reserved slot (was TUNE_NMP_R mode)
+TUNE_SINGULAR_MARGIN_BASE = 21  # Singular extension base margin (rescaled to 100cp)
+TUNE_SINGULAR_TTPV_BONUS = 22   # Singular extension tt_pv bonus
+TUNE_RESERVED_21 = TUNE_SINGULAR_MARGIN_BASE  # Backward compatibility alias
+TUNE_RESERVED_22 = TUNE_SINGULAR_TTPV_BONUS   # Backward compatibility alias
 TUNE_PROBCUT_STYLE = 23
 TUNE_LMR_TABLE_SCALE = 24    # percent on REDUCTIONS[d]*REDUCTIONS[mc]
 TUNE_LMR_NOT_IMP = 25        # not-improving numerator (higher → more reduction)
