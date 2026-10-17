@@ -968,4 +968,28 @@ NMP gate/R、ProbCut style、NMP beta requirement 的預設值也由常量明確
 
 * **結論**：100% 保證搜尋決策與搜尋樹單節點完全一致（**0-node delta**），核心深層搜尋速度穩定提升 **+10.21% NPS**（開局起點更高達 **+18.77%**）。
 
+### 17.4 探索實驗與物理機制反思：LMR `correction_mag` 解耦實驗（回滾）
+* **實驗假設**：LMR 中之 `correction_mag = abs(static_score - raw_static_eval)` 原本意在衡量 Correction History 的偏移。若 `tt_hit` 將 `static_score` 覆寫為 `tt_score`，該值將混入 TT 搜尋分數。曾嘗試引入獨立的 `corrected_static_eval` 排除 TT 覆寫。
+* **錦標賽結果（Colab 210 局 @ 300k nodes）**：Candidate 39W 124D 47L（48.10%，-13.23 Elo）。
+* **物理機理解析（動態戰術張力防護機制 Dynamic Volatility Relief）**：
+  * 當 `tt_hit` 為 True 且 TT 搜尋得分 `tt_score` 與靜態評估 `raw_static_eval` 出現顯著差異時，該盤面客觀上處於**高度戰術張力（Tactical Tension / High Volatility）**。
+  * `abs(static_score - raw_static_eval)` 數值變大，使 `r -= ...` 發揮顯著的**減深抑制（Reduction Relief）**效果，驅使引擎在此類戰術複雜節點深入搜尋。
+  * 強行解耦後剝奪了此項戰術防護罩，導致引擎在高張力節點發生過度減深（Over-reduction）並漏算戰術。
+* **處置**：立即回滾至原版 `static_score` 實作，完整保留動態戰術張力防護機制與 Step A 加速成果。
+
+### 17.5 Phase 10：Stockfish 19 Step 12 ProbCut TT 寫入深度對齊與深度膨脹消除（E69）
+* **病灶定位**：
+  * `chess_engine/classical/search.py:1805` 原使用歷史寫死的常數 `depth - PROBCUT_TT_DEPTH_OFFSET`（固定 offset 3）。
+  * 在引進動態 `probcut_r = (5 if improving else 3)` 後，當 `improving == True` 時，子搜尋深度為 `depth - 5`，但寫入 TT 卻聲稱 `depth - 3`，造成 **+1 ply 虛高深度膨脹 (TT Depth Inflation)**，導致後續搜尋誤觸虛假剪枝。
+* **對齊 SF19 規範**：
+  * 嚴格比照 Stockfish 19 Step 12（`ttWriter.write(..., probCutDepth + 1, ...)`）：
+  * `pc_tt_depth = max(1, depth - probcut_r + 1)`
+* **5 盤面固定深度 14 實測收益**：
+  * 全局搜尋節點：766,116 → **733,568 (-4.25% 節點減省)**
+  * 複雜中局 (Pos 3) 節點銳減：282,656 → **204,137 (-27.8% 節點減省)**
+  * 總搜尋耗時：2.834s → **2.632s (-7.1% 搜尋提速)**
+  * 整體 NPS：270,319 → **278,717 (+3.11% NPS 提升)**
+
+
+
 

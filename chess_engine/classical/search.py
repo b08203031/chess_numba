@@ -1482,7 +1482,6 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
 
     # --- H2: Static Evaluation & Improving Flag (computed BEFORE any pruning) ---
     static_score = -INFINITY
-    corrected_static_eval = -INFINITY
     improving = False
     
     # Correction History Adjustment
@@ -1498,7 +1497,6 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
             raw_static_eval, _, _ = _evaluate_position_jit(piece_bbs, occupancy_bbs, game_state, True, search_context)
 
         static_score = apply_correction_history_score(game_state, search_context, raw_static_eval, ply)
-        corrected_static_eval = static_score
         
         # --- H2 Enhancement: Refine static_score using trusted TT Score Bounds ---
         if tt_hit and not is_exclusion_search:
@@ -1588,7 +1586,6 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
         raw_static_eval, static_score, improving, cached_pinned_white, cached_pinned_black = compute_full_corrected_static_eval(
             piece_bbs, occupancy_bbs, game_state, search_context, ply
         )
-        corrected_static_eval = static_score
         static_eval_is_full = True
 
     # =====================================================================
@@ -1605,7 +1602,6 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                     raw_static_eval, static_score, improving, cached_pinned_white, cached_pinned_black = compute_full_corrected_static_eval(
                         piece_bbs, occupancy_bbs, game_state, search_context, ply
                     )
-                    corrected_static_eval = static_score
                     static_eval_is_full = True
                 if (static_score < alpha - razor_margin
                         and not is_win(static_score) and not is_loss(alpha)):
@@ -1635,7 +1631,6 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
             if static_score - rfp_margin >= beta:
                 if not static_eval_is_full:
                     raw_static_eval, static_score, improving, cached_pinned_white, cached_pinned_black = compute_full_corrected_static_eval(piece_bbs, occupancy_bbs, game_state, search_context, ply)
-                    corrected_static_eval = static_score
                     static_eval_is_full = True
                     rfp_depth_factor = depth - (1 if improving else 0)
                     if rfp_depth_factor < 1:
@@ -1803,11 +1798,12 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                     # PR-B: do not propagate unproven known-win / mate from reduced ProbCut
                     if is_win(probcut_return_score) or is_decisive(probcut_return_score):
                         probcut_return_score = beta
-                    # Store in TT for future use
+                    # Store in TT for future use (aligned with SF19: probCutDepth + 1 = depth - probcut_r + 1)
                     tt_store_score_pc = probcut_return_score
                     if tt_store_score_pc > MATE_IN_MAX_PLY: tt_store_score_pc += ply
                     elif tt_store_score_pc < -MATE_IN_MAX_PLY: tt_store_score_pc -= ply
-                    store_tt(search_context.transposition_table, tt_key, depth - PROBCUT_TT_DEPTH_OFFSET, tt_store_score_pc, np.int16(32767), TT_FLAG_BETA, pc_move, search_context.tt_generation, tt_pv)
+                    pc_tt_depth = max(1, depth - probcut_r + 1)
+                    store_tt(search_context.transposition_table, tt_key, pc_tt_depth, tt_store_score_pc, np.int16(32767), TT_FLAG_BETA, pc_move, search_context.tt_generation, tt_pv)
                     _diag_add(search_context, DIAG_PROBCUT)
                     return (np.int32(probcut_return_score), pc_move, nodes_searched, quiescence_nodes, tt_hits)
 
@@ -1841,7 +1837,6 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                 raw_static_eval, static_score, improving, cached_pinned_white, cached_pinned_black = compute_full_corrected_static_eval(
                     piece_bbs, occupancy_bbs, game_state, search_context, ply
                 )
-                corrected_static_eval = static_score
                 static_eval_is_full = True
                 nmp_threshold = (beta - search_context.tune[TUNE_NMP_DEPTH_COEF] * depth
                                       - search_context.tune[TUNE_NMP_IMP_COEF] * (1 if improving else 0)
@@ -2344,7 +2339,6 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                                 raw_static_eval, static_score, improving, cached_pinned_white, cached_pinned_black = compute_full_corrected_static_eval(
                                     piece_bbs, occupancy_bbs, game_state, search_context, ply
                                 )
-                                corrected_static_eval = static_score
                                 static_eval_is_full = True
                                 fp_lmr_d = compute_quiet_pruning_lmr_depth(
                                     depth, quiet_move_counter, improving, search_context, ply,
@@ -2726,7 +2720,7 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                     r -= searched_legal_moves * search_context.tune[TUNE_LMR_MC_FACTOR]
 
                     # Scale centipawn difference back to raw correction scale before dividing by LMR_CORRECTION_DIVISOR
-                    correction_mag = abs(corrected_static_eval - raw_static_eval)
+                    correction_mag = abs(static_score - raw_static_eval)
                     r -= (correction_mag * CORRECTION_HISTORY_DIVISOR) // LMR_CORRECTION_DIVISOR
 
                     if cut_node:

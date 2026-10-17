@@ -2030,6 +2030,56 @@ LMP skip 體積 ≫ RFP ≈ FP/Razor/hist-prune 帶 ≫ NMP ≫ ProbCut
 
 ---
 
+### E68：LMR correction_mag 解耦靜態評估與 TT 分數實驗與回滾（2026-10-17）
+
+* **實驗動機與設想：**
+  * 原假設：LMR 中的 `correction_mag` 目的是依據 Correction History 的修正幅度調控減深。當 `tt_hit` 發生且 `static_score` 被 TT 分數覆寫時，`abs(static_score - raw_static_eval)` 計算的實為 TT 分數與原始評估的差值，而非單純的 correction offset。因此嘗試引入獨立的 `corrected_static_eval` 專門計算 Correction History 偏量。
+* **對戰設定與環境：**
+  * 錦標賽配置：Google Colab (AMD EPYC 7B12 8 vCPU, 7 並行 Worker)，`inprocess` 後端。
+  * 時控：300,000 nodes/move，TT：64 MB / context。
+  * 對陣：Candidate (解耦 `corrected_static_eval`) vs Baseline (原版 Step A 加速後 `static_score`)。
+* **對戰成果：**
+  * 戰局：跑至 210 局（105 對雙向開局）。
+  * 戰績：Candidate **39 勝 124 和 47 負**（得分率 **48.10%**，101.0 / 210）。
+  * 相對 Elo：**-13.23 ± 30.1** (95% CI [-43.3, +16.9])，顯著退步。
+* **物理機理解析（重大發現：動態戰術張力防護機制 Dynamic Volatility Relief）：**
+  1. 當 TT 探針命中且搜尋得分 `tt_score` 與靜態評估 `raw_static_eval` 產生劇烈落差時，該節點本質上處於**高度戰術動盪（Tactical Tension / High Volatility）**局面（例如已有戰術伏筆或得失子線）。
+  2. 原代碼使用 `abs(static_score - raw_static_eval)` 會使 `correction_mag` 大幅膨脹，進而使 `r -= ...` **顯著減少減深量（Reduction Relief）**，驅使搜尋樹在此類高張力節點展開更深的排查，避免漏算。
+  3. 強行將其替換為平滑的 `corrected_static_eval` 雖然在語意上純粹化了 Correction History，但卻**意外剝奪了高張力節點的動態減深抑制罩**，導致引擎在複雜戰術線路上過度減深（Over-reduction），頻繁出現深層戰術盲點而落敗。
+* **判定：** **立即回滾 (REVERTED)**。
+  * 還原 `search.py` 中的 `correction_mag` 為 `abs(static_score - raw_static_eval)`，完整保留戰術張力防護機制。
+  * 完整保留 Step A 的零搜尋樹變動 NPS 加速成果。
+
+---
+
+### E69：對齊 Stockfish 19 Step 12 ProbCut TT 寫入深度修復（2026-10-17，待實測）
+
+* **改動項目與動機：**
+  * 檔案：`chess_engine/classical/search.py`（Line 1805）。
+  * 歷史背景：原代碼在 ProbCut 成功觸發截斷時，呼叫 `store_tt(..., depth - PROBCUT_TT_DEPTH_OFFSET, ...)`，使用寫死的 `PROBCUT_TT_DEPTH_OFFSET = 3`。
+  * 根因病灶：在 E47 引入動態 `probcut_r = (5 if improving else 3)` 後，當 `improving == True` 時，底層子搜尋深度實為 `depth - 5`。但寫入 TT 時卻標記為 `depth - 3`（形成了 **+1 ply 虛高深度膨脹 TT Depth Inflation**）！這會誤導後續搜尋誤判該局面已有高深度走法驗證，引發虛假剪枝 (Bogus Cutoffs)。而在 `improving == False` 時，真實戰術驗證深度為 `depth - 3 + 1 = depth - 2`，舊代碼卻少記了 1 層深度。
+  * 嚴格對齊 SF19 Step 12：`probCutDepth = depth - probcut_r`，寫入 TT 深度為 `probCutDepth + 1`，即 `pc_tt_depth = max(1, depth - probcut_r + 1)`。
+* **5 盤面固定深度 14 實測比對（Startpos, Kiwipete, Middlegame, Tactical Queens, Endgame）：**
+  * Baseline (Old / 包含 Step A NPS 加速)：
+    * Pos 1 (Startpos): 146,393 nodes (0.483s, 302,953 NPS)
+    * Pos 2 (Kiwipete): 199,940 nodes (0.884s, 226,230 NPS)
+    * Pos 3 (Middlegame Complex): 282,656 nodes (1.104s, 256,020 NPS)
+    * Pos 4 (Tactical Queens): 123,097 nodes (0.328s, 374,891 NPS)
+    * Pos 5 (Endgame): 14,030 nodes (0.035s, 404,150 NPS)
+    * **總計：766,116 nodes, 2.834s, Overall NPS 270,319**
+  * Candidate (New / SF19 ProbCut TT 深度對齊)：
+    * Pos 1 (Startpos): 146,396 nodes (+3 nodes)
+    * Pos 2 (Kiwipete): 259,861 nodes (探索更充分)
+    * Pos 3 (Middlegame Complex): **204,137 nodes (-78,519 nodes, -27.8% 節點減省！)**
+    * Pos 4 (Tactical Queens): **111,536 nodes (-11,561 nodes, -9.4% 節點減省！)**
+    * Pos 5 (Endgame): **11,638 nodes (-2,392 nodes, -17.0% 節點減省！)**
+    * **總計：733,568 nodes (-32,548 nodes, -4.25% 全局節點減省！)**
+    * **總時間：2.632s vs 2.834s (-7.1% 搜尋時間縮短！)**
+    * **Overall NPS：278,717 (+3.11% NPS 提升！)**
+* **狀態：** 待在 Google Colab 上進行 A/B 錦標賽對抗驗證。
+
+---
+
 ## 4. 常用指令
 
 ```text
