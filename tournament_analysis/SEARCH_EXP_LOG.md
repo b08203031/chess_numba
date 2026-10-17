@@ -2089,6 +2089,41 @@ LMP skip 體積 ≫ RFP ≈ FP/Razor/hist-prune 帶 ≫ NMP ≫ ProbCut
 
 ---
 
+### E70：修復吃子後首步靜態著法被豁免 LMR 錯誤進行全深搜尋（2026-10-17，待實測）
+
+* **改動項目與動機：**
+  * 檔案：`chess_engine/classical/search.py`（Line 2689）。
+  * 根因病灶：
+    在 `_search` 著法迴圈中，`searched_legal_moves == 1`（第 1 步合法著法）已被排他性地以全深度搜尋。
+    進入 `else:` 區塊時，`searched_legal_moves >= 2`（表示該節點已有走法驗證且未引發即時截斷）。
+    原代碼檢查：
+    `if is_quiet_move and quiet_move_counter >= LMR_MIN_QUIET_MOVE_INDEX and moved_piece_type != -1:`
+    常數 `LMR_MIN_QUIET_MOVE_INDEX = 2`。
+    當前面已試過吃子著法（例如 TT move 或好吃子）時，隨後產生的第 1 步靜態著法的 `quiet_move_counter` 僅為 1。
+    導致該靜態著法被**錯誤豁免 LMR**，以**全深度 (Full Depth)** 進行昂貴搜尋！甚至在有多步吃子的節點，第 4、第 5 步走法若為第 1 步靜態著法，依然全深搜尋！
+  * 對齊 SF19 Step 18 規範：
+    Stockfish 19 `search.cpp:1362` 僅在 `moveCount > 1` 時對所有後續著法全面施加 LMR。
+    將檢查改為 `searched_legal_moves >= LMR_MIN_QUIET_MOVE_INDEX`。
+    任何已有首步驗證的節點，其後續靜態著法一律依其走法序數施加 LMR 減深；若確實為好棋（fail-high），則由引擎原有的 fail-high re-search 機制重新以 adjusted_depth 驗證。
+* **5 盤面固定深度 14 實測比對（Startpos, Kiwipete, Middlegame, Tactical Queens, Endgame）：**
+  * Baseline (Old / E69 生產基準)：
+    * Pos 1 (Startpos): 146,396 nodes (score 31, best e2e4)
+    * Pos 2 (Kiwipete): 259,861 nodes (score -217)
+    * Pos 3 (Middlegame Complex): 204,137 nodes (score 13)
+    * Pos 4 (Tactical Queens): 111,536 nodes (score -173)
+    * Pos 5 (Endgame): 11,638 nodes (score 10120)
+    * **總計：733,568 nodes**
+  * Candidate (New / E70 全域 moveCount LMR)：
+    * Pos 1 (Startpos): 162,788 nodes (score 47, best e2e4)
+    * Pos 2 (Kiwipete): **83,959 nodes (-175,902 nodes, -67.7% 節點暴減！戰術盤面剪枝效率極高)**
+    * Pos 3 (Middlegame Complex): 282,105 nodes (score 45)
+    * Pos 4 (Tactical Queens): 147,256 nodes (score -182)
+    * Pos 5 (Endgame): 12,373 nodes (score 10121)
+    * **總計：688,481 nodes (-45,087 nodes, -6.15% 全局節點減省！)**
+* **狀態：** 待在 Google Colab 上進行 A/B 錦標賽對抗驗證。
+
+---
+
 ## 4. 常用指令
 
 ```text

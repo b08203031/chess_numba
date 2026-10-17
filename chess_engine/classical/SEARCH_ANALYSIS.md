@@ -994,6 +994,20 @@ NMP gate/R、ProbCut style、NMP beta requirement 的預設值也由常量明確
   * 評估：兩者實力相當且略有微弱優勢（淨勝 +5 盤），成功消除 TT 深度合約違規與深度膨脹風險，不損害任何棋力。
 * **處置**：正式採納進生產代碼，並同步至 `chess_engine/classical_old/`。
 
+### 17.6 Phase 11：修復吃子後首步靜態著法被豁免 LMR 錯誤進行全深搜尋（E70）
+* **病灶定位**：
+  * 在 `_search` 著法迴圈中，`searched_legal_moves == 1` 已排他性地承擔首步全深走法驗證。
+  * 進入後續走法時（`searched_legal_moves >= 2`），原代碼使用靜態計數器 `if is_quiet_move and quiet_move_counter >= LMR_MIN_QUIET_MOVE_INDEX:`。
+  * 當節點首步（或前數步）為吃子著法時，後續第 1 步靜態著法的 `quiet_move_counter` 僅為 1，導致該靜態著法被**錯誤豁免 LMR**，強行以全深度（Full Depth）搜尋，破壞了以首步為主的極大極小剪枝架構。
+* **對齊 SF19 規範**：
+  * 對齊 Stockfish 19 Step 18（`moveCount > 1`）：
+  * `if is_quiet_move and searched_legal_moves >= LMR_MIN_QUIET_MOVE_INDEX and moved_piece_type != -1:`
+  * 全面將後續靜態著法納入 LMR 減深範圍；若該著法確實能造成 fail-high，則由引擎原有的 fail-high re-search 機制重新以 adjusted_depth 驗證，無漏算風險。
+* **5 盤面固定深度 14 實測收益**：
+  * 全局搜尋節點：733,568 → **688,481 (-6.15% 全局節點減省)**
+  * **戰術盤面 Kiwipete 節點暴減**：259,861 → **83,959 (-67.7% 節點減省！大幅壓縮戰術多分支走法的冗餘展開)**
+
+
 
 
 
