@@ -12,6 +12,11 @@ import threading
 import concurrent.futures
 import traceback
 from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
 from tune_search.param_config import get_default_params
 from tune_search.search_param_registry import (
     DEFAULT_PROFILE,
