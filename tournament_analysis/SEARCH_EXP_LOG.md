@@ -2120,7 +2120,18 @@ LMP skip 體積 ≫ RFP ≈ FP/Razor/hist-prune 帶 ≫ NMP ≫ ProbCut
     * Pos 4 (Tactical Queens): 147,256 nodes (score -182)
     * Pos 5 (Endgame): 12,373 nodes (score 10121)
     * **總計：688,481 nodes (-45,087 nodes, -6.15% 全局節點減省！)**
-* **狀態：** 待在 Google Colab 上進行 A/B 錦標賽對抗驗證。
+* **對戰設定與環境：**
+  * 錦標賽配置：Google Colab (AMD EPYC 7B12 8 vCPU, 7 並行 Worker)，`inprocess` 後端。
+  * 局數：跑至 **486 局**（243 對成對換先開局），時控：**300,000 nodes/move**，TT：64 MB / context。
+  * 對陣：Candidate (New, 全域 moveCount LMR) vs Baseline (Old, E69 基準)。
+* **對戰成果與統計：**
+  * **對局戰績：** 486 局，Candidate **106 勝 265 和 115 負**（得分率 **49.07%**，238.5 / 486）。
+  * **相對 Elo：** **`-6.44`**，95% 置信區間 `[-27.24, +14.36]`。
+* **物理機理解析：**
+  * 現有的全套 LMR 係數（如 `LMR_BASE_OFFSET`、`LMR_TABLE_SCALE_PERCENT`、`LMR_MOVECOUNT_FACTOR` 等）皆是在歷史「首步靜態著法不減深 (`quiet_move_counter >= 2`)」的搜尋樹型態下調優出來的高維局部最優點。
+  * 放開吃子後的靜態著法 LMR 後，因現有減深公式並未隨之重調，導致在戰術激烈的開局/中局裡，部分關鍵的靜態防守或反擊步被過度減深，產生微小漏算。
+* **判定：** **立即回滾 (REVERTED)**。
+  * 還原 `search.py` 為 `quiet_move_counter >= LMR_MIN_QUIET_MOVE_INDEX`，確保基線 100% 穩固。
 
 ---
 

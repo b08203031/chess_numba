@@ -2686,7 +2686,7 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
             lmr_stat_score = 0
             if search_context.enable_lmr and depth >= LMR_MIN_DEPTH:
                 is_eligible = False
-                if is_quiet_move and searched_legal_moves >= LMR_MIN_QUIET_MOVE_INDEX and moved_piece_type != -1:
+                if is_quiet_move and quiet_move_counter >= LMR_MIN_QUIET_MOVE_INDEX and moved_piece_type != -1:
                     is_eligible = True
                 elif is_capture:
                     is_eligible = True
