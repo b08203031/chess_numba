@@ -1181,20 +1181,13 @@ def generate_pseudo_legal_quiets_buffer(piece_bbs, occupancy_bbs, game_state, mo
         single_pushes = (wp_bb << 8) & empty_squares
         double_pushes = ((single_pushes & RANK_3) << 8) & empty_squares
 
-        # Single Pushes (including quiet promotions)
-        pushes = single_pushes
+        # Single Pushes (non-promotion; quiet promotions are generated in captures_buffer)
+        pushes = single_pushes & ~RANK_8
         while pushes:
             to_sq = get_lsb_index(pushes)
             from_sq = to_sq - 8
-            if to_sq >= 56: # Promotion
-                moves_buffer[ply, move_count] = encode_move(from_sq, to_sq, PROMO_QUEEN, SPECIAL_MOVE_FLAG_PROMOTION)
-                moves_buffer[ply, move_count + 1] = encode_move(from_sq, to_sq, PROMO_ROOK, SPECIAL_MOVE_FLAG_PROMOTION)
-                moves_buffer[ply, move_count + 2] = encode_move(from_sq, to_sq, PROMO_BISHOP, SPECIAL_MOVE_FLAG_PROMOTION)
-                moves_buffer[ply, move_count + 3] = encode_move(from_sq, to_sq, PROMO_KNIGHT, SPECIAL_MOVE_FLAG_PROMOTION)
-                move_count += 4
-            else:
-                moves_buffer[ply, move_count] = encode_move(from_sq, to_sq, 0, SPECIAL_MOVE_FLAG_NORMAL)
-                move_count += 1
+            moves_buffer[ply, move_count] = encode_move(from_sq, to_sq, 0, SPECIAL_MOVE_FLAG_NORMAL)
+            move_count += 1
             pushes &= (pushes - np.uint64(1))
         
         # Double Pushes
@@ -1214,20 +1207,13 @@ def generate_pseudo_legal_quiets_buffer(piece_bbs, occupancy_bbs, game_state, mo
         single_pushes = (bp_bb >> 8) & empty_squares
         double_pushes = ((single_pushes & RANK_6) >> 8) & empty_squares
 
-        # Single Pushes (including quiet promotions)
-        pushes = single_pushes
+        # Single Pushes (non-promotion; quiet promotions are generated in captures_buffer)
+        pushes = single_pushes & ~RANK_1
         while pushes:
             to_sq = get_lsb_index(pushes)
             from_sq = to_sq + 8
-            if to_sq <= 7: # Promotion
-                moves_buffer[ply, move_count] = encode_move(from_sq, to_sq, PROMO_QUEEN, SPECIAL_MOVE_FLAG_PROMOTION)
-                moves_buffer[ply, move_count + 1] = encode_move(from_sq, to_sq, PROMO_ROOK, SPECIAL_MOVE_FLAG_PROMOTION)
-                moves_buffer[ply, move_count + 2] = encode_move(from_sq, to_sq, PROMO_BISHOP, SPECIAL_MOVE_FLAG_PROMOTION)
-                moves_buffer[ply, move_count + 3] = encode_move(from_sq, to_sq, PROMO_KNIGHT, SPECIAL_MOVE_FLAG_PROMOTION)
-                move_count += 4
-            else:
-                moves_buffer[ply, move_count] = encode_move(from_sq, to_sq, 0, SPECIAL_MOVE_FLAG_NORMAL)
-                move_count += 1
+            moves_buffer[ply, move_count] = encode_move(from_sq, to_sq, 0, SPECIAL_MOVE_FLAG_NORMAL)
+            move_count += 1
             pushes &= (pushes - np.uint64(1))
         
         # Double Pushes

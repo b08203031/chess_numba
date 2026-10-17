@@ -1005,8 +1005,14 @@ NMP gate/R、ProbCut style、NMP beta requirement 的預設值也由常量明確
   * 當前引擎的所有 LMR 相關係數（減深基礎值、係數乘積、歷史阻尼）皆在舊門檻下達成高度共振。在未重新 SPSA 調參的情況下改變靜態走法減深時機，會使部分戰術關鍵靜態步遭到過度減深，出現戰術盲點。
 * **處置**：立即回滾代碼至 `quiet_move_counter >= LMR_MIN_QUIET_MOVE_INDEX`，確保生產基線絕對穩固。
 
-
-
-
-
-
+### 17.7 Phase 12：LMR SPSA 前置底層演算法與參數接線 Bug 修復包（E71，2026-10-17）
+在啟動 LMR 核心參數群 SPSA 調優前，針對搜尋主迴圈與分段著法生成器進行全量代碼審計，修復 4 項底層缺陷（暫不同步 `classical_old`，待與 SPSA 調參結果合併後一併對戰驗收）：
+1. **Capture Futility Pruning 補齊 Runtime LMR Slot 接線（`search.py`）**：
+   * Step 14 吃子靜態剪枝原呼叫 `compute_lmr_reduction_1024(depth, searched_legal_moves + 1, improving)` 時漏傳 `search_context.tune[TUNE_LMR_TABLE_SCALE]` 與 `search_context.tune[TUNE_LMR_NOT_IMP]`，導致 SPSA 調整 `LMR_TABLE_SCALE_PERCENT` (`slot 24`) 時該處死鎖於編譯期常數。補齊接線後確保 SPSA 梯度一致（基準值下 100% 0-node delta）。
+2. **消除 MovePicker 分段生成重複搜索「不吃子升變（Quiet Promotions）」（`move_generator.py`）**：
+   * `generate_pseudo_legal_captures_buffer` 已生成所有直推升變（`single_pushes & RANK_8` / `RANK_1`），但 `generate_pseudo_legal_quiets_buffer` 內部又重複生成一次 4 種直推升變（Q, R, B, N），且 `get_next_move` 在安靜步階段未過濾已於吃子階段搜尋過的升變，導致同一節點內所有直推升變被重複搜尋兩次並使 `searched_legal_moves` 虛增 +4。
+   * 修復為在 `generate_pseudo_legal_quiets_buffer` 中將單步推兵掩碼改為 `single_pushes & ~RANK_8`（白）與 `single_pushes & ~RANK_1`（黑），使 `captures_buffer` 與 `quiets_buffer` 形成嚴格互斥且完備的著法分割。
+3. **消除 Step 14 Quiet SEE 與 EP SEE 的冗餘敵方 Bitboard 空掃描（`see.py`, `search.py`）**：
+   * `_see_ge_jit` 原以 `victim_type == -1` 作為「未知受害者」預設值並觸發 `find_piece_type_on_square_side` 掃描 6 個敵方 bitboard。新增 `victim_type == -2` 哨兵代表「已知目標格為空（Quiet 著法或 En Passant）」，直接設為無受害者而不掃描 bitboard（100% 0-node delta 純 NPS 加速）。
+4. **ProbCut 補齊 `not is_pv and ply > 0` 節點守衛（`search.py`）**：
+   * 原 ProbCut 區塊位於 `not is_pv` 守衛之外，在迭代加深進入 Aspiration Window（`abs(beta) < VALUE_KNOWN_WIN`）時可能於 PV 節點或 Root 節點觸發投機剪枝。補齊 `not is_pv and ply > 0` 嚴格對齊非 PV 剪枝安全合約。

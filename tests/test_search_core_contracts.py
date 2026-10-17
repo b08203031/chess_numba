@@ -302,7 +302,56 @@ class TestSearchCoreContracts(unittest.TestCase):
         self.assertIn('if halfmove_clock >= FIFTY_MOVE_RULE_LIMIT or not has_sufficient_material(piece_bbs):', search)
         self.assertIn('if not _is_in_check_jit(piece_bbs, occupancy_bbs, game_state):', search)
 
+    def test_pre_spsa_bugfixes_contracts(self):
+        import numpy as np
+        from chess_engine.classical.fen_parser import parse_fen
+        from chess_engine.classical.move_generator import (
+            generate_pseudo_legal_captures_buffer,
+            generate_pseudo_legal_moves_buffer,
+            generate_pseudo_legal_quiets_buffer,
+        )
+
+        search = (ROOT / 'chess_engine/classical/search.py').read_text(encoding='utf-8')
+        see = (ROOT / 'chess_engine/classical/see.py').read_text(encoding='utf-8')
+
+        # 1. Capture Futility Pruning must pass runtime LMR table scale and not-improving slots
+        cap_fp_start = search.index('# --- Stockfish 18 Step 14: Capture Futility Pruning (Pre-make) ---')
+        cap_fp_end = search.index('# --- Capture SEE Pruning ---', cap_fp_start)
+        cap_fp_body = search[cap_fp_start:cap_fp_end]
+        self.assertIn('search_context.tune[TUNE_LMR_TABLE_SCALE]', cap_fp_body)
+        self.assertIn('search_context.tune[TUNE_LMR_NOT_IMP]', cap_fp_body)
+
+        # 2. ProbCut must be guarded against Root and PV nodes
+        probcut_start = search.index('# --- ProbCut (must be before NMP, guarded by H3) ---')
+        probcut_end = search.index('# --- TT-based ProbCut Shortcut', probcut_start)
+        self.assertIn('not is_pv and ply > 0', search[probcut_start:probcut_end])
+
+        # 3. _see_ge_jit supports victim_type == -2 sentinel for known-empty target squares
+        self.assertIn('elif victim_type == -2:', see)
+        quiet_see_start = search.index('# --- Step 14d: Quiet SEE Pruning ---')
+        quiet_see_end = search.index('# --- Pre-make Legality Fast Path', quiet_see_start)
+        self.assertIn('see_piece, -2)', search[quiet_see_start:quiet_see_end])
+
+        # 4. Staged captures + quiets must never duplicate non-capture promotions
+        for fen in (
+            "8/P4k2/8/8/8/8/5K2/8 w - - 0 1",
+            "8/5k2/8/8/8/8/p4K2/8 b - - 0 1",
+            "r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1",
+        ):
+            pb, ob, gs = parse_fen(fen)
+            full_buf = np.zeros((2, 256), dtype=np.uint16)
+            staged_buf = np.zeros((2, 256), dtype=np.uint16)
+            full_cnt = int(generate_pseudo_legal_moves_buffer(pb, ob, gs, full_buf, 0))
+            cap_cnt = int(generate_pseudo_legal_captures_buffer(pb, ob, gs, staged_buf, 0))
+            tot_cnt = int(generate_pseudo_legal_quiets_buffer(pb, ob, gs, staged_buf, 0, cap_cnt))
+
+            full_moves = [int(full_buf[0, i]) for i in range(full_cnt)]
+            staged_moves = [int(staged_buf[0, i]) for i in range(tot_cnt)]
+            self.assertEqual(len(staged_moves), len(set(staged_moves)), f"Duplicate staged moves in {fen}")
+            self.assertEqual(sorted(full_moves), sorted(staged_moves), f"Staged vs full mismatch in {fen}")
+
 
 if __name__ == '__main__':
     unittest.main()
+
 

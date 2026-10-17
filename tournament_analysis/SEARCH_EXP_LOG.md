@@ -2135,6 +2135,23 @@ LMP skip 體積 ≫ RFP ≈ FP/Razor/hist-prune 帶 ≫ NMP ≫ ProbCut
 
 ---
 
+### E71：LMR SPSA 前置底層演算法與參數接線 Bug 修復包（2026-10-17，待與 SPSA 合併對戰驗收）
+
+* **改動項目與動機（全量代碼審計發現之 4 項缺陷）：**
+  1. **Capture Futility Pruning 補齊 Runtime LMR Slot 接線（`chess_engine/classical/search.py`）**：
+     * Step 14 Capture FP 原呼叫 `compute_lmr_reduction_1024(depth, searched_legal_moves + 1, improving)` 時漏傳 `search_context.tune[TUNE_LMR_TABLE_SCALE]` 與 `search_context.tune[TUNE_LMR_NOT_IMP]`，補齊後確保 `slot 24` SPSA 梯度一致（基準值下 0-node delta）。
+  2. **消除 MovePicker 分段生成重複搜索「不吃子升變（Quiet Promotions）」（`chess_engine/classical/move_generator.py`）**：
+     * `generate_pseudo_legal_captures_buffer` 已生成所有直推升變（`single_pushes & RANK_8` / `RANK_1`），移除 `generate_pseudo_legal_quiets_buffer` 內重複生成的直推升變（改為 `single_pushes & ~RANK_8` / `~RANK_1`），防止同一節點內不吃子升變被重複搜尋兩次並使 `searched_legal_moves` 虛增 +4。
+  3. **消除 Step 14 Quiet SEE 與 EP SEE 的冗餘敵方 Bitboard 空掃描（`chess_engine/classical/see.py`, `search.py`）**：
+     * `_see_ge_jit` 新增 `victim_type == -2` 哨兵代表「已知目標格為空（Quiet 著法或 En Passant）」，跳過 `find_piece_type_on_square_side` 的 6 個敵方 bitboard 線性掃描（100% 0-node delta 純 NPS 加速）。
+  4. **ProbCut 補齊 `not is_pv and ply > 0` 節點守衛（`chess_engine/classical/search.py`）**：
+     * 防止在 Aspiration Window（`abs(beta) < VALUE_KNOWN_WIN`）下於 Root 或 PV 節點觸發投機性 ProbCut 截斷。
+* **當前狀態：**
+  * 已通過 `tests/test_search_core_contracts.py`（20/20 全綠，含新增 `test_pre_spsa_bugfixes_contracts`）。
+  * **暫不同步 `classical_old`**，保留 `classical_old` 作為 E69 純基線，待完成 LMR SPSA 調優後一併進行對戰測試。
+
+---
+
 ## 4. 常用指令
 
 ```text

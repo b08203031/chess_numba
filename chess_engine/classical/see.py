@@ -258,7 +258,9 @@ def _see_ge_jit(piece_bbs, occupancy_bbs, side_to_move, from_sq, to_sq, threshol
 
     if victim_type == -1:
         victim_type = find_piece_type_on_square_side(piece_bbs, to_sq, 1 - side_to_move)
-    
+    elif victim_type == -2:
+        victim_type = -1
+
     if victim_type != -1:
         victim_type %= 6
 
