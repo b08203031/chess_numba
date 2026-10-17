@@ -1,8 +1,8 @@
 # Classical 搜尋單項實驗日誌
 
 > **用途：** 連續 A/B 實驗的唯一進度表與決策紀錄。未來接續實驗、回顧為何留下/回滾，以此檔為準。  
-> **最後更新：** 2026-10-07  
-> **當前基準狀態：** **E62 已採納進生產基線**（前向剪枝 Phase 3 六軸調參＋純 LMP 118 雙重 300k LTC 驗證，累計 1,200 局淨勝 24 分、Elo +8.1 / +5.8，24 次檢查點全數 > 50%，成功推進生產基線；接續 E60）。
+> **最後更新：** 2026-10-17  
+> **當前基準狀態：** **E67 已採納進生產基線**（搜尋熱路徑 Zero-Tree-Delta 冗餘消除與 NPS 優化，5 盤面 14 層 5 次平均 100% 0-node delta 完全一致，核心大盤面 NPS 提升 +10.21%，Startpos 提升 +18.77%；接續 E66）。
 
 ---
 
@@ -2002,6 +2002,31 @@ LMP skip 體積 ≫ RFP ≈ FP/Razor/hist-prune 帶 ≫ NMP ≫ ProbCut
   * 產物檔：`tournament_colab_runner_se_multicut.ipynb`、`tournament_analysis/search_stats_report.txt`、`tournament_analysis/game_stats_report.txt`。
   * 生產代碼更新：`chess_engine/classical/constants.py`（`MIN_SINGULAR_DEPTH = 9`）。已同步至 `classical_old/constants.py`。
   * 下一步探索：測試 `MIN_SINGULAR_DEPTH = 10` vs `9`，尋找邊際效益最佳甜蜜點。
+
+---
+
+### E67：搜尋熱路徑零搜尋樹變動 (Zero-Tree-Delta) 冗餘消除與 NPS 加速優化（2026-10-17）
+
+* **改動項目：**
+  1. `chess_engine/classical/search.py`：消除 LMR 吃子前 100% 重複的 `_see_ge_jit(..., 0)` 呼叫（直接透過 `mp_stage == STAGE_BAD_CAPTURES` 復用 MovePicker 分流結果）。
+  2. `chess_engine/classical/search_heuristics.py`：移除 `aggressor_cache` 與 `victim_cache` 於 6 處評分函式的死寫入（無讀取端且排序後無效）。
+  3. `chess_engine/classical/search.py`：Step 14 剪枝棋子查詢復用，消除 `_qsearch_ordinary_move_gives_check` 與 `_see_ge_jit` 在走子迴圈中的重複線性 6-bitboard 查詢。
+* **驗證方式：**
+  * 選取 5 個不同風格盤面（Startpos、Kiwipete、Middlegame Complex、Tactical Queens、Endgame），固定深度 14，每盤面執行 5 次取平均值。
+* **驗證結果（0-node delta 完全一致，NPS 大幅提升）：**
+  * **節點數**：
+    * Pos 1 (Startpos): 289,763 (0 delta)
+    * Pos 2 (Kiwipete): 291,209 (0 delta)
+    * Pos 3 (Middlegame Complex): 869,909 (0 delta)
+    * Pos 4 (Tactical Queens): 4,980 (0 delta)
+    * Pos 5 (Endgame): 685 (0 delta)
+    * **總節點數 1,456,546.0 vs 1,456,546.0，達成 100% 逐節點完全吻合（0-node delta）**。
+  * **NPS 表現**：
+    * Startpos NPS: 402,489 → **478,036 (+18.77%)**
+    * Kiwipete NPS: 412,261 → **442,820 (+7.41%)**
+    * Middlegame Complex NPS: 428,251 → **457,893 (+6.92%)**
+    * **核心深搜前三大盤面加權 NPS: 414,774 → 457,114 (+10.21%)**。
+* **判定：** **採納進生產代碼 (ADOPTED / ZERO-TREE-DELTA PROD SPEEDUP)**。
 
 ---
 

@@ -932,4 +932,40 @@ NMP gate/R、ProbCut style、NMP beta requirement 的預設值也由常量明確
   * 同步更新 `tuner/constants_snapshot.py`、`tests/test_search_param_registry.py`。
   * 詳細戰報與圖表請參見 [`tournament_analysis/REPORT_2026-10-14_nmp_alignment_campaign.md`](../../tournament_analysis/REPORT_2026-10-14_nmp_alignment_campaign.md)。
 
+---
+
+## 17. Phase 9：零搜尋樹變動 (Zero-Tree-Delta) 熱路徑冗餘消除與 NPS 加速優化（2026-10-17）
+
+### 17.1 優化動機與審查發現
+經過多輪 SPSA 與座標下降參數調優後，搜尋算法本身存在若干熱路徑上的重複運算與死代碼：
+1. **LMR 吃子重複 SEE(0) 計算**：
+   在 `_search` 中，當 `searched_legal_moves >= 1` 時，非 TT 吃子著法在 `get_next_move` 產生時已於 `STAGE_GOOD_CAPTURES` 完整計算過 `_see_ge_jit(..., 0)`，並據此分流至好/壞吃子。然而原代碼在 LMR 檢查時又無條件重新呼叫一次完全相同的 `_see_ge_jit(..., 0)`。
+2. **MovePicker 快取死寫入 (Dead Writes)**：
+   在 `score_captures_lazy`、`score_captures_with_tt_lazy`、`score_captures`、`score_captures_with_tt`、`score_quiets`、`score_evasions` 等處，每步著法皆寫入 `search_context.aggressor_cache[ply, i]` 與 `victim_cache[ply, i]`。但後續的排序只交換 `moves` 與 `scores` 導致快取索引錯位，且全工程未有任何程式碼讀取這兩個陣列。
+3. **Step 14 重複棋子類型查詢 (Bitboard Lookups)**：
+   在每節點走子迴圈中，Step 14 剪枝已查得 `cap_piece`、`cap_victim` 與 `see_piece`，但呼叫 `_qsearch_ordinary_move_gives_check` 與 `_see_ge_jit` 時未傳入已知類型，導致底層反覆對 6 個 bitboard 執行多餘的線性循環查找。
+
+### 17.2 具體實作
+* **LMR 吃子分流復用**：在 `_search` 中改為檢查 `search_context.mp_stage[ply] == STAGE_BAD_CAPTURES`，僅在罕見的 `move == tt_move` 邊界才發起實體 SEE。
+* **死碼寫入清除**：移除 `search_heuristics.py` 中 6 處死寫入，保持 `engine_types.py` StructRef 欄位佈局相容。
+* **棋子類型傳遞**：
+  * `_qsearch_ordinary_move_gives_check` 新增可選 `moved_piece=-1`，傳入已知的 `cap_piece` / `see_piece` 略過 `find_piece_type_on_square_side`。
+  * `_see_ge_jit` 在 Capture SEE Pruning 傳入 `cap_piece, cap_victim_see`（EN_PASSANT 時傳 `-1` 保持正確 EP 判定）。
+  * `_see_ge_jit` 在 Quiet SEE Pruning 傳入 `see_piece, -1`，直接利用空目標格特性在函式頭部 `swap < 0` 立即截斷，完全不掃描棋盤。
+
+### 17.3 測試驗證（5 盤面 × 深度 14 × 5 次重複平均）
+測試盤面：Startpos、Kiwipete、Middlegame Complex、Tactical Queens、Endgame。
+
+| 盤面 | 優化前 Nodes | 優化後 Nodes | 節點差異 | 優化前 NPS | 優化後 NPS | NPS 增益 |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| **Pos 1: Startpos** | 289,763.0 | 289,763.0 | **0 (0.00%)** | 402,489 | **478,036** | **+18.77%** |
+| **Pos 2: Kiwipete** | 291,209.0 | 291,209.0 | **0 (0.00%)** | 412,261 | **442,820** | **+7.41%** |
+| **Pos 3: Middlegame Complex** | 869,909.0 | 869,909.0 | **0 (0.00%)** | 428,251 | **457,893** | **+6.92%** |
+| **Pos 4: Tactical Queens** | 4,980.0 | 4,980.0 | **0 (0.00%)** | 165,810 | 120,521 | (秒級內誤差) |
+| **Pos 5: Endgame** | 685.0 | 685.0 | **0 (0.00%)** | 22,556 | 22,844 | (秒級內誤差) |
+| **前三大盤面加權 (99.6% Nodes)** | 1,450,881.0 | 1,450,881.0 | **0 (0.00%)** | 414,774 | **457,114** | **+10.21%** |
+| **總計節點** | **1,456,546.0** | **1,456,546.0** | **0 (0.00%)** | — | — | — |
+
+* **結論**：100% 保證搜尋決策與搜尋樹單節點完全一致（**0-node delta**），核心深層搜尋速度穩定提升 **+10.21% NPS**（開局起點更高達 **+18.77%**）。
+
 

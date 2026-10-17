@@ -397,13 +397,15 @@ def _qsearch_ordinary_move_gives_check(
     piece_bbs, move, side_to_move, their_king_bb,
     check_sq_pawn, check_sq_knight, check_sq_bishop,
     check_sq_rook, check_sq_queen, blockers_for_their_king,
+    moved_piece=-1,
 ):
     """Pre-make gives-check test for non-EP, non-promotion qsearch moves."""
     from_sq = get_from_square(move)
     to_sq = get_to_square(move)
-    moved_piece = find_piece_type_on_square_side(
-        piece_bbs, from_sq, side_to_move,
-    )
+    if moved_piece < 0:
+        moved_piece = find_piece_type_on_square_side(
+            piece_bbs, from_sq, side_to_move,
+        )
     if moved_piece < 0:
         return False
 
@@ -2151,6 +2153,7 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                             check_sq_pawn_s, check_sq_knight_s, check_sq_bishop_s,
                             check_sq_rook_s, check_sq_queen_s,
                             blockers_for_their_king_s,
+                            cap_piece,
                         )
                     if not pre_move_gives_check:
                         lmr_r = compute_lmr_reduction_1024(depth, searched_legal_moves + 1, improving)
@@ -2176,17 +2179,16 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                 if ENABLE_CAPTURE_FUTILITY and cap_piece >= 0 and cap_victim >= 0:
                     threshold = threshold - cap_hist * CAP_SEE_CAPTHIST_NUM // CAP_SEE_CAPTHIST_DEN
                 _diag_add(search_context, DIAG_MAIN_CAP_SEE_TRY)
-                if not _see_ge_jit(piece_bbs, occupancy_bbs, side_to_move, from_sq, to_sq, threshold, pinned_white, pinned_black):
+                cap_victim_see = -1 if flag == SPECIAL_MOVE_FLAG_EN_PASSANT else cap_victim
+                if not _see_ge_jit(piece_bbs, occupancy_bbs, side_to_move, from_sq, to_sq, threshold, pinned_white, pinned_black, cap_piece, cap_victim_see):
                     pruned_moves += 1
                     _diag_add(search_context, DIAG_SEE_CAP_SKIP)
                     continue
             # Quiet SEE skip: also respect followPV (do not prune last-iter PV path)
             elif is_pseudo_quiet and not low_material_pruning_guard and not follow_pv:
-                # SF11 and SF18 classify checking quiets with captures/checks,
-                # not with the more selective quiet-history pruning branch.
-                # Determine ordinary direct/discovered checks before make_move;
-                # castling is rare and protected here because its rook move is
-                # not represented by the ordinary geometry helper.
+                see_piece = int(find_piece_type_on_square_side(
+                    piece_bbs, from_sq, side_to_move,
+                ))
                 pre_move_gives_check = flag == SPECIAL_MOVE_FLAG_CASTLING
                 if not pre_move_gives_check:
                     pre_move_gives_check = _qsearch_ordinary_move_gives_check(
@@ -2194,23 +2196,17 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                         check_sq_pawn_s, check_sq_knight_s, check_sq_bishop_s,
                         check_sq_rook_s, check_sq_queen_s,
                         blockers_for_their_king_s,
+                        see_piece,
                     )
 
                 can_prune_quiet = not pre_move_gives_check
                 if pre_move_gives_check:
-                    # Common SF11/SF18 safety shape: checking moves may still
-                    # fail a permissive SEE gate, but never the quiet lmrDepth
-                    # gate.  This preserves speculative checks without making
-                    # all unsound checks free.
                     threshold = search_context.tune[TUNE_SEE_CAP_MARGIN] * depth
                     _diag_add(search_context, DIAG_MAIN_CHECK_SEE_ROUTE)
-                    if not _see_ge_jit(piece_bbs, occupancy_bbs, side_to_move, from_sq, to_sq, threshold, pinned_white, pinned_black):
+                    if not _see_ge_jit(piece_bbs, occupancy_bbs, side_to_move, from_sq, to_sq, threshold, pinned_white, pinned_black, see_piece, -1):
                         pruned_moves += 1
                         continue
                 else:
-                    see_piece = int(find_piece_type_on_square_side(
-                        piece_bbs, from_sq, side_to_move,
-                    ))
                     quiet_move_counter += 1
                     quiet_counted = True
 
@@ -2365,7 +2361,7 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                         * see_lmr_d * see_lmr_d
                     )
                     _diag_add(search_context, DIAG_MAIN_QUIET_SEE_TRY)
-                    if not _see_ge_jit(piece_bbs, occupancy_bbs, side_to_move, from_sq, to_sq, threshold, pinned_white, pinned_black):
+                    if not _see_ge_jit(piece_bbs, occupancy_bbs, side_to_move, from_sq, to_sq, threshold, pinned_white, pinned_black, see_piece, -1):
                         pruned_moves += 1
                         _diag_add(search_context, DIAG_SEE_QUIET_SKIP)
                         continue
@@ -2404,13 +2400,17 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
         # Capture LMR consumes SEE(0), but SEE must inspect the parent board.
         # Avoid the old unconditional call for shallow/first captures that can
         # never enter LMR, while keeping the result available after make_move.
+        # MovePicker has already partitioned non-TT captures via SEE(0).
         if (is_capture and search_context.enable_lmr and depth >= LMR_MIN_DEPTH
                 and searched_legal_moves >= 1):
-            _diag_add(search_context, DIAG_LMR_CAP_SEE_TRY)
-            is_bad_capture = not _see_ge_jit(
-                piece_bbs, occupancy_bbs, original_side,
-                from_sq, to_sq, 0, pinned_white, pinned_black,
-            )
+            if move == tt_move:
+                _diag_add(search_context, DIAG_LMR_CAP_SEE_TRY)
+                is_bad_capture = not _see_ge_jit(
+                    piece_bbs, occupancy_bbs, original_side,
+                    from_sq, to_sq, 0, pinned_white, pinned_black,
+                )
+            else:
+                is_bad_capture = (search_context.mp_stage[ply] == STAGE_BAD_CAPTURES)
 
         # Pre-compute SEE on parent board for check extension to avoid post-make unmake/remake round-trip
         if ENABLE_CHECK_EXTENSION and not is_pv and move != tt_move and depth > CHECK_EXT_NON_PV_MAX_DEPTH:
