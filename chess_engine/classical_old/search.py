@@ -157,6 +157,7 @@ from chess_engine.classical_old.constants import (
     TUNE_DELTA_MARGIN, TUNE_PROBCUT_MARGIN, TUNE_BAD_CAP_BONUS, TUNE_GOOD_CAP_RELIEF,
     TUNE_LMP_SCALE, TUNE_KILLER_RELIEF, TUNE_QS_SEE,
     TUNE_LMR_CUTNODE, TUNE_LMR_NO_TTMOVE, TUNE_LMR_TTCAP, TUNE_LMR_MC_FACTOR, TUNE_LMR_TTMOVE_RED,
+    TUNE_SINGULAR_MARGIN_BASE, TUNE_SINGULAR_TTPV_BONUS,
     TUNE_NMP_SCOPE, TUNE_NMP_GATE, TUNE_NMP_R, TUNE_PROBCUT_STYLE,
     TUNE_LMR_TABLE_SCALE, TUNE_LMR_NOT_IMP,
     TUNE_NMP_BASE, TUNE_NMP_DEPTH_COEF, TUNE_NMP_IMP_COEF, TUNE_NMP_EVAL_DIV,
@@ -2435,7 +2436,7 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
 
         # --- Step 15: Singular Extensions & Multi-Cut (Pre-make, move == tt_move) ---
         if (ENABLE_SINGULAR_EXTENSIONS and ply > 0 and excluded_move == NO_MOVE
-                and move == tt_move and depth >= MIN_SINGULAR_DEPTH + (1 if tt_pv else 0)
+                and move == tt_move and depth >= MIN_SINGULAR_DEPTH
                 and not is_currently_in_check and skip_post_legality_s):
             if ((tt_flag == TT_FLAG_BETA or tt_flag == TT_FLAG_EXACT)
                     and tt_depth >= depth - SINGULAR_TT_DEPTH_SLACK):
@@ -2446,8 +2447,8 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                     se_tt_score += ply
 
                 if abs(se_tt_score) < VALUE_KNOWN_WIN:
-                    se_tt_pv_bonus = SINGULAR_TTPV_BONUS if (tt_pv and not is_pv) else 0
-                    singular_margin = (SINGULAR_MARGIN_BASE + se_tt_pv_bonus) * depth // SINGULAR_MARGIN_DIV
+                    se_tt_pv_bonus = search_context.tune[TUNE_SINGULAR_TTPV_BONUS] if (tt_pv and not is_pv) else 0
+                    singular_margin = (search_context.tune[TUNE_SINGULAR_MARGIN_BASE] + se_tt_pv_bonus) * depth // SINGULAR_MARGIN_DIV
                     exclusion_beta = se_tt_score - singular_margin
 
                     # Save MovePicker & Search Context State to prevent Singular Extension from clobbering the parent
