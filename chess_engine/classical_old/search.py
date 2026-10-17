@@ -1798,11 +1798,12 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                     # PR-B: do not propagate unproven known-win / mate from reduced ProbCut
                     if is_win(probcut_return_score) or is_decisive(probcut_return_score):
                         probcut_return_score = beta
-                    # Store in TT for future use
+                    # Store in TT for future use (aligned with SF19: probCutDepth + 1 = depth - probcut_r + 1)
                     tt_store_score_pc = probcut_return_score
                     if tt_store_score_pc > MATE_IN_MAX_PLY: tt_store_score_pc += ply
                     elif tt_store_score_pc < -MATE_IN_MAX_PLY: tt_store_score_pc -= ply
-                    store_tt(search_context.transposition_table, tt_key, depth - PROBCUT_TT_DEPTH_OFFSET, tt_store_score_pc, np.int16(32767), TT_FLAG_BETA, pc_move, search_context.tt_generation, tt_pv)
+                    pc_tt_depth = max(1, depth - probcut_r + 1)
+                    store_tt(search_context.transposition_table, tt_key, pc_tt_depth, tt_store_score_pc, np.int16(32767), TT_FLAG_BETA, pc_move, search_context.tt_generation, tt_pv)
                     _diag_add(search_context, DIAG_PROBCUT)
                     return (np.int32(probcut_return_score), pc_move, nodes_searched, quiescence_nodes, tt_hits)
 

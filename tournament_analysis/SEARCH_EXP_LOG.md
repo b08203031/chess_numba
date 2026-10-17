@@ -2052,7 +2052,7 @@ LMP skip 體積 ≫ RFP ≈ FP/Razor/hist-prune 帶 ≫ NMP ≫ ProbCut
 
 ---
 
-### E69：對齊 Stockfish 19 Step 12 ProbCut TT 寫入深度修復（2026-10-17，待實測）
+### E69：對齊 Stockfish 19 Step 12 ProbCut TT 寫入深度修復（2026-10-17）
 
 * **改動項目與動機：**
   * 檔案：`chess_engine/classical/search.py`（Line 1805）。
@@ -2076,7 +2076,16 @@ LMP skip 體積 ≫ RFP ≈ FP/Razor/hist-prune 帶 ≫ NMP ≫ ProbCut
     * **總計：733,568 nodes (-32,548 nodes, -4.25% 全局節點減省！)**
     * **總時間：2.632s vs 2.834s (-7.1% 搜尋時間縮短！)**
     * **Overall NPS：278,717 (+3.11% NPS 提升！)**
-* **狀態：** 待在 Google Colab 上進行 A/B 錦標賽對抗驗證。
+* **對戰設定與環境：**
+  * 錦標賽配置：Google Colab (AMD EPYC 7B12 8 vCPU, 7 並行 Worker)，`inprocess` 後端。
+  * 局數：**600 局**（300 對成對換先開局），時控：**300,000 nodes/move**，TT：64 MB / context。
+  * 對陣：Candidate (New, SF19 ProbCut TT 深度) vs Baseline (Old, 包含 Step A NPS 加速)。
+* **對戰成果與統計：**
+  * **對局戰績：** 600 局，Candidate **135 勝 335 和 130 負**（得分率 **50.42%**，302.5 / 600）。
+  * **相對 Elo：** **`+2.90`**，95% 置信區間 `[-14.69, +20.49]`（淨勝 +5 盤）。
+  * **勝負與穩定度：** 兩者實力相當且略有微弱優勢（+2.90 Elo），完整修復 TT 深度膨脹缺陷，合約邏輯對齊 SF19。
+* **判定：** **採納進生產 / 基線 (ADOPTED / PRODUCTION BASELINE UPDATED)**。
+  * 透過 `tools/sync_classical_old.py --sync-code` 同步至 `chess_engine/classical_old/`。
 
 ---
 
