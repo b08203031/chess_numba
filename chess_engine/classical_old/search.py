@@ -1648,7 +1648,8 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
     _pc_style = search_context.tune[TUNE_PROBCUT_STYLE]
     probcut_r = PROBCUT_R_IMPROVING if improving else PROBCUT_R_NOT_IMPROVING
     probcut_min_depth = probcut_r + 1
-    if (search_context.enable_probcut and _pc_style != 2 and not is_exclusion_search and depth >= probcut_min_depth
+    if (search_context.enable_probcut and _pc_style != 2 and not is_pv and ply > 0
+            and not is_exclusion_search and depth >= probcut_min_depth
             and abs(beta) < MATE_IN_MAX_PLY and abs(beta) < VALUE_KNOWN_WIN
             and not is_currently_in_check and not is_win(static_score) and not is_loss(beta)):
         # --- TT-based ProbCut Shortcut (SF 18 Step 12) ---
@@ -2157,7 +2158,13 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                             cap_piece,
                         )
                     if not pre_move_gives_check:
-                        lmr_r = compute_lmr_reduction_1024(depth, searched_legal_moves + 1, improving)
+                        lmr_r = compute_lmr_reduction_1024(
+                            depth,
+                            searched_legal_moves + 1,
+                            improving,
+                            search_context.tune[TUNE_LMR_TABLE_SCALE],
+                            search_context.tune[TUNE_LMR_NOT_IMP],
+                        )
                         cap_lmr_d = (depth - 1) - (lmr_r // 1024)
                         if cap_lmr_d < 0:
                             cap_lmr_d = 0
@@ -2180,7 +2187,7 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                 if ENABLE_CAPTURE_FUTILITY and cap_piece >= 0 and cap_victim >= 0:
                     threshold = threshold - cap_hist * CAP_SEE_CAPTHIST_NUM // CAP_SEE_CAPTHIST_DEN
                 _diag_add(search_context, DIAG_MAIN_CAP_SEE_TRY)
-                cap_victim_see = -1 if flag == SPECIAL_MOVE_FLAG_EN_PASSANT else cap_victim
+                cap_victim_see = -2 if flag == SPECIAL_MOVE_FLAG_EN_PASSANT else cap_victim
                 if not _see_ge_jit(piece_bbs, occupancy_bbs, side_to_move, from_sq, to_sq, threshold, pinned_white, pinned_black, cap_piece, cap_victim_see):
                     pruned_moves += 1
                     _diag_add(search_context, DIAG_SEE_CAP_SKIP)
@@ -2204,7 +2211,7 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                 if pre_move_gives_check:
                     threshold = search_context.tune[TUNE_SEE_CAP_MARGIN] * depth
                     _diag_add(search_context, DIAG_MAIN_CHECK_SEE_ROUTE)
-                    if not _see_ge_jit(piece_bbs, occupancy_bbs, side_to_move, from_sq, to_sq, threshold, pinned_white, pinned_black, see_piece, -1):
+                    if not _see_ge_jit(piece_bbs, occupancy_bbs, side_to_move, from_sq, to_sq, threshold, pinned_white, pinned_black, see_piece, -2):
                         pruned_moves += 1
                         continue
                 else:
@@ -2362,7 +2369,7 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                         * see_lmr_d * see_lmr_d
                     )
                     _diag_add(search_context, DIAG_MAIN_QUIET_SEE_TRY)
-                    if not _see_ge_jit(piece_bbs, occupancy_bbs, side_to_move, from_sq, to_sq, threshold, pinned_white, pinned_black, see_piece, -1):
+                    if not _see_ge_jit(piece_bbs, occupancy_bbs, side_to_move, from_sq, to_sq, threshold, pinned_white, pinned_black, see_piece, -2):
                         pruned_moves += 1
                         _diag_add(search_context, DIAG_SEE_QUIET_SKIP)
                         continue

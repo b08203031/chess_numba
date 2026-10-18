@@ -2135,9 +2135,9 @@ LMP skip 體積 ≫ RFP ≈ FP/Razor/hist-prune 帶 ≫ NMP ≫ ProbCut
 
 ---
 
-### E71：LMR SPSA 前置底層演算法與參數接線 Bug 修復包（2026-10-17，待與 SPSA 合併對戰驗收）
+### E71：4 大底層缺陷修復 + 7 軸 LMR SPSA 調優與 50% 阻尼中點參數驗收（2026-10-18，正式採納 ADOPTED）
 
-* **改動項目與動機（全量代碼審計發現之 4 項缺陷）：**
+* **改動項目與動機：**
   1. **Capture Futility Pruning 補齊 Runtime LMR Slot 接線（`chess_engine/classical/search.py`）**：
      * Step 14 Capture FP 原呼叫 `compute_lmr_reduction_1024(depth, searched_legal_moves + 1, improving)` 時漏傳 `search_context.tune[TUNE_LMR_TABLE_SCALE]` 與 `search_context.tune[TUNE_LMR_NOT_IMP]`，補齊後確保 `slot 24` SPSA 梯度一致（基準值下 0-node delta）。
   2. **消除 MovePicker 分段生成重複搜索「不吃子升變（Quiet Promotions）」（`chess_engine/classical/move_generator.py`）**：
@@ -2146,9 +2146,38 @@ LMP skip 體積 ≫ RFP ≈ FP/Razor/hist-prune 帶 ≫ NMP ≫ ProbCut
      * `_see_ge_jit` 新增 `victim_type == -2` 哨兵代表「已知目標格為空（Quiet 著法或 En Passant）」，跳過 `find_piece_type_on_square_side` 的 6 個敵方 bitboard 線性掃描（100% 0-node delta 純 NPS 加速）。
   4. **ProbCut 補齊 `not is_pv and ply > 0` 節點守衛（`chess_engine/classical/search.py`）**：
      * 防止在 Aspiration Window（`abs(beta) < VALUE_KNOWN_WIN`）下於 Root 或 PV 節點觸發投機性 ProbCut 截斷。
-* **當前狀態：**
-  * 已通過 `tests/test_search_core_contracts.py`（20/20 全綠，含新增 `test_pre_spsa_bugfixes_contracts`）。
-  * **暫不同步 `classical_old`**，保留 `classical_old` 作為 E69 純基線，待完成 LMR SPSA 調優後一併進行對戰測試。
+* **7 軸 LMR SPSA 實測與方法論突破：**
+  * 在 Colab 上執行 7 軸 LMR SPSA（120k nodes / 1,000 iters / 14,000 局）。
+  * **信噪比與尺度反轉剖析：**
+    * 尾端 30% 聚合參數（`BASE=490, CUTNODE=1824, TTCAP=1231, NOT_IMP=218, MC=23, SCALE=114, HIST=194`）在 120k 淺層表現積極，但在 L2 300k 深層時發生「尺度反轉（Scale Inversion）」，過度剪枝（Over-reduction）導致深層戰術盲點而在 L2 翻車。
+  * **主特徵向量與阻尼中點（Midpoint 50%）：**
+    * 14,000 局 SPSA 實質找到了 7 參數協同優化的主梯度特徵向量 $\vec{v} = \vec{\theta}_{\text{tail}} - \vec{\theta}_{\text{start}}$。
+    * 使用者首先截取 Iter 852 檢查點（`BASE=486, CUTNODE=1809`），在 300k 取得 +3.17 Elo，但超長殘局（>80 步）勝率僅 48.0%。
+    * 進一步取起點與 Tail 30% 之 **50% 阻尼中點參數（Midpoint 50%）**：
+      - `LMR_BASE_OFFSET` : `449 -> 470` (+21)
+      - `LMR_TABLE_SCALE_PERCENT` : `113 -> 114` (+1)
+      - `LMR_MOVECOUNT_FACTOR` : `29 -> 26` (-3)
+      - `LMR_CUTNODE_BONUS` : `1839 -> 1832` (-7)
+      - `LMR_TTCAPTURE_BONUS` : `1191 -> 1211` (+20)
+      - `LMR_HISTORY_SCALE` : `200 -> 197` (-3)
+      - `LMR_NOT_IMP_NUM` : `197 -> 208` (+11)
+    * 二次拋物線擬合預測理論最佳點 $\alpha^* \approx 0.493$，與 50% 中點高度契合。
+* **對戰設定與環境（Stage B 驗收對決）：**
+  * 錦標賽配置：Google Colab (7 並行 Worker)，`inprocess` 後端。
+  * 局數：**354 局**（177 對成對換先開局），時控：**300,000 nodes/move**，TT：64 MB / context。
+  * 對陣：Candidate (New, E71 4 大修復 + Midpoint 50% 參數) vs Baseline (Old, E69 舊生產基準)。
+* **對戰成果與深度統計：**
+  * **對局戰績：** 354 局，Candidate **81 勝 202 和 71 負**（得分率 **51.41%**，淨勝 **+10 盤**）。
+  * **相對 Elo：** **`+9.82`**，95% 置信區間 `[-15.01, +34.74]`。
+  * **搜尋深度：** New 平均深度 **19.12 vs 18.97 (+0.15 ply)**，$\text{depth} \ge 14$ 比例 **82.7% vs 81.1%**。
+  * **長局與殘局逆轉：**
+    - 短局 ($\le 25$ 步): 0-48-0 (50.0%)
+    - 中局 (26–50 步): 6-59-3 (52.2%)
+    - 長局 (51–80 步): 54-55-54 (50.0%)
+    - 超長局 ($>80$ 步): **21-40-14 (54.7%, 淨勝 +7 盤)**，徹底治癒後期殘局失血缺陷！
+* **判定：** **正式採納進生產 / 基線 (ADOPTED / PRODUCTION BASELINE UPDATED)**。
+  * 將 Midpoint 50% 參數寫入 `chess_engine/classical/constants.py` 與 `tuner/constants_snapshot.py`。
+  * 透過 `tools/sync_classical_old.py --sync` 完整同步至 `chess_engine/classical_old/`，確立全新對戰基準。
 
 ---
 
