@@ -977,8 +977,8 @@ TUNE_LMR_DIV_STEP = 40      # LMR stat-score divisor growth per ply above MIN_DE
 TUNE_HIST_MALUS_SCALE = 41  # failed-quiet initial malus multiplier numerator (HISTORY_QUIET_MALUS_SCALE_NUM / 1024)
 TUNE_SIZE = 42
 # E2 tried 70 (puzzle +6 pass, nodes +25%); match @200k nodes: depth↓, no Elo.
-LMR_TABLE_SCALE_PERCENT = 113  # E60 tuned (was 100; SPSA L1 12k + L2 600@300k +15.6 Elo)
-LMR_NOT_IMP_NUM = 197  # E57 (was 194; SPSA L1+L2 400@300k +5.2 Elo)
+LMR_TABLE_SCALE_PERCENT = 114  # E60 tuned (was 100; SPSA L1 12k + L2 600@300k +15.6 Elo)
+LMR_NOT_IMP_NUM = 218  # E57 (was 194; SPSA L1+L2 400@300k +5.2 Elo)
 ENABLE_IIR = True           # Internal Iterative Reduction (Replaces old IID)
 ENABLE_SINGULAR_EXTENSIONS = True # Singular Extensions
 ENABLE_MATE_DISTANCE_PRUNING = True # Mate Distance Pruning
@@ -1102,19 +1102,19 @@ for i in range(1, 256):
 
 # LMR_BASE: E7 kept 480 (was 512). E20 keep 460. E56 tuned to 463 (+9.6 Elo). E60 tuned to 437 (+15.6 Elo).
 # Phase 6 SPSA 60 iters: 449 / 29 / 200
-LMR_BASE_OFFSET = 449  # SPSA P6 (was 450)
+LMR_BASE_OFFSET = 486  # SPSA P6 (was 450)
 LMR_TTPV_INCREASE = 768
 LMR_TTPV_DECREASE_BASE = 2048
 LMR_TTPV_PV_BONUS = 768
-LMR_CUTNODE_BONUS = 1839     # E60 (was 2117; SPSA L1 12k + L2 600@300k +15.6 Elo)
-LMR_TTCAPTURE_BONUS = 1191   # E60 (was 1035; SPSA L1 12k + L2 600@300k +15.6 Elo)
+LMR_CUTNODE_BONUS = 1809     # E60 (was 2117; SPSA L1 12k + L2 600@300k +15.6 Elo)
+LMR_TTCAPTURE_BONUS = 1232   # E60 (was 1035; SPSA L1 12k + L2 600@300k +15.6 Elo)
 # Match classical_old hard-coded LMR (±1024). P1 1536 withdrawn 2026-07-16.
 LMR_BAD_CAPTURE_BONUS = 1046    # E57 (was 1024; SPSA L1+L2 400@300k +5.2 Elo)
 LMR_GOOD_CAPTURE_RELIEF = 1030  # E57 (was 1024; SPSA L1+L2 400@300k +5.2 Elo)
 LMR_LATE_CAPTURE_BONUS = 0
 LMR_KILLER_COUNTER_RELIEF = 1024
-LMR_MOVECOUNT_FACTOR = 29    # SPSA P6 (was 29)
-LMR_HISTORY_SCALE = 200      # SPSA P6 (was 182)
+LMR_MOVECOUNT_FACTOR = 23    # SPSA P6 (was 29)
+LMR_HISTORY_SCALE = 195      # SPSA P6 (was 182)
 LMR_CUTOFF_CNT_BASE = 128
 LMR_CUTOFF_CNT_EXTRA = 512
 LMR_ALLNODE_EXTRA = 512

@@ -1,0 +1,98 @@
+{
+  "iterations": 1000,
+  "games": 14000,
+  "mean_score": 0.4997142857142863,
+  "observed_score_sd": 0.08965591822891218,
+  "expected_noise_sd": 0.0911238704553524,
+  "sd_ratio": 0.9838905852099482,
+  "tail_iterations": 300,
+  "weight_mode": "linear",
+  "averaged_params": {
+    "LMR_BASE_OFFSET": 490,
+    "LMR_TABLE_SCALE_PERCENT": 114,
+    "LMR_MOVECOUNT_FACTOR": 23,
+    "LMR_CUTNODE_BONUS": 1822,
+    "LMR_TTCAPTURE_BONUS": 1231,
+    "LMR_HISTORY_SCALE": 194,
+    "LMR_NOT_IMP_NUM": 218
+  },
+  "params": [
+    {
+      "name": "LMR_BASE_OFFSET",
+      "default": 486,
+      "start": 449.0,
+      "last": 489.4412142373299,
+      "tail_avg": 489.5843278462412,
+      "moved_pct_of_range": 8.986936497184425,
+      "drift_z": 2.0151954259382574,
+      "c_end": 20
+    },
+    {
+      "name": "LMR_TABLE_SCALE_PERCENT",
+      "default": 114,
+      "start": 113.0,
+      "last": 114.68413385353674,
+      "tail_avg": 114.31841452742277,
+      "moved_pct_of_range": 2.4059055050524796,
+      "drift_z": 0.839207947218841,
+      "c_end": 2
+    },
+    {
+      "name": "LMR_MOVECOUNT_FACTOR",
+      "default": 23,
+      "start": 29.0,
+      "last": 23.275638982445873,
+      "tail_avg": 23.30757717403506,
+      "moved_pct_of_range": -5.724361017554127,
+      "drift_z": -1.9016419027870584,
+      "c_end": 3
+    },
+    {
+      "name": "LMR_CUTNODE_BONUS",
+      "default": 1809,
+      "start": 1839.0,
+      "last": 1827.4157064844287,
+      "tail_avg": 1822.0021156736395,
+      "moved_pct_of_range": -0.38614311718570965,
+      "drift_z": -0.19241604343121124,
+      "c_end": 60
+    },
+    {
+      "name": "LMR_TTCAPTURE_BONUS",
+      "default": 1232,
+      "start": 1191.0,
+      "last": 1237.7874890369196,
+      "tail_avg": 1230.8874294801876,
+      "moved_pct_of_range": 1.8714995614767849,
+      "drift_z": 0.9325727298395571,
+      "c_end": 50
+    },
+    {
+      "name": "LMR_HISTORY_SCALE",
+      "default": 195,
+      "start": 200.0,
+      "last": 195.4013649936551,
+      "tail_avg": 193.64203047036844,
+      "moved_pct_of_range": -1.3138957160985407,
+      "drift_z": -0.38191847949804436,
+      "c_end": 12
+    },
+    {
+      "name": "LMR_NOT_IMP_NUM",
+      "default": 218,
+      "start": 197.0,
+      "last": 217.57680545912518,
+      "tail_avg": 217.9592097566621,
+      "moved_pct_of_range": 5.358543088313849,
+      "drift_z": 2.563367904726184,
+      "c_end": 8
+    }
+  ],
+  "penta_total": [
+    386,
+    1699,
+    2830,
+    1691,
+    394
+  ]
+}

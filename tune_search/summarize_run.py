@@ -94,6 +94,7 @@ def summarize(iterations, tail_fraction: float = 0.5, weight_mode: str = "unifor
             }
         )
     games = sum(int(r["match"].get("games", r.get("games", 0))) for r in iterations)
+    max_abs_drift_z = max((abs(r["drift_z"]) for r in report), default=0.0)
     return {
         "iterations": len(iterations),
         "games": games,
@@ -101,6 +102,7 @@ def summarize(iterations, tail_fraction: float = 0.5, weight_mode: str = "unifor
         "observed_score_sd": observed_sd,
         "expected_noise_sd": expected_sd,
         "sd_ratio": observed_sd / expected_sd if expected_sd > 0 else float("nan"),
+        "max_abs_drift_z": max_abs_drift_z,
         "tail_iterations": tail_n,
         "weight_mode": weight_mode,
         "averaged_params": averaged,
@@ -130,13 +132,18 @@ def main() -> None:
     print(
         f"score sd observed={result['observed_score_sd']:.4f} "
         f"noise-only expected={result['expected_noise_sd']:.4f} "
-        f"ratio={result['sd_ratio']:.2f}"
+        f"ratio={result['sd_ratio']:.2f} max|drift_z|={result['max_abs_drift_z']:.2f}"
     )
-    if result["sd_ratio"] < 1.3:
+    sig_axes = [row["name"] for row in result["params"] if abs(row["drift_z"]) >= 1.96]
+    if sig_axes:
         print(
-            "  -> ratio ~1: batch scores are indistinguishable from sampling noise; "
-            "this run carries (almost) no gradient signal. Use more games per batch / "
-            "more batches before trusting any parameter movement."
+            f"  -> cumulative gradient signal detected (|drift_z| >= 1.96 on "
+            f"{', '.join(sig_axes)}); per-batch ratio ~1.00 is normal for micro-batch SPSA."
+        )
+    elif result["sd_ratio"] < 1.3:
+        print(
+            f"  -> no statistically significant cumulative drift (max |drift_z|={result['max_abs_drift_z']:.2f} < 1.96) "
+            "and batch scores match sampling noise; consider more total games or fewer simultaneous axes."
         )
     print(f"\n{'param':32s} {'default':>8s} {'last':>9s} {'tail_avg':>9s} {'moved%rng':>9s} {'drift_z':>8s}")
     for row in result["params"]:
