@@ -2824,10 +2824,11 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                         _diag_add(search_context, DIAG_LMR_QUIET_TRY)
                     else:
                         _diag_add(search_context, DIAG_LMR_CAPTURE_TRY)
+            child_cut_node = _b_true() if lmr > 0 else (not cut_node)
             res = _search(
                 piece_bbs, occupancy_bbs, game_state, _i32(search_depth - lmr),
                 _i32(-alpha - 1), _i32(-alpha), search_context, _i32(ply + 1),
-                _u16(NO_MOVE), _b_false(), _b_true(),
+                _u16(NO_MOVE), _b_false(), child_cut_node,
             )
             evaluation = -res[0]
             child_nodes = res[2]; child_q_nodes = res[3]; child_tt_hits = res[4]

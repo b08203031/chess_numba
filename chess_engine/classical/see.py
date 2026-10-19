@@ -43,6 +43,25 @@ def get_sliding_attacks(square, occupied, is_diagonal):
         return get_rook_attacks(square, occupied)
 
 
+@numba.njit(cache=True, boundscheck=False, fastmath=True, inline='always')
+def get_all_attackers_for_see(square, occupied, piece_bbs, sliders_diag, sliders_orth):
+    """
+    Get bitboard of all pieces (both White and Black) attacking 'square'.
+    Combines both sides in a single pass to eliminate duplicate Magic Bitboard
+    sliding attack calculations (bishop and rook attacks on the same square and occupied).
+    """
+    attackers = (
+        (PAWN_ATTACKS[WHITE, square] & piece_bbs[PAWN])
+        | (PAWN_ATTACKS[BLACK, square] & piece_bbs[6 + PAWN])
+        | (KNIGHT_ATTACKS[square] & (piece_bbs[KNIGHT] | piece_bbs[6 + KNIGHT]))
+        | (KING_ATTACKS[square] & (piece_bbs[KING] | piece_bbs[6 + KING]))
+    )
+    if sliders_diag & BISHOP_RAYS[square]:
+        attackers |= (get_bishop_attacks(square, occupied) & sliders_diag)
+    if sliders_orth & ROOK_RAYS[square]:
+        attackers |= (get_rook_attacks(square, occupied) & sliders_orth)
+    return attackers
+
 @numba.njit(cache=True, boundscheck=False, fastmath=True)
 def get_attackers_for_see(square, occupied, piece_bbs, side_mask):
     """
@@ -166,16 +185,15 @@ def _see_jit(piece_bbs, occupancy_bbs, side_to_move, from_sq, to_sq, pinned_whit
     # pinned_white = get_pinned_pieces(piece_bbs, occupancy_bbs, WHITE)
     # pinned_black = get_pinned_pieces(piece_bbs, occupancy_bbs, BLACK)
 
-    # Find all attackers to `to_sq`
-    attackers = get_attackers_for_see(to_sq, occupied, piece_bbs, WHITE) | \
-                get_attackers_for_see(to_sq, occupied, piece_bbs, BLACK)
-
-    current_side = side_to_move
-    current_attacker_val = attacker_value
-
     # Pre-compute slider masks outside loop (avoid recomputation each iteration)
     sliders_diag = piece_bbs[BISHOP] | piece_bbs[QUEEN] | piece_bbs[BISHOP+6] | piece_bbs[QUEEN+6]
     sliders_orth = piece_bbs[ROOK] | piece_bbs[QUEEN] | piece_bbs[ROOK+6] | piece_bbs[QUEEN+6]
+
+    # Find all attackers to `to_sq` in a unified pass (eliminates duplicate Magic Bitboard calls)
+    attackers = get_all_attackers_for_see(to_sq, occupied, piece_bbs, sliders_diag, sliders_orth)
+
+    current_side = side_to_move
+    current_attacker_val = attacker_value
 
     depth = 1
 
@@ -295,16 +313,15 @@ def _see_ge_jit(piece_bbs, occupancy_bbs, side_to_move, from_sq, to_sq, threshol
         ep_sq = (from_sq // 8) * 8 + (to_sq % 8)
         occupied ^= BB_SQUARES[ep_sq]
 
-    # 5. Get all attackers to target square
-    attackers = get_attackers_for_see(to_sq, occupied, piece_bbs, WHITE) | \
-                get_attackers_for_see(to_sq, occupied, piece_bbs, BLACK)
-
-    current_side = side_to_move
-    res = 1
-
     # Pre-compute slider masks outside loop
     sliders_diag = piece_bbs[BISHOP] | piece_bbs[QUEEN] | piece_bbs[BISHOP+6] | piece_bbs[QUEEN+6]
     sliders_orth = piece_bbs[ROOK] | piece_bbs[QUEEN] | piece_bbs[ROOK+6] | piece_bbs[QUEEN+6]
+
+    # 5. Get all attackers to target square in a unified pass (eliminates duplicate Magic Bitboard calls)
+    attackers = get_all_attackers_for_see(to_sq, occupied, piece_bbs, sliders_diag, sliders_orth)
+
+    current_side = side_to_move
+    res = 1
 
     while True:
         current_side = numba.int32(1 - current_side)

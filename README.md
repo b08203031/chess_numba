@@ -192,6 +192,7 @@ python -m tests.perft divide --depth 4
 ### 2. 經典 (Classical) 評估與搜尋
 
 * **[搜尋算法分析](chess_engine/classical/SEARCH_ANALYSIS.md)**：PVS、NMP / LMR / Futility / Singular 等剪枝與 move ordering。
+* **[2026-10-19 搜尋演算法深度審計與 SF19 對齊報告](chess_engine/classical/SEARCH_AUDIT_AND_SF19_PROPOSALS_20261019.md)**：全檔邏輯 Bug 診斷（Fail-Low TT 污染、Non-LMR cut_node 錯誤、ContCorr 重複等）、SPSA 現況與 SF19 對齊優化路線圖。
 * **[2026-08-04 搜尋優化診斷與交接](chess_engine/classical/SEARCH_OPTIMIZATION_DIAGNOSTIC_20260804.md)**：500 戰術 + 500 開局／安靜盤面的 n30k 複驗；P0–P4 diagnostics/rollback、P5 暖 history attribution，以及 P6 history-prune cont1 負尾保護。
 * **[Numba JIT 編譯與快取實驗報告](chess_engine/classical/JIT_COMPILE_CACHE_REPORT.md)**（**JIT / disk cache 主文件**）：1 MB 表上限、packed rook、StructRef `SearchContext`、特化爆炸、cold/warm 量測與 checklist；後續 JIT 工作請參考並擴寫。
 * **[2026-07-15/16 搜尋戰役報告](tournament_analysis/REPORT_2026-07-15_16_search_campaign.md)**：座標下降 R1–R3、結構 A/B、E1/E2、雙對戰 scale 100/85 結論與接納決策。
