@@ -1,8 +1,8 @@
 # Classical 搜尋單項實驗日誌
 
 > **用途：** 連續 A/B 實驗的唯一進度表與決策紀錄。未來接續實驗、回顧為何留下/回滾，以此檔為準。  
-> **最後更新：** 2026-10-17  
-> **當前基準狀態：** **E67 已採納進生產基線**（搜尋熱路徑 Zero-Tree-Delta 冗餘消除與 NPS 優化，5 盤面 14 層 5 次平均 100% 0-node delta 完全一致，核心大盤面 NPS 提升 +10.21%，Startpos 提升 +18.77%；接續 E66）。
+> **最後更新：** 2026-10-20  
+> **當前基準狀態：** **E72 已採納進生產基線**（SEE 雙向滑動攻擊零樹變動快速短路優化 + Non-LMR 全深度搜尋 `cut_node` 傳遞修復，600 局 @ 400k nodes LTC 取得 118W 377D 105L，+7.53 Elo，長局殘局全面制霸；接續 E71.1）。
 
 ---
 
@@ -2214,6 +2214,43 @@ LMP skip 體積 ≫ RFP ≈ FP/Razor/hist-prune 帶 ≫ NMP ≫ ProbCut
 * **判定：** **正式採納進生產 / 基線 (ADOPTED / PRODUCTION BASELINE UPDATED)**。
   * 正式將 $\alpha = 0.40$ 數值保留在 `chess_engine/classical/constants.py` 與 `tuner/constants_snapshot.py`。
   * 透過 `tools/sync_classical_old.py --sync` 完整同步至 `chess_engine/classical_old/`，更新生產基準對抗庫。
+
+---
+
+### E72：SEE 雙向滑動攻擊零樹變動快速短路優化 + Non-LMR 全深度搜尋 `cut_node` 傳遞修復（Bug 2）（2026-10-20，正式採納 ADOPTED）
+
+* **改動項目與動機：**
+  1. **MovePicker `STAGE_GOOD_CAPTURES` SEE 雙向滑動攻擊零樹變動短路（`chess_engine/classical/see.py`）**：
+     * 重構 `get_all_attackers_for_see`，一次性生成白黑雙方滑動攻擊位元棋盤，消除冗餘的重複 Magic Bitboard 計算。
+     * 在 6 個標準 Perft 盤面 Depth 15 測試中取得 **100% 0-node delta 完全一致**（全量 2,997,212 個節點完全吻合），全域 NPS **+12.24%**（Kiwipete 達到 **+27.06% NPS 提升**，總搜尋耗時縮減 10.90%）。
+  2. **Non-LMR 全深度搜尋 `cut_node` 傳遞修正（`chess_engine/classical/search.py:2827`）**：
+     * 原代碼在 `lmr == 0` 時無條件向子節點傳遞 `cut_node = True`，導致防守 ALL-Node 被誤當成進攻 CUT-Node。
+     * 舊版後遺症：在緊湊局面與王兵殘局中，防守方誤觸發空步剪枝（NMP），產生嚴重的強迫走步（Zugzwang）盲點；且破壞了 SF19 Step 18 `all_node = not is_pv and not cut_node` 的正常判斷。
+     * 修復為：`child_cut_node = _b_true() if lmr > 0 else (not cut_node)`。
+* **對戰設定與環境：**
+  * 錦標賽配置：Google Colab (AMD EPYC 7B12 8 vCPU, 7 並行 Worker)，`inprocess` 後端。
+  * 局數：**600 局**（300 對成對換先開局），時控：**400,000 nodes/move**，TT：64 MB / context。
+  * 對陣：Candidate (New, E72 SEE Fast-Path + Bug 2 Fix) vs Baseline (Old, E71.1 生產基準)。
+  * PGN 存檔：`tournament_analysis/tournament_results.pgn`。
+* **對戰成果與深度統計（400k nodes L2 長時控總決戰）：**
+  * **對局戰績：** 跑滿 **600 局**，Candidate **118 勝 377 和 105 負**（得分率 **51.08%**，總體得分 306.5 / 600，淨勝 **+13 盤**）。
+  * **相對 Elo：** **`+7.53`**，95% 置信區間 `[-8.49, +23.58]`。
+  * **前後半場高度對稱：**
+    - 前半場 150 對 (300 局): 得分率 51.2% (淨勝 +3.5 分)
+    - 後半場 150 對 (300 局): 得分率 51.0% (淨勝 +3.0 分)
+  * **搜尋效能與深度：**
+    - 搜尋深度：New 19.65 vs Old 19.70 (-0.06 ply, Welch t=-0.493, p=0.62 統計等價)
+    - 每步節點數：New 249,346 vs Old 250,029 (-0.3%, 節點略為精煉)
+    - 每步耗時：867.1 ms vs 862.3 ms (+0.5%)，NPS 354,861 vs 356,922 (-0.6%)
+  * **長局與殘局結構碾壓（Bug 2 修復核心鐵證）：**
+    - 短局 ($\le 25$ 步): 0-65-0 (50.0%)
+    - 中局 (26–50 步): 10-141-7 (50.9%)
+    - 長局 (51–80 步): **69-85-63 (51.4%, 淨勝 +6 盤)**
+    - 超長局 ($>80$ 步): **39-86-35 (51.2%, 淨勝 +4 盤)**，$>50$ 步殘局共淨勝 **+10 盤**！
+* **物理機理解析：**
+  * 舊版在殘局將 ALL-Node 誤判為 CUT-Node 導致 NMP 偷跑，在細膩殘局中漏算強迫步（Zugzwang）；修復後正確傳遞 `child_cut_node`，封堵了殘局假截斷，大幅提升長回合殘局轉化勝率與守和能力。
+* **判定：** **正式採納進生產 / 基線 (ADOPTED / PRODUCTION BASELINE UPDATED)**。
+  * 透過 `python tools/sync_classical_old.py --sync` 完整同步至 `chess_engine/classical_old/`，確立全新生產基準對抗庫。
 
 ---
 

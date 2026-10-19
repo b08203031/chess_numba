@@ -1943,9 +1943,11 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                         _diag_add(search_context, DIAG_NMP_CUT)
                         return (np.int32(null_move_score), NO_MOVE, nodes_searched, quiescence_nodes, tt_hits)
     # --- M1: IIR (Internal Iterative Reduction) replaces IID ---
-    # Mild IIR only (1 ply). Skip on last-iteration PV path (SF !followPV gate) —
+    # Mild IIR only (1 ply). SF19 Step 11: reduce depth for PV/Cut nodes without a TTMove.
+    # Guard with (is_pv or cut_node) to protect defensive ALL-nodes from unjustified depth reduction.
+    # Skip on last-iteration PV path (SF !followPV gate) —
     # reducing depth on the critical line hides tactics for little gain.
-    if (tt_move == NO_MOVE and ENABLE_IIR and not is_exclusion_search
+    if (ENABLE_IIR and (is_pv or cut_node) and tt_move == NO_MOVE and not is_exclusion_search
             and not is_currently_in_check and not follow_pv):
         if depth >= IIR_MIN_DEPTH:
             depth -= 1
@@ -3272,13 +3274,6 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                         update_continuation_history(search_context, 4, opp_prev_move_3, opp_prev_piece_3, prev_move, prev_piece, sub_bonus)
 
     original_best_move = best_move
-
-    if best_move == NO_MOVE and search_context.mp_captures_end[ply] + search_context.mp_quiets_end[ply] > 0:
-        # Fallback to first move that is not excluded
-        for i in range(search_context.mp_captures_end[ply] + search_context.mp_quiets_end[ply]):
-            if moves[i] != excluded_move:
-                best_move = moves[i]
-                break
     
     # --- Update Correction History ---
     if (not is_exclusion_search and depth >= CORRECTION_HISTORY_UPDATE_DEPTH
