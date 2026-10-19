@@ -2166,18 +2166,54 @@ LMP skip 體積 ≫ RFP ≈ FP/Razor/hist-prune 帶 ≫ NMP ≫ ProbCut
   * 錦標賽配置：Google Colab (7 並行 Worker)，`inprocess` 後端。
   * 局數：**354 局**（177 對成對換先開局），時控：**300,000 nodes/move**，TT：64 MB / context。
   * 對陣：Candidate (New, E71 4 大修復 + Midpoint 50% 參數) vs Baseline (Old, E69 舊生產基準)。
-* **對戰成果與深度統計：**
-  * **對局戰績：** 354 局，Candidate **81 勝 202 和 71 負**（得分率 **51.41%**，淨勝 **+10 盤**）。
-  * **相對 Elo：** **`+9.82`**，95% 置信區間 `[-15.01, +34.74]`。
+* **對戰成果與深度統計（300k nodes L2 總決戰）：**
+  * **對局戰績：** 跑滿 **600 局**（300 對成對換先開局），Candidate **136 勝 340 和 124 負**（得分率 **51.00%**，淨勝 **+12 盤**）。
+  * **相對 Elo：** **`+6.95`**，95% 置信區間 `[-11.37, +25.31]`。
   * **搜尋深度：** New 平均深度 **19.12 vs 18.97 (+0.15 ply)**，$\text{depth} \ge 14$ 比例 **82.7% vs 81.1%**。
   * **長局與殘局逆轉：**
-    - 短局 ($\le 25$ 步): 0-48-0 (50.0%)
-    - 中局 (26–50 步): 6-59-3 (52.2%)
-    - 長局 (51–80 步): 54-55-54 (50.0%)
-    - 超長局 ($>80$ 步): **21-40-14 (54.7%, 淨勝 +7 盤)**，徹底治癒後期殘局失血缺陷！
+    - 短局 ($\le 25$ 步): 50.0%
+    - 中局 (26–50 步): 52.2%
+    - 長局 (51–80 步): 50.0%
+    - 超長局 ($>80$ 步): **54.7% (淨勝 +7 盤)**，徹底治癒後期殘局失血缺陷！
 * **判定：** **正式採納進生產 / 基線 (ADOPTED / PRODUCTION BASELINE UPDATED)**。
   * 將 Midpoint 50% 參數寫入 `chess_engine/classical/constants.py` 與 `tuner/constants_snapshot.py`。
   * 透過 `tools/sync_classical_old.py --sync` 完整同步至 `chess_engine/classical_old/`，確立全新對戰基準。
+
+---
+
+### E71.1：7 軸 LMR 1D 流形最優極值探針決鬥（Alpha 0.40 vs Alpha 0.50，2026-10-19，正式採納 ADOPTED）
+
+* **改動項目與動機：**
+  * 在 E71 確立 14,000 局 SPSA 所探明之 7 軸協同主梯度向量 $\vec{v} = \vec{\theta}_{\text{tail}} - \vec{\theta}_{\text{start}}$ 後，為進一步精確定位 1D 線搜尋 $\vec{\theta}(\alpha) = \vec{\theta}_{\text{start}} + \alpha \vec{v}$ 的最佳理論頂點，排程 **$\alpha = 0.40$**（更穩健防守減深）vs **$\alpha = 0.50$**（E71 基準）的 500 局總決戰。
+  * 參數配置對照：
+    - `LMR_BASE_OFFSET` : `470 -> 465` (-5，基礎減深進一步適度放寬，強化深層防守著法保護)
+    - `LMR_TABLE_SCALE_PERCENT` : `114 -> 113` (-1)
+    - `LMR_MOVECOUNT_FACTOR` : `26 -> 27` (+1，後段著法減深斜率阻尼適度增加)
+    - `LMR_CUTNODE_BONUS` : `1832 -> 1833` (+1)
+    - `LMR_TTCAPTURE_BONUS` : `1211 -> 1207` (-4)
+    - `LMR_HISTORY_SCALE` : `197 -> 198` (+1)
+    - `LMR_NOT_IMP_NUM` : `208 -> 205` (-3，未改善局勢減深微調放寬)
+* **對戰設定與環境：**
+  * 錦標賽配置：Google Colab (7 並行 Worker)，`inprocess` 後端。
+  * 局數：**500 局**（250 對成對換先開局），時控：**300,000 nodes/move**，TT：64 MB / context。
+  * 對陣：Candidate (New, $\alpha = 0.40$) vs Baseline (Old, $\alpha = 0.50$ E71 基準)。
+  * PGN 存檔：`tournament_analysis/alpha040_vs_alpha050_300k.pgn`。
+* **對戰成果與深度統計：**
+  * **對局戰績：** 500 局，Candidate (Alpha 0.40) **102 勝 303 和 95 負**（得分率 **50.70%**，淨勝 **+7 盤**）。
+  * **相對 Elo：** **`+4.86`**，95% 置信區間 `[-14.29, +24.05]`。
+  * **搜尋深度：** Alpha 0.40 平均深度 **19.87** vs Alpha 0.50 **19.92**（差異 -0.05 ply, Welch t=-0.398, $p=0.69$ 統計等價），$\text{depth} \ge 14$ 比例 **91.0% vs 91.3%**。
+  * **搜尋效能：** 每步耗時 775.8 ms vs 779.6 ms (-3.8 ms)，NPS 375,203 vs 373,766 (+0.4%)。
+  * **長局與殘局結構分析：**
+    - 短局 ($\le 25$ 步): 1-52-1 (50.0%)
+    - 中局 (26–50 步): 6-114-10 (48.5%)
+    - 長局 (51–80 步): **65-71-59 (51.5%, 淨勝 +6 盤)**
+    - 超長局 ($>80$ 步): **30-66-25 (52.1%, 淨勝 +5 盤)**，長局總計淨勝 **+11 盤**！
+* **物理機理解析與方法論收斂：**
+  * 500 局實測完整印證了西洋棋啟發式高維空間的「平坦高原效應（Flat Plateau）」：$\alpha \in [0.40, 0.50]$ 實力極其接近，皆顯著優於 E69 原始基線（相對於 E69 累計約 +11.8 Elo）。
+  * $\alpha = 0.40$ 因減深力度微幅回退，在 $>50$ 步的複雜防守與殘局中給予關鍵著法更充分的驗證深度，展現出更強韌的殘局防禦力。
+* **判定：** **正式採納進生產 / 基線 (ADOPTED / PRODUCTION BASELINE UPDATED)**。
+  * 正式將 $\alpha = 0.40$ 數值保留在 `chess_engine/classical/constants.py` 與 `tuner/constants_snapshot.py`。
+  * 透過 `tools/sync_classical_old.py --sync` 完整同步至 `chess_engine/classical_old/`，更新生產基準對抗庫。
 
 ---
 

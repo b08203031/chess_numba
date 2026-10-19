@@ -3,72 +3,72 @@
 【過濾規則】
   * 主統計排除: eval 為將殺 (#…) 的著法
   * 主統計排除: 和棋局 (1/2-1/2) 且 depth>=40 的著法
-  * 對局: 378  (其中和棋 216)
+  * 對局: 500  (其中和棋 303)
 
 【排除與將殺樣本】
-  * New: comments=23604 malformed=0  raw=23604  main=23419  mate=0  draw_deep(d>=40)=185
-  * Old: comments=23580 malformed=0  raw=23580  main=23429  mate=0  draw_deep(d>=40)=151
+  * Alpha0.40: comments=31197 malformed=0  raw=31197  main=30957  mate=0  draw_deep(d>=40)=240
+  * Alpha0.50: comments=31203 malformed=0  raw=31203  main=30957  mate=0  draw_deep(d>=40)=246
 
 【將殺著法額外統計 (eval=#…)】
-  * New: (no mate moves)
-  * Old: (no mate moves)
+  * Alpha0.40: (no mate moves)
+  * Alpha0.50: (no mate moves)
 
 【樣本 (主統計)】
-  * New 著步數: 23419
-  * Old 著步數: 23429
+  * Alpha0.40 著步數: 30957
+  * Alpha0.50 著步數: 30957
 
 【1. 搜尋深度 (Depth)】
-  * New: mean=19.10 σ=16.69 med=16 max=128
-  * Old: mean=18.96 σ=16.68 med=16 max=128
-  * 差異 (New-Old): +0.15
-  * Welch t=+0.950, p=3.4187e-01  [不顯著]
-  * depth>=14: New 82.6% vs Old 81.1%
+  * Alpha0.40: mean=19.87 σ=16.05 med=17 max=128
+  * Alpha0.50: mean=19.92 σ=16.05 med=17 max=128
+  * 差異 (Alpha0.40-Alpha0.50): -0.05
+  * Welch t=-0.398, p=6.9054e-01  [不顯著]
+  * depth>=14: Alpha0.40 91.0% vs Alpha0.50 91.3%
 
 【2. 節點數 (Nodes)】
-  * New: mean=186118 σ=38770 med=185391
-  * Old: mean=186483 σ=38625 med=185720
-  * 差異: -0.2%
-  * Welch t=-1.018, p=3.0855e-01  [不顯著]
+  * Alpha0.40: mean=249067 σ=50470 med=248522
+  * Alpha0.50: mean=248830 σ=50520 med=248227
+  * 差異: +0.1%
+  * Welch t=+0.583, p=5.5988e-01  [不顯著]
 
 【3. 每步耗時 (ms)】
-  * New: mean=709.3 σ=264.3
-  * Old: mean=707.4 σ=263.5
-  * Welch t=+0.782, p=4.3450e-01  [不顯著]
+  * Alpha0.40: mean=775.8 σ=255.9
+  * Alpha0.50: mean=779.6 σ=258.5
+  * Welch t=-1.836, p=6.6365e-02  [不顯著]
 
 【4. NPS】
-  * New: mean=320705 σ=201319 med=249566
-  * Old: mean=321967 σ=201358 med=250946
-  * 差異: -0.4%
-  * Welch t=-0.678, p=4.9754e-01  [不顯著]
+  * Alpha0.40: mean=375203 σ=205384 med=287923
+  * Alpha0.50: mean=373766 σ=205820 med=285822
+  * 差異: +0.4%
+  * Welch t=+0.870, p=3.8458e-01  [不顯著]
 
 【5. 分執色搜尋統計 (engine × color, 主統計樣本)】
-  New W: moves=11537 mean_d=18.95 med_d=16 d>=14=82.3% mean_n=186001 mean_nps=312016
-  New B: moves=11882 mean_d=19.25 med_d=16 d>=14=82.9% mean_n=186232 mean_nps=329141
-  Old W: moves=11987 mean_d=19.04 med_d=16 d>=14=81.4% mean_n=186221 mean_nps=322312
-  Old B: moves=11442 mean_d=18.87 med_d=16 d>=14=80.9% mean_n=186757 mean_nps=321605
+  Alpha0.40 W: moves=15489 mean_d=19.87 med_d=17 d>=14=91.0% mean_n=248947 mean_nps=374519
+  Alpha0.40 B: moves=15468 mean_d=19.86 med_d=17 d>=14=91.0% mean_n=249187 mean_nps=375887
+  Alpha0.50 W: moves=15610 mean_d=19.87 med_d=17 d>=14=91.4% mean_n=248839 mean_nps=373661
+  Alpha0.50 B: moves=15347 mean_d=19.96 med_d=17 d>=14=91.1% mean_n=248822 mean_nps=373872
 
 【6. 深度直方圖 (%, 主統計樣本)】
-  New: 1-10:0.6% 11-12:5.7% 13-13:11.1% 14-15:30.0% 16-20:38.3% 21-39:11.7% 40-128:2.6%
-    mean_d=19.10 med=16 d>=14=82.6%
-  Old: 1-10:0.8% 11-12:6.7% 13-13:11.4% 14-15:30.2% 16-20:37.2% 21-39:11.1% 40-128:2.6%
-    mean_d=18.96 med=16 d>=14=81.1%
+  Alpha0.40: 1-10:0.4% 11-12:2.5% 13-13:6.1% 14-15:25.8% 16-20:46.1% 21-39:16.6% 40-128:2.5%
+    mean_d=19.87 med=17 d>=14=91.0%
+  Alpha0.50: 1-10:0.4% 11-12:2.4% 13-13:6.0% 14-15:25.6% 16-20:46.4% 21-39:16.8% 40-128:2.5%
+    mean_d=19.92 med=17 d>=14=91.3%
 
 【7. 同深度平均節點比 (min 20 samples each)】
-  d=9: New 177563 (n=46)  Old 180999 (n=53)  ratio=0.981
-  d=10: New 188331 (n=87)  Old 192238 (n=110)  ratio=0.980
-  d=11: New 173349 (n=262)  Old 172714 (n=344)  ratio=1.004
-  d=12: New 162035 (n=1075)  Old 161159 (n=1223)  ratio=1.005
-  d=13: New 163612 (n=2588)  Old 164119 (n=2678)  ratio=0.997
-  d=14: New 170174 (n=3543)  Old 172061 (n=3644)  ratio=0.989
-  d=15: New 179061 (n=3486)  Old 180486 (n=3423)  ratio=0.992
-  d=16: New 188303 (n=2820)  Old 189871 (n=2801)  ratio=0.992
-  d=17: New 196924 (n=2270)  Old 198396 (n=2223)  ratio=0.993
-  d=18: New 203901 (n=1691)  Old 206094 (n=1624)  ratio=0.989
-  d=19: New 210056 (n=1265)  Old 210603 (n=1180)  ratio=0.997
-  d=20: New 214963 (n=913)  Old 215609 (n=894)  ratio=0.997
-  d=21: New 219353 (n=626)  Old 219018 (n=623)  ratio=1.002
-  d=22: New 220991 (n=482)  Old 221169 (n=420)  ratio=0.999
-  d=23: New 224307 (n=358)  Old 224569 (n=328)  ratio=0.999
-  d=24: New 223960 (n=249)  Old 224724 (n=236)  ratio=0.997
+  d=9: Alpha0.40 240136 (n=34)  Alpha0.50 243309 (n=37)  ratio=0.987
+  d=10: Alpha0.40 246075 (n=86)  Alpha0.50 248620 (n=85)  ratio=0.990
+  d=11: Alpha0.40 242486 (n=190)  Alpha0.50 242971 (n=183)  ratio=0.998
+  d=12: Alpha0.40 222384 (n=574)  Alpha0.50 223786 (n=549)  ratio=0.994
+  d=13: Alpha0.40 214430 (n=1895)  Alpha0.50 213186 (n=1846)  ratio=1.006
+  d=14: Alpha0.40 218782 (n=3672)  Alpha0.50 220232 (n=3611)  ratio=0.993
+  d=15: Alpha0.40 231195 (n=4317)  Alpha0.50 229550 (n=4317)  ratio=1.007
+  d=16: Alpha0.40 242349 (n=4069)  Alpha0.50 241554 (n=4050)  ratio=1.003
+  d=17: Alpha0.40 254001 (n=3554)  Alpha0.50 252882 (n=3550)  ratio=1.004
+  d=18: Alpha0.40 263422 (n=2845)  Alpha0.50 262452 (n=2933)  ratio=1.004
+  d=19: Alpha0.40 271833 (n=2188)  Alpha0.50 271379 (n=2171)  ratio=1.002
+  d=20: Alpha0.40 280964 (n=1613)  Alpha0.50 279735 (n=1649)  ratio=1.004
+  d=21: Alpha0.40 285552 (n=1192)  Alpha0.50 286301 (n=1177)  ratio=0.997
+  d=22: Alpha0.40 291040 (n=884)  Alpha0.50 290503 (n=873)  ratio=1.002
+  d=23: Alpha0.40 291932 (n=669)  Alpha0.50 292852 (n=681)  ratio=0.997
+  d=24: Alpha0.40 297799 (n=507)  Alpha0.50 295431 (n=513)  ratio=1.008
 
 =========================================
