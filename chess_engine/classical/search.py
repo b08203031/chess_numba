@@ -28,7 +28,7 @@ from chess_engine.classical.constants import (
     ASPIRATION_WINDOW_MIN, ASPIRATION_WINDOW_BASE, ASPIRATION_WINDOW_SCALE_DIV,
     MAX_PLY, LMR_MIN_DEPTH, LMR_MIN_QUIET_MOVE_INDEX,
     ENABLE_SEE_IN_QUIESCENCE, MATE_SCORE, MATE_IN_MAX_PLY, VALUE_KNOWN_WIN, NO_MOVE,
-    RFP_MAX_DEPTH, RFP_NO_TT_PENALTY,
+    RFP_MAX_DEPTH, RFP_NO_TT_PENALTY, RFP_SCORE_BETA_WEIGHT, RFP_SCORE_EVAL_WEIGHT, RFP_SCORE_DIVISOR,
     ENABLE_DELTA_PRUNING, LMP_MOVE_COUNT,
     PROBCUT_R, PROBCUT_R_IMPROVING, PROBCUT_R_NOT_IMPROVING,
     PROBCUT_SF_BASE, PROBCUT_SF_IMPROVING, PROBCUT_TT_DEPTH_OFFSET, PROBCUT_MIN_DEPTH,
@@ -1640,7 +1640,12 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                 if (static_score - rfp_margin >= beta
                         and not is_win(static_score) and not is_loss(beta)):
                     _diag_add(search_context, DIAG_RFP_CUT)
-                    return (np.int32(static_score), NO_MOVE, nodes_searched, quiescence_nodes, tt_hits)
+                    # SF19 Step 9: Fail-soft score blending (661 * beta + 363 * eval) / 1024
+                    rfp_score = np.int32(trunc_div(
+                        RFP_SCORE_BETA_WEIGHT * np.int64(beta) + RFP_SCORE_EVAL_WEIGHT * np.int64(static_score),
+                        RFP_SCORE_DIVISOR
+                    ))
+                    return (rfp_score, NO_MOVE, nodes_searched, quiescence_nodes, tt_hits)
 
     # --- ProbCut (must be before NMP, guarded by H3) ---
     # PR-B: SF18 !is_decisive(beta); also skip known-win band (VALUE_KNOWN_WIN).

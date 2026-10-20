@@ -1050,6 +1050,9 @@ FP_MULTIPLIER = 96    # E64 (was 125; SPSA L1 13.8k + L2 1000@300k +8.7 Elo)
 RFP_MAX_DEPTH = 8
 RFP_BASE_MULT = 168   # E64 (was 171; SPSA L1 13.8k + L2 1000@300k +8.7 Elo)
 RFP_NO_TT_PENALTY = 30
+RFP_SCORE_BETA_WEIGHT = 412  # E76 peak baseline: (412 * beta + 612 * eval) / 1024
+RFP_SCORE_EVAL_WEIGHT = 612
+RFP_SCORE_DIVISOR = 1024
 
 NMP_STATIC_MARGIN = 150      # not used as primary NMP gate
 NMP_MIN_SIDE_NON_PAWNS = 1   # SF19: pos.non_pawn_material(us) != 0 (was 2 before Phase 8b)

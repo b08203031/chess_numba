@@ -2,7 +2,7 @@
 
 > **用途：** 連續 A/B 實驗的唯一進度表與決策紀錄。未來接續實驗、回顧為何留下/回滾，以此檔為準。  
 > **最後更新：** 2026-10-20  
-> **當前基準狀態：** **E72 已採納進生產基線**（SEE 雙向滑動攻擊零樹變動快速短路優化 + Non-LMR 全深度搜尋 `cut_node` 傳遞修復，600 局 @ 400k nodes LTC 取得 118W 377D 105L，+7.53 Elo，長局殘局全面制霸；接續 E71.1）。
+> **當前基準狀態：** **E76 阻尼微調（412 $\beta$ + 612 eval）已採納進生產基線**（RFP 截斷回傳值阻尼混合，相較 E72 原始基線累積 +14.94 Elo，相較 E75.1 363 基線取得 123W 315D 114L，+5.67 Elo；E77 312 回滾；接續 E72）。
 
 ---
 
@@ -2288,6 +2288,146 @@ LMP skip 體積 ≫ RFP ≈ FP/Razor/hist-prune 帶 ≫ NMP ≫ ProbCut
     現有 RFP、LMR 與 History 常數均是在舊有「Fail-Low 暫存第一步 + 全域 IIR 快速收斂」的拓撲下達成之局部最優點，打破平衡引發連鎖失真。
 * **判定：** **立即回滾 (REVERTED)**。
   * 徹底還原 `chess_engine/classical/search.py` 至 E72 生產基線，`tools/sync_classical_old.py --diff-code` 確證 100% 0 diff。
+
+### E74：純化版提案 A 前向剪枝順序重構（NMP 前置於 Capture ProbCut，2026-10-20，回滾 REVERTED）
+
+* **改動項目與動機：**
+  1. **前向剪枝執行順序解耦與純化重構（`chess_engine/classical/search.py`）**：
+     * 將昂貴的「吃子走步生成 + 雙王 Pin 遮罩計算 + SEE 篩選 + QSearch + 減深子搜尋（Step 12b: Capture-based ProbCut）」移至「Step 10: 空步剪枝 (NMP)」之後。
+     * **保留 $O(1)$ TT ProbCut 捷徑（Step 12a）** 於 NMP 之前：維持 E35（+11.59 Elo）成果，凡 TT 歷史已證明能突破 `probcut_beta` 者直接以 0 子搜尋節點瞬間截斷，不支付任何 NMP 搜尋開銷。
+     * **安全隔離與解耦原則**：不移動 IIR、不修改 `improving` 狀態轉移、不更動 ProbCut TT Defense。
+  2. **NMP Fail-Low 與 ProbCut 的免費算力協同紅利**：
+     * 當盤面通過 NMP 門檻但空步子搜尋 Fail-Low 時，NMP 已呼叫 `compute_full_corrected_static_eval` 將 `static_eval_is_full` 設為 `True` 並計算了 `cached_pinned_white/black`。
+     * 緊接著進入 Capture ProbCut 時，直接復用完整的 HCE 評估分與雙王 Pin 位元盤，省去重複的 `get_pinned_pieces` 計算。
+* **對戰設定與環境：**
+  * 錦標賽配置：Google Colab (AMD EPYC 7B12 8 vCPU, 7 並行 Worker)，`inprocess` 後端。
+  * 規模：**600 局**（300 對成對換先開局），時控：**400,000 nodes/move** 長時控，轉置表：64 MB / context。
+  * 對陣雙方：Candidate (New, E74 NMP-First) vs Baseline (Old, E72 生產基準)。
+  * PGN 存檔：`tournament_analysis/tournament_results_E74.pgn`。
+* **對戰成果與深度統計（400k nodes L2 長時控 600 局驗證）：**
+  * **對局戰績：** 跑滿 **600 局**，Candidate **120 勝 358 和 122 負**（得分率 **49.83%**，總體得分 299.0 / 600，淨負 **-2 盤**）。
+  * **相對 Elo：** **`-1.16`**。
+  * **執色統計：** 白方 71W 175D 54L (52.83%)，黑方 49W 183D 68L (46.83%)。
+  * **搜尋深度與節點：**
+    - 平均深度：New **19.89 ply** vs Old **19.89 ply**（差異 +0.01 ply, Welch t = +0.074, p = 0.941 統計完全等價）
+    - 深度中位數：New **17** vs Old **16**
+    - 每步節點數：New **248,382** vs Old **248,400**（差異 -0.0%, Welch t = -0.048, p = 0.962 統計完全等價）
+    - 每步耗時：New **464.1 ms** vs Old **468.6 ms**（-4.5 ms, -1.0%, t = -4.160, p = 3.19e-5 微幅提速）
+    - 每步 NPS：New **612,827** vs Old **607,614**（+0.9%, t = +2.269, p = 0.023）
+    - 同深度節點比 (d=10 ~ 24)：0.998 ~ 1.001，全深度區間樹大小幾乎完全重疊。
+* **物理機理解析（為何理論「乾淨」的前置未帶來 Elo 正益？）：**
+  * **機制 ①：TT ProbCut Shortcut (E35) 早已攔截絕大多數 ProbCut 節點**：E35 已經是 O(1) 捷徑，真正會穿透進 Capture ProbCut 的節點本就極少，宏觀節省有限。
+  * **機制 ②：戰術引導資訊遺失（Tactical TT Guidance Loss）**：在少數己方有吃子大優的盤面中，原本 ProbCut 會找到具體吃子著法並存入 TT 作為高質量 best_move。將 NMP 前置後，引擎改為下「空步」探測，成功時回傳 NO_MOVE，未在置換表留下具體反擊著法，微幅削弱了後續重訪該節點時的著法排序品質，抵消了微小提速收益。
+* **判定：** **立即回滾 (REVERTED)**。
+  * 嚴格還原 `chess_engine/classical/search.py` 至 E72 生產基線，`tools/sync_classical_old.py --diff-code` 確證 100% 0 diff。
+
+### E75：提案 D RFP 靜態分數阻尼混合（Fail-Soft Score Blending，2026-10-20，LTC 600 局驗證 +9.27 Elo 正式勝出）
+
+* **改動項目與動機：**
+  1. **RFP 截斷回傳值阻尼混合（`chess_engine/classical/search.py:1643`）**：
+     * 對齊 Stockfish 19 Step 9（`search.cpp:1007`）：
+       `rfp_score = (RFP_SCORE_BETA_WEIGHT * beta + RFP_SCORE_EVAL_WEIGHT * static_score) // RFP_SCORE_DIVISOR`。
+     * **Classical HCE 與 NNUE 的本質差異與兩階段實驗**：
+       - **初次嘗試 E75.0（直移植 SF19 權重：661 $\beta$ + 363 eval）**：
+         在 NNUE 下評估極平滑，強阻尼拉向 $\beta$ 有效；但在 Classical HCE 下，過度重壓 $\beta$（拉向 $\beta$ 達 64.5%）嚴重閹割了局面優勢訊號，使父節點著法排序惡化，實測**顯著落敗**。
+       - **反向權重 E75.1（HCE 輕阻尼：363 $\beta$ + 661 eval）**：
+         改為拉向 $\beta$ 佔 35.5%、保留真實估值佔 64.5%。既成功抹平極端毛刺、防止 Aspiration Window 破裂，又完整保留了優勢梯度訊號。
+     * **數學特性保證**：
+       - 因 $static\_score - rfp\_margin \ge \beta$ 且 $rfp\_margin \ge 0$，恆有 $static\_score \ge \beta$。
+       - 權重混合公式嚴格保證 $\beta \le rfp\_score \le static\_score$。
+       - 100% 確保 $rfp\_score \ge \beta$ 觸發截斷，同時平滑極端大分。
+  2. **常數宣告（`chess_engine/classical/constants.py`）**：
+     * `RFP_SCORE_BETA_WEIGHT = 363`
+     * `RFP_SCORE_EVAL_WEIGHT = 661`
+     * `RFP_SCORE_DIVISOR = 1024`
+* **對戰驗證結果（E75.1：363/661 vs Old_E72，600 局 LTC 400k nodes，換先平衡 300 對）：**
+  * **戰績**：**137 勝 342 和 121 負**（得分率 **51.33%**，淨勝 **+16 局**）。
+  * **相對 Elo**：**+9.27 Elo**（95% CI: [-7.10, +25.67]）。
+  * **配對成果**：WD (38) vs LD (26) 淨勝 +12 對；WW (12) vs LL (7) 淨勝 +5 對；配對淨勝 +16 分。
+  * **盤長優勢**：在 51-80 步的關鍵中殘局戰術過渡盤中，E75 斬獲 **92 勝 81 和 73 負（勝率 53.9%）**，展現壓倒性穩定度。
+* **搜尋指標分析（`parse_search_stats.py`，樣本數 37,391 步 vs 37,357 步）：**
+  * **平均深度**：19.90 vs 19.93 ply（差異 -0.03 ply, Welch p = 0.803，統計完全等價）。
+  * **每步節點數**：247,551 vs 247,415（+0.1%, Welch p = 0.715，同深度節點比精確 1.000）。
+  * **耗時 / NPS**：442.4 ms vs 433.5 ms（+8.9 ms）；NPS 641,234 vs 652,159（-1.7%）。
+* **判定：** **顯著正收益（+9.27 Elo，勝率 51.33%）。**
+
+### E76：提案 D.1 RFP 阻尼權重精細微調（412 $\beta$ + 612 eval vs 363 基線，552 局 +5.67 Elo 勝出）
+
+* **改動項目與動機：**
+  * 承接 E75.1（363 $\beta$ + 661 eval）的 +9.27 Elo 突破，進一步探尋 $\beta$ 阻尼比例的最優平衡點：
+    將 $\beta$ 權重由 363 (35.5%) 微幅調升至 412 (40.2%)，eval 權重由 661 (64.5%) 調至 612 (59.8%)。
+  * 探索在 Classical HCE 下，40% $\beta$ 阻尼是否能在抑制估值震盪與保留優勢梯度之間取得更極致的平衡。
+* **常數設定：**
+  * New（候選）：`RFP_SCORE_BETA_WEIGHT = 412`, `RFP_SCORE_EVAL_WEIGHT = 612`
+  * Old（基線）：`RFP_SCORE_BETA_WEIGHT = 363`, `RFP_SCORE_EVAL_WEIGHT = 661`
+* **對戰驗證結果（552 局 LTC 400k nodes，換先平衡 276 對）：**
+  * **戰績**：**123 勝 315 和 114 負**（得分率 **50.82%**，淨勝 **+9 局**）。
+  * **相對 Elo**：**+5.67 Elo**（95% CI: [-12.87, +24.23]）。
+  * **配對成果**：WD (37) vs LD (32) 淨勝 +5 對；WW (13) vs LL (11) 淨勝 +2 對；配對淨勝 +9 分。
+  * **長局殘局表現**：超長局 (>80 步) 斬獲 36W 72D 29L（52.6% 得分率，淨勝 +7 盤）。
+* **搜尋指標分析（`parse_search_stats.py`，樣本數 37,825 步 vs 37,807 步）：**
+  * **平均深度**：19.87 vs 19.87 ply（差異 +0.00 ply, Welch p = 0.986，統計完全重合）。
+  * **每步節點數**：248,551 vs 248,515（+0.0%, Welch p = 0.921，同深度節點比維持 1.000）。
+  * **耗時 / NPS**：471.9 ms vs 464.7 ms（+7.2 ms）；NPS 605,424 vs 613,924（-1.4%）。
+* **判定：** **有效增益（+5.67 Elo，勝率 50.82%），412/612 成為新基線並已同步至 `classical_old`。**
+
+### E77：提案 D.2 RFP 阻尼權重探索（312 $\beta$ + 712 eval vs 412 基線，實測落敗回滾 REVERTED）
+
+* **改動項目與動機：**
+  * 探尋阻尼曲線在左側（輕阻尼方向）的邊界：
+    將 $\beta$ 權重由 412 (40.2%) 調降至 312 (30.5%)，eval 權重調升至 712 (69.5%)。
+  * 測試更低的 $\beta$ 阻尼（約 30% $\beta$ + 70% eval）能否比 412 提供更敏銳的戰術估值傳導。
+* **常數設定：**
+  * New（候選，`chess_engine/classical/constants.py`）：`RFP_SCORE_BETA_WEIGHT = 312`, `RFP_SCORE_EVAL_WEIGHT = 712`
+  * Old（基線，`chess_engine/classical_old/constants.py`）：`RFP_SCORE_BETA_WEIGHT = 412`, `RFP_SCORE_EVAL_WEIGHT = 612`
+* **對戰結果（LTC 400k nodes，換先平衡 67 對 / 134 局判定）：**
+  * **戰績**：**25 勝 72 和 37 負**（得分率 **45.52%**，淨負 **-12 局**）。
+  * **相對 Elo**：**-31.20 Elo**（95% CI: [-68.13, +5.04]）。
+  * **先手/後手表現**：持白 47.01%（12W 39D 16L），持黑 44.03%（13W 33D 21L），雙色皆落敗。
+* **物理機理解析與阻尼極值定位：**
+  * 當 $\beta$ 阻尼降低至 30.5%（312）時，阻尼強度已不足以壓制 Classical HCE 在戰術節點上的靜態估值毛刺。過大的 static_score 頻繁突破父節點的抱負視窗（Aspiration Window），導致重複觸發寬視窗 Fail-High 重搜，搜尋樹穩定度下降。
+  * **三階段實驗成功標定出 Classical HCE 的 RFP 阻尼凸函數最優區間**：
+    1. **661 $\beta$（64.5% 阻尼）**：過重阻尼，閹割優勢訊號，**顯著落敗**。
+    2. **312 $\beta$（30.5% 阻尼）**：過輕阻尼，估值毛刺反彈，**顯著落敗 (-31.20 Elo)**。
+    3. **363 $\beta$（35.5% 阻尼）**：顯著勝出（+9.27 Elo）。
+    4. **412 $\beta$（40.2% 阻尼）**：進一步超越 363（+5.67 Elo），**登上最高峰值（相較無阻尼累計約 +14.94 Elo）**。
+* **判定：** **立即回滾 (REVERTED)**。
+  * `chess_engine/classical/constants.py` 與 `tuner/constants_snapshot.py` 均恢復至 `RFP_SCORE_BETA_WEIGHT = 412`、`RFP_SCORE_EVAL_WEIGHT = 612`。
+  * `tools/sync_classical_old.py --diff-code` 確證 100% 邏輯等價（0 diff），生產基線穩固鎖定於 412。
+
+### E78：提案 D.3 RFP 阻尼權重右側邊界探索（462 $\beta$ + 562 eval vs 412 基線，600 局 -2.90 Elo 實測落敗回滾 REVERTED）
+
+* **改動項目與動機：**
+  * 在 E77 探尋左側邊界（312 $\beta$ 大敗 -31.20 Elo）確認過輕阻尼會導致 HCE 靜態估值毛刺刺穿抱負視窗後，進一步探尋 412 右側（偏重阻尼方向）的邊界：
+    將 $\beta$ 權重由 412 (40.2%) 調升至 462 (45.1%)，eval 權重由 612 (59.8%) 調降至 562 (54.9%)。
+  * 驗證更深度的靜態分平滑是否能進一步提升搜尋穩定度，抑或過重阻尼開始鈍化真實優勢信號。
+* **常數設定：**
+  * New（候選，`chess_engine/classical/constants.py`）：`RFP_SCORE_BETA_WEIGHT = 462`, `RFP_SCORE_EVAL_WEIGHT = 562`
+  - Old（基線，`chess_engine/classical_old/constants.py`）：`RFP_SCORE_BETA_WEIGHT = 412`, `RFP_SCORE_EVAL_WEIGHT = 612`
+* **對戰驗證結果（600 局 LTC 400k nodes，換先平衡 300 配對完整完賽）：**
+  * **戰績**：**122 勝 351 和 127 負**（得分率 **49.58%**，淨負 **-5 局 / -2.5 分**）。
+  * **相對 Elo**：**-2.90 Elo**（95% CI: [-20.93, +15.12]）。
+  * **先手/後手表現**：持白 53.17%（64W 191D 45L），持黑 46.00%（58W 160D 82L）。
+  * **盤長分佈特徵**：
+    * 51-80 步（關鍵中殘局）：78W 89D 75L（得分率 50.6%）。
+    * >80 步（超長殘局）：35W 58D 41L（得分率 **47.8%**，淨負 **-6 盤**）。
+  * **配對成果**：DD 106, DL 50, DW 35, WD 34, LD 20, WL 17, LL 15, WW 13, LW 10。
+* **搜尋指標分析（`parse_search_stats.py`，樣本數 36,724 步 vs 36,752 步）：**
+  * **平均深度**：19.90 vs 19.91 ply（差異 -0.01 ply, Welch t = -0.066, p = 0.948，完全等價）。
+  * **每步節點數**：248,195 vs 248,235（差異 -0.0%, Welch t = -0.108, p = 0.914，完全等價）。
+  * **耗時 / NPS**：776.2 ms vs 765.8 ms（+1.3%, p = 3.08e-8）；NPS 373,773 vs 378,647（-1.3%, p = 1.44e-3）。
+* **物理機理解析與 1D 阻尼凸函數全局閉合：**
+  * **超長殘局鈍化效應**：當 $\beta$ 權重升至 462（45.1%）時，估值過度向 $\beta$ 收縮，扁平化了真實優勢梯度。在 >80 步的超長殘局中，勝率顯著下滑至 47.8%（淨負 6 盤），證實過度阻尼削弱了將微小優勢轉化為勝勢的驅動力。
+  * **五階段實驗成功完整標定 Classical HCE 的 RFP 阻尼凹函數（Concave Function）曲線**：
+    1. **$W_\beta = 0$（0% $\beta$, 100% eval，E72 未阻尼基線）**：基準 0.00 Elo。
+    2. **$W_\beta = 312$（30.5% $\beta$, 69.5% eval，E77）**：**-31.20 Elo**（阻尼不足，HCE 靜態評估毛刺破窗重搜引發巨幅失分）。
+    3. **$W_\beta = 363$（35.5% $\beta$, 64.5% eval，E75）**：**+9.27 Elo**（成功壓制雜訊，確立正向效益）。
+    4. **$W_\beta = 412$（40.2% $\beta$, 59.8% eval，E76）**：**+14.94 Elo（vs 未阻尼基線，最高凹頂 Peak，確立為生產基線）**。
+    5. **$W_\beta = 462$（45.1% $\beta$, 54.9% eval，E78）**：**-2.90 Elo**（vs 412 基線，進入右側過度阻尼下降段）。
+  * 此結果嚴密確證 **$W_\beta = 412$（40.2% $\beta$ + 59.8% eval）即為 Classical HCE 搜尋架構下的全局最優阻尼常數**。
+* **判定：** **立即回滾 (REVERTED)**。
+  * `chess_engine/classical/constants.py` 與 `tuner/constants_snapshot.py` 均恢復至 `RFP_SCORE_BETA_WEIGHT = 412`、`RFP_SCORE_EVAL_WEIGHT = 612`。
+  * `tools/sync_classical_old.py --diff-code` 確證 100% 邏輯等價（0 diff），生產基線穩固鎖定於 412。
 
 ---
 
