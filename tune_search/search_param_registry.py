@@ -142,11 +142,11 @@ _RUNTIME_SPECS = [
     _spec("NMP_BASE", "NMP_BASE", 120, 350, 10, "nmp", runtime_attr="TUNE_NMP_BASE", spsa_r_end=0.8),
     _spec("NMP_DEPTH_COEF", "NMP_DEPTH_COEF", 6, 26, 2, "nmp", runtime_attr="TUNE_NMP_DEPTH_COEF", spsa_r_end=0.8),
     _spec("NMP_IMP_COEF", "NMP_IMP_COEF", 15, 75, 5, "nmp", runtime_attr="TUNE_NMP_IMP_COEF", spsa_r_end=0.8),
-    _spec("TUNE_RESERVED_29", "TUNE_RESERVED_29_VAL", 0, 0, 1, "safeguards", kind="discrete", runtime_attr="TUNE_RESERVED_29", spsa_r_end=0.0),
+    _spec("RFP_SCORE_BETA_WEIGHT", "RFP_SCORE_BETA_WEIGHT", 0, 1024, 16, "pruning", runtime_attr="TUNE_RFP_BLEND_BETA", spsa_r_end=0.6),
     _spec("NMP_R_BASE", "NMP_R_BASE", 4, 12, 1, "nmp", runtime_attr="TUNE_NMP_R_BASE", spsa_r_end=0.6),
     _spec("NMP_R_DIV", "NMP_R_DIV", 1, 8, 1, "nmp", kind="discrete", runtime_attr="TUNE_NMP_R_DIV", spsa_r_end=0.6),
     _spec("NMP_VERIFICATION_DEPTH", "NMP_VERIFICATION_DEPTH", 5, 18, 1, "nmp", kind="discrete", runtime_attr="TUNE_NMP_VERIFY_DEPTH", spsa_r_end=0.4),
-    _spec("TUNE_RESERVED_33", "TUNE_RESERVED_33_VAL", 0, 0, 1, "safeguards", kind="discrete", runtime_attr="TUNE_RESERVED_33", spsa_r_end=0.0),
+    _spec("PRUNING_CONTINUATION_THRESHOLD", "PRUNING_CONTINUATION_THRESHOLD", -3000, -500, 50, "pruning", runtime_attr="TUNE_CONT_PRUNE_THR", spsa_r_end=0.6),
     _spec("HISTORY_BONUS_SCALE", "HISTORY_BONUS_SCALE", 40, 240, 10, "history", runtime_attr="TUNE_HIST_BONUS_SCALE", spsa_r_end=0.8),
     _spec("HISTORY_BONUS_CAP", "HISTORY_BONUS_CAP", 800, 3000, 100, "history", runtime_attr="TUNE_HIST_BONUS_CAP", spsa_r_end=0.8),
     # Phase 7: band narrowed after the Phase 6 SPSA@100k pushed this cap to 1788
@@ -342,7 +342,7 @@ def profile_names(profile: str = DEFAULT_PROFILE) -> Tuple[str, ...]:
         return tuple(
             spec.name
             for spec in SEARCH_PARAM_SPECS
-            if spec.is_runtime and spec.name not in CATEGORICAL_PARAMS
+            if spec.is_runtime and spec.kind == "continuous" and spec.name not in CATEGORICAL_PARAMS
         )
     if key == "all":
         return tuple(spec.name for spec in SEARCH_PARAM_SPECS)

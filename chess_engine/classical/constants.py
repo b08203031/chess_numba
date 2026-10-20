@@ -825,7 +825,7 @@ HISTORY_QUIET_PIECE_TO_SCALE_NUM = 384   # was 512; less piece-to churn
 HISTORY_QUIET_PIECE_TO_SCALE_DEN = 1024
 HISTORY_QUIET_CONT_SCALE_NUM = 512       # was 820; damp cont writes (long-game pollution)
 HISTORY_QUIET_CONT_SCALE_DEN = 1024
-HISTORY_QUIET_MALUS_SCALE_NUM = 1024     # was 1136; milder failed-quiet penalty
+HISTORY_QUIET_MALUS_SCALE_NUM = 956     # was 1024; decoupled from DECAY (decay moved to bottom of loop)
 HISTORY_QUIET_MALUS_SCALE_DEN = 1024
 HISTORY_QUIET_MALUS_DECAY_NUM = 956
 HISTORY_QUIET_MALUS_DECAY_DEN = 1024
@@ -945,11 +945,13 @@ TUNE_LMR_NOT_IMP = 25        # not-improving numerator (higher → more reductio
 TUNE_NMP_BASE = 26           # continuous gate base threshold (was TUNE_NMP_G_BASE)
 TUNE_NMP_DEPTH_COEF = 27     # continuous gate depth coefficient (was TUNE_NMP_G_DEPTH)
 TUNE_NMP_IMP_COEF = 28       # continuous gate improving coefficient (was TUNE_NMP_G_IMP)
-TUNE_RESERVED_29 = 29        # reserved slot (was TUNE_NMP_NEED_BETA)
+TUNE_RFP_BLEND_BETA = 29      # Fail-soft RFP beta weight (was TUNE_RESERVED_29)
+TUNE_RESERVED_29 = TUNE_RFP_BLEND_BETA
 TUNE_NMP_R_BASE = 30         # dynamic R base (NMP_R_BASE, default 7)
 TUNE_NMP_R_DIV = 31          # dynamic R depth divisor (NMP_R_DIV, default 3)
 TUNE_NMP_VERIFY_DEPTH = 32   # verification search min depth threshold (was TUNE_NMP_VERIFY_D)
-TUNE_RESERVED_33 = 33        # reserved slot (was TUNE_NMP_SCOPE_MIND)
+TUNE_CONT_PRUNE_THR = 33      # Continuation history pruning threshold (was TUNE_RESERVED_33)
+TUNE_RESERVED_33 = TUNE_CONT_PRUNE_THR
 
 # Backward compatibility aliases for tune slots
 TUNE_NMP_SCOPE = TUNE_NMP_EVAL_DIV
@@ -1067,8 +1069,8 @@ PROBCUT_STYLE_MODE = 0     # 0=flat, 1=SF-style, 2=off
 NMP_NEED_BETA = 0
 TUNE_RESERVED_21_VAL = 0
 TUNE_RESERVED_22_VAL = 0
-TUNE_RESERVED_29_VAL = 0
-TUNE_RESERVED_33_VAL = 0
+TUNE_RESERVED_29_VAL = RFP_SCORE_BETA_WEIGHT
+TUNE_RESERVED_33_VAL = PRUNING_CONTINUATION_THRESHOLD
 
 # Late Move Reductions (LMR)
 LMR_MIN_DEPTH = 3

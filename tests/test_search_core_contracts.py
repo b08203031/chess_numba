@@ -109,7 +109,7 @@ class TestSearchCoreContracts(unittest.TestCase):
         self.assertIn('TUNE_SEE_CAP_MARGIN', search[check_route:make_move])
         self.assertIn('DIAG_MAIN_CHECK_SEE_ROUTE', search[check_route:make_move])
 
-    def test_main_quiet_scorer_uses_baseline_local_geometry(self):
+    def test_main_quiet_scorer_reuses_geometry(self):
         search = (ROOT / 'chess_engine/classical/search.py').read_text(encoding='utf-8')
         heuristics = (ROOT / 'chess_engine/classical/search_heuristics.py').read_text(encoding='utf-8')
         call = search[search.index('score_quiets('):search.index('search_return_type =', search.index('score_quiets('))]
@@ -117,9 +117,8 @@ class TestSearchCoreContracts(unittest.TestCase):
         scorer_end = heuristics.index('def compute_lmr_reduction_1024(', scorer_start)
         scorer = heuristics[scorer_start:scorer_end]
 
-        self.assertNotIn('check_sq_pawn, check_sq_knight', call)
-        self.assertNotIn('check_sq_pawn_arg', scorer)
-        self.assertIn('check_sq_computed = False', scorer)
+        self.assertIn('check_sq_knight', call)
+        self.assertIn('check_sq_computed = (', scorer)
         self.assertIn('get_bishop_attacks(enemy_king_sq, all_occ)', scorer)
         self.assertIn('get_rook_attacks(enemy_king_sq, all_occ)', scorer)
         self.assertIn('DIAG_MAIN_SCORE_GEOMETRY_REBUILD', scorer)

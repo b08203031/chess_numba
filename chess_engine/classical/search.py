@@ -166,11 +166,12 @@ from chess_engine.classical.constants import (
     TUNE_NMP_VERIFY_D, TUNE_NMP_SCOPE_MIND,
     TUNE_HIST_BONUS_SCALE, TUNE_HIST_BONUS_CAP, TUNE_HIST_MALUS_CAP,
     TUNE_HIST_MALUS_DECAY, TUNE_LMR_DIV_STEP, TUNE_HIST_MALUS_SCALE,
+    TUNE_RFP_BLEND_BETA, TUNE_CONT_PRUNE_THR,
     PINNED_UNCOMPUTED_SENTINEL,
 )
 from chess_engine.classical.bitboard_utils import find_piece_type_on_square_side
 from chess_engine.classical.debug_utils import log_info
-from chess_engine.classical.see import _see_ge_jit, get_pinned_pieces
+from chess_engine.classical.see import _see_ge_jit, get_pinned_pieces, SEE_PIECE_VALUES
 from chess_engine.classical.transposition_table import (
     probe_tt, store_tt,
     TT_FLAG_NONE, TT_FLAG_EXACT, TT_FLAG_ALPHA, TT_FLAG_BETA,
@@ -815,20 +816,23 @@ def quiescence_search(piece_bbs, occupancy_bbs, game_state, alpha, beta, ply, se
         qs_from_sq = get_from_square(move)
         qs_to_sq = get_to_square(move)
         qs_special_flag = get_special_move_flag(move)
+        qs_side = game_state[0]
+        qs_opp = 1 - qs_side
+
+        qs_att_type = find_piece_type_on_square_side(piece_bbs, qs_from_sq, qs_side)
+        if qs_special_flag == SPECIAL_MOVE_FLAG_EN_PASSANT:
+            qs_vic_type = np.int8(-2)
+            qs_vic_val = MG_MATERIAL_VALUES[PAWN]
+        else:
+            qs_vic_type = find_piece_type_on_square_side(piece_bbs, qs_to_sq, qs_opp)
+            qs_vic_val = MG_MATERIAL_VALUES[qs_vic_type % 6] if qs_vic_type != -1 else 0
 
         delta_prune_candidate = False
         if not is_currently_in_check:
             if ENABLE_DELTA_PRUNING:
-                move_flag = qs_special_flag
-                is_promotion = move_flag == SPECIAL_MOVE_FLAG_PROMOTION
+                is_promotion = qs_special_flag == SPECIAL_MOVE_FLAG_PROMOTION
                 promotion_gain = MG_MATERIAL_VALUES[4] - MG_MATERIAL_VALUES[0] if is_promotion else 0
-                side_to_move = game_state[0]
-                if move_flag == SPECIAL_MOVE_FLAG_EN_PASSANT:
-                    victim_value = MG_MATERIAL_VALUES[PAWN]
-                else:
-                    victim_type = find_piece_type_on_square_side(piece_bbs, get_to_square(move), 1 - side_to_move)
-                    victim_value = MG_MATERIAL_VALUES[victim_type % 6] if victim_type != -1 else 0
-                potential_gain = victim_value + promotion_gain
+                potential_gain = qs_vic_val + promotion_gain
                 
                 if stand_pat + potential_gain + search_context.tune[TUNE_DELTA_MARGIN] < alpha:
                     delta_prune_candidate = True
@@ -898,10 +902,8 @@ def quiescence_search(piece_bbs, occupancy_bbs, game_state, alpha, beta, ply, se
 
         if not is_currently_in_check:
             if ENABLE_SEE_IN_QUIESCENCE and move != qs_tt_move:
-                c_from = get_from_square(move)
-                c_to = get_to_square(move)
                 _diag_add(search_context, DIAG_Q_SEE_TRY)
-                if not _see_ge_jit(piece_bbs, occupancy_bbs, game_state[0], c_from, c_to, search_context.tune[TUNE_QS_SEE], pinned_white, pinned_black):
+                if not _see_ge_jit(piece_bbs, occupancy_bbs, qs_side, qs_from_sq, qs_to_sq, search_context.tune[TUNE_QS_SEE], pinned_white, pinned_black, qs_att_type, qs_vic_type):
                     _diag_add(search_context, DIAG_Q_SEE_SKIP)
                     continue
 
@@ -1025,6 +1027,9 @@ def get_next_move(
     is_in_check, in_check_our_king_sq, in_check_our_king_bb,
     in_check_opponent_side, in_check_pinned_us, in_check_checker_count,
     in_check_evasion_targets,
+    check_sq_knight=np.uint64(0), check_sq_bishop=np.uint64(0),
+    check_sq_rook=np.uint64(0), check_sq_queen=np.uint64(0),
+    check_sq_pawn=np.uint64(0),
 ):
     moves = search_context.moves_buffer[ply]
     scores = search_context.move_scores[ply]
@@ -1082,8 +1087,22 @@ def get_next_move(
                 # Lazy SEE Evaluation with threshold 0
                 c_from = get_from_square(candidate_move)
                 c_to = get_to_square(candidate_move)
+                sp_flag = get_special_move_flag(candidate_move)
+                side_to_move = game_state[0]
+                att_type = find_piece_type_on_square_side(piece_bbs, c_from, side_to_move)
+                if sp_flag == SPECIAL_MOVE_FLAG_EN_PASSANT:
+                    vic_type = np.int8(-2)
+                else:
+                    vic_type = find_piece_type_on_square_side(piece_bbs, c_to, 1 - side_to_move)
+
                 _diag_add(search_context, DIAG_PICKER_SEE_TRY)
-                is_good = _see_ge_jit(piece_bbs, occupancy_bbs, game_state[0], c_from, c_to, 0, pinned_white, pinned_black)
+                # Fast path: non-promotion captures where victim SEE value >= attacker SEE value always pass SEE >= 0
+                if (sp_flag != SPECIAL_MOVE_FLAG_PROMOTION
+                        and att_type != -1 and vic_type != -1
+                        and SEE_PIECE_VALUES[vic_type % 6] >= SEE_PIECE_VALUES[att_type % 6]):
+                    is_good = True
+                else:
+                    is_good = _see_ge_jit(piece_bbs, occupancy_bbs, side_to_move, c_from, c_to, 0, pinned_white, pinned_black, att_type, vic_type)
                 
                 if is_good:
                     move = candidate_move
@@ -1115,6 +1134,8 @@ def get_next_move(
                 captures_end, search_context.mp_quiets_end[ply], search_context,
                 ply, killer_1, killer_2, counter_move, pawn_key_idx,
                 pinned_white, pinned_black,
+                check_sq_knight, check_sq_bishop, check_sq_rook,
+                check_sq_queen, check_sq_pawn,
             )
             
             # Sort good quiets (score >= GOOD_QUIET_THRESHOLD) to the front. Bad quiets (score < GOOD_QUIET_THRESHOLD) remain at the back.
@@ -1482,6 +1503,7 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
 
     # --- H2: Static Evaluation & Improving Flag (computed BEFORE any pruning) ---
     static_score = -INFINITY
+    corrected_eval = -INFINITY
     improving = False
     
     # Correction History Adjustment
@@ -1497,6 +1519,7 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
             raw_static_eval, _, _ = _evaluate_position_jit(piece_bbs, occupancy_bbs, game_state, True, search_context)
 
         static_score = apply_correction_history_score(game_state, search_context, raw_static_eval, ply)
+        corrected_eval = static_score
         
         # --- H2 Enhancement: Refine static_score using trusted TT Score Bounds ---
         if tt_hit and not is_exclusion_search:
@@ -1640,10 +1663,12 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                 if (static_score - rfp_margin >= beta
                         and not is_win(static_score) and not is_loss(beta)):
                     _diag_add(search_context, DIAG_RFP_CUT)
-                    # SF19 Step 9: Fail-soft score blending (661 * beta + 363 * eval) / 1024
+                    # SF19 Step 9: Fail-soft score blending via TUNE_RFP_BLEND_BETA
+                    w_beta = np.int64(search_context.tune[TUNE_RFP_BLEND_BETA])
+                    w_stat = np.int64(1024) - w_beta
                     rfp_score = np.int32(trunc_div(
-                        RFP_SCORE_BETA_WEIGHT * np.int64(beta) + RFP_SCORE_EVAL_WEIGHT * np.int64(static_score),
-                        RFP_SCORE_DIVISOR
+                        w_beta * np.int64(beta) + w_stat * np.int64(static_score),
+                        np.int64(1024)
                     ))
                     return (rfp_score, NO_MOVE, nodes_searched, quiescence_nodes, tt_hits)
 
@@ -2084,6 +2109,8 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
             is_currently_in_check, our_king_sq_s, our_king_bb_s,
             opponent_side_s, pinned_us_s, main_checker_count_s,
             main_evasion_targets_s,
+            check_sq_knight_s, check_sq_bishop_s, check_sq_rook_s,
+            check_sq_queen_s, check_sq_pawn_s,
         )
         if move == NO_MOVE:
             break
@@ -2242,7 +2269,7 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                             cont_prune_score = get_continuation_pruning_score(
                                 search_context, ply, see_piece, to_sq, pawn_key_idx
                             )
-                            if cont_prune_score < PRUNING_CONTINUATION_THRESHOLD * depth:
+                            if cont_prune_score < search_context.tune[TUNE_CONT_PRUNE_THR] * depth:
                                 prune_quiet_move = True
 
                         if not prune_quiet_move:
@@ -2363,6 +2390,22 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                                 _diag_add(search_context, DIAG_FP_SKIP)
                                 pruned_moves += 1
                                 continue
+
+                    # Fast O(1) Pre-make Legality check before Quiet SEE
+                    if not skip_post_legality_s and not is_currently_in_check:
+                        if from_sq != our_king_sq_s and flag != SPECIAL_MOVE_FLAG_EN_PASSANT:
+                            from_bb_s = BB_SQUARES[from_sq]
+                            if not (pinned_us_s & from_bb_s):
+                                skip_post_legality_s = True
+                            elif LINE_BB[from_sq, to_sq] & our_king_bb_s:
+                                skip_post_legality_s = True
+                            else:
+                                continue
+                        elif from_sq == our_king_sq_s and flag != SPECIAL_MOVE_FLAG_CASTLING:
+                            occ_without_king_s = occupancy_bbs[2] ^ our_king_bb_s
+                            if is_square_attacked_with_occ(piece_bbs, to_sq, occ_without_king_s, opponent_side_s):
+                                continue
+                            skip_post_legality_s = True
 
                     # --- Step 14d: Quiet SEE Pruning ---
                     see_lmr_d = compute_quiet_pruning_lmr_depth(
@@ -3171,7 +3214,6 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                 bad_move = quiet_moves_tried[q_idx]
                 if bad_move == best_move:
                     continue
-                actual_malus = actual_malus * search_context.tune[TUNE_HIST_MALUS_DECAY] // HISTORY_QUIET_MALUS_DECAY_DEN
                 bad_from = get_from_square(bad_move)
                 bad_to = get_to_square(bad_move)
                 bad_aggressor = quiet_pieces_tried[q_idx]
@@ -3221,6 +3263,8 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                     curr = search_context.low_ply_history[ply, bad_move]
                     clamped = min(max(-lph_malus, -LOW_PLY_HISTORY_MAX), LOW_PLY_HISTORY_MAX)
                     search_context.low_ply_history[ply, bad_move] = curr + clamped - (curr * abs(clamped)) // LOW_PLY_HISTORY_MAX
+
+                actual_malus = actual_malus * search_context.tune[TUNE_HIST_MALUS_DECAY] // HISTORY_QUIET_MALUS_DECAY_DEN
 
     # --- Opponent Move Bonus (Fail-Low / Alpha Flag Bonus) ---
     elif (final_flag == TT_FLAG_ALPHA and not is_exclusion_search
@@ -3278,9 +3322,10 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
 
     original_best_move = best_move
 
-    if best_move == NO_MOVE and search_context.mp_captures_end[ply] + search_context.mp_quiets_end[ply] > 0:
+    generated_end = max(search_context.mp_captures_end[ply], search_context.mp_quiets_end[ply])
+    if best_move == NO_MOVE and generated_end > 0:
         # Fallback to first move that is not excluded
-        for i in range(search_context.mp_captures_end[ply] + search_context.mp_quiets_end[ply]):
+        for i in range(generated_end):
             if moves[i] != excluded_move:
                 best_move = moves[i]
                 break
@@ -3304,9 +3349,9 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                 is_capture = ((occupancy_bbs[enemy_side] & BB_SQUARES[to_sq]) != 0) or (move_flag == SPECIAL_MOVE_FLAG_EN_PASSANT)
             
             has_best_move = (original_best_move != NO_MOVE)
-            if not is_capture and (max_eval > static_score) == has_best_move:
-                # Based on static_score calculation of bonus
-                diff = max_eval - static_score
+            if not is_capture and (max_eval > corrected_eval) == has_best_move:
+                # Exp C: Based on pure corrected_eval (SF19 Step 20 ss->staticEval), not TT-refined static_score
+                diff = max_eval - corrected_eval
                 bonus = trunc_div(
                     diff * depth,
                     (CORRECTION_BONUS_HAS_MOVE_DIV if has_best_move else CORRECTION_BONUS_NO_MOVE_DIV),

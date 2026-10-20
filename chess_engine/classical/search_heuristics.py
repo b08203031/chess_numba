@@ -479,6 +479,9 @@ def score_quiets(
     piece_bbs, occupancy_bbs, game_state, moves, scores, start_idx, end_idx,
     search_context, ply, killer_1, killer_2, counter_move, pawn_key_idx,
     pinned_white, pinned_black,
+    check_sq_knight=np.uint64(0), check_sq_bishop=np.uint64(0),
+    check_sq_rook=np.uint64(0), check_sq_queen=np.uint64(0),
+    check_sq_pawn=np.uint64(0),
 ):
     if start_idx >= end_idx:
         return
@@ -488,16 +491,13 @@ def score_quiets(
     enemy_side = 1 - side_to_move
     
     threats_computed = False
-    check_sq_computed = False
-
-    # Production rollback of P1 geometry reuse: restore the baseline scorer's
-    # lazy, local check-square construction.  The opt-in counter remains so
-    # diagnostics can measure the rebuild cost without changing move order.
-    check_sq_knight = np.uint64(0)
-    check_sq_bishop = np.uint64(0)
-    check_sq_rook = np.uint64(0)
-    check_sq_queen = np.uint64(0)
-    check_sq_pawn = np.uint64(0)
+    check_sq_computed = (
+        check_sq_knight != np.uint64(0)
+        or check_sq_bishop != np.uint64(0)
+        or check_sq_rook != np.uint64(0)
+        or check_sq_queen != np.uint64(0)
+        or check_sq_pawn != np.uint64(0)
+    )
     
     # Initialize threat bitboards to 0
     threat_knight = np.uint64(0)
@@ -521,7 +521,7 @@ def score_quiets(
         if move == killer_1:
             score += search_context.tune[TUNE_ORDER_KILLER_1]
         elif move == killer_2:
-            score += QUIET_ORDER_KILLER_2
+            score += (search_context.tune[TUNE_ORDER_KILLER_1] + search_context.tune[TUNE_ORDER_COUNTER]) // 2
         elif move == counter_move:
             score += search_context.tune[TUNE_ORDER_COUNTER]
         else:
@@ -572,7 +572,7 @@ def score_quiets(
             if is_check_candidate:
                 if (not ENABLE_CHECK_SEE_GATE) or _see_ge_jit(
                         piece_bbs, occupancy_bbs, side_to_move, from_sq, to_square,
-                        CHECK_SEE_THRESHOLD, pinned_white, pinned_black, aggressor_type, -1):
+                        CHECK_SEE_THRESHOLD, pinned_white, pinned_black, aggressor_type, -2):
                     score += CHECK_BONUS
 
             # --- Threat-Based Reordering (Part B); off in Phase 1a ---
