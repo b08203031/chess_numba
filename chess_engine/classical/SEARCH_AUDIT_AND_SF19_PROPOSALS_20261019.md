@@ -235,6 +235,47 @@
 1. **驗證通過**：Step 2 Bug 2 修復在長時控 600 局高壓測試下穩定取得 **+7.53 Elo**（+13 盤淨勝），前後半場得分率均衡，殘局收割率顯著改善。
 2. **基線同步**：依據專案工作流規則，已正式透過 `python tools/sync_classical_old.py --sync` 將代碼完整同步至 [`chess_engine/classical_old/`](file:///c:/Users/ren%20cian/OneDrive/桌面/chess/chess_numba/chess_numba/chess_engine/classical_old/)，確立為全新生產基準（E72）。
 3. **後續排程**：下一步依路線圖推進至 **Step 3**（修復 Bug 1：Fail-Low ALL-Node 污染 TT best_move，搭配提案 B：IIR `!all_node` 守衛）。
+---
 
+## 7. Step 3 實測驗證成果（Bug 1 修復與提案 B IIR 守衛之 1,000 局 LTC 檢驗與回滾）
 
+### 7.1 測試背景與對抗設定
+* **改動項目**：
+  1. 修復 Bug 1（[`chess_engine/classical/search.py:3276`](search.py#L3276)）：移除 Fail-Low ALL-Node 強制回退 `best_move = moves[0]` 的代碼。
+  2. 實作提案 B（[`chess_engine/classical/search.py:1946`](search.py#L1946)）：IIR 補齊 `(is_pv or cut_node)` 守衛，對齊 SF19 Step 11（`!allNode` 規範）。
+* **測試環境與規格**：
+  * 對戰環境：Google Colab（AMD EPYC 7B12 8 vCPU，7 個並行 Worker），`inprocess` 後端。
+  * 規模：**1,000 局**（500 對成對換先開局）。
+  * 時控：**400,000 nodes/move** 長時控，轉置表：64 MB / context。
+  * 對陣雙方：Candidate (New / classical) vs Baseline (Old / classical_old，E72 生產基準)。
+
+### 7.2 實測數據與 Elo 表現
+
+```text
+========== 引擎對戰深度分析報告 (New vs Old) ==========
+總對局數 : 1000 局 (500 對成對換先開局)
+戰績統計 : 勝 185 | 和 607 | 負 208
+總體得分 : 488.5 / 1000 (得分率 48.85%，淨負 -23 盤)
+和局率   : 60.70%
+相對 Elo 變化 : -7.99
+95% 信賴區間  : [-21.34, +5.33] (單位: color-swapped pair clustered, n=500)
+```
+
+| 搜尋指標 | Candidate (New) | Baseline (Old) | 差異 (New - Old) | 統計顯著性 (Welch t-test) |
+| :--- | :---: | :---: | :---: | :---: |
+| **平均搜尋深度 (Depth)** | 19.63 ply | 19.86 ply | **-0.24 ply** | $t = -2.528, p = 0.011$ (高度顯著縮減 ⚠️) |
+| **深度中位數** | 16 ply | 17 ply | **-1.00 ply** | 整整落後 1 層 |
+| **深度 $\ge 14$ 比例** | 88.5% | 90.3% | -1.8% | 深度突破率顯著下降 |
+| **深度 16–20 比例** | 42.8% | 45.0% | -2.2% | 主力深度區間明顯萎縮 |
+| **每步耗時** | 917.0 ms | 915.8 ms | +1.2 ms | 不顯著 ($p = 0.54$) |
+| **每步 NPS** | 330,632 | 331,420 | -0.2% | 不顯著 ($p = 0.52$) |
+
+### 7.3 失敗根因剖析（Post-Mortem Analysis）
+1. **著法排序快取喪失**：在迭代加深中，深度 $D$ 失敗（Fail-Low）時，舊版存入 TT 的 `moves[0]` 是 MovePicker 排序第一的高質量候選步。新版存入 `NO_MOVE` 導致深度 $D+1$ 重訪該局面時喪失 TT 導引，MovePicker 必須重頭生成並排序全部著法，拖慢了擴展速度。
+2. **ALL-Node 分支爆炸**：舊版對所有無 TT 步節點皆實施 IIR 減深；新版豁免了 ALL-Node 的 IIR 減深。當大量 ALL-Node 正確清空 TT 步後，新版強行以「全深度」窮舉搜尋全部 30+ 步走法，單點節點消耗暴增 2~3 倍，在 400k nodes 固定預算下過早耗盡算力，直接導致搜尋深度崩塌 -0.24 ply。
+3. **生態系平衡反噬**：如同先前修復 Bug 3 導致參數重力失衡，引擎現有 RFP、LMR 與 History 常數均是在舊有「Fail-Low 暫存第一步 + 全域 IIR 快速收斂」的拓撲下達成之最優點，打破平衡引發連鎖失真。
+
+### 7.4 處置結論
+* **立即回滾 (REVERTED)**：依專案規範，嚴格撤銷本次改動，將 [`chess_engine/classical/search.py`](search.py) 完整還原至 E72 生產基線，維持基線 100% 穩固。
+* **後續策略調整**：不再動 Bug 1 與 IIR 守衛，轉向對樹結構干擾較小、消除純粹浪費的架構重構（如 **提案 A：前向剪枝順序重構，NMP/IIR 前置於 ProbCut**）。
 

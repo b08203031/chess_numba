@@ -2254,6 +2254,43 @@ LMP skip 體積 ≫ RFP ≈ FP/Razor/hist-prune 帶 ≫ NMP ≫ ProbCut
 
 ---
 
+### E73：Step 3 修復 Fail-Low ALL-Node 污染 TT (Bug 1) + IIR !allNode 守衛 (提案 B)（2026-10-20，回滾 REVERTED）
+
+* **改動項目與動機：**
+  1. **修復 Bug 1（Fail-Low 污染 TT 缺陷，`chess_engine/classical/search.py:3276`）**：
+     * 移除 Fail-Low ALL-Node 強制回退 `best_move = moves[0]` 的邏輯，避免覆寫摧毀置換表中已有之合法最佳步，並消除假 TT 步對後續著法排序、RFP 與 LMR 的干擾。
+  2. **實作提案 B（IIR !allNode 守衛，`chess_engine/classical/search.py:1946`）**：
+     * 對齊 Stockfish 19 Step 11（`!allNode` 規範），在 IIR 條件補齊 `(is_pv or cut_node)` 守衛，豁免防守型 ALL-Node 遭無謂減深。
+* **對戰設定與環境：**
+  * 錦標賽配置：Google Colab (AMD EPYC 7B12 8 vCPU, 7 並行 Worker)，`inprocess` 後端。
+  * 規模：**1,000 局**（500 對成對換先開局），時控：**400,000 nodes/move**，TT：64 MB / context。
+  * 對陣：Candidate (New, Step 3 Bug 1 Fix + Proposal B IIR Guard) vs Baseline (Old, E72 生產基準)。
+  * PGN 存檔：`tournament_analysis/tournament_results.pgn`。
+* **對戰成果與深度統計（400k nodes L2 長時控 1,000 局驗證）：**
+  * **對局戰績：** 跑滿 **1,000 局**，Candidate **185 勝 607 和 208 負**（得分率 **48.85%**，總體得分 488.5 / 1000，淨負 **-23 盤**）。
+  * **相對 Elo：** **`-7.99`**，95% 置信區間 `[-21.34, +5.33]`。
+  * **搜尋深度（致命崩塌）：**
+    - New 平均深度 **19.63 ply** vs Old **19.86 ply**（顯著縮減 **-0.24 ply**，Welch $t = -2.528, p = 0.011$）
+    - 深度中位數 New **16** vs Old **17**（整整落後 1 層）
+    - $\text{depth} \ge 14$ 比例：New 88.5% vs Old 90.3% (-1.8%)
+    - $\text{depth} \in [16, 20]$ 比例：New 42.8% vs Old 45.0% (-2.2%)
+  * **全區間得分率萎縮：**
+    - 短局 ($\le 25$ 步): 0-120-1 (49.6%)
+    - 中局 (26–50 步): 11-223-17 (48.8%)
+    - 長局 (51–80 步): 121-149-129 (49.0%)
+    - 超長局 ($>80$ 步): 53-115-61 (48.3%)
+* **物理機理解析（為何理論「乾淨」的改動會失敗？）：**
+  * **機制 ①：`best_move = moves[0]` 實質扮演關鍵的「迭代著法快取（Move Ordering Cache）」**：
+    在迭代加深搜尋中，深度 $D$ 失敗（Fail-Low）的局面在深度 $D+1$ 重訪時，舊版存入 TT 的 `moves[0]` 是 MovePicker 排序第一的著法（最佳吃子、殺手步或最高歷史安靜步），仍然是下一迭代最可能構成反擊的著法。新版存入 `NO_MOVE` 後，重訪該節點時缺乏 TT 著法指引，MovePicker 必須重頭生成並排序全部著法，著法排序效率嚴重下降。
+  * **機制 ②：IIR 排除 ALL-Node 引發「分支爆炸（Branching Explosion）」**：
+    舊版在 `tt_move == NO_MOVE` 時對所有節點均實施 1 層 IIR 減深探測。新版補齊 `(is_pv or cut_node)` 守衛後，豁免了 ALL-Node 的減深。但因修復 Bug 1 導致沒有 TT 步的 ALL-Node 大量增加，新版對這些節點全數以全深度展開搜尋全部 30+ 步走法，單點節點消耗暴增 2~3 倍，在 400k nodes 固定預算下過早耗盡算力，直接導致主幹 PV 無法推進（深度顯著掉落 -0.24 ply）。
+  * **機制 ③：歷史與啟發平衡反噬**：
+    現有 RFP、LMR 與 History 常數均是在舊有「Fail-Low 暫存第一步 + 全域 IIR 快速收斂」的拓撲下達成之局部最優點，打破平衡引發連鎖失真。
+* **判定：** **立即回滾 (REVERTED)**。
+  * 徹底還原 `chess_engine/classical/search.py` 至 E72 生產基線，`tools/sync_classical_old.py --diff-code` 確證 100% 0 diff。
+
+---
+
 ## 4. 常用指令
 
 ```text
