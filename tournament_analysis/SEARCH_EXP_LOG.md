@@ -2429,6 +2429,32 @@ LMP skip 體積 ≫ RFP ≈ FP/Razor/hist-prune 帶 ≫ NMP ≫ ProbCut
   * `chess_engine/classical/constants.py` 與 `tuner/constants_snapshot.py` 均恢復至 `RFP_SCORE_BETA_WEIGHT = 412`、`RFP_SCORE_EVAL_WEIGHT = 612`。
   * `tools/sync_classical_old.py --diff-code` 確證 100% 邏輯等價（0 diff），生產基線穩固鎖定於 412。
 
+### E79 / 實驗 C：解耦 Correction History 的 static_score 與 corrected_eval（962 局 -9.39 Elo 實測落敗回滾 REVERTED）
+
+* **改動項目與動機：**
+  * 對照 Stockfish 19 Step 20（`search.cpp:1631-1638`）：在節點結尾更新 Correction History（Pawn, Minor, Non-Pawn, Continuation）時，SF 使用未受置換表動態覆蓋的靜態評估 `ss->staticEval` 計算殘差偏差 `diff = bestValue - ss->staticEval`。
+  * 本引擎原實作中，`static_score` 在節點開頭遇到 TT 命中時會被精煉為 TT 分數邊界（`tt_score`）。當節點最終評估 `max_eval` 接近上次存入 TT 的分數時，`diff = max_eval - static_score` 經常為 0，理論上阻斷了修正歷史在 TT 命中節點的持續學習。
+  * 實驗 C 嘗試將偏差計算解耦：定義獨立的 `corrected_eval`（純評估修正分數），將結尾偏差計算改為 `diff = max_eval - corrected_eval`，並以 `(max_eval > corrected_eval) == has_best_move` 作為更新門檻；同時保留搜尋前向剪枝與 LMR 仍使用高置信度的 TT 精煉 `static_score`。
+* **常數與程式設定：**
+  * New（候選，`chess_engine/classical/search.py`）：引入 `corrected_eval`，更新 Correction History 改用 `diff = max_eval - corrected_eval`。
+  * Old（基線，`chess_engine/classical_old/search.py`）：Stage 1 零樹變動基線（`diff = max_eval - static_score`）。
+* **對戰驗證結果（Colab 962 局 LTC 400k nodes，換先平衡成對對決）：**
+  * **戰績**：**189 勝 558 和 215 負**（得分率 **48.65%**，淨負 **-26 局**）。
+  * **相對 Elo**：**-9.39 Elo**（±14.23，95% CI: [-23.62, +4.84]）。
+  * **SPRT 模型**：LLR = -2.98 $\le$ -2.944（$H_0$ Accepted，統計顯著倒退定案）。
+  * **盤長勝率崩塌特徵**：
+    * 1-50 步（開局/早中局）：得分率 50.8%（維持平局走勢）。
+    * **51-80 步（關鍵中殘局戰術過渡盤）：勝率暴跌至 46.7%**（成為主要失分階段）。
+    * >80 步（殘局）：得分率 47.9%。
+* **物理機理解析與失敗根因：**
+  * **Classical HCE 噪聲飽和效應**：Stockfish 19 採用極度平滑的 NNUE 網路，評估波動小；而 Classical HCE 評估值在複雜局面存在顯著局部戰術毛刺。
+  * 舊實作中，TT 命中時將 `diff` 壓制為 0 雖然在理論上阻礙了部分節點更新，但意外地充當了一道天然的**評估抗噪阻尼器（Noise Damping Gate）**，避免了頻繁的戰術偶發波動過度更新全域修正表。
+  * 一旦解耦為純 `max_eval - corrected_eval`，所有節點均全力更新。而當前 `CORRECTION_BONUS_HAS_MOVE_DIV = 10` 的除數是過去在更新受阻背景下調配的高增益參數。解耦後的大幅頻繁更新導致 Pawn / Minor Correction History 估值被戰術殘差迅速打滿飽和（±100~256），到了 51–80 步時全域評估表被髒噪聲污染，導致安靜步排序與深層剪枝嚴重失準。
+  * **結論**：解耦 `corrected_eval` 在 Classical HCE 下無法作為零調參熱插拔特性，必須大幅降低更新增益（如將除數調大至 24~32）並搭配 SPSA 重新擬合。
+* **判定：** **立即回滾 (REVERTED)**。
+  * `chess_engine/classical/search.py` 完整復原至 `diff = max_eval - static_score`。
+  * `tools/sync_classical_old.py --diff-code` 確證 100% 邏輯等價（0 diff）。
+
 ---
 
 ## 4. 常用指令

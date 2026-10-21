@@ -349,3 +349,37 @@
       4. **$W_\beta = 412$（40.2% $\beta$, 59.8% eval，E76）**：**+14.94 Elo（vs 未阻尼基線，全局凹頂 Peak，確立為生產基線）**。
       5. $W_\beta = 462$（45.1% $\beta$, 54.9% eval，E78）：**-2.90 Elo**（vs 412 基線，轉入右側過度阻尼下降段）。
     * **提案 D 結案處置**：以 **$W_\beta = 412$、`RFP_SCORE_EVAL_WEIGHT = 612`** 為最優解圓滿收官，候選常數已回滾還原至 412，`classical_old` 與主引擎完全同步（0 diff）。
+
+---
+
+## 10. Stage 1 零樹變動重構與實驗 C 實測分析（E79）
+
+### 10.1 Stage 1 零樹變動加速與正交解耦（0-Node Delta 已合入 HEAD）
+為替後續 SPSA 連續調參清理路障，首先完成了 Stage 1 零樹變動性能與架構清理套件：
+1. **MovePicker 與 QSearch SEE $O(1)$ 快速短路**：改用專門的 `SEE_PIECE_VALUES`，並在呼叫 `_see_ge_jit` 時傳遞已知攻擊方與被吃方棋子型別，避免每次重複搜尋棋盤；若非過路兵，Victim 價值直接取自 `MG_MATERIAL_VALUES[victim_type % 6]`。
+2. **`check_squares` 位元棋盤跨層重用**：在 `_search` 節點預先計算各兵種對敵王將軍的目標位元棋盤，傳入 `get_next_move` 並由 `score_quiets` 重用，消除安靜步排序中每次對敵王的重複攻擊計算。
+3. **Step 14d 安靜步 SEE 前置合法性檢查**：在安靜步 SEE 剪枝前執行快速 $O(1)$ 被釘住棋子判斷，大幅減少無效走步進入重型剪枝邏輯。
+4. **Fail-Low 緩衝區上限修正**：將原本雙重相加的越界風險修復為 `max(mp_captures_end[ply], mp_quiets_end[ply])`。
+5. **Killer 2 排序常數動態內插**：`QUIET_ORDER_KILLER_2 = QUIET_ORDER_KILLER_1 - max(500, QUIET_ORDER_KILLER_1 // 12)`，消除靜態數值突兀斷層。
+6. **歷史懲罰 Scale 與 Decay 正交解耦**：將 `TUNE_HIST_MALUS_DECAY` 移至迴圈末尾執行，使 `TUNE_HIST_MALUS_SCALE`（預設 956）與衰減率（預設 491）完全解耦，利於獨立 SPSA 擬合。
+7. **新增連續運行時調優槽位**：`SearchContext.tune[29]`（`TUNE_RFP_BLEND_BETA`）與 `SearchContext.tune[33]`（`TUNE_CONT_PRUNE_THR`）正式接通，並修正連續調優配置過濾離散參數。
+
+### 10.2 實驗 C：解耦 Correction History 的 static_score 與 corrected_eval 實測分析
+* **實驗假設**：在節點更新 Correction History 時，將殘差由 `max_eval - static_score` 改為純評估偏差 `diff = max_eval - corrected_eval`（對齊 SF19 Step 20 `ss->staticEval`），以解決 TT 命中時 static_score 被 TT 邊界覆蓋導致學習殘差常為 0 的問題。
+* **對戰設定**：Colab 雲端高並行成對換先錦標賽，400,000 nodes/move，64MB TT，`openings.epd`。
+* **實測戰績（962 局驗證）**：
+  * **戰績**：Candidate **189 勝 558 和 215 負**（得分率 **48.65%**，淨負 **-26 局**）。
+  * **相對 Elo**：**-9.39 ± 14.23 Elo**（95% CI: [-23.62, +4.84]）。
+  * **SPRT**：LLR = -2.98 $\le$ -2.944（$H_0$ Accepted，統計顯著倒退判定）。
+* **盤長勝率崩塌特徵**：
+  * 1–50 步：得分率 50.8%（均勢持平）。
+  * **51–80 步（關鍵中殘局戰術過渡盤）：勝率崩跌至 46.7%**（主要的潰敗來源）。
+  * >80 步（深殘局）：得分率 47.9%。
+* **失敗根因深度分析**：
+  1. **HCE 與 NNUE 的噪聲特性根本差異**：Stockfish 19 的 NNUE 評估極度平滑，靜態評估殘差穩定；而 Classical HCE 在複雜中局容易產生突發性的局部戰術評估毛刺。
+  2. **TT 截斷意外扮演了「天然抗噪阻尼器」**：舊程式碼中 TT 命中將 `diff` 壓低甚至歸零，雖然在理論上犧牲了部分節點的更新頻率，但在實務上恰好過濾了巨量的戰術隨機噪聲，保護了全域修正歷史表不被偶發戰術走步污染。
+  3. **高增益除數引發飽和污染**：引擎中預設的 `CORRECTION_BONUS_HAS_MOVE_DIV = 10` 是在過去更新受阻背景下調配的高增益除數。一旦解耦，每個節點均以全量殘差進行更新，單步更新常打滿上限（±100~256），導致 Pawn / Minor Correction History 在 50 步前便迅速飽和。到了 51–80 步的中殘局過渡期，修正表已被嚴重的戰術噪聲污染，破壞了安靜步排序與深層前向剪枝的準確性。
+* **處置結論**：**立即回滾 (REVERTED)**。
+  * `chess_engine/classical/search.py` 完整復原至 `diff = max_eval - static_score`。
+  * 證實該項改動無法以零參數調整方式落地；若未來欲對齊 SF19 解耦靜態評估，必須大幅調降更新權重（如除數提高至 24~32）並以 SPSA 重擬全套修正係數。
+  * 隨後轉入**實驗 A（Fail-Low TT best_move 保護 + cutoff_cnt 隔離）**推進。
