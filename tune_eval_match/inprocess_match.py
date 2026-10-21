@@ -98,10 +98,10 @@ def reset_ctx_tables(ctx: SearchContext) -> None:
 
 def load_openings(path: Optional[Path], limit: int) -> List[str]:
     if path is None or not path.exists():
-        # Prefer openings EPD, then puzzles
+        # Prefer tournament openings EPD, then diagnostics/puzzles
         for candidate in (
-            ROOT / "data" / "hist_diag_openings_500.epd",
             ROOT / "data" / "openings.epd",
+            ROOT / "data" / "hist_diag_openings_500.epd",
             ROOT / "data" / "hist_diag_puzzles_500.epd",
         ):
             if candidate.exists():

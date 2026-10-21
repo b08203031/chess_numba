@@ -101,8 +101,14 @@ def _build_inprocess_runner(args, param_names, start_batch=0):
     if args.openings:
         openings_path = Path(args.openings)
     else:
-        openings_path = ROOT / "data" / "hist_diag_openings_500.epd"
-    openings = load_openings(openings_path, limit=max(500, args.games * 2))
+        openings_path = ROOT / "data" / "openings.epd"
+    # --openings-limit lets a long campaign draw a fresh opening for every pair
+    # (e.g. 600 batches x 7 pairs) instead of wrapping a 500-position list.
+    # Keep it constant across --resume runs: it fixes the shuffled opening order.
+    openings = load_openings(
+        openings_path,
+        limit=max(500, args.games * 2, int(getattr(args, "openings_limit", 0) or 0)),
+    )
     # Shuffle with a private RNG: the global ``random`` stream drives SPSA
     # deltas and is checkpointed for resume, so it must not be consumed here.
     openings = list(openings)
@@ -793,7 +799,19 @@ def main():
         default=0.1,
         help="Fishtest A ratio (A = ratio * total paired games; default: 0.1)",
     )
-    parser.add_argument("--openings", type=str, default=None, help="EPD/FEN source for inprocess matches")
+    parser.add_argument(
+        "--openings",
+        type=str,
+        default=str(ROOT / "data" / "openings.epd"),
+        help="EPD/FEN source for inprocess matches (default: data/openings.epd)",
+    )
+    parser.add_argument(
+        "--openings-limit",
+        type=int,
+        default=0,
+        help="inprocess only: max openings loaded (default 0 -> max(500, 2*games)); "
+             "set >= batches*games/2 so SPSA never replays an opening",
+    )
     parser.add_argument("--log-every", type=int, default=10, help="match progress interval")
     parser.add_argument(
         "--adjudicate",

@@ -205,8 +205,11 @@ python -m tune_search.search_tuner --params LMR_MIN_DEPTH \
 *   `--schedule-iterations <N>`: 完整 Fishtest 衰減排程的批次總數；新 campaign 預設等於
     `--iter`，resume 時若省略會讀 checkpoint 的原值。
 *   `--spsa-a-ratio <R>`: `A = R * paired_games`，預設 `0.1`；更換時必須使用新的 state。
+*   `--openings <Path>` / `--openings-limit <N>`: inprocess 開局來源與載入上限。預設只載入 `max(500, 2*games)` 局，長 campaign 會重複使用開局；請把 `--openings-limit` 設為 `>= iter * games / 2`（例如 `data/openings.epd` + `5000`），並在 `--resume` 時保持不變（它決定洗牌後的開局順序）。
 *   `--log <Path>`: 每次啟動與每次 iteration 的 JSONL 紀錄檔。
 *   `--tc <Time>`: 只供 UCI backend 使用的時間控制，格式為 `秒+增量` (例如 `0.1+0.01`)。
+
+**SEE 專用 profile（E85）**：`--profile see`（或 `--params` 明列）會調 5 個 SEE 軸：`PRUNING_CAPTURE_SEE_MARGIN`、`PRUNING_QUIET_SEE_MARGIN`、`QS_SEE_THRESHOLD`、`CHECK_SEE_THRESHOLD`、`CAP_SEE_CAPTHIST_NUM`。Colab 版見根目錄 `tune_colab_runner.ipynb`（150k nodes、600 輪 × 14 局、每輪即時戰況；`--resume` 時 `--iter` 需傳「剩餘輪數」）。
 
 ### 步驟 4: 查看結果
 系統會提供詳細的即時輸出：

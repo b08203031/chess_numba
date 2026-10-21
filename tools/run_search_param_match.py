@@ -93,7 +93,7 @@ def main() -> None:
     )
     ap.add_argument("--concurrency", type=int, default=6)
     ap.add_argument("--tt-mb", type=int, default=16)
-    ap.add_argument("--openings", type=Path, default=Path("data/hist_diag_openings_500.epd"))
+    ap.add_argument("--openings", type=Path, default=Path("data/openings.epd"))
     ap.add_argument("--params", default=",".join(DEFAULT_NAMES))
     ap.add_argument("--param", action="append", default=[], metavar="NAME=VALUE")
     ap.add_argument(
