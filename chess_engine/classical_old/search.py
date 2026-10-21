@@ -15,7 +15,7 @@ from chess_engine.classical_old.move_generator import (
     PAWN_ATTACKS, KNIGHT_ATTACKS, KING_ATTACKS, get_bishop_attacks, get_rook_attacks
 )
 from chess_engine.classical_old.bitboard_utils import (
-    get_lsb_index, count_bits, LINE_BB, SQUARES_BETWEEN,
+    get_lsb_index, count_bits, LINE_BB, SQUARES_BETWEEN, ROOK_RAYS,
 )
 from chess_engine.classical_old.board_operations import make_move, unmake_move, make_null_move
 from chess_engine.classical_old.move import (
@@ -831,7 +831,7 @@ def quiescence_search(piece_bbs, occupancy_bbs, game_state, alpha, beta, ply, se
         if not is_currently_in_check:
             if ENABLE_DELTA_PRUNING:
                 is_promotion = qs_special_flag == SPECIAL_MOVE_FLAG_PROMOTION
-                promotion_gain = MG_MATERIAL_VALUES[4] - MG_MATERIAL_VALUES[0] if is_promotion else 0
+                promotion_gain = (MG_MATERIAL_VALUES[get_promotion_piece(move) + 1] - MG_MATERIAL_VALUES[0]) if is_promotion else 0
                 potential_gain = qs_vic_val + promotion_gain
                 
                 if stand_pat + potential_gain + search_context.tune[TUNE_DELTA_MARGIN] < alpha:
@@ -903,7 +903,7 @@ def quiescence_search(piece_bbs, occupancy_bbs, game_state, alpha, beta, ply, se
         if not is_currently_in_check:
             if ENABLE_SEE_IN_QUIESCENCE and move != qs_tt_move:
                 _diag_add(search_context, DIAG_Q_SEE_TRY)
-                if not _see_ge_jit(piece_bbs, occupancy_bbs, qs_side, qs_from_sq, qs_to_sq, search_context.tune[TUNE_QS_SEE], pinned_white, pinned_black, qs_att_type, qs_vic_type):
+                if not _see_ge_jit(piece_bbs, occupancy_bbs, qs_side, qs_from_sq, qs_to_sq, search_context.tune[TUNE_QS_SEE], pinned_white, pinned_black, qs_att_type, qs_vic_type, get_promotion_piece(move) + 1):
                     _diag_add(search_context, DIAG_Q_SEE_SKIP)
                     continue
 
@@ -1098,11 +1098,11 @@ def get_next_move(
                 _diag_add(search_context, DIAG_PICKER_SEE_TRY)
                 # Fast path: non-promotion captures where victim SEE value >= attacker SEE value always pass SEE >= 0
                 if (sp_flag != SPECIAL_MOVE_FLAG_PROMOTION
-                        and att_type != -1 and vic_type != -1
+                        and att_type != -1 and vic_type >= 0
                         and SEE_PIECE_VALUES[vic_type % 6] >= SEE_PIECE_VALUES[att_type % 6]):
                     is_good = True
                 else:
-                    is_good = _see_ge_jit(piece_bbs, occupancy_bbs, side_to_move, c_from, c_to, 0, pinned_white, pinned_black, att_type, vic_type)
+                    is_good = _see_ge_jit(piece_bbs, occupancy_bbs, side_to_move, c_from, c_to, 0, pinned_white, pinned_black, att_type, vic_type, get_promotion_piece(candidate_move) + 1)
                 
                 if is_good:
                     move = candidate_move
@@ -1713,7 +1713,7 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
             probcut_beta = beta + search_context.tune[TUNE_PROBCUT_MARGIN]
         
         # --- NEW: ProbCut TT Defense ---
-        # If TT bound is UPPER (Alpha) and TT score is less than probcut_beta,
+        # If TT bound is UPPER (Alpha) or EXACT at sufficient depth and TT score is less than probcut_beta,
         # it is highly unlikely a reduced depth search will exceed probcut_beta. Skip ProbCut.
         skip_probcut = False
         if tt_hit:
@@ -1721,7 +1721,9 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
             if tt_score_pc > MATE_IN_MAX_PLY: tt_score_pc -= ply
             elif tt_score_pc < -MATE_IN_MAX_PLY: tt_score_pc += ply
             
-            if tt_score_pc < probcut_beta:
+            if ((tt_flag == TT_FLAG_ALPHA or tt_flag == TT_FLAG_EXACT)
+                    and tt_depth >= depth - probcut_r
+                    and tt_score_pc < probcut_beta):
                 skip_probcut = True
                 
         if not skip_probcut:
@@ -1765,7 +1767,7 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                 # SEE filter: only try captures whose SEE >= probcut_beta - static_eval
                 see_threshold_pc = probcut_beta - static_score if static_score != -INFINITY else 0
                 _diag_add(search_context, DIAG_PROBCUT_SEE_TRY)
-                if not _see_ge_jit(piece_bbs, occupancy_bbs, game_state[0], pc_from, pc_to, see_threshold_pc, pc_pinned_w, pc_pinned_b):
+                if not _see_ge_jit(piece_bbs, occupancy_bbs, game_state[0], pc_from, pc_to, see_threshold_pc, pc_pinned_w, pc_pinned_b, -1, -1, get_promotion_piece(pc_move) + 1):
                     continue
     
                 pc_original_side = game_state[0]
@@ -2163,6 +2165,34 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                 and depth <= PRUNING_SHALLOW_DEPTH and not is_currently_in_check and not is_pv):
             side_to_move = original_side
 
+            # Fast O(1) Pre-make Legality check before Step 14 pruning (prevents illegal moves from incrementing pruned_moves)
+            if not skip_post_legality_s:
+                if from_sq != our_king_sq_s and flag != SPECIAL_MOVE_FLAG_EN_PASSANT:
+                    from_bb_s = BB_SQUARES[from_sq]
+                    if not (pinned_us_s & from_bb_s):
+                        skip_post_legality_s = True
+                    elif LINE_BB[from_sq, to_sq] & our_king_bb_s:
+                        skip_post_legality_s = True
+                    else:
+                        continue
+                elif from_sq == our_king_sq_s and flag != SPECIAL_MOVE_FLAG_CASTLING:
+                    occ_without_king_s = occupancy_bbs[2] ^ our_king_bb_s
+                    if is_square_attacked_with_occ(piece_bbs, to_sq, occ_without_king_s, opponent_side_s):
+                        continue
+                    skip_post_legality_s = True
+                elif flag == SPECIAL_MOVE_FLAG_EN_PASSANT:
+                    ep_cap_sq_s = (from_sq & 56) | (to_sq & 7)
+                    occ_ep_s = (occupancy_bbs[2] ^ BB_SQUARES[from_sq] ^ BB_SQUARES[ep_cap_sq_s]) | BB_SQUARES[to_sq]
+                    if is_square_attacked_with_occ(piece_bbs, our_king_sq_s, occ_ep_s, opponent_side_s):
+                        continue
+                    skip_post_legality_s = True
+                elif flag == SPECIAL_MOVE_FLAG_CASTLING:
+                    mid_sq_s = (from_sq + to_sq) >> 1
+                    if (is_square_attacked(piece_bbs, occupancy_bbs, mid_sq_s, opponent_side_s)
+                            or is_square_attacked(piece_bbs, occupancy_bbs, to_sq, opponent_side_s)):
+                        continue
+                    skip_post_legality_s = True
+
             if is_capture:
                 cap_piece = int(find_piece_type_on_square_side(piece_bbs, from_sq, side_to_move))
                 if flag == SPECIAL_MOVE_FLAG_EN_PASSANT:
@@ -2218,7 +2248,7 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                     threshold = threshold - cap_hist * CAP_SEE_CAPTHIST_NUM // CAP_SEE_CAPTHIST_DEN
                 _diag_add(search_context, DIAG_MAIN_CAP_SEE_TRY)
                 cap_victim_see = -2 if flag == SPECIAL_MOVE_FLAG_EN_PASSANT else cap_victim
-                if not _see_ge_jit(piece_bbs, occupancy_bbs, side_to_move, from_sq, to_sq, threshold, pinned_white, pinned_black, cap_piece, cap_victim_see):
+                if not _see_ge_jit(piece_bbs, occupancy_bbs, side_to_move, from_sq, to_sq, threshold, pinned_white, pinned_black, cap_piece, cap_victim_see, get_promotion_piece(move) + 1):
                     pruned_moves += 1
                     _diag_add(search_context, DIAG_SEE_CAP_SKIP)
                     continue
@@ -2227,8 +2257,14 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                 see_piece = int(find_piece_type_on_square_side(
                     piece_bbs, from_sq, side_to_move,
                 ))
-                pre_move_gives_check = flag == SPECIAL_MOVE_FLAG_CASTLING
-                if not pre_move_gives_check:
+                if flag == SPECIAL_MOVE_FLAG_CASTLING:
+                    rook_to_sq_s = (from_sq + to_sq) >> 1
+                    occ_after_castle_s = (all_occ_s ^ BB_SQUARES[from_sq]) | BB_SQUARES[to_sq]
+                    pre_move_gives_check = (
+                        (ROOK_RAYS[their_king_sq_s] & BB_SQUARES[rook_to_sq_s]) != 0
+                        and (get_rook_attacks(rook_to_sq_s, occ_after_castle_s) & their_king_bb_s) != 0
+                    )
+                else:
                     pre_move_gives_check = _qsearch_ordinary_move_gives_check(
                         piece_bbs, move, side_to_move_s, their_king_bb_s,
                         check_sq_pawn_s, check_sq_knight_s, check_sq_bishop_s,
@@ -2241,7 +2277,7 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                 if pre_move_gives_check:
                     threshold = search_context.tune[TUNE_SEE_CAP_MARGIN] * depth
                     _diag_add(search_context, DIAG_MAIN_CHECK_SEE_ROUTE)
-                    if not _see_ge_jit(piece_bbs, occupancy_bbs, side_to_move, from_sq, to_sq, threshold, pinned_white, pinned_black, see_piece, -2):
+                    if flag != SPECIAL_MOVE_FLAG_CASTLING and not _see_ge_jit(piece_bbs, occupancy_bbs, side_to_move, from_sq, to_sq, threshold, pinned_white, pinned_black, see_piece, -2):
                         pruned_moves += 1
                         continue
                 else:
@@ -2389,22 +2425,6 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                                 pruned_moves += 1
                                 continue
 
-                    # Fast O(1) Pre-make Legality check before Quiet SEE
-                    if not skip_post_legality_s and not is_currently_in_check:
-                        if from_sq != our_king_sq_s and flag != SPECIAL_MOVE_FLAG_EN_PASSANT:
-                            from_bb_s = BB_SQUARES[from_sq]
-                            if not (pinned_us_s & from_bb_s):
-                                skip_post_legality_s = True
-                            elif LINE_BB[from_sq, to_sq] & our_king_bb_s:
-                                skip_post_legality_s = True
-                            else:
-                                continue
-                        elif from_sq == our_king_sq_s and flag != SPECIAL_MOVE_FLAG_CASTLING:
-                            occ_without_king_s = occupancy_bbs[2] ^ our_king_bb_s
-                            if is_square_attacked_with_occ(piece_bbs, to_sq, occ_without_king_s, opponent_side_s):
-                                continue
-                            skip_post_legality_s = True
-
                     # --- Step 14d: Quiet SEE Pruning ---
                     see_lmr_d = compute_quiet_pruning_lmr_depth(
                         depth, quiet_move_counter, improving, search_context, ply,
@@ -2415,7 +2435,7 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                         * see_lmr_d * see_lmr_d
                     )
                     _diag_add(search_context, DIAG_MAIN_QUIET_SEE_TRY)
-                    if not _see_ge_jit(piece_bbs, occupancy_bbs, side_to_move, from_sq, to_sq, threshold, pinned_white, pinned_black, see_piece, -2):
+                    if flag != SPECIAL_MOVE_FLAG_CASTLING and not _see_ge_jit(piece_bbs, occupancy_bbs, side_to_move, from_sq, to_sq, threshold, pinned_white, pinned_black, see_piece, -2):
                         pruned_moves += 1
                         _diag_add(search_context, DIAG_SEE_QUIET_SKIP)
                         continue
@@ -2446,7 +2466,18 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                         _diag_add(search_context, DIAG_MAIN_QUIET_POST_KING_ILLEGAL)
                     continue  # King walks into attack
                 skip_post_legality_s = True
-            # else: EP or Castling — fall through to post-make check
+            elif flag == SPECIAL_MOVE_FLAG_EN_PASSANT:
+                ep_cap_sq_s = (from_sq & 56) | (to_sq & 7)
+                occ_ep_s = (occupancy_bbs[2] ^ BB_SQUARES[from_sq] ^ BB_SQUARES[ep_cap_sq_s]) | BB_SQUARES[to_sq]
+                if is_square_attacked_with_occ(piece_bbs, our_king_sq_s, occ_ep_s, opponent_side_s):
+                    continue
+                skip_post_legality_s = True
+            elif flag == SPECIAL_MOVE_FLAG_CASTLING:
+                mid_sq_s = (from_sq + to_sq) >> 1
+                if (is_square_attacked(piece_bbs, occupancy_bbs, mid_sq_s, opponent_side_s)
+                        or is_square_attacked(piece_bbs, occupancy_bbs, to_sq, opponent_side_s)):
+                    continue
+                skip_post_legality_s = True
 
         if quiet_see_passed_s and not skip_post_legality_s:
             _diag_add(search_context, DIAG_MAIN_QUIET_FALLBACK_TRY)
@@ -2462,30 +2493,42 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                 is_bad_capture = not _see_ge_jit(
                     piece_bbs, occupancy_bbs, original_side,
                     from_sq, to_sq, 0, pinned_white, pinned_black,
+                    -1, -1, get_promotion_piece(move) + 1,
                 )
             else:
                 is_bad_capture = (search_context.mp_stage[ply] == STAGE_BAD_CAPTURES)
 
         # Pre-compute SEE on parent board for check extension to avoid post-make unmake/remake round-trip
         if ENABLE_CHECK_EXTENSION and not is_pv and move != tt_move and depth > CHECK_EXT_NON_PV_MAX_DEPTH:
-            gives_check_candidate = (
-                flag == SPECIAL_MOVE_FLAG_CASTLING or flag == SPECIAL_MOVE_FLAG_EN_PASSANT or is_promotion
-                or _qsearch_ordinary_move_gives_check(
-                    piece_bbs, move, original_side, their_king_bb_s,
-                    check_sq_pawn_s, check_sq_knight_s, check_sq_bishop_s,
-                    check_sq_rook_s, check_sq_queen_s,
-                    blockers_for_their_king_s,
+            if flag == SPECIAL_MOVE_FLAG_CASTLING:
+                rook_to_sq_ce = (from_sq + to_sq) >> 1
+                occ_after_castle_ce = (all_occ_s ^ BB_SQUARES[from_sq]) | BB_SQUARES[to_sq]
+                gives_check_candidate = (
+                    (ROOK_RAYS[their_king_sq_s] & BB_SQUARES[rook_to_sq_ce]) != 0
+                    and (get_rook_attacks(rook_to_sq_ce, occ_after_castle_ce) & their_king_bb_s) != 0
                 )
-            )
+            else:
+                gives_check_candidate = (
+                    flag == SPECIAL_MOVE_FLAG_EN_PASSANT or is_promotion
+                    or _qsearch_ordinary_move_gives_check(
+                        piece_bbs, move, original_side, their_king_bb_s,
+                        check_sq_pawn_s, check_sq_knight_s, check_sq_bishop_s,
+                        check_sq_rook_s, check_sq_queen_s,
+                        blockers_for_their_king_s,
+                    )
+                )
             if gives_check_candidate:
                 _diag_add(search_context, DIAG_CHECK_GATE_SEE_TRY)
-                if (is_capture and search_context.enable_lmr and depth >= LMR_MIN_DEPTH
+                if flag == SPECIAL_MOVE_FLAG_CASTLING:
+                    check_gate_see_ok = True
+                elif (is_capture and search_context.enable_lmr and depth >= LMR_MIN_DEPTH
                         and searched_legal_moves >= 1):
                     check_gate_see_ok = not is_bad_capture
                 else:
                     check_gate_see_ok = _see_ge_jit(
                         piece_bbs, occupancy_bbs, original_side,
                         from_sq, to_sq, 0, pinned_white, pinned_black,
+                        -1, -1, get_promotion_piece(move) + 1,
                     )
 
         # --- Step 15: Singular Extensions & Multi-Cut (Pre-make, move == tt_move) ---

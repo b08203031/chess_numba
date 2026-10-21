@@ -110,30 +110,30 @@ def _spec(
 
 
 # ---------------------------------------------------------------------------
-# Runtime-backed axes (one compile; 42 slots in SearchContext.tune[])
+# Runtime-backed axes (one compile; 44 slots in SearchContext.tune[])
 # ---------------------------------------------------------------------------
 _RUNTIME_SPECS = [
     _spec("RFP_BASE_MULT", "RFP_BASE_MULT", 120, 230, 5, "pruning", runtime_attr="TUNE_RFP_MULT", spsa_r_end=0.8),
     _spec("RAZORING_COEFF", "RAZORING_COEFF", 200, 800, 25, "pruning", runtime_attr="TUNE_RAZOR_COEFF", spsa_r_end=0.8),
     _spec("FP_BASE", "FP_BASE", 100, 300, 10, "pruning", runtime_attr="TUNE_FP_BASE", spsa_r_end=0.8),
     _spec("FP_MULTIPLIER", "FP_MULTIPLIER", 60, 220, 10, "pruning", runtime_attr="TUNE_FP_MULT", spsa_r_end=0.8),
-    _spec("PRUNING_CAPTURE_SEE_MARGIN", "PRUNING_CAPTURE_SEE_MARGIN", -250, 0, 25, "pruning", runtime_attr="TUNE_SEE_CAP_MARGIN", spsa_r_end=0.6),
-    _spec("PRUNING_QUIET_SEE_MARGIN", "PRUNING_QUIET_SEE_MARGIN", -200, -5, 15, "pruning", runtime_attr="TUNE_SEE_QUIET_MARGIN", spsa_r_end=0.6),
+    _spec("PRUNING_CAPTURE_SEE_MARGIN", "PRUNING_CAPTURE_SEE_MARGIN", -280, 0, 20, "pruning", runtime_attr="TUNE_SEE_CAP_MARGIN", spsa_r_end=0.6),
+    _spec("PRUNING_QUIET_SEE_MARGIN", "PRUNING_QUIET_SEE_MARGIN", -200, -5, 8, "pruning", runtime_attr="TUNE_SEE_QUIET_MARGIN", spsa_r_end=0.6),
     _spec("LMR_BASE_OFFSET", "LMR_BASE_OFFSET", 250, 700, 20, "lmr", runtime_attr="TUNE_LMR_BASE_OFFSET", spsa_r_end=0.8),
     _spec("LMR_HISTORY_SCALE", "LMR_HISTORY_SCALE", 50, 400, 12, "lmr", runtime_attr="TUNE_LMR_HIST_SCALE", spsa_r_end=0.8),
     _spec("DELTA_PRUNING_MARGIN", "DELTA_PRUNING_MARGIN", 150, 700, 25, "qsearch", runtime_attr="TUNE_DELTA_MARGIN", spsa_r_end=0.8),
     _spec("PROBCUT_MARGIN", "PROBCUT_MARGIN", 80, 300, 10, "pruning", runtime_attr="TUNE_PROBCUT_MARGIN", spsa_r_end=0.6),
     _spec("LMR_BAD_CAPTURE_BONUS", "LMR_BAD_CAPTURE_BONUS", 0, 1800, 64, "lmr", runtime_attr="TUNE_BAD_CAP_BONUS", spsa_r_end=0.8),
     _spec("LMR_GOOD_CAPTURE_RELIEF", "LMR_GOOD_CAPTURE_RELIEF", 0, 1800, 64, "lmr", runtime_attr="TUNE_GOOD_CAP_RELIEF", spsa_r_end=0.8),
-    _spec("LMP_SCALE_PERCENT", "LMP_SCALE_PERCENT", 70, 140, 5, "pruning", runtime_attr="TUNE_LMP_SCALE", spsa_r_end=0.6),
+    _spec("LMP_SCALE_PERCENT", "LMP_SCALE_PERCENT", 70, 180, 5, "pruning", runtime_attr="TUNE_LMP_SCALE", spsa_r_end=0.6),
     _spec("LMR_KILLER_COUNTER_RELIEF", "LMR_KILLER_COUNTER_RELIEF", 0, 1800, 64, "lmr", runtime_attr="TUNE_KILLER_RELIEF", spsa_r_end=0.8),
-    _spec("QS_SEE_THRESHOLD", "QS_SEE_THRESHOLD", -200, 0, 10, "qsearch", runtime_attr="TUNE_QS_SEE", spsa_r_end=0.6),
+    _spec("QS_SEE_THRESHOLD", "QS_SEE_THRESHOLD", -220, 0, 10, "qsearch", runtime_attr="TUNE_QS_SEE", spsa_r_end=0.6),
     _spec("LMR_CUTNODE_BONUS", "LMR_CUTNODE_BONUS", 0, 3000, 60, "lmr", runtime_attr="TUNE_LMR_CUTNODE", spsa_r_end=0.8),
     _spec("LMR_NO_TTMOVE_BONUS", "LMR_NO_TTMOVE_BONUS", 0, 2500, 128, "lmr", runtime_attr="TUNE_LMR_NO_TTMOVE", spsa_r_end=0.8),
     _spec("LMR_TTCAPTURE_BONUS", "LMR_TTCAPTURE_BONUS", 0, 2500, 50, "lmr", runtime_attr="TUNE_LMR_TTCAP", spsa_r_end=0.8),
     _spec("LMR_MOVECOUNT_FACTOR", "LMR_MOVECOUNT_FACTOR", 0, 100, 3, "lmr", runtime_attr="TUNE_LMR_MC_FACTOR", spsa_r_end=0.8),
     _spec("LMR_TTMOVE_REDUCTION", "LMR_TTMOVE_REDUCTION", 0, 2500, 128, "lmr", runtime_attr="TUNE_LMR_TTMOVE_RED", spsa_r_end=0.8),
-    _spec("NMP_EVAL_MARGIN_DIV", "NMP_EVAL_MARGIN_DIV", 120, 450, 16, "nmp", runtime_attr="TUNE_NMP_EVAL_DIV", spsa_r_end=0.8),
+    _spec("NMP_EVAL_MARGIN_DIV", "NMP_EVAL_MARGIN_DIV", 90, 450, 16, "nmp", runtime_attr="TUNE_NMP_EVAL_DIV", spsa_r_end=0.8),
     _spec("SINGULAR_MARGIN_BASE", "SINGULAR_MARGIN_BASE", 20, 120, 4, "extensions", runtime_attr="TUNE_SINGULAR_MARGIN_BASE", spsa_r_end=0.8),
     _spec("SINGULAR_TTPV_BONUS", "SINGULAR_TTPV_BONUS", 0, 140, 4, "extensions", runtime_attr="TUNE_SINGULAR_TTPV_BONUS", spsa_r_end=0.8),
     _spec("PROBCUT_STYLE_MODE", "PROBCUT_STYLE_MODE", 0, 2, 1, "pruning", kind="discrete", runtime_attr="TUNE_PROBCUT_STYLE", spsa_r_end=0.4),
@@ -142,11 +142,11 @@ _RUNTIME_SPECS = [
     _spec("NMP_BASE", "NMP_BASE", 120, 350, 10, "nmp", runtime_attr="TUNE_NMP_BASE", spsa_r_end=0.8),
     _spec("NMP_DEPTH_COEF", "NMP_DEPTH_COEF", 6, 26, 2, "nmp", runtime_attr="TUNE_NMP_DEPTH_COEF", spsa_r_end=0.8),
     _spec("NMP_IMP_COEF", "NMP_IMP_COEF", 15, 75, 5, "nmp", runtime_attr="TUNE_NMP_IMP_COEF", spsa_r_end=0.8),
-    _spec("RFP_SCORE_BETA_WEIGHT", "RFP_SCORE_BETA_WEIGHT", 0, 1024, 16, "pruning", runtime_attr="TUNE_RFP_BLEND_BETA", spsa_r_end=0.6),
-    _spec("NMP_R_BASE", "NMP_R_BASE", 4, 12, 1, "nmp", runtime_attr="TUNE_NMP_R_BASE", spsa_r_end=0.6),
+    _spec("RFP_SCORE_BETA_WEIGHT", "RFP_SCORE_BETA_WEIGHT", 128, 768, 32, "pruning", runtime_attr="TUNE_RFP_BLEND_BETA", spsa_r_end=0.6),
+    _spec("NMP_R_BASE", "NMP_R_BASE", 4, 12, 1, "nmp", kind="discrete", runtime_attr="TUNE_NMP_R_BASE", spsa_r_end=0.6),
     _spec("NMP_R_DIV", "NMP_R_DIV", 1, 8, 1, "nmp", kind="discrete", runtime_attr="TUNE_NMP_R_DIV", spsa_r_end=0.6),
     _spec("NMP_VERIFICATION_DEPTH", "NMP_VERIFICATION_DEPTH", 5, 18, 1, "nmp", kind="discrete", runtime_attr="TUNE_NMP_VERIFY_DEPTH", spsa_r_end=0.4),
-    _spec("PRUNING_CONTINUATION_THRESHOLD", "PRUNING_CONTINUATION_THRESHOLD", -3000, -500, 50, "pruning", runtime_attr="TUNE_CONT_PRUNE_THR", spsa_r_end=0.6),
+    _spec("PRUNING_CONTINUATION_THRESHOLD", "PRUNING_CONTINUATION_THRESHOLD", -2500, -800, 100, "pruning", runtime_attr="TUNE_CONT_PRUNE_THR", spsa_r_end=0.6),
     _spec("HISTORY_BONUS_SCALE", "HISTORY_BONUS_SCALE", 40, 240, 10, "history", runtime_attr="TUNE_HIST_BONUS_SCALE", spsa_r_end=0.8),
     _spec("HISTORY_BONUS_CAP", "HISTORY_BONUS_CAP", 800, 3000, 100, "history", runtime_attr="TUNE_HIST_BONUS_CAP", spsa_r_end=0.8),
     # Phase 7: band narrowed after the Phase 6 SPSA@100k pushed this cap to 1788
@@ -159,6 +159,9 @@ _RUNTIME_SPECS = [
     _spec("HISTORY_QUIET_MALUS_DECAY_NUM", "HISTORY_QUIET_MALUS_DECAY_NUM", 880, 1000, 8, "history", runtime_attr="TUNE_HIST_MALUS_DECAY", spsa_r_end=0.8),
     _spec("LMR_DIVISOR_DEPTH_STEP", "LMR_DIVISOR_DEPTH_STEP", 0, 256, 16, "lmr", runtime_attr="TUNE_LMR_DIV_STEP", spsa_r_end=0.8),
     _spec("HISTORY_QUIET_MALUS_SCALE_NUM", "HISTORY_QUIET_MALUS_SCALE_NUM", 768, 1280, 32, "history", runtime_attr="TUNE_HIST_MALUS_SCALE", spsa_r_end=0.8),
+    # SEE-related runtime slots (slots 42-43; rescaled for MG_MATERIAL_VALUES SEE)
+    _spec("CHECK_SEE_THRESHOLD", "CHECK_SEE_THRESHOLD", -220, 0, 10, "ordering", runtime_attr="TUNE_CHECK_SEE_THR", spsa_r_end=0.6),
+    _spec("CAP_SEE_CAPTHIST_NUM", "CAP_SEE_CAPTHIST_NUM", 0, 96, 4, "pruning", runtime_attr="TUNE_CAP_SEE_HIST_NUM", spsa_r_end=0.6),
 ]
 
 
@@ -219,7 +222,7 @@ _COMPILE_SPECS = [
     _spec("SCORE_BAD_CAPTURE_PENALTY", "SCORE_BAD_CAPTURE_PENALTY", -10000, -1000, 500, "ordering", spsa_r_end=0.5),
     _spec("GOOD_QUIET_THRESHOLD", "GOOD_QUIET_THRESHOLD", -3000, 0, 100, "ordering", spsa_r_end=0.5),
     _spec("CHECK_BONUS", "CHECK_BONUS", 10000, 30000, 1000, "ordering", spsa_r_end=0.5),
-    _spec("CHECK_SEE_THRESHOLD", "CHECK_SEE_THRESHOLD", -200, 0, 10, "ordering", spsa_r_end=0.5),
+    # CHECK_SEE_THRESHOLD promoted to runtime slot 42 (TUNE_CHECK_SEE_THR)
     _spec("THREAT_MULTIPLIER", "THREAT_MULTIPLIER", 0, 40, 2, "ordering", spsa_r_end=0.5),
     _spec("QUIET_ORDER_KILLER_2", "QUIET_ORDER_KILLER_2", 100000, 600000, 10000, "ordering", spsa_r_end=0.5),
     _spec("LPH_ORDER_SCALE", "LPH_ORDER_SCALE", 0, 16, 1, "ordering", spsa_r_end=0.5),
@@ -262,6 +265,7 @@ SEARCH_PARAM_BY_NAME: Dict[str, SearchParamSpec] = {
 PROFILE_NAMES = (
     "runtime",
     "runtime_continuous",
+    "see",
     "pruning",
     "nmp",
     "lmr",
@@ -283,6 +287,19 @@ DEFAULT_PROFILE = "runtime"
 CATEGORICAL_PARAMS = frozenset(
     {
         "PROBCUT_STYLE_MODE",
+    }
+)
+
+# Zero-gradient / dead-code runtime slots excluded from active SPSA perturbation
+# (see Phase 3 plan: slot 23 categorical switch, slots 37-38 step-function killer/counter
+# bonuses whose local perturbation never changes relative move order, and slot 19
+# LMR_TTMOVE_REDUCTION which is unreachable dead code inside searched_legal_moves >= 2).
+FROZEN_RUNTIME_PARAMS = frozenset(
+    {
+        "PROBCUT_STYLE_MODE",
+        "QUIET_ORDER_KILLER_1",
+        "QUIET_ORDER_COUNTER",
+        "LMR_TTMOVE_REDUCTION",
     }
 )
 
@@ -342,7 +359,18 @@ def profile_names(profile: str = DEFAULT_PROFILE) -> Tuple[str, ...]:
         return tuple(
             spec.name
             for spec in SEARCH_PARAM_SPECS
-            if spec.is_runtime and spec.kind == "continuous" and spec.name not in CATEGORICAL_PARAMS
+            if spec.is_runtime
+            and spec.kind == "continuous"
+            and spec.name not in CATEGORICAL_PARAMS
+            and spec.name not in FROZEN_RUNTIME_PARAMS
+        )
+    if key == "see":
+        return (
+            "PRUNING_CAPTURE_SEE_MARGIN",
+            "PRUNING_QUIET_SEE_MARGIN",
+            "QS_SEE_THRESHOLD",
+            "CHECK_SEE_THRESHOLD",
+            "CAP_SEE_CAPTHIST_NUM",
         )
     if key == "all":
         return tuple(spec.name for spec in SEARCH_PARAM_SPECS)

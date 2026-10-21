@@ -349,6 +349,53 @@ class TestSearchCoreContracts(unittest.TestCase):
             self.assertEqual(len(staged_moves), len(set(staged_moves)), f"Duplicate staged moves in {fen}")
             self.assertEqual(sorted(full_moves), sorted(staged_moves), f"Staged vs full mismatch in {fen}")
 
+    def test_see_review_fixes(self):
+        from chess_engine.classical.constants import WHITE, PAWN, KNIGHT, QUEEN
+        from chess_engine.classical.fen_parser import parse_fen
+        from chess_engine.classical.move_generator import get_pinned_pieces
+        from chess_engine.classical.see import _see_jit, _see_ge_jit
+
+        # 1A. Initial move is the pinner leaving the pin ray (Qe2xc4 unpins Black Ne5)
+        pb, ob, _ = parse_fen("4k3/8/8/4n3/2p5/8/4Q3/6K1 w - - 0 1")
+        pw = get_pinned_pieces(pb, ob, 0)
+        pb_pin = get_pinned_pieces(pb, ob, 1)
+        self.assertEqual(int(_see_jit(pb, ob, WHITE, 12, 26, pw, pb_pin)), -1070)
+        self.assertFalse(bool(_see_ge_jit(pb, ob, WHITE, 12, 26, 0, pw, pb_pin)))
+
+        # 1B. Mid-exchange pinner captures into to_sq, unpinning piece for next turn
+        # White Ke1(4), Ne3(20), Bf1(5); Black Re4(28) pinning Ne3, Black Pc4(26), Ke8(60)
+        pb, ob, _ = parse_fen("4k3/8/8/8/2p1r3/4N3/8/4KB2 w - - 0 1")
+        pw = get_pinned_pieces(pb, ob, 0)
+        pb_pin = get_pinned_pieces(pb, ob, 1)
+        self.assertEqual(int(_see_jit(pb, ob, WHITE, 5, 26, pw, pb_pin)), 100)
+        self.assertTrue(bool(_see_ge_jit(pb, ob, WHITE, 5, 26, 0, pw, pb_pin)))
+
+        # 2. Subsequent back-rank pawn promotion inside _see_ge_jit loop (1. Qxd8 Rxd8 2. cxd8=Q Kxd8)
+        # 2*Rook (1144) - Queen (1170) - Pawn (100) = -126 (vs -598 without promotion bonus)
+        pb, ob, _ = parse_fen("r2rk3/2P5/8/8/8/8/8/3Q2K1 w - - 0 1")
+        pw = get_pinned_pieces(pb, ob, 0)
+        pb_pin = get_pinned_pieces(pb, ob, 1)
+        self.assertEqual(int(_see_jit(pb, ob, WHITE, 3, 59, pw, pb_pin)), -126)
+        self.assertTrue(bool(_see_ge_jit(pb, ob, WHITE, 3, 59, -126, pw, pb_pin)))
+        self.assertFalse(bool(_see_ge_jit(pb, ob, WHITE, 3, 59, -125, pw, pb_pin)))
+
+        # 3. Underpromotion uses actual promoted piece SEE value instead of Queen (b7b8=N vs b7b8=Q)
+        pb, ob, _ = parse_fen("4k3/1P6/8/8/8/8/8/4K3 w - - 0 1")
+        pw = get_pinned_pieces(pb, ob, 0)
+        pb_pin = get_pinned_pieces(pb, ob, 1)
+        self.assertEqual(int(_see_jit(pb, ob, WHITE, 49, 57, pw, pb_pin, PAWN, -1, KNIGHT)), 247)
+        self.assertEqual(int(_see_jit(pb, ob, WHITE, 49, 57, pw, pb_pin, PAWN, -1, QUEEN)), 1070)
+        self.assertFalse(bool(_see_ge_jit(pb, ob, WHITE, 49, 57, 500, pw, pb_pin, PAWN, -1, KNIGHT)))
+        self.assertTrue(bool(_see_ge_jit(pb, ob, WHITE, 49, 57, 500, pw, pb_pin, PAWN, -1, QUEEN)))
+
+        # 4. Self-contained EP detection works even when caller passes victim_type=PAWN (0)
+        # White Pe5(36), Qd1(3), Kg1(6); Black Pd5(35), Rd8(59), Kg8(62). exd6 e.p. uncovers Qd1 X-ray on d6(43)
+        pb, ob, _ = parse_fen("3r2k1/8/8/3pP3/8/8/8/3Q2K1 w - d6 0 1")
+        pw = get_pinned_pieces(pb, ob, 0)
+        pb_pin = get_pinned_pieces(pb, ob, 1)
+        self.assertEqual(int(_see_jit(pb, ob, WHITE, 36, 43, pw, pb_pin, PAWN, PAWN)), 100)
+        self.assertTrue(bool(_see_ge_jit(pb, ob, WHITE, 36, 43, 100, pw, pb_pin, PAWN, PAWN)))
+
 
 if __name__ == '__main__':
     unittest.main()

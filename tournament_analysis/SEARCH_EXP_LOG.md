@@ -1,8 +1,8 @@
 # Classical 搜尋單項實驗日誌
 
 > **用途：** 連續 A/B 實驗的唯一進度表與決策紀錄。未來接續實驗、回顧為何留下/回滾，以此檔為準。  
-> **最後更新：** 2026-10-20  
-> **當前基準狀態：** **E76 阻尼微調（412 $\beta$ + 612 eval）已採納進生產基線**（RFP 截斷回傳值阻尼混合，相較 E72 原始基線累積 +14.94 Elo，相較 E75.1 363 基線取得 123W 315D 114L，+5.67 Elo；E77 312 回滾；接續 E72）。
+> **最後更新：** 2026-10-21  
+> **當前基準狀態：** **E84（SEE 全套漏洞修補與 Step 14 前置合法性預檢）已採納進生產基線**（600 局 123W 372D 105L，51.50%，**+10.43 Elo**，淨勝 +18 局，每步節點數 -1.1% 極度顯著，同深度節點比 0.981–0.997；接續 E81 ProbCut TT Defense 與 E76 RFP 412 阻尼基線）。
 
 ---
 
@@ -2454,6 +2454,149 @@ LMP skip 體積 ≫ RFP ≈ FP/Razor/hist-prune 帶 ≫ NMP ≫ ProbCut
 * **判定：** **立即回滾 (REVERTED)**。
   * `chess_engine/classical/search.py` 完整復原至 `diff = max_eval - static_score`。
   * `tools/sync_classical_old.py --diff-code` 確證 100% 邏輯等價（0 diff）。
+
+### E80 / 實驗 A：修復 `cutoff_cnt` 跨層污染隔離 + Fail-Low TT `best_move` 保護（600 局 -4.63 Elo 實測落敗回滾 REVERTED）
+
+* **改動項目與動機：**
+  1. **ProbCut 與 NMP 之 `cutoff_cnt` 跨層污染隔離（`chess_engine/classical/search.py:1728, 1841, 2109`）**：
+     * 在 ProbCut 嘗試吃子前保存 `search_context.cutoff_cnt[ply + 1]`，若未觸發 ProbCut 截斷則予以還原；並對齊 SF19 Step 13，於 ProbCut 與 NMP 結束後、進入主迴圈前執行 `search_context.cutoff_cnt[ply + 2] = 0`，防止失敗的前向探測殘留高截斷計數污染主變例首步子樹的 LMR 減深。
+  2. **Fail-Low 時保護既有 `tt_move`（Bug 1 微創修復，`chess_engine/classical/search.py:3333-3341`）**：
+     * 當節點 Fail-Low（`best_move == NO_MOVE`）時，若該節點原本已有合法的 `tt_move != NO_MOVE`，則保留 `best_move = tt_move` 避免被 `moves[0]` 覆寫；僅在原本 `tt_move == NO_MOVE` 的全新 ALL-Node 上回退至 `moves[0]`。
+* **常數與程式設定：**
+  * New（候選，`chess_engine/classical/search.py`）：Stage 1 基線 + 實驗 A（`cutoff_cnt` 隔離 + Fail-Low `tt_move` 保留）。
+  * Old（基線，`chess_engine/classical_old/search.py`）：Stage 1 零樹變動基線。
+* **對戰驗證結果（Colab 600 局 LTC 400k nodes，換先平衡 300 對完整完賽）：**
+  * **戰績**：**116 勝 360 和 124 負**（得分率 **49.33%**，總得分 296.0 / 600，淨負 **-8 局 / -4.0 分**）。
+  * **相對 Elo**：**-4.63 Elo**（±16.80，95% CI: `[-21.44, +12.15]`）。
+  * **前後半場與分段軌跡**：
+    * 前半場 150 對（300 局）：53W 184D 63L（得分率 `48.3%`，主要受前 40 對 11W 48D 21L 開場亂流拖累）。
+    * 後半場 150 對（300 局）：63W 176D 61L（得分率 `50.3%`，淨勝 +2 局，後段回歸五五開均勢）。
+  * **先手/後手表現**：
+    * 持白：51.50%（62W 185D 53L），持黑：47.17%（54W 175D 71L；對應 Old 持白 52.83%，屬正常先手優勢範圍，無顯著執色不對稱，$p = 0.179$）。
+  * **盤長分佈特徵**：
+    * 短局 ($\le 25$ 步)：0W 61D 1L（49.2%）。
+    * 中局 (26–50 步)：6W 150D 9L（49.1%）。
+    * 長局 (51–80 步)：75W 88D 81L（48.8%，淨負 -6 局）。
+    * 超長局 ($>80$ 步)：35W 61D 33L（**50.8%**，淨勝 +2 局）。
+  * **配對九宮格（300 對）**：DD 109 (36.3%), DL 40 (13.3%), DW 36 (12.0%), WD 34 (11.3%), LD 32 (10.7%), WL 20 (6.7%), LL 11 (3.7%), LW 10 (3.3%), WW 8 (2.7%)。
+* **搜尋指標分析（`parse_search_stats.py`，樣本數 36,389 步 vs 36,348 步）：**
+  * **平均深度**：19.83 vs 19.82 ply（差異 `+0.01 ply`, Welch $t = +0.090, p = 0.928$，統計完全等價；$\text{depth} \ge 14$ 比例 `90.4%` vs `90.3%`）。
+  * **每步節點數**：248,282 vs 248,320（差異 `-0.0%`, Welch $t = -0.100, p = 0.920$，同深度節點比在 `d=10..24` 均落於 `0.990 ~ 1.004`）。
+  * **耗時 / NPS**：473.5 ms vs 474.3 ms（`-0.8 ms`）；NPS 604,157 vs 603,082（`+0.2%`, $p = 0.641$）。
+* **判讀與處置：**
+  * 實測 `-4.63 Elo`（95% CI `[-21.44, +12.15]` 含 0），搜尋深度與節點數完全持平，顯示改動效果小於 600 局測試解析度（±17 Elo）。（註：關於 Fail-Low 保留安靜 `tt_move` 是否影響 `tt_capture` 相關剪枝僅為未經診斷計數驗證之假說。）
+* **判定：** **回滾 (REVERTED)**。
+  * 依門檻規範（49.33% $\le$ 49.5%，點估計為負）撤銷實驗 A 的 3 處改動，還原 `chess_engine/classical/search.py` 至 Stage 1 基線，並轉入 **實驗 D（修復 ProbCut TT Defense 漏檢，Bug 4）**。
+
+### E81 / 實驗 D：修復 ProbCut TT Defense 漏檢（Bug 4，600 局 +1.16 Elo 採納進生產基線 ADOPTED）
+
+* **改動項目與動機：**
+  * 檔案：`chess_engine/classical/search.py:1724-1727`。
+  * 根因病灶：原 ProbCut TT Defense 註解載明「若 TT 為上界（`TT_FLAG_ALPHA`）且分數低於 `probcut_beta` 則跳過 ProbCut」，但實作僅寫 `if tt_score_pc < probcut_beta: skip_probcut = True`，漏檢了 `tt_flag` 與 `tt_depth`。這導致當 TT 存放的是下界分數（`TT_FLAG_BETA`，真實分數 $\ge \text{tt\_score\_pc}$）或淺層紀錄（如 `depth = 0` 的 QSearch）時，ProbCut 遭到錯誤關閉。
+  * 修復方式：補齊邊界與深度有效性條件：
+    ```python
+    if ((tt_flag == TT_FLAG_ALPHA or tt_flag == TT_FLAG_EXACT)
+            and tt_depth >= depth - probcut_r
+            and tt_score_pc < probcut_beta):
+        skip_probcut = True
+    ```
+* **對戰驗證結果（Colab 600 局 LTC 400k nodes，換先平衡 300 對完整完賽）：**
+  * **戰績**：**119 勝 364 和 117 負**（得分率 **50.17%**，總得分 301.0 / 600，淨勝 **+2 局 / +1.0 分**）。
+  * **相對 Elo**：**+1.16 Elo**（±17.33，95% CI: `[-16.17, +18.49]`）。
+  * **前後半場與執色**：前半場 300 局 `49.5%`，後半場 300 局 `50.8%`；執白 `53.50%`（71W 179D 50L），執黑 `46.83%`（48W 185D 67L，對應 Old 執白 `53.17%`，完全對稱）。
+  * **盤長分佈**：短局 `49.1%`、中局 `49.6%`、長局 (51–80 步) **51.0%**（79W 99D 74L，淨勝 +5 局）、超長局 ($>80$ 步) `49.7%`（34W 84D 35L）。
+* **搜尋指標分析（`parse_search_stats.py`，樣本數 37,599 步 vs 37,562 步）：**
+  * **平均深度**：19.67 vs 19.73 ply（差異 `-0.06 ply`, Welch $t = -0.558, p = 0.577$，無顯著差異；$\text{depth} \ge 14$ 比例均為 `90.5%`）。
+  * **同深度平均節點比（關鍵結構訊號）**：在 `d = 9 .. 24` 全數 16 個深度層上，New/Old 同深度節點比一致落在 **`0.984 ~ 0.997`**（全局每步節點數 245,524 vs 247,644，**`-0.9%`**，Welch $t = -5.854, p = 4.83 \times 10^{-9}$ 極度顯著），證實修復後 ProbCut 正常放行並成功削減了約 1% 的搜尋樹節點。
+  * **耗時 / NPS**：461.1 ms vs 458.4 ms（`+2.7 ms`）；NPS 612,465 vs 620,805（`-1.3%`），反映更多節點進入 ProbCut 嘗試吃子生成、SEE 與 QSearch 前置驗證的合理成本。
+* **物理機理解析與採納決策：**
+  1. **搜尋樹行為完全符合預期**：解除 `TT_FLAG_BETA` 與淺層 TT 對 ProbCut 的誤封鎖後，ProbCut 截斷率提升使每一層同深度節點數穩定縮減 0.5%～1.6%，與多付出的 1.3% NPS 嘗試成本相抵，在未重調 `TUNE_PROBCUT_MARGIN` 下即維持 +1.16 Elo 正向平盤。
+  2. **符合「近平手有優勢」與正確性修復原則**：Elo 點估計 $> 0$、深度差異 $\le 0.1$ ply、NPS 差異 $\le 5\%$，且消除了「註解與實作不符」的邏輯缺陷。
+  3. **後續 SPSA 協同空間**：現行 `TUNE_PROBCUT_MARGIN`（槽位 22）係在舊版 ProbCut 被過度壓制下調出；已將 `TUNE_PROBCUT_MARGIN` 納入第三階段 SPSA 清單以釋放完整潛力。
+* **判定：** **採納進生產 / 基線 (ADOPTED / PRODUCTION BASELINE UPDATED)**。
+  * 已透過 `python tools/sync_classical_old.py --sync` 同步至 `chess_engine/classical_old/`，並接續實裝 **實驗 B（QSearch 維護 `move_stack`/`piece_stack` 並接通修正歷史）**。
+
+### E82 / 實驗 B：QSearch 維護 `move_stack`/`piece_stack` 並接通修正歷史（68 局 -204.75 Elo 嚴重崩盤，立即回滾 REVERTED）
+
+* **改動項目與動機：**
+  * 嘗試在 `quiescence_search` 中對 `stand_pat`（以及最大 QSearch 深度回傳值）套用 `apply_correction_history_score`，並在遞迴前更新 `search_context.move_stack[ply]` 與 `piece_stack[ply]`，以消除主搜尋 `depth = 1` 與靜態搜尋 `depth = 0` 交界處的靜態估值斷差。
+* **對戰驗證結果（Colab LTC 400k nodes，68 局 / 34 對換先即觸發大敗判定中止）：**
+  * **戰績**：**2 勝 28 和 38 負**（得分率 **23.53%**，總得分 16.0 / 68，淨負 **-36 局**）。
+  * **相對 Elo**：**-204.75 Elo**（95% CI: `[-283.19, -141.62]`）。
+  * **執色表現**：持白 `23.53%`（2W 12D 20L），持黑 `23.53%`（0W 16D 18L），雙色全面潰敗。
+* **搜尋指標分析（`parse_search_stats.py`，68 局，樣本數 4,902 步 vs 4,917 步）：**
+  * **平均搜尋深度（嚴重崩塌）**：New **18.27 ply** vs Old **20.10 ply**（暴跌 **`-1.83 ply`**，Welch $t = -4.957, p = 7.26 \times 10^{-7}$；中位數深度由 `16` 跌至 `15`）。
+  * **深層抵達率（$\text{depth} \ge 14$）**：由 Old 的 **89.6%** 崩跌至 **68.5%**（`-21.1%`）！
+  * **同深度節點比**：在主力深度 `d = 12 .. 15` 上，同深度節點消耗暴增 **`+4.9% ~ +5.8%`**（`ratio = 1.049 ~ 1.058`）。
+  * **NPS 與耗時**：NPS 由 639,607 跌至 **599,709（`-6.2%`，$p = 1.35 \times 10^{-10}$）**；每步耗時增加 `+21.4 ms`（`+4.8%`）。
+* **物理機理解析（重大工程教訓：為何 HCE 修正歷史絕對不可進入 QSearch）：**
+  1. **訓練域與推理域嚴重錯位（Quiet-Trained History Applied to Capture Chains）**：
+     * 在主搜尋 `_search`（第 3362 行 `if not is_capture:`）中，四張修正歷史表（Pawn、Minor、Non-Pawn、Continuation）**100% 僅在最佳步為「安靜步」時才更新**，其學習的是靜態陣型的慢變偏置。
+     * 然而 `quiescence_search` 是純粹的**連續吃子交換鏈**。在 QSearch 中每走一步吃子，`PAWN_KEY`、`MINOR_KEY` 與 `NON_PAWN_KEY` 都會瞬間跳轉到一個未經該路線訓練的雜湊桶；同時將 QSearch 吃子步寫入 `move_stack[ply]` 後，`continuation_correction_history` 會在深層吃子鏈上查出完全無關的修正值（高達 $\pm 50 \sim 100\text{ cp}$）。
+  2. **QSearch `stand_pat` 截斷與 Delta Pruning 大規模失靈，引發葉節點爆炸**：
+     * 在連續吃子清算中疊加隨機陣型修正偏置，一方面使大量本應 `stand_pat >= beta` 截斷的節點跌破門檻而被迫展開全套吃子分支（導致 QSearch 節點暴增，在 400k 固定節點預算下直接吸乾主搜尋算力，造成平均深度暴跌 `-1.83 ply`）；另一方面在戰術交換末端產生高達數十厘兵的估值扭曲並透過 `store_tt` 的 `tt_score` 寫入置換表，導致戰術清算全面失準。
+  3. **熱路徑快取懲罰**：QSearch 佔總節點數 60% 以上，每節點額外查閱 4 張修正歷史表直接造成 `-6.2%` 的 NPS 損失。
+* **判定：** **立即回滾 (REVERTED)，列為永久架構禁區**。
+  * 已將 `chess_engine/classical/search.py` 100% 還原至 E81 生產基線（`sync_classical_old.py --diff-code` 確證 0 diff）。
+
+### E83 / 實驗 E：Stockfish 19 Step 18 LMR 重搜門檻校準與 Step 19 條件式過渡降深（418 局 -9.98 Elo、深度顯著下滑 -0.42 ply，回滾 REVERTED）
+
+* **改動項目與動機：**
+  1. `constants.py:1300`：將 `LMR_RESEARCH_SHALLOWER_MARGIN` 由 `15` 下調至 `4`（對齊 SF19 `doShallowerSearch = value < bestValue + 9` 之百厘兵尺度）。
+  2. `search.py:2909`：在 `do_shallower` 加上 `and not (lmr == 1 and cut_node)` 安全守衛，避免 `lmr == 1` 時因 `adjusted_depth == lmr_depth` 直接跳過重搜。
+  3. `search.py:2860`：對齊 SF19 Step 19，當吃子步之後的第一個安靜步（`quiet_move_counter == 1` 且 `searched_legal_moves >= 2`）於 `not is_pv and cut_node`、非殺手/反擊步且 `lmr_stat_score < 0` 時，給予溫和的 `lmr = 1` 過渡降深。
+* **對戰驗證結果（Colab LTC 400k nodes，418 局 / 209 對換先平衡）：**
+  * **戰績**：**82 勝 242 和 94 負**（得分率 **48.56%**，總得分 203.0 / 418，淨負 **-12 局 / -6.0 分**）。
+  * **相對 Elo**：**-9.98 Elo**（±19.99，95% CI: `[-30.00, +9.98]`；自第 100 局起累積得分率持續處於 `46.5% ~ 48.9%` 水下）。
+  * **執色與盤長特徵**：
+    * 持白：`53.59%`（49W 126D 34L）；持黑：**`43.54%`**（33W 116D 60L，防守端明顯吃虧）。
+    * 短局 ($\le 25$ 步) `50.0%`、中局 (26–50 步) `49.1%`、長局 (51–80 步) `48.5%`（52W 61D 57L）、超長局 ($>80$ 步) `47.4%`（20W 52D 25L）。
+* **搜尋指標分析（`parse_search_stats.py`，418 局，樣本數 26,330 步 vs 26,307 步）：**
+  * **平均搜尋深度（統計顯著下滑）**：New **19.32 ply** vs Old **19.73 ply**（下滑 **`-0.42 ply`**，Welch $t = -2.913, p = 0.0036$ **高度顯著**）。
+  * **深層抵達率（$\text{depth} \ge 14$）**：由 Old 的 **90.3%** 下跌至 **85.0%**（**`-5.3%`**；卡在 `d = 11..13` 淺層的比例由 `9.1%` 增至 `14.3%`）。
+  * **同深度平均節點比**：在主力深度 `d = 14 .. 18` 一致膨脹 **`+1.0% ~ +2.4%`**（`d=14: 1.015`, `d=15: 1.024`, `d=16: 1.013`, `d=17: 1.010`, `d=18: 1.010`）。
+  * **NPS 與耗時**：NPS 599,468 vs 605,006（`-0.9%`, $p = 0.0406$）；每步耗時 470.9 ms vs 468.1 ms（`+2.8 ms`）。
+* **物理機理解析（為何引發「LMR 重搜風暴 Re-search Explosion」並拖垮深度）：**
+  1. **`LMR_RESEARCH_SHALLOWER_MARGIN` (15 $\to$ 4) 與 Fail-Soft 平滑回傳的尺度衝突**：
+     * 本引擎採用 **QSearch Fail-High 平滑**（`481 * score + 543 * beta`）與 **RFP Fail-Soft 阻尼混合**（`412 * beta + 612 * eval`），導致零視窗子搜尋突破 Alpha 時，回傳分數常態性落在 `alpha + 6 ~ 14 cp`。
+     * 在舊版（門檻 `15`）中，這批邊際突破的 LMR 著法會觸發 `do_shallower = True`（使 `lmr == 1` 免除重搜，或使 `lmr >= 2` 以 `search_depth - 1` 淺一層重搜，節省約 45% 重搜節點）。將門檻壓至 `4` 並加上 `not (lmr == 1 and cut_node)` 後，大量邊際 Fail-High 著法被迫執行昂貴的全深度（`search_depth`）重搜。
+  2. **Step 19 對首步安靜步（`quiet_move_counter == 1`）降深 1 層的「雙重搜尋懲罰」**：
+     * 在 `cut_node` 上，當吃子步未能截斷時，排序第一的安靜步（`quiet_move_counter == 1`）極常是真正的突破步。舊版直接以 `search_depth` 搜 1 次即截斷；新版先以 `search_depth - 1` 搜第 1 次，突破 Alpha 後又因 `not (lmr == 1 and cut_node)` 被強制以 `search_depth` 重搜第 2 次，總耗費節點變為 $\text{Nodes}(d-1) + \text{Nodes}(d) \approx 1.6\text{x} \text{Nodes}(d)$。
+  3. **400k 固定節點預算下的深度擠壓**：中層迭代（`d = 14..18`）節點膨脹 `+1.0% ~ +2.4%`，使搜尋提前觸及軟節點上限而中止，導致 $\text{depth} \ge 14$ 比例下跌 `5.3%`、平均深度損失 `0.42 ply`。
+* **判定：** **回滾 (REVERTED)**。
+  * 已將 `chess_engine/classical/constants.py` 與 `chess_engine/classical/search.py` 100% 還原至 E81 生產基線（`sync_classical_old.py --diff-code` 確證 0 diff），並正式推進至第三階段 SPSA 參數空間整備。
+
+### E84：SEE 靜態交換評估全套漏洞修補與 Step 14 前置合法性預檢（600 局 +10.43 Elo、淨勝 +18 局，正式採納進生產基線 ADOPTED）
+
+* **改動項目與動機（詳見 [`chess_engine/classical/SEE_ANALYSIS.md`](../chess_engine/classical/SEE_ANALYSIS.md)）：**
+  1. **動態牽制過濾與牽制線反吃（`chess_engine/classical/see.py` `filter_pinned_attackers`）**：
+     * 允許被牽制棋子沿牽制線（`LINE_BB[king_sq, to_sq]`）合法反吃；若被牽制子不在該線上，當牽制線（`LINE_BB[king_sq, p_sq]`）在交換初始或中途有棋子離開（`removed_occ & pin_line != 0`）時，動態驗證敵方滑動子是否仍牽制該子，解除牽制後即恢復其反吃能力。
+  2. **升變與欠升變（Underpromotion）完整計分與底線後續升變截斷保護（`see.py`, `search.py`, `search_heuristics.py`）**：
+     * `_see_jit` 與 `_see_ge_jit` 新增 `promo_type` 參數（由呼叫端傳入 `get_promotion_piece(move) + 1`），並同步修正 QSearch Delta Pruning 之 `promotion_gain`，杜絕欠升變（升馬/象/車）被高估為皇后（900/1170 cp）。
+     * 在交換迴圈內處理底線後續兵重吃升變（`+promo_gain`），並在 `_see_ge_jit` 提前截斷條件加入 `if not is_promo_rank or (swap + promo_gain ...)` 守衛，避免在底線格因未計入下一輪兵升變收益而提早誤判跳出。
+  3. **過路兵自包含判定與 `-2` 哨兵值安全防護（`see.py`, `search.py`, `search_heuristics.py`）**：
+     * 直接由 `(initial_occ & BB_SQUARES[to_sq]) == 0` 判定空格與過路兵並移除 `ep_sq` 佔用位元；在 `_see_jit` 相容 `victim_type == -2`，在 MovePicker Fast Path 要求 `vic_type >= 0`，並在 `search_heuristics.py` 過路兵排序與將軍 SEE 門檻統一傳入 `-2` 哨兵以跳過冗餘敵方 bitboard 掃描。
+  4. **王車易位將軍預判與 SEE 豁免 + Step 14 前置 $O(1)$ 合法性預檢（`search.py`）**：
+     * 修正王車易位的 `pre_move_gives_check` 為檢查易位後城堡落點 `rook_to_sq = (from_sq + to_sq) >> 1` 是否對敵王將軍，且王車易位不送入 `_see_ge_jit`（對齊 Stockfish 視為 `SEE = 0`）。
+     * 將 $O(1)$ 前置合法性檢查（涵蓋牽制子、國王走法、過路兵揭露將軍、王車易位路徑受攻）提前至 Step 14 淺層剪枝入口，防止非法偽合法走法因剪枝而遞增 `pruned_moves`，徹底保護無合法走法時的逼和（Stalemate）終局判定。
+* **對戰驗證結果（Colab 600 局 LTC 400k nodes，換先平衡 300 對完整完賽）：**
+  * **戰績**：**123 勝 372 和 105 負**（得分率 **51.50%**，總得分 309.0 / 600，淨勝 **+18 局 / +9.0 分**）。
+  * **相對 Elo**：**+10.43 Elo**（95% CI: `[-5.69, +26.59]`，成對換先配對聚類 $n=300$）。
+  * **前後半場與執色表現**：
+    * 前半場 150 對（300 局）：得分率 **53.0%**（64W 190D 46L，淨勝 +18 局）；後半場 150 對（300 局）：得分率 **50.0%**（59W 182D 59L，穩健守平）。
+    * 持白：**52.83%**（68W 181D 51L，淨勝 +17 局）；持黑：**50.17%**（55W 191D 54L，淨勝 +1 局，**持黑勝率突破 50%！**）。
+  * **配對九宮格（300 對）**：DD 111 (37.0%), WD 46 (15.3%) vs LD 34 (11.3%, 淨勝 +12 對), DW 39 (13.0%) vs DL 31 (10.3%, 淨勝 +8 對), WL 16 (5.3%), LW 10 (3.3%), LL 7 (2.3%), WW 6 (2.0%)。
+  * **盤長分佈特徵（全區間全數 $\ge 50\%$）**：
+    * 短局 ($\le 25$ 步)：1W 75D 0L（**50.7%**）。
+    * 中局 (26–50 步)：11W 135D 5L（**52.0%**，淨勝 +6 局）。
+    * 長局 (51–80 步)：83W 82D 73L（**52.1%**，淨勝 +10 局）。
+    * 超長局 ($>80$ 步)：28W 80D 27L（**50.4%**，淨勝 +1 局）。
+* **搜尋指標分析（`parse_search_stats.py`，600 局，樣本數 36,777 步 vs 36,735 步）：**
+  * **平均搜尋深度**：New **19.64 ply** vs Old **19.76 ply**（差異 `-0.12 ply`, Welch $t = -1.045, p = 0.296$，統計不顯著；$\text{depth} \ge 14$ 比例 `89.7%` vs `90.1%`）。
+  * **每步節點數與同深度節點比（關鍵樹效率提升）**：每步節點數 **245,396 vs 248,189（`-1.1%`**, Welch $t = -7.505, p = 6.20 \times 10^{-14}$ 極度顯著）；在 `d = 11 .. 24` 全數 14 個深度層上，同深度節點比一致落在 **`0.981 ~ 0.997`**。
+  * **耗時 / NPS**：每步耗時 790.7 ms vs 782.2 ms（`+8.5 ms`, `+1.1%`）；NPS 365,350 vs 372,166（`-1.8%`）。
+* **判定：** **正式採納進生產 / 基線 (ADOPTED / PRODUCTION BASELINE UPDATED)**。
+  * 已透過 `python tools/sync_classical_old.py --sync` 將 `search.py`、`search_heuristics.py`、`see.py` 完整同步至 `chess_engine/classical_old/`（`--diff` 確證 100% 0 diff）。
 
 ---
 

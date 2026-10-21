@@ -860,7 +860,7 @@ ENABLE_REVERSE_QUIET = False
 # Quiet check ordering
 # E1 (2026-07-16): experiment CHECK_SEE_GATE=True (SEE >= -75 before CHECK_BONUS)
 CHECK_BONUS = 20000
-CHECK_SEE_THRESHOLD = -75
+CHECK_SEE_THRESHOLD = -85  # Rescaled x1.134 for MG_MATERIAL_VALUES SEE (was -75)
 ENABLE_CHECK_SEE_GATE = True
 
 # Threat reordering — disabled (regressed when enabled)
@@ -977,7 +977,10 @@ TUNE_ORDER_COUNTER = 38     # quiet move ordering counter move bonus (QUIET_ORDE
 TUNE_HIST_MALUS_DECAY = 39  # failed-quiet geometric decay numerator (HISTORY_QUIET_MALUS_DECAY_NUM / 1024)
 TUNE_LMR_DIV_STEP = 40      # LMR stat-score divisor growth per ply above MIN_DEPTH (LMR_DIVISOR_DEPTH_STEP)
 TUNE_HIST_MALUS_SCALE = 41  # failed-quiet initial malus multiplier numerator (HISTORY_QUIET_MALUS_SCALE_NUM / 1024)
-TUNE_SIZE = 42
+# SEE runtime slots (slots 42-43)
+TUNE_CHECK_SEE_THR = 42     # quiet check ordering SEE gate threshold (CHECK_SEE_THRESHOLD)
+TUNE_CAP_SEE_HIST_NUM = 43  # capture SEE pruning capture-history slope numerator (CAP_SEE_CAPTHIST_NUM / 1024)
+TUNE_SIZE = 44
 # E2 tried 70 (puzzle +6 pass, nodes +25%); match @200k nodes: depth↓, no Elo.
 LMR_TABLE_SCALE_PERCENT = 113  # Alpha 0.40 candidate (was 114 in 0.50)
 LMR_NOT_IMP_NUM = 205  # Alpha 0.40 candidate (was 208 in 0.50)
@@ -1005,8 +1008,8 @@ ENABLE_HISTORY_PRUNING = True      # Enable pruning based on History Score
 # (policy lifted 2026-07-19). Prefer Elo/pass gates over "must not exceed SF11".
 # SEE: SF11 capture ~-194 internal → ~-151 @0.78; current values stay until A/B.
 PRUNING_SHALLOW_DEPTH = 12
-PRUNING_CAPTURE_SEE_MARGIN = -102  # E64 (was -100; SPSA L1 13.8k + L2 1000@300k +8.7 Elo)
-PRUNING_QUIET_SEE_MARGIN = -32     # E64 (was -24; SPSA L1 13.8k + L2 1000@300k +8.7 Elo)
+PRUNING_CAPTURE_SEE_MARGIN = -116  # Rescaled x1.134 for MG_MATERIAL_VALUES SEE (was -102 in E64)
+PRUNING_QUIET_SEE_MARGIN = -36     # Rescaled x1.134 for MG_MATERIAL_VALUES SEE (was -32 in E64)
 
 # Master switches for existing pruning techniques / 現有剪枝技術的總開關
 ENABLE_NMP = True           # Null Move Pruning
@@ -1029,7 +1032,7 @@ CAP_FP_CAPTHIST_NUM = 131      # + captHist * NUM // DEN
 CAP_FP_CAPTHIST_DEN = 1024
 # Capture SEE: threshold = SEE_CAP_MARGIN * depth - captHist * NUM // DEN
 # (good/high captHist → more negative threshold → harder to prune; matches SF sign)
-CAP_SEE_CAPTHIST_NUM = 34
+CAP_SEE_CAPTHIST_NUM = 39      # Rescaled x1.134 for MG_MATERIAL_VALUES SEE (was 34)
 CAP_SEE_CAPTHIST_DEN = 1024
 
 # Alpha-raise depth reduction (kept for re-enable experiments; production OFF).
@@ -1157,7 +1160,7 @@ DELTA_PRUNING_MARGIN = 350
 # --- Static Exchange Evaluation (SEE) Threshold / SEE 閾值 ---
 SEE_THRESHOLD = 0
 # QS SEE (P0 try -60: puzzle OK but no clear node win on suite → keep -80)
-QS_SEE_THRESHOLD = -80
+QS_SEE_THRESHOLD = -91  # Rescaled x1.134 for MG_MATERIAL_VALUES SEE (was -80)
 ENABLE_SEE_IN_QUIESCENCE = True
 
 # =============================================================================

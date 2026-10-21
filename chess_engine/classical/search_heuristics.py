@@ -2,7 +2,7 @@ import numba
 import numpy as np
 
 from chess_engine.classical.move import (
-    get_to_square, get_from_square, get_special_move_flag,
+    get_to_square, get_from_square, get_special_move_flag, get_promotion_piece,
     SPECIAL_MOVE_FLAG_PROMOTION, SPECIAL_MOVE_FLAG_EN_PASSANT
 )
 from chess_engine.classical.constants import (
@@ -20,7 +20,7 @@ from chess_engine.classical.constants import (
     HISTORY_PAWN_MALUS_THRESHOLD, ENABLE_CHECK_SEE_GATE, ENABLE_THREAT_REORDERING,
     HISTORY_LPH_SCALE_NUM, HISTORY_LPH_SCALE_DEN, LOW_PLY_HISTORY_MAX,
     QUIET_ORDER_KILLER_1, QUIET_ORDER_KILLER_2, QUIET_ORDER_COUNTER, LPH_ORDER_SCALE,
-    TUNE_ORDER_KILLER_1, TUNE_ORDER_COUNTER,
+    TUNE_ORDER_KILLER_1, TUNE_ORDER_COUNTER, TUNE_QS_SEE, TUNE_CHECK_SEE_THR,
     LOW_PLY_HISTORY_SIZE, LMR_REDUCTION_BASE_ADD, LMR_NOT_IMP_DEN, LMR_NOT_IMP_NUM,
     LMR_TABLE_SCALE_PERCENT, PAWN_KEY_INDEX, PAWN_HISTORY_MASK,
     QS_EVASION_CAPTURE_BUCKET, QS_EVASION_QUIET_CLAMP,
@@ -410,7 +410,8 @@ def score_captures(piece_bbs, occupancy_bbs, game_state, moves, scores, start_id
         victim_type = find_piece_type_on_square_side(piece_bbs, to_square, 1 - side_to_move)
         aggressor_type = find_piece_type_on_square_side(piece_bbs, from_sq, side_to_move)
         
-        if victim_type == -1 and get_special_move_flag(move) == SPECIAL_MOVE_FLAG_EN_PASSANT:
+        is_ep = (victim_type == -1 and get_special_move_flag(move) == SPECIAL_MOVE_FLAG_EN_PASSANT)
+        if is_ep:
             victim_type = 0 # Pawn value for En Passant
 
         mvv_lva = 0
@@ -420,7 +421,8 @@ def score_captures(piece_bbs, occupancy_bbs, game_state, moves, scores, start_id
         
         # Identify good vs bad capture using SEE right here (R1 Optimization)
         # Using threshold 0 to divide good/bad captures
-        is_good_capture = _see_ge_jit(piece_bbs, occupancy_bbs, side_to_move, from_sq, to_square, 0, pinned_white, pinned_black, aggressor_type, victim_type)
+        see_victim = -2 if is_ep else victim_type
+        is_good_capture = _see_ge_jit(piece_bbs, occupancy_bbs, side_to_move, from_sq, to_square, 0, pinned_white, pinned_black, aggressor_type, see_victim, get_promotion_piece(move) + 1)
         
         score = 0
         if is_good_capture:
@@ -451,7 +453,8 @@ def score_captures_with_tt(piece_bbs, occupancy_bbs, game_state, moves, scores, 
             victim_type = find_piece_type_on_square_side(piece_bbs, to_square, 1 - side_to_move)
             aggressor_type = find_piece_type_on_square_side(piece_bbs, from_sq, side_to_move)
             
-            if victim_type == -1 and get_special_move_flag(move) == SPECIAL_MOVE_FLAG_EN_PASSANT:
+            is_ep = (victim_type == -1 and get_special_move_flag(move) == SPECIAL_MOVE_FLAG_EN_PASSANT)
+            if is_ep:
                 victim_type = 0 # Pawn value for En Passant
 
             mvv_lva = 0
@@ -459,7 +462,8 @@ def score_captures_with_tt(piece_bbs, occupancy_bbs, game_state, moves, scores, 
             if victim_rel != -1:
                 mvv_lva = MG_MATERIAL_VALUES[victim_rel] - MG_MATERIAL_VALUES[aggressor_type % 6]
             
-            is_good_capture = _see_ge_jit(piece_bbs, occupancy_bbs, side_to_move, from_sq, to_square, QS_SEE_THRESHOLD, pinned_white, pinned_black, aggressor_type, victim_type)
+            see_victim = -2 if is_ep else victim_type
+            is_good_capture = _see_ge_jit(piece_bbs, occupancy_bbs, side_to_move, from_sq, to_square, search_context.tune[TUNE_QS_SEE], pinned_white, pinned_black, aggressor_type, see_victim, get_promotion_piece(move) + 1)
             
             if is_good_capture:
                 score = SCORE_GOOD_CAPTURE_BONUS + mvv_lva
@@ -572,7 +576,7 @@ def score_quiets(
             if is_check_candidate:
                 if (not ENABLE_CHECK_SEE_GATE) or _see_ge_jit(
                         piece_bbs, occupancy_bbs, side_to_move, from_sq, to_square,
-                        CHECK_SEE_THRESHOLD, pinned_white, pinned_black, aggressor_type, -2):
+                        search_context.tune[TUNE_CHECK_SEE_THR], pinned_white, pinned_black, aggressor_type, -2):
                     score += CHECK_BONUS
 
             # --- Threat-Based Reordering (Part B); off in Phase 1a ---
@@ -748,11 +752,13 @@ def score_moves(piece_bbs, occupancy_bbs, game_state, moves, scores, move_count,
                 victim_type = find_piece_type_on_square_side(piece_bbs, to_square, 1 - side_to_move)
                 aggressor_type = find_piece_type_on_square_side(piece_bbs, from_sq, side_to_move)
                 
-                if victim_type == -1 and get_special_move_flag(move) == SPECIAL_MOVE_FLAG_EN_PASSANT:
+                is_ep = (victim_type == -1 and get_special_move_flag(move) == SPECIAL_MOVE_FLAG_EN_PASSANT)
+                if is_ep:
                     victim_type = 0 # Pawn
  
                 # Optimization: Use see_ge(0) instead of full see()
-                is_good_capture = _see_ge_jit(piece_bbs, occupancy_bbs, side_to_move, from_sq, to_square, 0, pinned_white, pinned_black, aggressor_type, victim_type)
+                see_victim = -2 if is_ep else victim_type
+                is_good_capture = _see_ge_jit(piece_bbs, occupancy_bbs, side_to_move, from_sq, to_square, 0, pinned_white, pinned_black, aggressor_type, see_victim, get_promotion_piece(move) + 1)
                 
                 mvv_lva = 0
                 victim_rel = capture_victim_index(victim_type)
@@ -861,7 +867,7 @@ def score_moves(piece_bbs, occupancy_bbs, game_state, moves, scores, move_count,
                     if is_check_candidate:
                         if (not ENABLE_CHECK_SEE_GATE) or _see_ge_jit(
                                 piece_bbs, occupancy_bbs, side_to_move, from_sq, to_square,
-                                CHECK_SEE_THRESHOLD, pinned_white, pinned_black, aggressor_type, -1):
+                                search_context.tune[TUNE_CHECK_SEE_THR], pinned_white, pinned_black, aggressor_type, -2):
                             score += CHECK_BONUS
 
                     # --- Threat-Based Reordering (Part B); off in Phase 1a ---

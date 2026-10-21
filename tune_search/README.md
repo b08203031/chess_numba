@@ -3,7 +3,7 @@
 本目錄 (`tune_search/`) 包含了一套專為搜尋參數設計的自動化調優系統。與靜態評估調參不同，搜尋參數（如剪枝邊界、LMR 深度等）無法通過靜態數據集 (MSE) 進行優化，必須通過**實戰對局 (Match Playing)** 來驗證優劣。
 
 本系統採用 **SPSA (Simultaneous Perturbation Stochastic Approximation)** 演算法，透過讓引擎自我對弈來不斷調整參數，以提升棋力。參數定義現在集中在
-`search_param_registry.py`：目前盤點 **117 個實際搜尋標量**，其中 **42 個**已映射到
+`search_param_registry.py`：目前盤點 **118 個實際搜尋標量**，其中 **44 個**已映射到
 `SearchContext.tune[]`，其餘是需要重啟/JIT 的 compile-time 候選。這避免把不存在的
 舊名稱（例如早期的 `FP_MARGIN_D1`）誤當成可調參數。
 
@@ -53,7 +53,7 @@
 ## 3. 參數清冊與分階段調參
 
 不要把 117 個軸一次塞進 SPSA；高維度會讓每個回合的勝負訊號過於稀薄。調參器預設
-只選 runtime profile 的 42 個軸，並提供依搜尋機制拆分的 profile：
+只選 runtime profile 的 44 個軸，並提供依搜尋機制拆分的 profile（含專屬 `see` profile）：
 
 ```bash
 # 列出預設 runtime profile（不啟動引擎）
@@ -70,7 +70,7 @@ python -m tune_search.search_tuner --params LMR_BASE_OFFSET,LMR_HISTORY_SCALE,LM
     --backend inprocess --scale-mode integer --iter 20 --games 20 --nodes 30000 --concurrency 6
 ```
 
-`runtime`、`pruning`、`nmp`、`lmr`、`lmr_runtime`、`lmr_compile`、`qsearch`、
+`runtime`、`see`、`pruning`、`nmp`、`lmr`、`lmr_runtime`、`lmr_compile`、`qsearch`、
 `history`、`ordering`、`safeguards`、`aspiration` 和明確的 `all` 都來自同一份 registry。
 其中 `lmr_runtime` 只選 13 個 live slot，`lmr_compile` 只選 10 個需要重啟/JIT 的
 LMR 常數；`lmr` 才是兩者合併的完整 23 軸。每個條目都記錄預設值、邊界、最小步長、
@@ -185,7 +185,7 @@ compile-time 候選採用另一種節奏：先做單軸或 2–3 軸 coordinate 
 在專案根目錄執行以下指令：
 
 ```bash
-# runtime profile 可列出 42 個 live slot；實際 SPSA 先限制在同一機制的 block
+# runtime profile 可列出 44 個 live slot；實際 SPSA 先限制在同一機制的 block
 python -m tune_search.search_tuner --params \
     LMR_BASE_OFFSET,LMR_HISTORY_SCALE,LMR_CUTNODE_BONUS,LMR_TTCAPTURE_BONUS,LMR_MOVECOUNT_FACTOR,LMR_TABLE_SCALE_PERCENT \
     --backend inprocess --scale-mode integer --iter 20 --games 20 --nodes 30000 --concurrency 6 \
