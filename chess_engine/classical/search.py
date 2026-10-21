@@ -1503,7 +1503,6 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
 
     # --- H2: Static Evaluation & Improving Flag (computed BEFORE any pruning) ---
     static_score = -INFINITY
-    corrected_eval = -INFINITY
     improving = False
     
     # Correction History Adjustment
@@ -1519,7 +1518,6 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
             raw_static_eval, _, _ = _evaluate_position_jit(piece_bbs, occupancy_bbs, game_state, True, search_context)
 
         static_score = apply_correction_history_score(game_state, search_context, raw_static_eval, ply)
-        corrected_eval = static_score
         
         # --- H2 Enhancement: Refine static_score using trusted TT Score Bounds ---
         if tt_hit and not is_exclusion_search:
@@ -1727,6 +1725,7 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                 skip_probcut = True
                 
         if not skip_probcut:
+            saved_pc_child_cutoff = search_context.cutoff_cnt[ply + 1] if (ply + 1 < MAX_PLY) else np.int32(0)
             # We must only try captures.
             pc_move_count = generate_pseudo_legal_captures_buffer(piece_bbs, occupancy_bbs, game_state, search_context.moves_buffer, ply)
             
@@ -1837,6 +1836,10 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                     store_tt(search_context.transposition_table, tt_key, pc_tt_depth, tt_store_score_pc, np.int16(32767), TT_FLAG_BETA, pc_move, search_context.tt_generation, tt_pv)
                     _diag_add(search_context, DIAG_PROBCUT)
                     return (np.int32(probcut_return_score), pc_move, nodes_searched, quiescence_nodes, tt_hits)
+
+            # ProbCut finished all captures without cutoff: restore child cutoff_cnt
+            if ply + 1 < MAX_PLY:
+                search_context.cutoff_cnt[ply + 1] = saved_pc_child_cutoff
 
     # --- Null Move Pruning (guarded by H3) ---
     # =========================================================================
@@ -2100,6 +2103,11 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
 
     # opponent_pieces_bb is constant throughout this node (make/unmake restores occupancy)
     opponent_pieces_bb = occupancy_bbs[1] if game_state[0] == 0 else occupancy_bbs[0]
+
+    # SF19 Step 13: Reset grandchild cutoff_cnt AFTER ProbCut and NMP so failed
+    # null-move / ProbCut searches do not pollute the first move's LMR reductions.
+    if ply + 2 < MAX_PLY:
+        search_context.cutoff_cnt[ply + 2] = 0
 
     while True:
         move = get_next_move(
@@ -3322,13 +3330,15 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
 
     original_best_move = best_move
 
-    generated_end = max(search_context.mp_captures_end[ply], search_context.mp_quiets_end[ply])
-    if best_move == NO_MOVE and generated_end > 0:
-        # Fallback to first move that is not excluded
-        for i in range(generated_end):
-            if moves[i] != excluded_move:
-                best_move = moves[i]
-                break
+    if best_move == NO_MOVE:
+        if tt_move != NO_MOVE and tt_move != excluded_move:
+            best_move = tt_move
+        else:
+            generated_end = max(search_context.mp_captures_end[ply], search_context.mp_quiets_end[ply])
+            for i in range(generated_end):
+                if moves[i] != excluded_move:
+                    best_move = moves[i]
+                    break
     
     # --- Update Correction History ---
     if (not is_exclusion_search and depth >= CORRECTION_HISTORY_UPDATE_DEPTH
@@ -3349,9 +3359,9 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                 is_capture = ((occupancy_bbs[enemy_side] & BB_SQUARES[to_sq]) != 0) or (move_flag == SPECIAL_MOVE_FLAG_EN_PASSANT)
             
             has_best_move = (original_best_move != NO_MOVE)
-            if not is_capture and (max_eval > corrected_eval) == has_best_move:
-                # Exp C: Based on pure corrected_eval (SF19 Step 20 ss->staticEval), not TT-refined static_score
-                diff = max_eval - corrected_eval
+            if not is_capture and (max_eval > static_score) == has_best_move:
+                # Based on static_score calculation of bonus
+                diff = max_eval - static_score
                 bonus = trunc_div(
                     diff * depth,
                     (CORRECTION_BONUS_HAS_MOVE_DIV if has_best_move else CORRECTION_BONUS_NO_MOVE_DIV),
