@@ -200,7 +200,7 @@ python -m tests.perft divide --depth 4
 * **[Classical 搜尋單項實驗日誌](tournament_analysis/SEARCH_EXP_LOG.md)**：E1+ 連續 A/B（200@100k）、留下/回滾門檻、early-trash、累積基線；**E14 起診斷隨對戰**（可選 `tools/hist_diag_bench.py` 事後彙總）。
 * **[NMP 實驗計畫](tournament_analysis/NMP_EXPERIMENT_PLAN.md)**：~15% 節點貢獻診斷、S1 失敗複盤、漏斗 KPI 與 Phase 0–3 中間態實驗閘道。
 * **[搜尋 ↔ 評估介面](chess_engine/classical/SEARCH_EVAL_INTERFACE.md)**：KNOWN_WIN 護欄（**PR-A+B+C 已定稿**；122 局 50%）、NMP/RFP/ProbCut/Razor 與 SF11/SF18 對照。
-* **[SEE 專題](chess_engine/classical/SEE_ANALYSIS.md)**：Swap 演算法、射線過濾、動態解牽制、過路兵、升變/欠升變與 Step 14 前置合法性預檢（E84 600 局 @ 400k +10.43 Elo 採納）。
+* **[SEE 專題](chess_engine/classical/SEE_ANALYSIS.md)**：Swap 演算法、射線過濾、動態解牽制、過路兵、升變/欠升變、Step 14 前置合法性預檢（E84 600 局採納）與子力價值對齊 MG_MATERIAL_VALUES（E85 1000 局 LTC 400k +7.99 Elo 驗證與 5 軸 SPSA 微調）。
 * **[HCE 與 SF11 對齊審核](chess_engine/classical/HCE_SF11_GAP_AUDIT.md)**（**評估對齊主文件**）：階段 A/B/B3/B4/B5/P2、對戰結論；評估 P3 回滾；搜尋護欄交叉引用。
 * **[殘局 vs Stockfish 驗證](chess_engine/classical/ENDGAME_SF_VERIFICATION.md)**：專用殘局說明；日常測 `tests/test_endgame_conformance.py`，可選 oracle `tools/verify_endgame_vs_sf.py`。
 * **[歷史啟發](chess_engine/classical/HISTORY_HEURISTICS_CN.md)**：主 / 蝴蝶 / 吃子 / 延續 / 糾錯歷史與重力公式；**現用基線 Phase 1a**。

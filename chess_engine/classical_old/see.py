@@ -20,10 +20,16 @@ from chess_engine.classical_old.move_generator import (
 from chess_engine.classical_old.bitboard_utils import get_lsb_index, count_bits
 
 
-# Piece values for SEE (legacy ordering scale; Phase 1a keeps pre-P1 values).
-# Aligning to MG_MATERIAL_VALUES is a separate A/B — it changes QS/pruning globally.
-# King is extremely high so SEE never treats K as a capturable swap piece.
-SEE_PIECE_VALUES = np.array([100, 320, 330, 500, 900, 20000], dtype=np.int32)
+# Piece values for SEE: P/N/B/R/Q directly use MG_MATERIAL_VALUES;
+# King is set to 20000 so SEE never treats K as a free sacrificial swap piece.
+SEE_PIECE_VALUES = np.array([
+    MG_MATERIAL_VALUES[PAWN],
+    MG_MATERIAL_VALUES[KNIGHT],
+    MG_MATERIAL_VALUES[BISHOP],
+    MG_MATERIAL_VALUES[ROOK],
+    MG_MATERIAL_VALUES[QUEEN],
+    20000,
+], dtype=np.int32)
 
 # Basic Attack Tables (Initialize once if possible, or use logic)
 # Numba caches function compilation, so we can embed logic.

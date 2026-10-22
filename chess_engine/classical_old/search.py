@@ -166,6 +166,7 @@ from chess_engine.classical_old.constants import (
     TUNE_NMP_VERIFY_D, TUNE_NMP_SCOPE_MIND,
     TUNE_HIST_BONUS_SCALE, TUNE_HIST_BONUS_CAP, TUNE_HIST_MALUS_CAP,
     TUNE_HIST_MALUS_DECAY, TUNE_LMR_DIV_STEP, TUNE_HIST_MALUS_SCALE,
+    TUNE_CAP_SEE_HIST_NUM,
     TUNE_RFP_BLEND_BETA, TUNE_CONT_PRUNE_THR,
     PINNED_UNCOMPUTED_SENTINEL,
 )
@@ -2245,7 +2246,7 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                 # --- Capture SEE Pruning ---
                 threshold = search_context.tune[TUNE_SEE_CAP_MARGIN] * depth
                 if ENABLE_CAPTURE_FUTILITY and cap_piece >= 0 and cap_victim >= 0:
-                    threshold = threshold - cap_hist * CAP_SEE_CAPTHIST_NUM // CAP_SEE_CAPTHIST_DEN
+                    threshold = threshold - cap_hist * search_context.tune[TUNE_CAP_SEE_HIST_NUM] // CAP_SEE_CAPTHIST_DEN
                 _diag_add(search_context, DIAG_MAIN_CAP_SEE_TRY)
                 cap_victim_see = -2 if flag == SPECIAL_MOVE_FLAG_EN_PASSANT else cap_victim
                 if not _see_ge_jit(piece_bbs, occupancy_bbs, side_to_move, from_sq, to_sq, threshold, pinned_white, pinned_black, cap_piece, cap_victim_see, get_promotion_piece(move) + 1):
