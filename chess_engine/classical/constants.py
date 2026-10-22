@@ -1133,7 +1133,7 @@ LMR_ALLNODE_SCALE_DENOM_OFFSET = 268
 
 # ProbCut — multi-pack 180 regressed with stack → keep 150 default
 PROBCUT_R = 4  # Retained for tuning registry backwards compatibility (no used)
-PROBCUT_MARGIN = 120
+PROBCUT_MARGIN = 170
 PROBCUT_MIN_DEPTH = 5  # Retained for tuning registry backwards compatibility
 # SF19 Step 12: Dynamic ProbCut reduction based on improving flag
 PROBCUT_R_IMPROVING = 5
