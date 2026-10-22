@@ -856,7 +856,7 @@ ENABLE_REVERSE_QUIET = False
 # Quiet check ordering
 # E1 (2026-07-16): experiment CHECK_SEE_GATE=True (SEE >= -75 before CHECK_BONUS)
 CHECK_BONUS = 20000
-CHECK_SEE_THRESHOLD = -85  # Rescaled x1.134 for MG_MATERIAL_VALUES SEE (was -75)
+CHECK_SEE_THRESHOLD = -81  # Rescaled x1.134 for MG_MATERIAL_VALUES SEE (was -75)
 ENABLE_CHECK_SEE_GATE = True
 
 # Threat reordering — disabled (regressed when enabled)
@@ -1003,8 +1003,8 @@ ENABLE_HISTORY_PRUNING = True      # Enable pruning based on History Score
 # (policy lifted 2026-07-19). Prefer Elo/pass gates over "must not exceed SF11".
 # SEE: SF11 capture ~-194 internal → ~-151 @0.78; current values stay until A/B.
 PRUNING_SHALLOW_DEPTH = 12
-PRUNING_CAPTURE_SEE_MARGIN = -116  # Rescaled x1.134 for MG_MATERIAL_VALUES SEE (was -102 in E64)
-PRUNING_QUIET_SEE_MARGIN = -36     # Rescaled x1.134 for MG_MATERIAL_VALUES SEE (was -32 in E64)
+PRUNING_CAPTURE_SEE_MARGIN = -95  # Rescaled x1.134 for MG_MATERIAL_VALUES SEE (was -102 in E64)
+PRUNING_QUIET_SEE_MARGIN = -34     # Rescaled x1.134 for MG_MATERIAL_VALUES SEE (was -32 in E64)
 
 # Master switches for existing pruning techniques / 現有剪枝技術的總開關
 ENABLE_NMP = True           # Null Move Pruning
@@ -1027,7 +1027,7 @@ CAP_FP_CAPTHIST_NUM = 131      # + captHist * NUM // DEN
 CAP_FP_CAPTHIST_DEN = 1024
 # Capture SEE: threshold = SEE_CAP_MARGIN * depth - captHist * NUM // DEN
 # (good/high captHist → more negative threshold → harder to prune; matches SF sign)
-CAP_SEE_CAPTHIST_NUM = 39  # Rescaled x1.134 for MG_MATERIAL_VALUES SEE (was 34)
+CAP_SEE_CAPTHIST_NUM = 36  # Rescaled x1.134 for MG_MATERIAL_VALUES SEE (was 34)
 CAP_SEE_CAPTHIST_DEN = 1024
 
 # Alpha-raise depth reduction (kept for re-enable experiments; production OFF).
@@ -1083,11 +1083,11 @@ LMR_REDUCTION = 1
 # Late Move Pruning — SF11: (5 + depth^2) * (1+improving) / 2 - 1
 # improving factor applied at search-time (// (2 - improving))
 LMP_MOVE_COUNT = np.array([
-    0 if d == 0 else max(1, (5 + d * d) // 2 - 1) for d in range(MAX_PLY)
+    0 if d == 0 else max(1, (6 + d * d) // 2 - 1) for d in range(MAX_PLY)
 ], dtype=np.int32)
 # Percent scale on LMP limit (100=table). Higher → later prune (fatter tree).
 # E4: 100→105 kept (+15.7 Elo @100k). E57: 105→107 (+5.2 Elo @300k). E62: 107→118 (+8.1 Elo @300k). E64: 118→137 (+8.7 Elo @300k).
-LMP_SCALE_PERCENT = 137
+LMP_SCALE_PERCENT = 150
 
 # LMR Table (legacy integer plies; live path uses 1024-scale REDUCTIONS)
 LMR_TABLE = np.zeros((MAX_PLY, 256), dtype=np.int32)
@@ -1132,7 +1132,7 @@ LMR_ALLNODE_SCALE_DENOM_OFFSET = 268
 
 
 # ProbCut — multi-pack 180 regressed with stack → keep 150 default
-PROBCUT_R = 4  # Retained for tuning registry backwards compatibility
+PROBCUT_R = 4  # Retained for tuning registry backwards compatibility (no used)
 PROBCUT_MARGIN = 150
 PROBCUT_MIN_DEPTH = 5  # Retained for tuning registry backwards compatibility
 # SF19 Step 12: Dynamic ProbCut reduction based on improving flag
@@ -1155,7 +1155,7 @@ DELTA_PRUNING_MARGIN = 350
 # --- Static Exchange Evaluation (SEE) Threshold / SEE 閾值 ---
 SEE_THRESHOLD = 0
 # QS SEE (P0 try -60: puzzle OK but no clear node win on suite → keep -80)
-QS_SEE_THRESHOLD = -91  # Rescaled x1.134 for MG_MATERIAL_VALUES SEE (was -80)
+QS_SEE_THRESHOLD = -84  # Rescaled x1.134 for MG_MATERIAL_VALUES SEE (was -80)
 ENABLE_SEE_IN_QUIESCENCE = True
 
 # =============================================================================
