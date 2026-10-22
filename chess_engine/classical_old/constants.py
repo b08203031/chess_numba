@@ -856,7 +856,7 @@ ENABLE_REVERSE_QUIET = False
 # Quiet check ordering
 # E1 (2026-07-16): experiment CHECK_SEE_GATE=True (SEE >= -75 before CHECK_BONUS)
 CHECK_BONUS = 20000
-CHECK_SEE_THRESHOLD = -81  # Rescaled x1.134 for MG_MATERIAL_VALUES SEE (was -75)
+CHECK_SEE_THRESHOLD = -84  # Rescaled x1.134 for MG_MATERIAL_VALUES SEE (was -75)
 ENABLE_CHECK_SEE_GATE = True
 
 # Threat reordering — disabled (regressed when enabled)
@@ -1003,8 +1003,8 @@ ENABLE_HISTORY_PRUNING = True      # Enable pruning based on History Score
 # (policy lifted 2026-07-19). Prefer Elo/pass gates over "must not exceed SF11".
 # SEE: SF11 capture ~-194 internal → ~-151 @0.78; current values stay until A/B.
 PRUNING_SHALLOW_DEPTH = 12
-PRUNING_CAPTURE_SEE_MARGIN = -95  # Rescaled x1.134 for MG_MATERIAL_VALUES SEE (was -102 in E64)
-PRUNING_QUIET_SEE_MARGIN = -34     # Rescaled x1.134 for MG_MATERIAL_VALUES SEE (was -32 in E64)
+PRUNING_CAPTURE_SEE_MARGIN = -97  # Rescaled x1.134 for MG_MATERIAL_VALUES SEE (was -102 in E64)
+PRUNING_QUIET_SEE_MARGIN = -33     # Rescaled x1.134 for MG_MATERIAL_VALUES SEE (was -32 in E64)
 
 # Master switches for existing pruning techniques / 現有剪枝技術的總開關
 ENABLE_NMP = True           # Null Move Pruning
@@ -1027,7 +1027,7 @@ CAP_FP_CAPTHIST_NUM = 131      # + captHist * NUM // DEN
 CAP_FP_CAPTHIST_DEN = 1024
 # Capture SEE: threshold = SEE_CAP_MARGIN * depth - captHist * NUM // DEN
 # (good/high captHist → more negative threshold → harder to prune; matches SF sign)
-CAP_SEE_CAPTHIST_NUM = 36  # Rescaled x1.134 for MG_MATERIAL_VALUES SEE (was 34)
+CAP_SEE_CAPTHIST_NUM = 37  # Rescaled x1.134 for MG_MATERIAL_VALUES SEE (was 34)
 CAP_SEE_CAPTHIST_DEN = 1024
 
 # Alpha-raise depth reduction (kept for re-enable experiments; production OFF).
@@ -1155,7 +1155,7 @@ DELTA_PRUNING_MARGIN = 350
 # --- Static Exchange Evaluation (SEE) Threshold / SEE 閾值 ---
 SEE_THRESHOLD = 0
 # QS SEE (P0 try -60: puzzle OK but no clear node win on suite → keep -80)
-QS_SEE_THRESHOLD = -84  # Rescaled x1.134 for MG_MATERIAL_VALUES SEE (was -80)
+QS_SEE_THRESHOLD = -86  # Rescaled x1.134 for MG_MATERIAL_VALUES SEE (was -80)
 ENABLE_SEE_IN_QUIESCENCE = True
 
 # =============================================================================
