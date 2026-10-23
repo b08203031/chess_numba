@@ -331,9 +331,6 @@ full_static_eval_return_type = numba.types.Tuple((numba.int32, numba.int32, numb
 @numba.njit(cache=True, nogil=True, boundscheck=False, fastmath=True)
 def compute_full_corrected_static_eval(piece_bbs, occupancy_bbs, game_state, search_context, ply):
     raw_eval, pinned_white, pinned_black = _evaluate_position_jit(piece_bbs, occupancy_bbs, game_state, False, search_context)
-    if pinned_white == PINNED_UNCOMPUTED_SENTINEL:
-        pinned_white = get_pinned_pieces(piece_bbs, occupancy_bbs, WHITE)
-        pinned_black = get_pinned_pieces(piece_bbs, occupancy_bbs, BLACK)
     corrected_eval = apply_correction_history_score(game_state, search_context, raw_eval, ply)
     search_context.static_eval_stack[ply] = corrected_eval
 
@@ -1508,14 +1505,21 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
         return (np.int32(eval_score), NO_MOVE, nodes_searched, q_nodes, tt_hits)
 
     # --- H2: Static Evaluation & Improving Flag (computed BEFORE any pruning) ---
-    static_score = -INFINITY
+    # static_score: 對應 SF19 ss->staticEval (純靜態評估 + Correction History，絕不被 tt_score 覆蓋)
+    # tt_refined_eval: 對應 SF19 eval (套用可信 TT Bound 修正後的評估，專供 Razoring 與 RFP 使用)
+    static_score = np.int32(-INFINITY)
+    tt_refined_eval = np.int32(-INFINITY)
     improving = False
     
     # Correction History Adjustment
-    raw_static_eval = -INFINITY
+    raw_static_eval = np.int32(-INFINITY)
     static_eval_is_full = False
-    cached_pinned_white = np.uint64(0)
-    cached_pinned_black = np.uint64(0)
+    cached_pinned_white = PINNED_UNCOMPUTED_SENTINEL
+    cached_pinned_black = PINNED_UNCOMPUTED_SENTINEL
+
+    trusted_tt_score = False
+    trusted_exact_depth = False
+    tt_score_adj = np.int32(0)
 
     if not is_currently_in_check:
         if tt_hit and tt_static_eval_raw != 32767:
@@ -1524,29 +1528,30 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
             raw_static_eval, _, _ = _evaluate_position_jit(piece_bbs, occupancy_bbs, game_state, True, search_context)
 
         static_score = apply_correction_history_score(game_state, search_context, raw_static_eval, ply)
+        tt_refined_eval = static_score
         
-        # --- H2 Enhancement: Refine static_score using trusted TT Score Bounds ---
+        # --- H2 Enhancement: Refine tt_refined_eval using trusted TT Score Bounds ---
         if tt_hit and not is_exclusion_search:
-            tt_score = tt_score_raw
+            tt_score_adj = tt_score_raw
             
             # Adjust mate scores relative to current ply
-            if tt_score > MATE_IN_MAX_PLY: tt_score -= ply
-            elif tt_score < -MATE_IN_MAX_PLY: tt_score += ply
+            if tt_score_adj > MATE_IN_MAX_PLY: tt_score_adj -= ply
+            elif tt_score_adj < -MATE_IN_MAX_PLY: tt_score_adj += ply
 
             trusted_bound_depth = tt_depth >= max(1, depth - 2)
             trusted_exact_depth = tt_depth >= depth
-            trusted_tt_score = trusted_bound_depth and abs(tt_score) < MATE_IN_MAX_PLY
+            trusted_tt_score = trusted_bound_depth and abs(tt_score_adj) < MATE_IN_MAX_PLY
 
             if trusted_tt_score:
-                # If TT says score is at least tt_score (LOWER), and tt_score > static_score
-                if tt_flag == TT_FLAG_BETA and tt_score > static_score:
-                    static_score = tt_score
-                # If TT says score is at most tt_score (UPPER), and tt_score < static_score
-                elif tt_flag == TT_FLAG_ALPHA and tt_score < static_score:
-                    static_score = tt_score
+                # If TT says score is at least tt_score (LOWER), and tt_score > tt_refined_eval
+                if tt_flag == TT_FLAG_BETA and tt_score_adj > tt_refined_eval:
+                    tt_refined_eval = tt_score_adj
+                # If TT says score is at most tt_score (UPPER), and tt_score < tt_refined_eval
+                elif tt_flag == TT_FLAG_ALPHA and tt_score_adj < tt_refined_eval:
+                    tt_refined_eval = tt_score_adj
                 # Exact scores may replace static eval only when they are deep enough for this node.
                 elif tt_flag == TT_FLAG_EXACT and trusted_exact_depth:
-                    static_score = tt_score
+                    tt_refined_eval = tt_score_adj
         
         search_context.static_eval_stack[ply] = static_score
 
@@ -1586,10 +1591,12 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
     if tt_hit and not is_currently_in_check and static_score != -INFINITY:
         # Check if depth is reasonably close to current depth to trust the TT score
         if tt_depth >= depth - DISSONANCE_TT_DEPTH_SLACK:
-            tt_score = tt_score_raw
+            tt_score_d = tt_score_raw
+            if tt_score_d > MATE_IN_MAX_PLY: tt_score_d -= ply
+            elif tt_score_d < -MATE_IN_MAX_PLY: tt_score_d += ply
             # Avoid using mate scores for dissonance calculation
-            if abs(tt_score) < MATE_IN_MAX_PLY and abs(static_score) < MATE_IN_MAX_PLY:
-                dissonance = abs(tt_score - static_score)
+            if abs(tt_score_d) < MATE_IN_MAX_PLY and abs(static_score) < MATE_IN_MAX_PLY:
+                dissonance = abs(tt_score_d - static_score)
 
     total_piece_count = np.int32(0)
     side_non_pawn_count = np.int32(0)
@@ -1608,12 +1615,20 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
 
     # PR-C: if lazy/TT static is already near known-win band, force full HCE before pruning
     if (not is_currently_in_check and not static_eval_is_full
-            and (is_win(static_score) or is_loss(static_score)
+            and (is_win(static_score) or is_loss(static_score) or is_win(tt_refined_eval) or is_loss(tt_refined_eval)
                  or abs(static_score) >= (VALUE_KNOWN_WIN - FULL_EVAL_KNOWN_WIN_MARGIN))):
         raw_static_eval, static_score, improving, cached_pinned_white, cached_pinned_black = compute_full_corrected_static_eval(
             piece_bbs, occupancy_bbs, game_state, search_context, ply
         )
         static_eval_is_full = True
+        tt_refined_eval = static_score
+        if trusted_tt_score:
+            if tt_flag == TT_FLAG_BETA and tt_score_adj > tt_refined_eval:
+                tt_refined_eval = tt_score_adj
+            elif tt_flag == TT_FLAG_ALPHA and tt_score_adj < tt_refined_eval:
+                tt_refined_eval = tt_score_adj
+            elif tt_flag == TT_FLAG_EXACT and trusted_exact_depth:
+                tt_refined_eval = tt_score_adj
 
     # =====================================================================
     # --- Node-Level Pruning (H3: ALL guarded by not is_currently_in_check) ---
@@ -1621,17 +1636,25 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
     if not is_currently_in_check and not is_pv and not is_exclusion_search:
         # --- Step 8: Razoring (SF19 Step 8: eval < alpha - 482 * depth * depth) ---
         if (search_context.enable_razoring and depth <= RAZORING_MAX_DEPTH and not low_material_pruning_guard
-                and not is_win(static_score) and not is_loss(alpha)
+                and not is_win(tt_refined_eval) and not is_loss(alpha)
                 and abs(alpha) < VALUE_KNOWN_WIN):
             razor_margin = search_context.tune[TUNE_RAZOR_COEFF] * depth * depth
-            if static_score < alpha - razor_margin:
+            if tt_refined_eval < alpha - razor_margin:
                 if not static_eval_is_full:
                     raw_static_eval, static_score, improving, cached_pinned_white, cached_pinned_black = compute_full_corrected_static_eval(
                         piece_bbs, occupancy_bbs, game_state, search_context, ply
                     )
                     static_eval_is_full = True
-                if (static_score < alpha - razor_margin
-                        and not is_win(static_score) and not is_loss(alpha)):
+                    tt_refined_eval = static_score
+                    if trusted_tt_score:
+                        if tt_flag == TT_FLAG_BETA and tt_score_adj > tt_refined_eval:
+                            tt_refined_eval = tt_score_adj
+                        elif tt_flag == TT_FLAG_ALPHA and tt_score_adj < tt_refined_eval:
+                            tt_refined_eval = tt_score_adj
+                        elif tt_flag == TT_FLAG_EXACT and trusted_exact_depth:
+                            tt_refined_eval = tt_score_adj
+                if (tt_refined_eval < alpha - razor_margin
+                        and not is_win(tt_refined_eval) and not is_loss(alpha)):
                     search_context.pv_table[ply, ply] = NO_MOVE
                     razor_score, child_q_nodes = quiescence_search(
                         piece_bbs, occupancy_bbs, game_state, alpha, beta, ply, search_context, _i32(0)
@@ -1640,11 +1663,11 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                     _diag_add(search_context, DIAG_RAZOR_CUT)
                     return (np.int32(razor_score), NO_MOVE, nodes_searched, quiescence_nodes, tt_hits)
 
-        # --- M5: Reverse Futility Pruning (SF19 Step 9: !tt_pv, !tt_move or tt_capture) ---
+        # --- Step 9: Reverse Futility Pruning (SF19 Step 9: !tt_pv, !tt_move or tt_capture) ---
         # P2: never return known-win / loss-band static as a proven cutoff (SF11/18/19).
         if (search_context.enable_rfp and depth <= RFP_MAX_DEPTH and not low_material_pruning_guard
                 and not tt_pv and (tt_move == NO_MOVE or tt_capture)
-                and not is_win(static_score) and not is_loss(beta)):
+                and not is_win(tt_refined_eval) and not is_loss(beta)):
             # SF11: futility_margin = 217 * (depth - improving)
             # Larger margin when NOT improving → harder to RFP (safer). Do not invert this.
             rfp_multiplier = search_context.tune[TUNE_RFP_MULT]
@@ -1655,196 +1678,37 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                 rfp_depth_factor = 1
             rfp_margin = rfp_multiplier * rfp_depth_factor
                 
-            if static_score - rfp_margin >= beta:
+            if tt_refined_eval - rfp_margin >= beta:
                 if not static_eval_is_full:
-                    raw_static_eval, static_score, improving, cached_pinned_white, cached_pinned_black = compute_full_corrected_static_eval(piece_bbs, occupancy_bbs, game_state, search_context, ply)
+                    raw_static_eval, static_score, improving, cached_pinned_white, cached_pinned_black = compute_full_corrected_static_eval(
+                        piece_bbs, occupancy_bbs, game_state, search_context, ply
+                    )
                     static_eval_is_full = True
+                    tt_refined_eval = static_score
+                    if trusted_tt_score:
+                        if tt_flag == TT_FLAG_BETA and tt_score_adj > tt_refined_eval:
+                            tt_refined_eval = tt_score_adj
+                        elif tt_flag == TT_FLAG_ALPHA and tt_score_adj < tt_refined_eval:
+                            tt_refined_eval = tt_score_adj
+                        elif tt_flag == TT_FLAG_EXACT and trusted_exact_depth:
+                            tt_refined_eval = tt_score_adj
                     rfp_depth_factor = depth - (1 if improving else 0)
                     if rfp_depth_factor < 1:
                         rfp_depth_factor = 1
                     rfp_margin = rfp_multiplier * rfp_depth_factor
                 # Re-check known-win after full eval (specialized EG may surface)
-                if (static_score - rfp_margin >= beta
-                        and not is_win(static_score) and not is_loss(beta)):
+                if (tt_refined_eval - rfp_margin >= beta
+                        and not is_win(tt_refined_eval) and not is_loss(beta)):
                     _diag_add(search_context, DIAG_RFP_CUT)
                     # SF19 Step 9: Fail-soft score blending via TUNE_RFP_BLEND_BETA
                     w_beta = np.int64(search_context.tune[TUNE_RFP_BLEND_BETA])
                     w_stat = np.int64(1024) - w_beta
                     rfp_score = np.int32(trunc_div(
-                        w_beta * np.int64(beta) + w_stat * np.int64(static_score),
+                        w_beta * np.int64(beta) + w_stat * np.int64(tt_refined_eval),
                         np.int64(1024)
                     ))
                     return (rfp_score, NO_MOVE, nodes_searched, quiescence_nodes, tt_hits)
 
-    # --- ProbCut (must be before NMP, guarded by H3) ---
-    # PR-B: SF18 !is_decisive(beta); also skip known-win band (VALUE_KNOWN_WIN).
-    # TUNE_PROBCUT_STYLE: 0=flat margin, 1=SF11-ish, 2=force off
-    _pc_style = search_context.tune[TUNE_PROBCUT_STYLE]
-    probcut_r = PROBCUT_R_IMPROVING if improving else PROBCUT_R_NOT_IMPROVING
-    probcut_min_depth = probcut_r + 1
-    if (search_context.enable_probcut and _pc_style != 2 and not is_pv and ply > 0
-            and not is_exclusion_search and depth >= probcut_min_depth
-            and abs(beta) < MATE_IN_MAX_PLY and abs(beta) < VALUE_KNOWN_WIN
-            and not is_currently_in_check and not is_win(static_score) and not is_loss(beta)):
-        # --- TT-based ProbCut Shortcut (SF 18 Step 12) ---
-        # If a previous search at depth >= depth - 4 proved a lower bound >= probcut_beta,
-        # we can prune immediately without capture generation, SEE, or recursive sub-search.
-        if ENABLE_PROBCUT_TT_SHORTCUT and ply > 0:
-            probcut_beta_s12 = beta + PROBCUT_TT_SHORTCUT_MARGIN
-            if tt_flag == TT_FLAG_BETA or tt_flag == TT_FLAG_EXACT:
-                if tt_depth >= depth - probcut_r:
-                    tt_score_s12 = tt_score_raw
-                    if tt_score_s12 > MATE_IN_MAX_PLY:
-                        tt_score_s12 -= ply
-                    elif tt_score_s12 < -MATE_IN_MAX_PLY:
-                        tt_score_s12 += ply
-
-                    if fifty_move_scale < FIFTY_MOVE_MAX_SCALE and abs(tt_score_s12) < MATE_IN_MAX_PLY:
-                        tt_score_s12 = tt_score_s12 * fifty_move_scale // FIFTY_MOVE_MAX_SCALE
-
-                    if (tt_score_s12 >= probcut_beta_s12
-                            and not is_decisive(tt_score_s12) and not is_win(tt_score_s12)):
-                        search_context.pv_table[ply, ply] = NO_MOVE
-                        _diag_add(search_context, DIAG_PROBCUT)
-                        tt_hits += np.uint64(1)
-                        return (np.int32(probcut_beta_s12), tt_move, nodes_searched, quiescence_nodes, tt_hits)
-
-        if _pc_style == 1:
-            # SF11-ish raisedBeta; margins scaled by HCE_SCALE for our eval
-            _pc_add = (PROBCUT_SF_BASE - PROBCUT_SF_IMPROVING * (1 if improving else 0)) * HCE_SCALE_NUM // HCE_SCALE_DEN
-            if _pc_add < 1:
-                _pc_add = 1
-            probcut_beta = beta + _pc_add
-        else:
-            probcut_beta = beta + search_context.tune[TUNE_PROBCUT_MARGIN]
-        
-        # --- NEW: ProbCut TT Defense ---
-        # If TT bound is UPPER (Alpha) or EXACT at sufficient depth and TT score is less than probcut_beta,
-        # it is highly unlikely a reduced depth search will exceed probcut_beta. Skip ProbCut.
-        skip_probcut = False
-        if tt_hit:
-            tt_score_pc = tt_score_raw
-            if tt_score_pc > MATE_IN_MAX_PLY: tt_score_pc -= ply
-            elif tt_score_pc < -MATE_IN_MAX_PLY: tt_score_pc += ply
-            
-            if ((tt_flag == TT_FLAG_ALPHA or tt_flag == TT_FLAG_EXACT)
-                    and tt_depth >= depth - probcut_r
-                    and tt_score_pc < probcut_beta):
-                skip_probcut = True
-                
-        if not skip_probcut:
-            # We must only try captures.
-            pc_move_count = generate_pseudo_legal_captures_buffer(piece_bbs, occupancy_bbs, game_state, search_context.moves_buffer, ply)
-            
-            if static_eval_is_full and cached_pinned_white != PINNED_UNCOMPUTED_SENTINEL:
-                pc_pinned_w = cached_pinned_white
-                pc_pinned_b = cached_pinned_black
-            else:
-                pc_pinned_w = get_pinned_pieces(piece_bbs, occupancy_bbs, WHITE)
-                pc_pinned_b = get_pinned_pieces(piece_bbs, occupancy_bbs, BLACK)
-
-            score_captures_lazy(
-                piece_bbs, occupancy_bbs, game_state,
-                search_context.moves_buffer[ply],
-                search_context.move_scores[ply],
-                0, pc_move_count, search_context,
-                pc_pinned_w, pc_pinned_b,
-                ply
-            )
-
-            pc_moves = search_context.moves_buffer[ply]
-            pc_scores = search_context.move_scores[ply]
-    
-            for i in range(pc_move_count):
-                # Selection sort
-                best_idx = i
-                for j in range(i + 1, pc_move_count):
-                    if pc_scores[j] > pc_scores[best_idx]:
-                        best_idx = j
-                pc_moves[i], pc_moves[best_idx] = pc_moves[best_idx], pc_moves[i]
-                pc_scores[i], pc_scores[best_idx] = pc_scores[best_idx], pc_scores[i]
-    
-                pc_move = pc_moves[i]
-                if pc_move == excluded_move:
-                    continue
-                pc_from = get_from_square(pc_move)
-                pc_to = get_to_square(pc_move)
-    
-                # SEE filter: only try captures whose SEE >= probcut_beta - static_eval
-                see_threshold_pc = probcut_beta - static_score if static_score != -INFINITY else 0
-                _diag_add(search_context, DIAG_PROBCUT_SEE_TRY)
-                if not _see_ge_jit(piece_bbs, occupancy_bbs, game_state[0], pc_from, pc_to, see_threshold_pc, pc_pinned_w, pc_pinned_b, -1, -1, get_promotion_piece(pc_move) + 1):
-                    continue
-    
-                pc_original_side = game_state[0]
-                pc_unmake = make_move(piece_bbs, occupancy_bbs, game_state, pc_move)
-    
-                # Legality check
-                pc_king_bb = piece_bbs[5] if (1 - game_state[0]) == 0 else piece_bbs[11]
-                pc_king_sq = get_lsb_index(pc_king_bb) if pc_king_bb else 0
-                if is_square_attacked(piece_bbs, occupancy_bbs, pc_king_sq, game_state[0]):
-                    unmake_move(piece_bbs, occupancy_bbs, game_state, pc_move, pc_unmake)
-                    continue
-    
-                pc_q_score, pc_q_nodes = quiescence_search(
-                    piece_bbs, occupancy_bbs, game_state,
-                    _i32(-probcut_beta), _i32(-probcut_beta + 1), _i32(ply + 1), search_context, _i32(0),
-                )
-                quiescence_nodes += pc_q_nodes
-                pc_q_score = -pc_q_score
-
-                if search_context.stop_flag[0]:
-                    unmake_move(piece_bbs, occupancy_bbs, game_state, pc_move, pc_unmake)
-                    return (np.int32(0), NO_MOVE, nodes_searched, quiescence_nodes, tt_hits)
-
-                if pc_q_score < probcut_beta:
-                    unmake_move(piece_bbs, occupancy_bbs, game_state, pc_move, pc_unmake)
-                    continue
-
-                saved_pc_stack_move = search_context.move_stack[ply]
-                saved_pc_stack_piece = search_context.piece_stack[ply]
-                pc_moved_piece_type = pc_unmake[0]
-                if pc_moved_piece_type != -1 and pc_original_side == BLACK:
-                    pc_moved_piece_type += 6
-                search_context.move_stack[ply] = pc_move
-                search_context.piece_stack[ply] = pc_moved_piece_type
-                search_context.reduction_stack[ply + 1] = 0
-                res_pc = _search(
-                    piece_bbs, occupancy_bbs, game_state, _i32(depth - probcut_r),
-                    _i32(-probcut_beta), _i32(-probcut_beta + 1), search_context, _i32(ply + 1),
-                    _u16(NO_MOVE), _b_false(), not cut_node,
-                )
-                search_context.move_stack[ply] = saved_pc_stack_move
-                search_context.piece_stack[ply] = saved_pc_stack_piece
-                pc_score = -res_pc[0]
-                
-                # IMPORTANT: Must aggregate the search stats from ProbCut back into the parent
-                child_pc_nodes = res_pc[2]; child_pc_q_nodes = res_pc[3]
-                child_pc_tth = res_pc[4]
-                
-                nodes_searched += child_pc_nodes; quiescence_nodes += child_pc_q_nodes
-                tt_hits += child_pc_tth
-
-                unmake_move(piece_bbs, occupancy_bbs, game_state, pc_move, pc_unmake)
-
-                if search_context.stop_flag[0]:
-                    return (np.int32(0), NO_MOVE, nodes_searched, quiescence_nodes, tt_hits)
-    
-                if pc_score >= probcut_beta:
-                    probcut_return_score = pc_score - (probcut_beta - beta)
-                    # PR-B: do not propagate unproven known-win / mate from reduced ProbCut
-                    if is_win(probcut_return_score) or is_decisive(probcut_return_score):
-                        probcut_return_score = beta
-                    # Store in TT for future use (aligned with SF19: probCutDepth + 1 = depth - probcut_r + 1)
-                    tt_store_score_pc = probcut_return_score
-                    if tt_store_score_pc > MATE_IN_MAX_PLY: tt_store_score_pc += ply
-                    elif tt_store_score_pc < -MATE_IN_MAX_PLY: tt_store_score_pc -= ply
-                    pc_tt_depth = max(1, depth - probcut_r + 1)
-                    store_tt(search_context.transposition_table, tt_key, pc_tt_depth, tt_store_score_pc, np.int16(32767), TT_FLAG_BETA, pc_move, search_context.tt_generation, tt_pv)
-                    _diag_add(search_context, DIAG_PROBCUT)
-                    return (np.int32(probcut_return_score), pc_move, nodes_searched, quiescence_nodes, tt_hits)
-
-    # --- Null Move Pruning (guarded by H3) ---
     # =========================================================================
     # Step 10. Null move search with verification search (aligned to SF19 Step 10)
     # SF19: cutNode && staticEval >= beta - 13*d - 47*imp + 365 && !excludedMove
@@ -1864,7 +1728,7 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
 
         _diag_add(search_context, DIAG_NMP_ELIGIBLE)
 
-        # 1. Linear gate with Lazy Evaluation (do not waste heavy HCE on failing nodes)
+        # 1. Linear gate with Lazy Evaluation (uses pure static_score, aligned with SF19 ss->staticEval)
         nmp_threshold = (beta - search_context.tune[TUNE_NMP_DEPTH_COEF] * depth
                               - search_context.tune[TUNE_NMP_IMP_COEF] * (1 if improving else 0)
                               + search_context.tune[TUNE_NMP_BASE])
@@ -1875,6 +1739,14 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                     piece_bbs, occupancy_bbs, game_state, search_context, ply
                 )
                 static_eval_is_full = True
+                tt_refined_eval = static_score
+                if trusted_tt_score:
+                    if tt_flag == TT_FLAG_BETA and tt_score_adj > tt_refined_eval:
+                        tt_refined_eval = tt_score_adj
+                    elif tt_flag == TT_FLAG_ALPHA and tt_score_adj < tt_refined_eval:
+                        tt_refined_eval = tt_score_adj
+                    elif tt_flag == TT_FLAG_EXACT and trusted_exact_depth:
+                        tt_refined_eval = tt_score_adj
                 nmp_threshold = (beta - search_context.tune[TUNE_NMP_DEPTH_COEF] * depth
                                       - search_context.tune[TUNE_NMP_IMP_COEF] * (1 if improving else 0)
                                       + search_context.tune[TUNE_NMP_BASE])
@@ -1978,13 +1850,190 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                         search_context.pv_table[ply, ply] = NO_MOVE
                         _diag_add(search_context, DIAG_NMP_CUT)
                         return (np.int32(null_move_score), NO_MOVE, nodes_searched, quiescence_nodes, tt_hits)
-    # --- M1: IIR (Internal Iterative Reduction) replaces IID ---
-    # Mild IIR only (1 ply). Skip on last-iteration PV path (SF !followPV gate) —
-    # reducing depth on the critical line hides tactics for little gain.
+
+    # SF19 post-NMP improving update: improving |= ss->staticEval >= beta
+    if not is_currently_in_check and static_score >= beta:
+        improving = True
+
+    # =========================================================================
+    # Step 11. Internal Iterative Reduction (IIR) (SF19 Step 11)
+    # =========================================================================
     if (tt_move == NO_MOVE and ENABLE_IIR and not is_exclusion_search
             and not is_currently_in_check and not follow_pv):
         if depth >= IIR_MIN_DEPTH:
             depth -= 1
+
+    # =========================================================================
+    # Step 12. ProbCut (aligned to SF19 Step 12: after NMP and IIR)
+    # =========================================================================
+    # PR-B: SF18 !is_decisive(beta); also skip known-win band (VALUE_KNOWN_WIN).
+    # TUNE_PROBCUT_STYLE: 0=flat margin, 1=SF11-ish, 2=force off
+    _pc_style = search_context.tune[TUNE_PROBCUT_STYLE]
+    probcut_r = PROBCUT_R_IMPROVING if improving else PROBCUT_R_NOT_IMPROVING
+    probcut_min_depth = probcut_r + 1
+    if (search_context.enable_probcut and _pc_style != 2 and not is_pv and ply > 0
+            and not is_exclusion_search and depth >= probcut_min_depth
+            and abs(beta) < MATE_IN_MAX_PLY and abs(beta) < VALUE_KNOWN_WIN
+            and not is_currently_in_check and not is_win(static_score) and not is_loss(beta)):
+        # --- TT-based ProbCut Shortcut (SF 18 Step 12) ---
+        # If a previous search at depth >= depth - 4 proved a lower bound >= probcut_beta,
+        # we can prune immediately without capture generation, SEE, or recursive sub-search.
+        if ENABLE_PROBCUT_TT_SHORTCUT and ply > 0:
+            probcut_beta_s12 = beta + PROBCUT_TT_SHORTCUT_MARGIN
+            if tt_flag == TT_FLAG_BETA or tt_flag == TT_FLAG_EXACT:
+                if tt_depth >= depth - probcut_r:
+                    tt_score_s12 = tt_score_raw
+                    if tt_score_s12 > MATE_IN_MAX_PLY:
+                        tt_score_s12 -= ply
+                    elif tt_score_s12 < -MATE_IN_MAX_PLY:
+                        tt_score_s12 += ply
+
+                    if fifty_move_scale < FIFTY_MOVE_MAX_SCALE and abs(tt_score_s12) < MATE_IN_MAX_PLY:
+                        tt_score_s12 = tt_score_s12 * fifty_move_scale // FIFTY_MOVE_MAX_SCALE
+
+                    if (tt_score_s12 >= probcut_beta_s12
+                            and not is_decisive(tt_score_s12) and not is_win(tt_score_s12)):
+                        search_context.pv_table[ply, ply] = NO_MOVE
+                        _diag_add(search_context, DIAG_PROBCUT)
+                        tt_hits += np.uint64(1)
+                        return (np.int32(probcut_beta_s12), tt_move, nodes_searched, quiescence_nodes, tt_hits)
+
+        if _pc_style == 1:
+            # SF11-ish raisedBeta; margins scaled by HCE_SCALE for our eval
+            _pc_add = (PROBCUT_SF_BASE - PROBCUT_SF_IMPROVING * (1 if improving else 0)) * HCE_SCALE_NUM // HCE_SCALE_DEN
+            if _pc_add < 1:
+                _pc_add = 1
+            probcut_beta = beta + _pc_add
+        else:
+            probcut_beta = beta + search_context.tune[TUNE_PROBCUT_MARGIN]
+        
+        # --- NEW: ProbCut TT Defense ---
+        # If TT bound is UPPER (Alpha) or EXACT at sufficient depth and TT score is less than probcut_beta,
+        # it is highly unlikely a reduced depth search will exceed probcut_beta. Skip ProbCut.
+        skip_probcut = False
+        if tt_hit:
+            tt_score_pc = tt_score_raw
+            if tt_score_pc > MATE_IN_MAX_PLY: tt_score_pc -= ply
+            elif tt_score_pc < -MATE_IN_MAX_PLY: tt_score_pc += ply
+            
+            if ((tt_flag == TT_FLAG_ALPHA or tt_flag == TT_FLAG_EXACT)
+                    and tt_depth >= depth - probcut_r
+                    and tt_score_pc < probcut_beta):
+                skip_probcut = True
+                
+        if not skip_probcut:
+            # We must only try captures.
+            pc_move_count = generate_pseudo_legal_captures_buffer(piece_bbs, occupancy_bbs, game_state, search_context.moves_buffer, ply)
+            
+            if cached_pinned_white != PINNED_UNCOMPUTED_SENTINEL:
+                pc_pinned_w = cached_pinned_white
+                pc_pinned_b = cached_pinned_black
+            else:
+                pc_pinned_w = get_pinned_pieces(piece_bbs, occupancy_bbs, WHITE)
+                pc_pinned_b = get_pinned_pieces(piece_bbs, occupancy_bbs, BLACK)
+                cached_pinned_white = pc_pinned_w
+                cached_pinned_black = pc_pinned_b
+
+            score_captures_lazy(
+                piece_bbs, occupancy_bbs, game_state,
+                search_context.moves_buffer[ply],
+                search_context.move_scores[ply],
+                0, pc_move_count, search_context,
+                pc_pinned_w, pc_pinned_b,
+                ply
+            )
+
+            pc_moves = search_context.moves_buffer[ply]
+            pc_scores = search_context.move_scores[ply]
+    
+            for i in range(pc_move_count):
+                # Selection sort
+                best_idx = i
+                for j in range(i + 1, pc_move_count):
+                    if pc_scores[j] > pc_scores[best_idx]:
+                        best_idx = j
+                pc_moves[i], pc_moves[best_idx] = pc_moves[best_idx], pc_moves[i]
+                pc_scores[i], pc_scores[best_idx] = pc_scores[best_idx], pc_scores[i]
+    
+                pc_move = pc_moves[i]
+                if pc_move == excluded_move:
+                    continue
+                pc_from = get_from_square(pc_move)
+                pc_to = get_to_square(pc_move)
+    
+                # SEE filter: only try captures whose SEE >= probcut_beta - static_eval
+                see_threshold_pc = probcut_beta - static_score if static_score != -INFINITY else 0
+                _diag_add(search_context, DIAG_PROBCUT_SEE_TRY)
+                if not _see_ge_jit(piece_bbs, occupancy_bbs, game_state[0], pc_from, pc_to, see_threshold_pc, pc_pinned_w, pc_pinned_b, -1, -1, get_promotion_piece(pc_move) + 1):
+                    continue
+    
+                pc_original_side = game_state[0]
+                pc_unmake = make_move(piece_bbs, occupancy_bbs, game_state, pc_move)
+    
+                # Legality check
+                pc_king_bb = piece_bbs[5] if (1 - game_state[0]) == 0 else piece_bbs[11]
+                pc_king_sq = get_lsb_index(pc_king_bb) if pc_king_bb else 0
+                if is_square_attacked(piece_bbs, occupancy_bbs, pc_king_sq, game_state[0]):
+                    unmake_move(piece_bbs, occupancy_bbs, game_state, pc_move, pc_unmake)
+                    continue
+    
+                pc_q_score, pc_q_nodes = quiescence_search(
+                    piece_bbs, occupancy_bbs, game_state,
+                    _i32(-probcut_beta), _i32(-probcut_beta + 1), _i32(ply + 1), search_context, _i32(0),
+                )
+                quiescence_nodes += pc_q_nodes
+                pc_q_score = -pc_q_score
+
+                if search_context.stop_flag[0]:
+                    unmake_move(piece_bbs, occupancy_bbs, game_state, pc_move, pc_unmake)
+                    return (np.int32(0), NO_MOVE, nodes_searched, quiescence_nodes, tt_hits)
+
+                if pc_q_score < probcut_beta:
+                    unmake_move(piece_bbs, occupancy_bbs, game_state, pc_move, pc_unmake)
+                    continue
+
+                saved_pc_stack_move = search_context.move_stack[ply]
+                saved_pc_stack_piece = search_context.piece_stack[ply]
+                pc_moved_piece_type = pc_unmake[0]
+                if pc_moved_piece_type != -1 and pc_original_side == BLACK:
+                    pc_moved_piece_type += 6
+                search_context.move_stack[ply] = pc_move
+                search_context.piece_stack[ply] = pc_moved_piece_type
+                search_context.reduction_stack[ply + 1] = 0
+                res_pc = _search(
+                    piece_bbs, occupancy_bbs, game_state, _i32(depth - probcut_r),
+                    _i32(-probcut_beta), _i32(-probcut_beta + 1), search_context, _i32(ply + 1),
+                    _u16(NO_MOVE), _b_false(), not cut_node,
+                )
+                search_context.move_stack[ply] = saved_pc_stack_move
+                search_context.piece_stack[ply] = saved_pc_stack_piece
+                pc_score = -res_pc[0]
+                
+                # IMPORTANT: Must aggregate the search stats from ProbCut back into the parent
+                child_pc_nodes = res_pc[2]; child_pc_q_nodes = res_pc[3]
+                child_pc_tth = res_pc[4]
+                
+                nodes_searched += child_pc_nodes; quiescence_nodes += child_pc_q_nodes
+                tt_hits += child_pc_tth
+
+                unmake_move(piece_bbs, occupancy_bbs, game_state, pc_move, pc_unmake)
+
+                if search_context.stop_flag[0]:
+                    return (np.int32(0), NO_MOVE, nodes_searched, quiescence_nodes, tt_hits)
+    
+                if pc_score >= probcut_beta:
+                    probcut_return_score = pc_score - (probcut_beta - beta)
+                    # PR-B: do not propagate unproven known-win / mate from reduced ProbCut
+                    if is_win(probcut_return_score) or is_decisive(probcut_return_score):
+                        probcut_return_score = beta
+                    # Store in TT for future use (aligned with SF19: probCutDepth + 1 = depth - probcut_r + 1)
+                    tt_store_score_pc = probcut_return_score
+                    if tt_store_score_pc > MATE_IN_MAX_PLY: tt_store_score_pc += ply
+                    elif tt_store_score_pc < -MATE_IN_MAX_PLY: tt_store_score_pc -= ply
+                    pc_tt_depth = max(1, depth - probcut_r + 1)
+                    store_tt(search_context.transposition_table, tt_key, pc_tt_depth, tt_store_score_pc, np.int16(32767), TT_FLAG_BETA, pc_move, search_context.tt_generation, tt_pv)
+                    _diag_add(search_context, DIAG_PROBCUT)
+                    return (np.int32(probcut_return_score), pc_move, nodes_searched, quiescence_nodes, tt_hits)
 
     # --- Move Ordering ---
     # Retrieve Counter Move if available (SF: [prev_piece][prev_to])
@@ -2004,8 +2053,8 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
     killer_1 = search_context.killer_moves[safe_ply*2]
     killer_2 = search_context.killer_moves[safe_ply*2+1]
 
-    # Optimization: Reuse pinned pieces from full evaluation if available
-    if static_eval_is_full and cached_pinned_white != PINNED_UNCOMPUTED_SENTINEL:
+    # Optimization: Reuse pinned pieces from full evaluation or ProbCut if available
+    if cached_pinned_white != PINNED_UNCOMPUTED_SENTINEL:
         pinned_white = cached_pinned_white
         pinned_black = cached_pinned_black
     else:
@@ -4339,6 +4388,7 @@ def iterative_deepening_search(piece_bbs, occupancy_bbs, game_state, max_depth, 
     # PRESERVED: search_context.counter_moves is NOT cleared here to prevent state pollution loss
     search_context.move_stack.fill(NO_MOVE)
     search_context.piece_stack.fill(-1)
+    search_context.nmp_min_ply = np.int32(0)
 
     for current_depth in range(1, max_depth + 1):
         # Aspiration Window Logic
