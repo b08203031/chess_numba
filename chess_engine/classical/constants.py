@@ -1237,7 +1237,7 @@ LPH_ORDER_SCALE = 8              # score += scale * lph // (1+ply)
 NMP_MIN_DEPTH = 1            # SF19 has no NMP depth floor (was 3 before Phase 8b)
 # SF19 `beta >= -2000` (NNUE internal units, PawnValue~208) scaled to HCE cp: -2000*100/208.
 NMP_BETA_FLOOR = -960
-NMP_BASE = 235
+NMP_BASE = 215
 NMP_DEPTH_COEF = 12
 NMP_IMP_COEF = 45
 NMP_EVAL_MARGIN_DIV = 155
