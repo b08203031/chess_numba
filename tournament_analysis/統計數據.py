@@ -11,6 +11,8 @@ Search depth/nodes/NPS charts live in parse_search_stats.py.
 
 Usage (from repo root):
   python tournament_analysis/統計數據.py
+  python tournament_analysis/統計數據.py file1.pgn file2.pgn
+  python tournament_analysis/統計數據.py --pgn file1.pgn file2.pgn --target New
   python tournament_analysis/統計數據.py --pgn tournament_analysis/tournament_results.pgn --target New
   python tournament_analysis/統計數據.py --peek
 """
@@ -22,7 +24,7 @@ import re
 import sys
 from collections import Counter, defaultdict
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -119,29 +121,45 @@ def to_elo(s: float) -> float:
     return -400.0 * math.log10(1.0 / s - 1.0)
 
 
-def detect_engines(pgn_path: Path) -> List[str]:
-    text = pgn_path.read_text(encoding="utf-8", errors="replace")
-    names = re.findall(r'\[(?:White|Black)\s+"([^"]+)"\]', text)
-    # Preserve frequency order
-    counts = Counter(names)
+def detect_engines(pgn_paths: Path | Sequence[Path]) -> List[str]:
+    if isinstance(pgn_paths, (str, Path)):
+        paths = [Path(pgn_paths)]
+    else:
+        paths = [Path(p) for p in pgn_paths]
+    counts: Counter = Counter()
+    for path in paths:
+        if path.exists():
+            text = path.read_text(encoding="utf-8", errors="replace")
+            names = re.findall(r'\[(?:White|Black)\s+"([^"]+)"\]', text)
+            counts.update(names)
     return [n for n, _ in counts.most_common()]
 
 
-def peek_pgn(pgn_path: Path, head_lines: int = 50) -> None:
-    text = pgn_path.read_text(encoding="utf-8", errors="replace")
-    n_games = len(re.findall(r"\[Event ", text))
-    whites = Counter(re.findall(r'\[White "(.+?)"\]', text))
-    blacks = Counter(re.findall(r'\[Black "(.+?)"\]', text))
-    dates = Counter(re.findall(r'\[Date "(.+?)"\]', text))
-    events = Counter(re.findall(r'\[Event "(.+?)"\]', text)).most_common(5)
-    print(f"file: {pgn_path}")
-    print(f"games: {n_games}")
-    print(f"White: {whites}")
-    print(f"Black: {blacks}")
-    print(f"Date:  {dates}")
-    print(f"Event: {events}")
-    print("--- head ---")
-    print("\n".join(text.splitlines()[:head_lines]))
+def peek_pgn(pgn_paths: Path | Sequence[Path], head_lines: int = 50) -> None:
+    if isinstance(pgn_paths, (str, Path)):
+        paths = [Path(pgn_paths)]
+    else:
+        paths = [Path(p) for p in pgn_paths]
+    for path in paths:
+        if not path.exists():
+            print(f"file: {path} (NOT FOUND)")
+            continue
+        text = path.read_text(encoding="utf-8", errors="replace")
+        n_games = len(re.findall(r"\[Event ", text))
+        whites = Counter(re.findall(r'\[White "(.+?)"\]', text))
+        blacks = Counter(re.findall(r'\[Black "(.+?)"\]', text))
+        dates = Counter(re.findall(r'\[Date "(.+?)"\]', text))
+        events = Counter(re.findall(r'\[Event "(.+?)"\]', text)).most_common(5)
+        print(f"file: {path}")
+        print(f"games: {n_games}")
+        print(f"White: {whites}")
+        print(f"Black: {blacks}")
+        print(f"Date:  {dates}")
+        print(f"Event: {events}")
+        print("--- head ---")
+        print("\n".join(text.splitlines()[:head_lines]))
+        if len(paths) > 1:
+            print("-" * 50)
 
 
 class ChessEngineAnalyzer:
@@ -167,13 +185,39 @@ class ChessEngineAnalyzer:
         self.fen_pair_counts: Counter = Counter()
         self.match_pairs: List[Tuple[int, Dict[str, Any], Dict[str, Any]]] = []
         self.sequence_order = "PGN file order"
-        self.source_path: Optional[Path] = None
+        self.source_paths: List[Path] = []
+        self.fen_analysis: Dict[str, Any] = {}
 
-    def parse_pgn(self, file_path: str | Path) -> None:
-        path = Path(file_path)
-        self.source_path = path.resolve()
-        content = path.read_text(encoding="utf-8", errors="replace")
-        games_raw = re.split(r"\[Event ", content)[1:]
+    @property
+    def source_path(self) -> Optional[Path]:
+        return self.source_paths[0] if self.source_paths else None
+
+    @source_path.setter
+    def source_path(self, val: Optional[Path]) -> None:
+        if val is None:
+            self.source_paths = []
+        else:
+            self.source_paths = [Path(val).resolve()]
+
+    def parse_pgn(self, file_paths: str | Path | Sequence[str | Path]) -> None:
+        if isinstance(file_paths, (str, Path)):
+            raw_paths = [Path(file_paths)]
+        else:
+            raw_paths = [Path(p) for p in file_paths]
+
+        seen = set()
+        paths: List[Path] = []
+        for p in raw_paths:
+            res = p.resolve()
+            if res not in seen:
+                seen.add(res)
+                paths.append(p)
+
+        self.source_paths = [p.resolve() for p in paths if p.exists()]
+        if not self.source_paths:
+            print(f"Error: No valid PGN files found among: {paths}", file=sys.stderr)
+            return
+
         self.games.clear()
         self.score_sequence.clear()
         self.lengths.clear()
@@ -185,105 +229,145 @@ class ChessEngineAnalyzer:
         self.w_wins = self.w_draws = self.w_losses = 0
         self.b_wins = self.b_draws = self.b_losses = 0
 
-        for file_index, game in enumerate(games_raw):
-            white_m = re.search(r'\[White "(.*?)"\]', game)
-            black_m = re.search(r'\[Black "(.*?)"\]', game)
-            result_m = re.search(r'\[Result "(.*?)"\]', game)
-            if not (white_m and black_m and result_m):
-                continue
+        current_max_round = 0
+        total_game_index = 0
+        offset_applied = False
 
-            white = white_m.group(1)
-            black = black_m.group(1)
-            result = result_m.group(1)
-            if self.target_engine not in (white, black):
-                continue
+        for path in self.source_paths:
+            file_name = path.name
+            content = path.read_text(encoding="utf-8", errors="replace")
+            games_raw = re.split(r"\[Event ", content)[1:]
 
-            rnd_m = re.search(r'\[Round "(.*?)"\]', game)
-            date_m = re.search(r'\[Date "(.*?)"\]', game)
-            fen_m = re.search(r'\[FEN "(.*?)"\]', game)
-            fen = fen_m.group(1) if fen_m else ""
+            file_parsed_games: List[Dict[str, Any]] = []
 
-            moves_m = re.search(r"\]\s*\n\s*\n(.*?)$", game, re.DOTALL)
-            moves_text = moves_m.group(1) if moves_m else ""
-            num_moves, first_move, promos, mate_flag = extract_movetext_metadata(moves_text, fen)
+            for file_index, game in enumerate(games_raw):
+                white_m = re.search(r'\[White "(.*?)"\]', game)
+                black_m = re.search(r'\[Black "(.*?)"\]', game)
+                result_m = re.search(r'\[Result "(.*?)"\]', game)
+                if not (white_m and black_m and result_m):
+                    continue
 
-            round_number = 0
-            if rnd_m:
-                round_match = re.match(r"\s*(\d+)", rnd_m.group(1))
-                if round_match:
-                    round_number = int(round_match.group(1))
+                white = white_m.group(1)
+                black = black_m.group(1)
+                result = result_m.group(1)
+                if self.target_engine not in (white, black):
+                    continue
 
-            is_target_white = white == self.target_engine
-            if result == "1-0":
-                score = 1.0 if is_target_white else 0.0
-                res_type = "W" if is_target_white else "L"
-            elif result == "0-1":
-                score = 0.0 if is_target_white else 1.0
-                res_type = "L" if is_target_white else "W"
-            else:
-                score = 0.5
-                res_type = "D"
+                rnd_m = re.search(r'\[Round "(.*?)"\]', game)
+                date_m = re.search(r'\[Date "(.*?)"\]', game)
+                fen_m = re.search(r'\[FEN "(.*?)"\]', game)
+                fen = fen_m.group(1).strip() if fen_m else ""
 
-            if num_moves <= 25:
-                length_bucket = "short(<=25)"
-            elif num_moves <= 50:
-                length_bucket = "medium(26-50)"
-            elif num_moves <= 80:
-                length_bucket = "long(51-80)"
-            else:
-                length_bucket = "very_long(>80)"
+                moves_m = re.search(r"\]\s*\n\s*\n(.*?)$", game, re.DOTALL)
+                moves_text = moves_m.group(1) if moves_m else ""
+                num_moves, first_move, promos, mate_flag = extract_movetext_metadata(moves_text, fen)
 
-            self.games.append(
-                {
-                    "round": round_number,
-                    "file_index": file_index,
-                    "date": date_m.group(1) if date_m else "?",
-                    "white": white,
-                    "black": black,
-                    "result": result,
-                    "score": score,
-                    "rt": res_type,
-                    "nmoves": num_moves,
-                    "length_bucket": length_bucket,
-                    "is_target_white": is_target_white,
-                    "promos": promos,
-                    "mate_flag": mate_flag,
-                    "fen": fen,
-                    "first_move": first_move,
-                }
-            )
+                round_number = 0
+                if rnd_m:
+                    round_match = re.match(r"\s*(\d+)", rnd_m.group(1))
+                    if round_match:
+                        round_number = int(round_match.group(1))
 
-            if is_target_white:
-                if res_type == "W":
-                    self.w_wins += 1
-                elif res_type == "D":
-                    self.w_draws += 1
+                is_target_white = white == self.target_engine
+                if result == "1-0":
+                    score = 1.0 if is_target_white else 0.0
+                    res_type = "W" if is_target_white else "L"
+                elif result == "0-1":
+                    score = 0.0 if is_target_white else 1.0
+                    res_type = "L" if is_target_white else "W"
                 else:
-                    self.w_losses += 1
-                bucket = self.openings_white.setdefault(
-                    first_move, {"W": 0, "D": 0, "L": 0, "Total": 0}
-                )
-                bucket[res_type] += 1
-                bucket["Total"] += 1
-            else:
-                if res_type == "W":
-                    self.b_wins += 1
-                elif res_type == "D":
-                    self.b_draws += 1
+                    score = 0.5
+                    res_type = "D"
+
+                if num_moves <= 25:
+                    length_bucket = "short(<=25)"
+                elif num_moves <= 50:
+                    length_bucket = "medium(26-50)"
+                elif num_moves <= 80:
+                    length_bucket = "long(51-80)"
                 else:
-                    self.b_losses += 1
-                bucket = self.openings_black.setdefault(
-                    first_move, {"W": 0, "D": 0, "L": 0, "Total": 0}
+                    length_bucket = "very_long(>80)"
+
+                norm_fen = " ".join(fen.split()[:4]) if fen else "startpos"
+
+                file_parsed_games.append(
+                    {
+                        "round": round_number,
+                        "orig_round": round_number,
+                        "file_index": file_index,
+                        "total_index": total_game_index,
+                        "source_file": file_name,
+                        "date": date_m.group(1) if date_m else "?",
+                        "white": white,
+                        "black": black,
+                        "result": result,
+                        "score": score,
+                        "rt": res_type,
+                        "nmoves": num_moves,
+                        "length_bucket": length_bucket,
+                        "is_target_white": is_target_white,
+                        "promos": promos,
+                        "mate_flag": mate_flag,
+                        "fen": fen,
+                        "norm_fen": norm_fen,
+                        "first_move": first_move,
+                    }
                 )
-                bucket[res_type] += 1
-                bucket["Total"] += 1
+                total_game_index += 1
+
+            # Determine round offset for this file if round numbers overlap with previous files
+            file_rounds = [g["orig_round"] for g in file_parsed_games if g["orig_round"] > 0]
+            if file_rounds:
+                min_r = min(file_rounds)
+                if current_max_round > 0 and min_r <= current_max_round:
+                    # Offset must be even to keep (round + 1) // 2 pair boundaries aligned
+                    round_offset = ((current_max_round + 1) // 2) * 2
+                    offset_applied = True
+                else:
+                    round_offset = 0
+
+                for g in file_parsed_games:
+                    if g["orig_round"] > 0:
+                        g["round"] = g["orig_round"] + round_offset
+                current_max_round = max(current_max_round, max(g["round"] for g in file_parsed_games))
+
+            # Add to self.games and update WDL counters
+            for g in file_parsed_games:
+                self.games.append(g)
+                res_type = g["rt"]
+                first_move = g["first_move"]
+                if g["is_target_white"]:
+                    if res_type == "W":
+                        self.w_wins += 1
+                    elif res_type == "D":
+                        self.w_draws += 1
+                    else:
+                        self.w_losses += 1
+                    bucket = self.openings_white.setdefault(
+                        first_move, {"W": 0, "D": 0, "L": 0, "Total": 0}
+                    )
+                    bucket[res_type] += 1
+                    bucket["Total"] += 1
+                else:
+                    if res_type == "W":
+                        self.b_wins += 1
+                    elif res_type == "D":
+                        self.b_draws += 1
+                    else:
+                        self.b_losses += 1
+                    bucket = self.openings_black.setdefault(
+                        first_move, {"W": 0, "D": 0, "L": 0, "Total": 0}
+                    )
+                    bucket[res_type] += 1
+                    bucket["Total"] += 1
 
         rounds = [g["round"] for g in self.games]
         if rounds and all(r > 0 for r in rounds) and len(set(rounds)) == len(rounds):
             original_order = list(rounds)
             self.games.sort(key=lambda g: g["round"])
             reordered = original_order != [g["round"] for g in self.games]
-            self.sequence_order = "numeric Round order" + (" (PGN completion order reordered)" if reordered else "")
+            multi_note = f" (across {len(self.source_paths)} files" + (", offset applied" if offset_applied else "") + ")" if len(self.source_paths) > 1 else ""
+            self.sequence_order = "numeric Round order" + multi_note + (" (PGN completion order reordered)" if reordered else "")
         else:
             self.sequence_order = "PGN file order (Round missing or duplicated)"
 
@@ -295,6 +379,7 @@ class ChessEngineAnalyzer:
         self.match_pairs = self._build_match_pairs()
         self._calculate_pair_stats()
         self._calculate_fen_pairs()
+        self.fen_analysis = self.analyze_starting_positions()
 
     def _build_match_pairs(self) -> List[Tuple[int, Dict[str, Any], Dict[str, Any]]]:
         """Build complete color-swapped pairs, ordered by scheduled pair number."""
@@ -693,7 +778,10 @@ class ChessEngineAnalyzer:
         )
         if np.sum(obs[0]) == 0 or np.sum(obs[1]) == 0:
             return None
-        chi2, p_val, _, _ = stats.chi2_contingency(obs)
+        try:
+            chi2, p_val, _, _ = stats.chi2_contingency(obs)
+        except (ValueError, ZeroDivisionError):
+            chi2, p_val = 0.0, 1.0
         w_rate = (self.w_wins + 0.5 * self.w_draws) / np.sum(obs[0])
         b_rate = (self.b_wins + 0.5 * self.b_draws) / np.sum(obs[1])
         white_perspective_w = self.w_wins + self.b_losses
@@ -892,6 +980,145 @@ class ChessEngineAnalyzer:
             lines.append(f"  … ({len(mate_games) - 30} more)")
         return lines
 
+    def analyze_starting_positions(self) -> Dict[str, Any]:
+        """Detect duplicate starting positions (FENs), pair integrity, and cross-file overlap."""
+        fen_games: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
+        fen_files: Dict[str, Set[str]] = defaultdict(set)
+        fen_colors: Dict[str, Counter] = defaultdict(Counter)
+        game_fingerprints: Counter = Counter()
+
+        for g in self.games:
+            norm_fen = g.get("norm_fen", "startpos")
+            fen_games[norm_fen].append(g)
+            fen_files[norm_fen].add(g.get("source_file", "unknown"))
+            fen_colors[norm_fen]["W" if g["is_target_white"] else "B"] += 1
+            fingerprint = (norm_fen, g["white"], g["black"], g["result"], g["nmoves"])
+            game_fingerprints[fingerprint] += 1
+
+        total_games = len(self.games)
+        unique_fens = len(fen_games)
+        all_startpos = unique_fens == 1 and "startpos" in fen_games
+
+        excess_fens: List[Dict[str, Any]] = []
+        unpaired_fens: List[Dict[str, Any]] = []
+        cross_file_duplicates: List[Dict[str, Any]] = []
+
+        for norm_fen, glist in fen_games.items():
+            if norm_fen == "startpos" and all_startpos:
+                continue
+            count = len(glist)
+            files = sorted(fen_files[norm_fen])
+            color_c = fen_colors[norm_fen]
+            raw_fen = glist[0].get("fen", "") or "startpos"
+
+            if count > 2:
+                excess_fens.append({
+                    "fen": raw_fen,
+                    "norm_fen": norm_fen,
+                    "count": count,
+                    "white": color_c["W"],
+                    "black": color_c["B"],
+                    "files": {f: sum(1 for g in glist if g.get("source_file") == f) for f in files},
+                })
+            elif count == 1:
+                unpaired_fens.append({
+                    "fen": raw_fen,
+                    "norm_fen": norm_fen,
+                    "count": count,
+                    "white": color_c["W"],
+                    "black": color_c["B"],
+                    "file": files[0] if files else "unknown",
+                })
+
+            if len(files) > 1:
+                cross_file_duplicates.append({
+                    "fen": raw_fen,
+                    "norm_fen": norm_fen,
+                    "total_count": count,
+                    "files": {f: sum(1 for g in glist if g.get("source_file") == f) for f in files},
+                })
+
+        exact_duplicates = sum(v - 1 for v in game_fingerprints.values() if v > 1)
+
+        return {
+            "total_games": total_games,
+            "unique_fens": unique_fens,
+            "all_startpos": all_startpos,
+            "excess_fens": excess_fens,
+            "unpaired_fens": unpaired_fens,
+            "cross_file_duplicates": cross_file_duplicates,
+            "exact_duplicate_games": exact_duplicates,
+            "num_files": len(self.source_paths),
+        }
+
+    def format_starting_position_analysis(self) -> List[str]:
+        lines = ["[11. 起始盤面 (FEN) 查重與分佈檢驗]"]
+        fa = self.fen_analysis
+        if not fa:
+            lines.append("  (no data)")
+            return lines
+
+        num_files = fa["num_files"]
+        if num_files > 1:
+            lines.append(f"  * 載入 PGN 檔案數 : {num_files} 檔合併分析:")
+            for sp in self.source_paths:
+                cnt = sum(1 for g in self.games if g.get("source_file") == sp.name)
+                lines.append(f"      - {sp.name}: {cnt} 局")
+        elif num_files == 1 and self.source_paths:
+            lines.append(f"  * 來源檔案       : {self.source_paths[0].name}")
+
+        lines.append(f"  * 總對局數       : {fa['total_games']} 局")
+
+        if fa["all_startpos"]:
+            lines.append("  * 盤面類型       : 標準起始局面 (startpos)")
+            lines.append("  * 說明           : 所有對局均自標準起始局面開局，未使用自訂 FEN 開局庫。")
+            return lines
+
+        lines.append("  * 盤面類型       : 自訂開局庫 (FEN)")
+        lines.append(f"  * 獨立起始盤面數 : {fa['unique_fens']} 組 (預期成對換先: {fa['total_games'] // 2} 對)")
+
+        if num_files > 1:
+            cf = fa.get("cross_file_duplicates", [])
+            if cf:
+                lines.append(f"  * ⚠️ 跨檔案重複盤面: 發現 {len(cf)} 組起始盤面同時出現在多個 PGN 檔案中！")
+                for item in cf[:10]:
+                    files_str = ", ".join(f"{f}({c}局)" for f, c in item["files"].items())
+                    lines.append(f"      - {item['fen']}: 共 {item['total_count']} 局 [{files_str}]")
+                if len(cf) > 10:
+                    lines.append(f"      … ({len(cf) - 10} more)")
+            else:
+                lines.append("  * ✅ 跨檔案檢查通過：各 PGN 檔案開局盤面完全獨立，無跨檔重複盤面。")
+
+        excess = fa.get("excess_fens", [])
+        if excess:
+            lines.append(f"  * ⚠️ 超額重複開局: 發現 {len(excess)} 組盤面測試局數 > 2 局 (被重複測試了多次):")
+            for item in excess[:10]:
+                files_str = ", ".join(f"{f}({c}局)" for f, c in item["files"].items())
+                lines.append(
+                    f"      - {item['fen']}: 共 {item['count']} 局 "
+                    f"(持白 {item['white']}, 持黑 {item['black']}) [{files_str}]"
+                )
+            if len(excess) > 10:
+                lines.append(f"      … ({len(excess) - 10} more)")
+        elif not fa.get("unpaired_fens"):
+            lines.append("  * ✅ 起始盤面配對檢查通過：所有開局盤面均恰好測試 1 組換先對局（各 2 局，白黑各一），無重複測試。")
+
+        unpaired = fa.get("unpaired_fens", [])
+        if unpaired:
+            lines.append(f"  * ⚠️ 未成對盤面: 發現 {len(unpaired)} 組盤面僅測試 1 局 (未完成成對換先):")
+            for item in unpaired[:5]:
+                lines.append(f"      - {item['fen']}: 1 局 (持{'白' if item['white'] else '黑'}) 來自 {item['file']}")
+            if len(unpaired) > 5:
+                lines.append(f"      … ({len(unpaired) - 5} more)")
+
+        exact = fa.get("exact_duplicate_games", 0)
+        if exact > 0:
+            lines.append(f"  * ⚠️ 完全重複對局: 發現 {exact} 局完全相同之重複對局！")
+        else:
+            lines.append("  * ✅ 對局唯一性檢查通過：無完全重複之對局。")
+
+        return lines
+
     def generate_report(self, output_dir: Path, write_file: bool = True) -> str:
         lines: List[str] = []
 
@@ -901,8 +1128,12 @@ class ChessEngineAnalyzer:
         out(f"========== 引擎對戰深度分析報告 ({self.target_engine}) ==========\n")
         if self.games:
             dates = Counter(g["date"] for g in self.games)
-            if self.source_path is not None:
-                out(f"來源 PGN: {self.source_path}")
+            if len(self.source_paths) == 1:
+                out(f"來源 PGN: {self.source_paths[0]}")
+            elif len(self.source_paths) > 1:
+                out(f"來源 PGN (共 {len(self.source_paths)} 檔合併):")
+                for sp in self.source_paths:
+                    out(f"  - {sp}")
             out(f"序列順序: {self.sequence_order}")
             out(f"日期分佈: {dict(dates)}")
             out(f"White 名稱: {Counter(g['white'] for g in self.games)}")
@@ -994,6 +1225,7 @@ class ChessEngineAnalyzer:
             self.analyze_promos(),
             self.analyze_halves_and_cumulative(),
             self.analyze_mates(),
+            self.format_starting_position_analysis(),
         ):
             for line in block:
                 out(line)
@@ -1007,7 +1239,11 @@ class ChessEngineAnalyzer:
         out("================ 分析結束 ================\n")
 
         text = "\n".join(lines)
-        print(text)
+        try:
+            print(text)
+        except UnicodeEncodeError:
+            encoding = getattr(sys.stdout, "encoding", "ascii") or "ascii"
+            print(text.encode(encoding, errors="replace").decode(encoding))
         if write_file:
             report_path = Path(output_dir) / "game_stats_report.txt"
             report_path.write_text(text, encoding="utf-8")
@@ -1024,22 +1260,41 @@ def main(argv: Optional[List[str]] = None) -> int:
             reconfigure(encoding="utf-8", errors="replace")
 
     parser = argparse.ArgumentParser(description="Tournament game-level statistics")
-    parser.add_argument("--pgn", type=Path, default=DEFAULT_PGN, help="PGN path")
+    parser.add_argument("pgn_files", nargs="*", type=Path, help="PGN file(s) to analyze (positional)")
+    parser.add_argument("--pgn", nargs="+", action="extend", type=Path, default=None, help="One or more PGN paths")
     parser.add_argument("--target", default=None, help="Target engine name (default: auto / New)")
     parser.add_argument("--out-dir", type=Path, default=HERE, help="Output directory for plot/report")
     parser.add_argument("--peek", action="store_true", help="Only print PGN header summary")
     parser.add_argument("--no-report-file", action="store_true", help="Do not write game_stats_report.txt")
     args = parser.parse_args(argv)
 
-    if not args.pgn.exists():
-        print(f"Error: PGN not found: {args.pgn}", file=sys.stderr)
+    raw_paths: List[Path] = []
+    if args.pgn:
+        raw_paths.extend(args.pgn)
+    if args.pgn_files:
+        raw_paths.extend(args.pgn_files)
+    if not raw_paths:
+        raw_paths = [DEFAULT_PGN]
+
+    seen = set()
+    pgn_paths: List[Path] = []
+    for p in raw_paths:
+        res = p.resolve()
+        if res not in seen:
+            seen.add(res)
+            pgn_paths.append(p)
+
+    existing_paths = [p for p in pgn_paths if p.exists()]
+    if not existing_paths:
+        for p in pgn_paths:
+            print(f"Error: PGN not found: {p}", file=sys.stderr)
         return 1
 
     if args.peek:
-        peek_pgn(args.pgn)
+        peek_pgn(existing_paths)
         return 0
 
-    engines = detect_engines(args.pgn)
+    engines = detect_engines(existing_paths)
     target = args.target
     if target is None:
         if "New" in engines:
@@ -1049,13 +1304,16 @@ def main(argv: Optional[List[str]] = None) -> int:
         else:
             target = "New"
 
-    print(f"PGN: {args.pgn}")
+    if len(existing_paths) == 1:
+        print(f"PGN: {existing_paths[0]}")
+    else:
+        print(f"PGNs ({len(existing_paths)} files): {[str(p) for p in existing_paths]}")
     print(f"Detected engines: {engines}")
     print(f"Target: {target}")
 
     args.out_dir.mkdir(parents=True, exist_ok=True)
     analyzer = ChessEngineAnalyzer(target_engine=target)
-    analyzer.parse_pgn(args.pgn)
+    analyzer.parse_pgn(existing_paths)
     analyzer.generate_report(args.out_dir, write_file=not args.no_report_file)
     return 0
 

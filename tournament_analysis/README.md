@@ -54,12 +54,14 @@ python tools/sync_classical_old.py --diff
 在**專案根目錄**對 `tournament_results.pgn` 跑：
 
 ```bash
-# 局級：WDL / Elo / 執色 / 長度分桶 / 換先配對 / 升變 / 累積得分
+# 局級：WDL / Elo / 執色 / 長度分桶 / 換先配對 / 升變 / 累積得分 / 起始盤面 (FEN) 查重
 python tournament_analysis/統計數據.py
-python tournament_analysis/統計數據.py --target New --peek   # 只看 PGN 摘要
+python tournament_analysis/統計數據.py file1.pgn file2.pgn              # 多檔合併分析 + 跨檔開局查重
+python tournament_analysis/統計數據.py --target New --peek             # 只看 PGN 摘要
 
-# 著法級：深度 / 節點 / 時間 / NPS、分執色、深度直方、同深度節點比 + 圖表
+# 著法級：深度 / 節點 / 時間 / NPS、分執色、深度直方、同深度節點比 + 起始盤面查重 + 圖表
 python tournament_analysis/parse_search_stats.py
+python tournament_analysis/parse_search_stats.py file1.pgn file2.pgn    # 多檔合併分析
 python tournament_analysis/parse_search_stats.py --name1 New --name2 Old
 ```
 

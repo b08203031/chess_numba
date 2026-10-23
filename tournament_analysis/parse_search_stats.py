@@ -15,6 +15,8 @@ Game-level WDL / Elo: 統計數據.py
 
 Usage (repo root):
   python tournament_analysis/parse_search_stats.py
+  python tournament_analysis/parse_search_stats.py file1.pgn file2.pgn
+  python tournament_analysis/parse_search_stats.py --pgn file1.pgn file2.pgn
   python tournament_analysis/parse_search_stats.py --name1 New --name2 Old
   python tournament_analysis/parse_search_stats.py --draw-depth-cap 40
 """
@@ -23,9 +25,10 @@ from __future__ import annotations
 import argparse
 import os
 import re
-from collections import defaultdict
+import sys
+from collections import Counter, defaultdict
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -102,21 +105,38 @@ def is_mate_eval(ev: str) -> bool:
     return s.startswith("#")
 
 
+def normalize_fen(fen: str) -> str:
+    """Normalize FEN to board placement, active color, castling, and en-passant."""
+    parts = fen.strip().split()
+    if len(parts) >= 4:
+        return " ".join(parts[:4])
+    return fen.strip()
+
+
 def parse_pgn(
-    file_path: str | Path,
+    file_paths: str | Path | Sequence[str | Path],
     name1: str,
     name2: str,
     draw_depth_cap: int = DEFAULT_DRAW_DEPTH_CAP,
 ):
-    path = Path(file_path)
-    if not path.exists():
-        print(f"Error: PGN file not found: {path}")
-        return None
+    if isinstance(file_paths, (str, Path)):
+        raw_paths = [Path(file_paths)]
+    else:
+        raw_paths = [Path(p) for p in file_paths]
 
-    content = path.read_text(encoding="utf-8", errors="replace")
-    game_blocks = content.split('[Event "')
-    if len(game_blocks) <= 1:
-        game_blocks = re.split(r"\[Event ", content)
+    seen = set()
+    paths: List[Path] = []
+    for p in raw_paths:
+        res = p.resolve()
+        if res not in seen:
+            seen.add(res)
+            paths.append(p)
+
+    existing_paths = [p for p in paths if p.exists()]
+    if not existing_paths:
+        for p in paths:
+            print(f"Error: PGN file not found: {p}")
+        return None
 
     new_stats = empty_stats()
     old_stats = empty_stats()
@@ -130,6 +150,13 @@ def parse_pgn(
 
     games_parsed = 0
     draw_games = 0
+
+    fen_game_counts: Counter = Counter()
+    fen_raw_map: Dict[str, str] = {}
+    fen_by_file: Dict[str, Counter] = defaultdict(Counter)
+    fen_by_color: Dict[str, Counter] = defaultdict(Counter)
+    file_game_counts: Counter = Counter()
+    game_fingerprints: Counter = Counter()
 
     def record_main(
         eng: str,
@@ -180,68 +207,139 @@ def parse_pgn(
         bucket["color"].append(col)
         counts[eng]["mate_moves"] += 1
 
-    for block in game_blocks:
-        if not block.strip():
-            continue
-        white_match = re.search(r'\[White\s+"([^"]+)"\]', block)
-        black_match = re.search(r'\[Black\s+"([^"]+)"\]', block)
-        if not white_match or not black_match:
-            continue
-        white_player = white_match.group(1)
-        black_player = black_match.group(1)
-        if white_player not in (name1, name2) or black_player not in (name1, name2):
-            continue
-        games_parsed += 1
+    for path in existing_paths:
+        file_name = path.name
+        content = path.read_text(encoding="utf-8", errors="replace")
+        game_blocks = content.split('[Event "')
+        if len(game_blocks) <= 1:
+            game_blocks = re.split(r"\[Event ", content)
 
-        result_m = re.search(r'\[Result\s+"([^"]+)"\]', block)
-        result = result_m.group(1) if result_m else "*"
-        is_draw = result == "1/2-1/2"
-        if is_draw:
-            draw_games += 1
+        for block in game_blocks:
+            if not block.strip():
+                continue
+            white_match = re.search(r'\[White\s+"([^"]+)"\]', block)
+            black_match = re.search(r'\[Black\s+"([^"]+)"\]', block)
+            if not white_match or not black_match:
+                continue
+            white_player = white_match.group(1)
+            black_player = black_match.group(1)
+            if white_player not in (name1, name2) or black_player not in (name1, name2):
+                continue
+            games_parsed += 1
+            file_game_counts[file_name] += 1
 
-        moves: List[Tuple[str, str, int, str, int, int, int, Optional[int]]] = []
-        for move_match in MOVE_COMMENT_RE.finditer(block):
-            is_black = move_match.group("black") is not None
-            eng = black_player if is_black else white_player
-            col = "B" if is_black else "W"
-            if eng not in counts:
-                continue
-            counts[eng]["comments_seen"] += 1
-            parsed = parse_search_comment(move_match.group("comment"))
-            if parsed is None:
-                counts[eng]["malformed_comments"] += 1
-                continue
-            depth, ev, nodes, time_ms, nps = parsed
-            moves.append(
-                (
-                    eng,
-                    col,
-                    int(move_match.group("move_num")),
-                    ev,
-                    depth,
-                    nodes,
-                    time_ms,
-                    nps,
+            result_m = re.search(r'\[Result\s+"([^"]+)"\]', block)
+            result = result_m.group(1) if result_m else "*"
+            is_draw = result == "1/2-1/2"
+            if is_draw:
+                draw_games += 1
+
+            fen_match = re.search(r'\[FEN\s+"([^"]+)"\]', block)
+            raw_fen = fen_match.group(1).strip() if fen_match else "startpos"
+            norm_fen = normalize_fen(raw_fen)
+            fen_game_counts[norm_fen] += 1
+            if norm_fen not in fen_raw_map:
+                fen_raw_map[norm_fen] = raw_fen
+            fen_by_file[norm_fen][file_name] += 1
+            fen_by_color[norm_fen]["W" if white_player == name1 else "B"] += 1
+
+            moves_m = re.search(r"\]\s*\n\s*\n(.*?)$", block, re.DOTALL)
+            moves_text = moves_m.group(1).strip() if moves_m else ""
+            game_fingerprints[(norm_fen, white_player, black_player, moves_text[:100])] += 1
+
+            moves: List[Tuple[str, str, int, str, int, int, int, Optional[int]]] = []
+            for move_match in MOVE_COMMENT_RE.finditer(block):
+                is_black = move_match.group("black") is not None
+                eng = black_player if is_black else white_player
+                col = "B" if is_black else "W"
+                if eng not in counts:
+                    continue
+                counts[eng]["comments_seen"] += 1
+                parsed = parse_search_comment(move_match.group("comment"))
+                if parsed is None:
+                    counts[eng]["malformed_comments"] += 1
+                    continue
+                depth, ev, nodes, time_ms, nps = parsed
+                moves.append(
+                    (
+                        eng,
+                        col,
+                        int(move_match.group("move_num")),
+                        ev,
+                        depth,
+                        nodes,
+                        time_ms,
+                        nps,
+                    )
                 )
-            )
 
-        for eng, col, move_num, ev, depth, nodes, time_ms, nps in moves:
-            if eng not in counts:
-                continue
-            counts[eng]["raw_moves"] += 1
+            for eng, col, move_num, ev, depth, nodes, time_ms, nps in moves:
+                if eng not in counts:
+                    continue
+                counts[eng]["raw_moves"] += 1
 
-            if is_mate_eval(ev):
-                record_mate(eng, col, depth, nodes, time_ms, move_num, nps)
-                continue
+                if is_mate_eval(ev):
+                    record_mate(eng, col, depth, nodes, time_ms, move_num, nps)
+                    continue
 
-            if is_draw and depth >= draw_depth_cap:
-                counts[eng]["draw_deep_excluded"] += 1
-                continue
+                if is_draw and depth >= draw_depth_cap:
+                    counts[eng]["draw_deep_excluded"] += 1
+                    continue
 
-            record_main(eng, col, depth, nodes, time_ms, move_num, nps)
+                record_main(eng, col, depth, nodes, time_ms, move_num, nps)
 
+    # Analyze starting position (FEN) duplicates
+    all_startpos = len(fen_game_counts) == 1 and "startpos" in fen_game_counts
+    excess_fens = []
+    unpaired_fens = []
+    cross_file_duplicates = []
+
+    for norm_fen, count in fen_game_counts.items():
+        if norm_fen == "startpos" and all_startpos:
+            continue
+        raw_fen = fen_raw_map.get(norm_fen, norm_fen)
+        files_dict = dict(fen_by_file[norm_fen])
+        color_c = fen_by_color[norm_fen]
+        if count > 2:
+            excess_fens.append({
+                "fen": raw_fen,
+                "norm_fen": norm_fen,
+                "count": count,
+                "white": color_c["W"],
+                "black": color_c["B"],
+                "files": files_dict,
+            })
+        elif count == 1:
+            unpaired_fens.append({
+                "fen": raw_fen,
+                "norm_fen": norm_fen,
+                "count": count,
+                "white": color_c["W"],
+                "black": color_c["B"],
+                "files": files_dict,
+            })
+        if len(files_dict) > 1:
+            cross_file_duplicates.append({
+                "fen": raw_fen,
+                "norm_fen": norm_fen,
+                "total_count": count,
+                "files": files_dict,
+            })
+
+    exact_duplicates = sum(v - 1 for v in game_fingerprints.values() if v > 1)
+    fen_check_results = {
+        "unique_fens": len(fen_game_counts),
+        "all_startpos": all_startpos,
+        "excess_fens": excess_fens,
+        "unpaired_fens": unpaired_fens,
+        "cross_file_duplicates": cross_file_duplicates,
+        "exact_duplicate_games": exact_duplicates,
+        "file_game_counts": dict(file_game_counts),
+    }
+
+    files_desc = f"{len(existing_paths)} file(s)" if len(existing_paths) > 1 else f"{existing_paths[0].name}"
     print(
-        f"Successfully parsed {games_parsed} games "
+        f"Successfully parsed {games_parsed} games from {files_desc} "
         f"(draws={draw_games}, draw_depth_cap={draw_depth_cap})."
     )
     meta = {
@@ -249,6 +347,8 @@ def parse_pgn(
         "draw_games": draw_games,
         "draw_depth_cap": draw_depth_cap,
         "counts": counts,
+        "source_files": [str(p) for p in existing_paths],
+        "fen_check": fen_check_results,
     }
     return new_stats, old_stats, by_color, new_mate, old_mate, meta
 
@@ -333,6 +433,69 @@ def append_exclusion_and_mate_section(
         )
         deep_mate = float(np.mean(d >= 100) * 100)
         report.append(f"      depth>=100: {deep_mate:.1f}%  depth>=40: {float(np.mean(d >= 40)*100):.1f}%")
+    report.append("")
+
+
+def append_fen_check_section(report: List[str], meta: Dict[str, Any]) -> None:
+    fc = meta.get("fen_check")
+    if not fc:
+        return
+    source_files = meta.get("source_files", [])
+    report.append("【來源 PGN 與起始盤面 (FEN) 查重】")
+    if len(source_files) > 1:
+        report.append(f"  * 載入 {len(source_files)} 份 PGN 檔案進行合併分析:")
+        for f in source_files:
+            cnt = fc["file_game_counts"].get(Path(f).name, 0)
+            report.append(f"      - {Path(f).name}: {cnt} 局")
+    elif len(source_files) == 1:
+        report.append(f"  * 來源檔案: {Path(source_files[0]).name}")
+
+    report.append(f"  * 總對局數: {meta['games_parsed']} 局")
+    if fc["all_startpos"]:
+        report.append("  * 盤面類型: 標準起始局面 (startpos)")
+        report.append("  * 說明: 所有對局均自標準起始局面開局，未使用自訂 FEN 開局庫。\n")
+        return
+
+    report.append(f"  * 盤面類型: 自訂開局庫 (FEN)")
+    report.append(f"  * 獨立起始盤面: {fc['unique_fens']} 組 (預期換先配對: {meta['games_parsed'] // 2} 對)")
+
+    # Cross-file duplicate check
+    if len(source_files) > 1:
+        cf_dups = fc.get("cross_file_duplicates", [])
+        if cf_dups:
+            report.append(f"  * ⚠️ 跨檔案重複起始盤面: 發現 {len(cf_dups)} 組盤面同時出現在多個檔案中！")
+            for item in cf_dups[:10]:
+                files_str = ", ".join(f"{f}({c}局)" for f, c in item["files"].items())
+                report.append(f"      - {item['fen']}: 共 {item['total_count']} 局 [{files_str}]")
+            if len(cf_dups) > 10:
+                report.append(f"      … ({len(cf_dups) - 10} more)")
+        else:
+            report.append("  * ✅ 跨檔案檢查通過：各 PGN 檔案之起始盤面完全獨立，無跨檔重複盤面。")
+
+    # Excess duplicate check (tested in > 1 pair, i.e. > 2 games)
+    excess = fc.get("excess_fens", [])
+    if excess:
+        report.append(f"  * ⚠️ 超額重複開局: 發現 {len(excess)} 組盤面出現次數 > 2 局 (被重複測試了多次):")
+        for item in excess[:10]:
+            files_str = ", ".join(f"{f}({c}局)" for f, c in item["files"].items())
+            report.append(
+                f"      - {item['fen']}: 共 {item['count']} 局 "
+                f"(持白 {item['white']}, 持黑 {item['black']}) [{files_str}]"
+            )
+        if len(excess) > 10:
+            report.append(f"      … ({len(excess) - 10} more)")
+    elif not fc.get("unpaired_fens"):
+        report.append("  * ✅ 起始盤面配對檢查通過：所有開局均為嚴格成對測試（各 2 局，持白 1 局 / 持黑 1 局）。")
+
+    unpaired = fc.get("unpaired_fens", [])
+    if unpaired:
+        report.append(f"  * ⚠️ 未成對盤面: 發現 {len(unpaired)} 組盤面僅出現 1 局 (未完成成對換先)")
+
+    if fc.get("exact_duplicate_games", 0) > 0:
+        report.append(f"  * ⚠️ 發現完全重複對局: {fc['exact_duplicate_games']} 局！")
+    else:
+        report.append("  * ✅ 對局唯一性檢查通過：無完全重複之對局。")
+
     report.append("")
 
 
@@ -444,6 +607,7 @@ def analyze_and_plot(
     report: List[str] = []
     report.append("========== 搜尋效能與深度對比統計報告 ==========\n")
     append_exclusion_and_mate_section(report, meta, new_mate, old_mate, name1, name2)
+    append_fen_check_section(report, meta)
 
     report.append("【樣本 (主統計)】")
     report.append(f"  * {name1} 著步數: {len(new_depths)}")
@@ -497,7 +661,11 @@ def analyze_and_plot(
     report.append("=========================================\n")
 
     report_text = "\n".join(report)
-    print(report_text)
+    try:
+        print(report_text)
+    except UnicodeEncodeError:
+        encoding = getattr(sys.stdout, "encoding", "ascii") or "ascii"
+        print(report_text.encode(encoding, errors="replace").decode(encoding))
     with open(os.path.join(output_dir, "search_stats_report.txt"), "w", encoding="utf-8") as rf:
         rf.write(report_text)
 
@@ -691,26 +859,43 @@ def analyze_and_plot(
     print("Charts: " + ", ".join(saved))
 
 
-def auto_names(pgn_path: Path) -> Tuple[str, str]:
-    content = pgn_path.read_text(encoding="utf-8", errors="replace")
-    white_names = re.findall(r'\[White\s+"([^"]+)"\]', content)
-    black_names = re.findall(r'\[Black\s+"([^"]+)"\]', content)
+def auto_names(pgn_paths: Path | Sequence[Path]) -> Tuple[str, str]:
+    if isinstance(pgn_paths, (str, Path)):
+        paths = [Path(pgn_paths)]
+    else:
+        paths = [Path(p) for p in pgn_paths]
+
+    white_names: List[str] = []
+    black_names: List[str] = []
+    for path in paths:
+        if path.exists():
+            content = path.read_text(encoding="utf-8", errors="replace")
+            white_names.extend(re.findall(r'\[White\s+"([^"]+)"\]', content))
+            black_names.extend(re.findall(r'\[Black\s+"([^"]+)"\]', content))
+
     unique_names = list(set(white_names + black_names))
     if "New" in unique_names and "Old" in unique_names:
         return "New", "Old"
     if "MyEngine" in unique_names and "Stockfish" in unique_names:
         return "MyEngine", "Stockfish"
     if len(unique_names) >= 2:
-        unique_names.sort()
-        return unique_names[0], unique_names[1]
+        counts = Counter(white_names + black_names)
+        most_common = [name for name, _ in counts.most_common(2)]
+        return most_common[0], most_common[1]
     if len(unique_names) == 1:
         return unique_names[0], "Unknown"
     return "New", "Old"
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Parse search stats from tournament PGN")
-    parser.add_argument("--pgn", type=Path, default=DEFAULT_PGN)
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is not None:
+            reconfigure(encoding="utf-8", errors="replace")
+
+    parser = argparse.ArgumentParser(description="Parse search stats from tournament PGN(s)")
+    parser.add_argument("pgn_files", nargs="*", type=Path, help="PGN file(s) to parse (positional)")
+    parser.add_argument("--pgn", nargs="+", action="extend", type=Path, default=None, help="One or more PGN files to parse and merge")
     parser.add_argument("--out-dir", type=Path, default=HERE)
     parser.add_argument("--name1", default=None, help="First engine (e.g. New)")
     parser.add_argument("--name2", default=None, help="Second engine (e.g. Old)")
@@ -722,22 +907,41 @@ def main():
     )
     args = parser.parse_args()
 
-    if not args.pgn.exists():
-        print(f"Error: PGN not found: {args.pgn}")
+    raw_paths: List[Path] = []
+    if args.pgn:
+        raw_paths.extend(args.pgn)
+    if args.pgn_files:
+        raw_paths.extend(args.pgn_files)
+    if not raw_paths:
+        raw_paths = [DEFAULT_PGN]
+
+    # De-duplicate while preserving order
+    seen = set()
+    pgn_paths: List[Path] = []
+    for p in raw_paths:
+        res = p.resolve()
+        if res not in seen:
+            seen.add(res)
+            pgn_paths.append(p)
+
+    existing_paths = [p for p in pgn_paths if p.exists()]
+    if not existing_paths:
+        print(f"Error: None of the specified PGN files exist: {pgn_paths}")
         return 1
 
     name1 = args.name1
     name2 = args.name2
     if name1 is None or name2 is None:
-        a1, a2 = auto_names(args.pgn)
+        a1, a2 = auto_names(existing_paths)
         name1 = name1 or a1
         name2 = name2 or a2
 
+    pgn_desc = ", ".join(str(p) for p in existing_paths)
     print(
-        f"Parsing stats: '{name1}' vs '{name2}'  from {args.pgn}  "
-        f"(draw_depth_cap={args.draw_depth_cap})"
+        f"Parsing stats: '{name1}' vs '{name2}' from {len(existing_paths)} file(s): "
+        f"[{pgn_desc}] (draw_depth_cap={args.draw_depth_cap})"
     )
-    stats = parse_pgn(args.pgn, name1, name2, draw_depth_cap=args.draw_depth_cap)
+    stats = parse_pgn(existing_paths, name1, name2, draw_depth_cap=args.draw_depth_cap)
     if not stats:
         return 1
     new_stats, old_stats, by_color, new_mate, old_mate, meta = stats
