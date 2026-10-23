@@ -1728,12 +1728,12 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
 
         _diag_add(search_context, DIAG_NMP_ELIGIBLE)
 
-        # 1. Linear gate with Lazy Evaluation (uses pure static_score, aligned with SF19 ss->staticEval)
+        # 1. Linear gate with Lazy Evaluation (uses max(static_score, tt_refined_eval) for outer gate to detect positional advantage)
         nmp_threshold = (beta - search_context.tune[TUNE_NMP_DEPTH_COEF] * depth
                               - search_context.tune[TUNE_NMP_IMP_COEF] * (1 if improving else 0)
                               + search_context.tune[TUNE_NMP_BASE])
 
-        if static_score >= nmp_threshold:
+        if max(static_score, tt_refined_eval) >= nmp_threshold:
             if not static_eval_is_full:
                 raw_static_eval, static_score, improving, cached_pinned_white, cached_pinned_black = compute_full_corrected_static_eval(
                     piece_bbs, occupancy_bbs, game_state, search_context, ply
@@ -1850,10 +1850,6 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                         search_context.pv_table[ply, ply] = NO_MOVE
                         _diag_add(search_context, DIAG_NMP_CUT)
                         return (np.int32(null_move_score), NO_MOVE, nodes_searched, quiescence_nodes, tt_hits)
-
-    # SF19 post-NMP improving update: improving |= ss->staticEval >= beta
-    if not is_currently_in_check and static_score >= beta:
-        improving = True
 
     # =========================================================================
     # Step 11. Internal Iterative Reduction (IIR) (SF19 Step 11)
@@ -2262,7 +2258,7 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                     cap_hist = int(search_context.capture_history[cap_piece, to_sq, cap_victim])
 
                 # --- Stockfish 18 Step 14: Capture Futility Pruning (Pre-make) ---
-                if ENABLE_CAPTURE_FUTILITY and static_score != -INFINITY and cap_piece >= 0 and cap_victim >= 0 and not low_material_pruning_guard:
+                if ENABLE_CAPTURE_FUTILITY and tt_refined_eval != -INFINITY and cap_piece >= 0 and cap_victim >= 0 and not low_material_pruning_guard:
                     pre_move_gives_check = flag == SPECIAL_MOVE_FLAG_CASTLING or flag == SPECIAL_MOVE_FLAG_EN_PASSANT or is_promotion
                     if not pre_move_gives_check:
                         pre_move_gives_check = _qsearch_ordinary_move_gives_check(
@@ -2286,7 +2282,7 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                         if cap_lmr_d < CAP_FP_MAX_LMR_DEPTH:
                             victim_val = int(MG_MATERIAL_VALUES[cap_victim])
                             futility_value = (
-                                static_score
+                                tt_refined_eval
                                 + CAP_FP_BASE
                                 + CAP_FP_LMR_MULT * cap_lmr_d
                                 + victim_val
@@ -2453,7 +2449,7 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
 
                     # --- Step 14c: Futility Pruning (FP) ---
                     if (search_context.enable_fp and depth <= FP_MAX_DEPTH
-                            and static_score != -INFINITY):
+                            and tt_refined_eval != -INFINITY):
                         fp_lmr_d = compute_quiet_pruning_lmr_depth(
                             depth, quiet_move_counter, improving, search_context, ply,
                             from_sq, to_sq, see_piece,
@@ -2462,12 +2458,20 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                         if dissonance > FP_DISSONANCE_THRESHOLD:
                             margin += dissonance // 2
 
-                        if margin > 0 and static_score + margin < alpha:
+                        if margin > 0 and tt_refined_eval + margin < alpha:
                             if not static_eval_is_full:
                                 raw_static_eval, static_score, improving, cached_pinned_white, cached_pinned_black = compute_full_corrected_static_eval(
                                     piece_bbs, occupancy_bbs, game_state, search_context, ply
                                 )
                                 static_eval_is_full = True
+                                tt_refined_eval = static_score
+                                if trusted_tt_score:
+                                    if tt_flag == TT_FLAG_BETA and tt_score_adj > tt_refined_eval:
+                                        tt_refined_eval = tt_score_adj
+                                    elif tt_flag == TT_FLAG_ALPHA and tt_score_adj < tt_refined_eval:
+                                        tt_refined_eval = tt_score_adj
+                                    elif tt_flag == TT_FLAG_EXACT and trusted_exact_depth:
+                                        tt_refined_eval = tt_score_adj
                                 fp_lmr_d = compute_quiet_pruning_lmr_depth(
                                     depth, quiet_move_counter, improving, search_context, ply,
                                     from_sq, to_sq, see_piece,
@@ -2475,7 +2479,7 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                                 margin = search_context.tune[TUNE_FP_BASE] + search_context.tune[TUNE_FP_MULT] * fp_lmr_d
                                 if dissonance > FP_DISSONANCE_THRESHOLD:
                                     margin += dissonance // 2
-                            if margin > 0 and static_score + margin < alpha:
+                            if margin > 0 and tt_refined_eval + margin < alpha:
                                 _diag_add(search_context, DIAG_FP_SKIP)
                                 pruned_moves += 1
                                 continue
