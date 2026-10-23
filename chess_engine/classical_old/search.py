@@ -820,26 +820,27 @@ def quiescence_search(piece_bbs, occupancy_bbs, game_state, alpha, beta, ply, se
         qs_side = game_state[0]
         qs_opp = 1 - qs_side
 
-        qs_att_type = find_piece_type_on_square_side(piece_bbs, qs_from_sq, qs_side)
-        if qs_special_flag == SPECIAL_MOVE_FLAG_EN_PASSANT:
-            qs_vic_type = np.int8(-2)
-            qs_vic_val = MG_MATERIAL_VALUES[PAWN]
-        else:
-            qs_vic_type = find_piece_type_on_square_side(piece_bbs, qs_to_sq, qs_opp)
-            qs_vic_val = MG_MATERIAL_VALUES[qs_vic_type % 6] if qs_vic_type != -1 else 0
-
+        qs_att_type = -1
+        qs_vic_type = -2
         delta_prune_candidate = False
         if not is_currently_in_check:
-            if ENABLE_DELTA_PRUNING:
+            if qs_special_flag == SPECIAL_MOVE_FLAG_EN_PASSANT:
+                qs_vic_type = -2
+                qs_vic_val = MG_MATERIAL_VALUES[PAWN]
+            else:
+                qs_vic_type = find_piece_type_on_square_side(piece_bbs, qs_to_sq, qs_opp)
+                qs_vic_val = MG_MATERIAL_VALUES[qs_vic_type % 6] if qs_vic_type != -1 else 0
+
+            if ENABLE_DELTA_PRUNING and not is_loss(stand_pat):
                 is_promotion = qs_special_flag == SPECIAL_MOVE_FLAG_PROMOTION
                 promotion_gain = (MG_MATERIAL_VALUES[get_promotion_piece(move) + 1] - MG_MATERIAL_VALUES[0]) if is_promotion else 0
                 potential_gain = qs_vic_val + promotion_gain
-                
+
                 if stand_pat + potential_gain + search_context.tune[TUNE_DELTA_MARGIN] < alpha:
                     delta_prune_candidate = True
 
         if delta_prune_candidate:
-            move_flag = get_special_move_flag(move)
+            move_flag = qs_special_flag
             gives_check = False
 
             if (move_flag == SPECIAL_MOVE_FLAG_EN_PASSANT
@@ -889,11 +890,13 @@ def quiescence_search(piece_bbs, occupancy_bbs, game_state, alpha, beta, ply, se
                     )
                     qs_check_info_computed = True
 
+                qs_att_type = find_piece_type_on_square_side(piece_bbs, qs_from_sq, qs_side)
                 gives_check = _qsearch_ordinary_move_gives_check(
                     piece_bbs, move, side_to_move_qs, their_king_bb_qs,
                     check_sq_pawn_qs, check_sq_knight_qs, check_sq_bishop_qs,
                     check_sq_rook_qs, check_sq_queen_qs,
                     blockers_for_their_king_qs,
+                    qs_att_type,
                 )
 
             if not gives_check:
@@ -904,6 +907,8 @@ def quiescence_search(piece_bbs, occupancy_bbs, game_state, alpha, beta, ply, se
         if not is_currently_in_check:
             if ENABLE_SEE_IN_QUIESCENCE and move != qs_tt_move:
                 _diag_add(search_context, DIAG_Q_SEE_TRY)
+                if qs_att_type < 0:
+                    qs_att_type = find_piece_type_on_square_side(piece_bbs, qs_from_sq, qs_side)
                 if not _see_ge_jit(piece_bbs, occupancy_bbs, qs_side, qs_from_sq, qs_to_sq, search_context.tune[TUNE_QS_SEE], pinned_white, pinned_black, qs_att_type, qs_vic_type, get_promotion_piece(move) + 1):
                     _diag_add(search_context, DIAG_Q_SEE_SKIP)
                     continue

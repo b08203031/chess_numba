@@ -1150,7 +1150,7 @@ PROBCUT_TT_SHORTCUT_MARGIN = 334
 
 # Delta Pruning (QS) — keep milder than aggressive node-exp values
 # QS delta (P0 try 300 regressed fixed-depth suite nodes → keep 350)
-DELTA_PRUNING_MARGIN = 350
+DELTA_PRUNING_MARGIN = 380
 
 # --- Static Exchange Evaluation (SEE) Threshold / SEE 閾值 ---
 SEE_THRESHOLD = 0

@@ -40,9 +40,9 @@
     *   實現於 `quiescence_search`。
     *   僅考慮吃子（若被將軍，則額外考慮逃避將軍的偽合法移動）。
     *   被將軍時，吃子逃逸與 quiet 逃逸分屬不同排序 bucket；quiet 逃逸以既有 piece-to / pawn / butterfly / continuation history 排序並限幅，避免產生器順序決定整棵強迫樹。
-    *   引入**增益剪枝 (Delta Pruning)**：如果當前評估極差，即使吃掉對手最大的子（如后）也無法挽回，則直接剪枝。
-    *   引入**SEE 剪枝 (SEE Pruning)**：在靜態搜尋中直接剪除不划算的吃子移動 (SEE < 0) 以節省時間。
-    *   對齊 SF11/SF18：checking capture 不受 delta/futility gate；但仍必須通過最後的 SEE。普通著以 pre-make check geometry 判斷，升變與 en passant 以暫時 make/unmake 精確判斷。
+    *   引入**增益剪枝 (Delta Pruning)**：若當前未處於 `KNOWN_WIN` 必敗斷崖帶（`not is_loss(stand_pat)`，對齊 SF11 `futilityBase > -VALUE_KNOWN_WIN` 與 SF19 `!is_loss(futilityBase)`，防止專門殘局如 KRvK / KBNvK / KPK 在對手送子時因 `-10000` 斷崖分誤剪唯一反吃和棋步），且 `stand_pat + potential_gain + TUNE_DELTA_MARGIN < alpha`（含實際升變/欠升變增益），則直接剪枝。
+    *   引入**SEE 剪枝 (SEE Pruning)**：在靜態搜尋中直接剪除不划算的吃子移動 (`SEE < TUNE_QS_SEE`) 以節省時間。
+    *   對齊 SF11/SF18：checking capture 不受 delta/futility gate；但仍必須通過最後的 SEE。普通著以 pre-make check geometry 判斷（複用延遲計算之 `qs_att_type` 避免重複掃描位元棋盤），升變與 en passant 以暫時 make/unmake 精確判斷；被將軍時完全跳過無需使用的 `qs_vic_type` / `qs_att_type` 查表。
 
 ---
 

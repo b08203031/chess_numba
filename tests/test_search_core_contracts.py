@@ -396,6 +396,15 @@ class TestSearchCoreContracts(unittest.TestCase):
         self.assertEqual(int(_see_jit(pb, ob, WHITE, 36, 43, pw, pb_pin, PAWN, PAWN)), 100)
         self.assertTrue(bool(_see_ge_jit(pb, ob, WHITE, 36, 43, 100, pw, pb_pin, PAWN, PAWN)))
 
+    def test_qsearch_delta_pruning_known_loss_guard_and_lazy_attacker(self):
+        search = (ROOT / 'chess_engine/classical/search.py').read_text(encoding='utf-8')
+        delta_gate = search.index('if ENABLE_DELTA_PRUNING and not is_loss(stand_pat):')
+        gives_check_call = search.index('gives_check = _qsearch_ordinary_move_gives_check(', delta_gate)
+        see_gate = search.index('if ENABLE_SEE_IN_QUIESCENCE and move != qs_tt_move:', gives_check_call)
+
+        self.assertIn('qs_att_type,', search[gives_check_call:see_gate])
+        self.assertIn('if qs_att_type < 0:', search[see_gate:see_gate + 350])
+
 
 if __name__ == '__main__':
     unittest.main()
