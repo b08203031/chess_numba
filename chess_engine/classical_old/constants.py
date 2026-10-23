@@ -1131,7 +1131,7 @@ LMR_ALLNODE_SCALE_DENOM_BASE = 256
 LMR_ALLNODE_SCALE_DENOM_OFFSET = 268
 
 
-# ProbCut — multi-pack 180 regressed with stack → keep 150 default
+# ProbCut — E88: 150 -> 170 adopted (+4.86 Elo vs 150; 120 and 190 regressed)
 PROBCUT_R = 4  # Retained for tuning registry backwards compatibility (no used)
 PROBCUT_MARGIN = 170
 PROBCUT_MIN_DEPTH = 5  # Retained for tuning registry backwards compatibility

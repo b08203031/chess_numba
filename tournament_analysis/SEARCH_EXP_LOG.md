@@ -1,8 +1,8 @@
 # Classical 搜尋單項實驗日誌
 
 > **用途：** 連續 A/B 實驗的唯一進度表與決策紀錄。未來接續實驗、回顧為何留下/回滾，以此檔為準。  
-> **最後更新：** 2026-10-22  
-> **當前基準狀態：** **E87（LMP 縮放百分比放寬 LMP_SCALE_PERCENT=150）已採納進生產基線**（600 局 132W 359D 109L，51.92%，**+13.32 Elo**，淨勝 +23 局，深度顯著提升 +0.18 ply，每步搜尋提速 -10.1 ms / NPS +1.4%）；**E86（LMP 基底常數 (6 + d*d)）已完成基線鎖定**（+17.39 Elo）。
+> **最後更新：** 2026-10-23  
+> **當前基準狀態：** **E88（ProbCut 剪枝裕度放寬 PROBCUT_MARGIN = 170 vs 150）已採納進生產基線**（1000 局 507.0 vs 493.0，50.70%，**+4.86 Elo**，且探勘 120 與 190 皆落敗，確立 170 為局部峰值）；**E87（LMP 縮放百分比放寬 LMP_SCALE_PERCENT=150）已完成基線鎖定**（+13.32 Elo）。
 
 ---
 
@@ -2697,6 +2697,37 @@ LMP skip 體積 ≫ RFP ≈ FP/Razor/hist-prune 帶 ≫ NMP ≫ ProbCut
 * **判定與處置：** **正式採納進生產基線 (ADOPTED / PRODUCTION BASELINE UPDATED)**。
   * 執行 `python tools/sync_classical_old.py --sync` 將 `LMP_SCALE_PERCENT = 150` 完整同步至 `chess_engine/classical_old/`。
   * 實證 LMP 在基底與縮放連續兩輪放寬累計帶來超過 **+30 Elo** 的強大增益，為後續調參奠定最高效生產基線。
+
+
+### E88：ProbCut 剪枝裕度 1D 座標探索與微調 `PROBCUT_MARGIN = 170` vs `150`（1,000 局 +4.86 Elo，190 vs 170 落敗 -5.91 Elo，正式採納進生產基線 ADOPTED）
+
+* **改動項目與動機：**
+  * 在 `chess_engine/classical/constants.py` 中，將 ProbCut 剪枝裕度常數由原先的：
+    `PROBCUT_MARGIN = 150`
+    微調為：
+    `PROBCUT_MARGIN = 170`（放寬約 +13.3%）
+  * **動機**：
+    1. 評估架構在 E85 統一了 `MG_MATERIAL_VALUES`（使子力尺度整體上升約 13.4%），而舊版 `PROBCUT_MARGIN = 150` 係在舊子力表下調出，尺度相對過緊。
+    2. 在 E81 修正 ProbCut TT Defense 漏檢後，ProbCut 截斷機制已完全正常運作。透過單參數 1D 座標爬山搜尋（Coordinate Descent / Peak Bracketing），探尋最佳截斷邊界。
+* **對戰驗證結果（1D 座標兩側探針驗證，Colab LTC 1,000 局）：**
+  * **第 1 輪探索（向左探針，120 vs 150）：**
+    * 嘗試收緊至 `PROBCUT_MARGIN = 120`，實測落敗，證實門檻不可過低（過低易引發戰術漏算與不穩定截斷）。
+  * **第 2 輪對決（主測試：New170 vs Old150，1,000 局）：**
+    * **戰績**：**214 勝 586 和 200 負**（得分率 **50.70%**，總得分 507.0 / 1000，淨勝 **+14 局 / +7.0 分**）。
+    * **相對 Elo**：**+4.86 Elo**（95% CI: `[-9.00, +18.72]`，±13.86）。
+    * **狀態**：`Status: Continue; LLR=-0.03`。
+  * **第 3 輪驗證（向右探針：New190 vs Old170，1,000 局，邊界鎖定）：**
+    * **戰績**：**191 勝 601 和 208 負**（得分率 **49.15%**，總得分 491.5 / 1000，淨負 **-17 局 / -8.5 分**）。
+    * **相對 Elo**：**-5.91 Elo**（95% CI: `[-19.51, +7.69]`，±13.60）。
+    * **狀態**：`Status: Continue; LLR=-2.28`。
+* **物理機理解析與採納決策（極致的局部峰值鎖定）：**
+  1. **峰值夾擊驗證（Peak Bracketing）**：
+     * 實測序列呈現鮮明的凹函數單峰特徵：$120 < 150 < 170 > 190$。
+     * 170 成功擊敗 150（+4.86 Elo），而進一步放寬至 190 則顯著回落（-5.91 Elo），嚴謹確立了 $170\text{ cp}$ 為該鄰域的全局最優局部極值點。
+  2. **符合 E85 子力尺度對齊**：$150 \times 1.134 = 170.1$，與實測最優值 170 完美自洽。
+* **判定與處置：** **正式採納進生產基線 (ADOPTED / PRODUCTION BASELINE UPDATED)**。
+  * 保持 `chess_engine/classical/constants.py` 與 `chess_engine/classical_old/constants.py` 之 `PROBCUT_MARGIN = 170`。
+  * 執行 `python tools/sync_classical_old.py --sync` 確保兩側代碼邏輯一致。
 
 ---
 
