@@ -171,7 +171,7 @@ P3 的診斷分成三條 opt-in funnel：
     *   在非排除搜尋、非將軍、深度足夠（`depth >= 5`）時，以 `probCutBeta = beta + margin` 且搜尋深度 `depth - 4` 嘗試吃子走步。若 QSearch 與子搜尋皆 hold 且 `>= probCutBeta`，則存入 TT 並回傳截斷。
 *   **Step 12: TT-based ProbCut Shortcut (純 TT 快速捷徑，對齊 SF 18)**：
     *   **位置**：放置於 ProbCut 入口處（在吃子生成、SEE 計算與 QSearch 之前）。
-    *   **邏輯**：若 TT 條目已存在且下界有效（`BOUND_LOWER` 或 `BOUND_EXACT`），深度 `tt_depth >= depth - 4`，且其分數 `tt_score >= beta + PROBCUT_TT_SHORTCUT_MARGIN`（334 cp，對齊 SF18 的 428 cp 乘以 HCE 0.78 縮放）：
+    *   **邏輯**：若 TT 條目已存在且下界有效（`BOUND_LOWER` 或 `BOUND_EXACT`），深度 `tt_depth >= depth - 4`，且其分數 `tt_score >= beta + PROBCUT_TT_SHORTCUT_MARGIN`（310 cp，原 334 cp 於 E94 調優至 310 cp 獲 +14.68 Elo 採納，對齊 SF18 的 428 cp 乘以 HCE 0.78 縮放）：
         *   此節點在 `depth - 4` 已經被證明能獲得壓倒性高分，符合 ProbCut 截斷本意。
         *   直接判定 Fail-High 回傳 `probcut_beta`，達成 $O(1)$ 零搜尋開銷截斷，徹底跳過整段昂貴的吃子生成、SEE 評估、QSearch、子搜尋，以及後續的 NMP 與 Razoring。
         *   守護條件：嚴格排除 `ply == 0`（根節點禁止啟發式截斷）、排除奇異延伸搜尋、排除被將軍盤面、排除將死與確知勝負分數。
@@ -1032,3 +1032,12 @@ NMP gate/R、ProbCut style、NMP beta requirement 的預設值也由常量明確
    * **總比分**：Candidate **194 勝 633 和 173 負**（得分率 **51.05%**，淨勝 **+21 局**，相對 **+7.30 Elo**，95% CI: `[-4.94, +19.55]`）。
    * **超長殘局突破**：>80 步超長局拿下 **62W 137D 38L（勝率 55.06%，淨勝 +24 局！）**，充分驗證了 TT 記憶保護與殘局 Sentinel 在極深層棋局轉化中的關鍵勝率加乘。
    * **處置結論**：**正式採納進生產基線 (ADOPTED)**，新舊引擎代碼全面同步升級至 `cf312b0`。
+
+### 17.9 Phase 14：TT-based ProbCut Shortcut 門檻調優（E94，+14.68 Elo 正式採納）
+在完成 Phase 13（E93 置換表與殘局 Sentinel 修復）並鎖定穩定基線後，針對 Step 12 的 TT ProbCut Shortcut 門檻進行高強度成對開局換先對戰（900 局，`tournament_results_334vs310`）：
+* **修改常數**：`PROBCUT_TT_SHORTCUT_MARGIN` 從原先偏保守的 `334` 放寬至 `310`（-24 cp）。
+* **實測對局戰績（900 局，HEAD = 4c57063）**：
+  * **總戰績**：Candidate **182 勝 574 和 144 負**（得分率 **52.11%**，淨勝 **+38 局**，相對 **+14.68 Elo**，95% CI: `[+2.02, +27.37]`）。
+  * **中殘局突破**：在 51~80 步的中殘局勝負手階段拿下 **128W 144D 97L（勝率 54.20%，淨勝 +31 局！）**。
+  * **搜尋效率提升**：平均每步耗時由 904.1ms 顯著降低至 897.4ms（$p = 7.0 \times 10^{-4}$），NPS 提升 +0.6%，節點無任何異常膨脹。
+* **處置結論**：**正式採納進生產基線 (ADOPTED)**，`PROBCUT_TT_SHORTCUT_MARGIN = 310` 同步至 `classical` 與 `classical_old`。

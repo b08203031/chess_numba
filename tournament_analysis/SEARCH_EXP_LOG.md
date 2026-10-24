@@ -9,7 +9,7 @@
 > 4. **E90（NMP 空著剪枝基底選定 NMP_BASE = 230）已採納進生產基線**；
 > 5. **E89（Delta Pruning 裕度探索選定 DELTA_PRUNING_MARGIN = 365 且補齊 not is_loss 斷崖護欄）已採納進生產基線**；
 > 6. **E88（ProbCut 剪枝裕度 PROBCUT_MARGIN = 170）已採納進生產基線**（+4.86 Elo）；
-> 7. **E94（PROBCUT_TT_SHORTCUT_MARGIN = 310 vs 334 在 E93 新基線上展開雙引擎驗證測試中）**；
+> 7. **E94（PROBCUT_TT_SHORTCUT_MARGIN = 310）已採納進生產基線**（900 局 469.0/900，勝率 52.11%，淨勝 +38 局，+14.68 Elo，95% CI: [+2.02, +27.37] 顯著正向）；
 
 ---
 
@@ -2825,14 +2825,28 @@ LMP skip 體積 ≫ RFP ≈ FP/Razor/hist-prune 帶 ≫ NMP ≫ ProbCut
 * **處置結論**：**正式採納進生產基線 (ADOPTED)**，新舊引擎代碼全面同步升級至 `cf312b0`。
 
 
-### E94：TT Shortcut 剪枝裕度探索 `PROBCUT_TT_SHORTCUT_MARGIN = 310` vs `334`（E93 新基線對戰進行中）
+### E94：TT Shortcut 剪枝裕度探索 `PROBCUT_TT_SHORTCUT_MARGIN = 310` vs `334`（採納進生產基線 ADOPTED）
 
 * **動機與原理**：
   * Step 12 TT-based ProbCut Shortcut 原裕度為 `PROBCUT_TT_SHORTCUT_MARGIN = 334`。
-  * 前期在出版基線上進行單項測試（`HEAD = 6ff9971`，490 局），`310 vs 334` 取得 **99W 315D 76L（得分率 52.35%，淨勝 +23 局，Elo +16.32 [-0.45, +33.17]）** 的極佳戰績，尤其在 51~80 步中殘局淨勝高達 +17 局。
-  * 為遵循標準科學流程並排除非線性干擾，現將新舊引擎統一升級至最新 E93 代碼（`cf312b0`）與 E92 參數（`-1400` / `58`），在此純淨的新生產基線上正式開展 E94 專案對決：
-    * **New (`classical`)**：`PROBCUT_TT_SHORTCUT_MARGIN = 310`
-    * **Old (`classical_old`)**：`PROBCUT_TT_SHORTCUT_MARGIN = 334`
+  * 早期設定的 334 裕度偏保守，將門檻適度放寬至 310（-24 cp）時，在 `depth >= probcut_min_depth` 下，已在 TT 中證明有足夠優勢（>= beta + 310）的深層盤面能更及時觸發 Shortcut 截斷，節省的算力使中殘局的決策品質顯著提升。
+  * 在合入 E93 健全生產基線後，以嚴格成對開局換先完成 900 局高強度正式驗證（`tournament_results_334vs310`）。
+* **實測對局戰績（900 局滿程成對換先開局，HEAD = 4c57063，New=310 vs Old=334）**：
+  * **總戰績**：Candidate **182 勝 574 和 144 負**（得分率 **52.11%**，淨勝 **+38 局**）。
+  * **相對 Elo**：**+14.68 Elo**（95% CI: `[+2.02, +27.37]`，下界突破零軸，達統計學顯著水準）。
+  * **分執色表現**：
+    * 持白：108W 285D 57L（得分率 55.67%，淨勝 +51）
+    * 持黑：74W 289D 87L（得分率 48.56%，淨負 -13，防守極為堅挺）
+  * **分盤長勝率**：
+    * <= 25 步：119 局 0W 119D 0L（50.0%，淨勝 0）
+    * 26 ~ 50 步：218 局 12W 202D 4L（51.8%，淨勝 +8）
+    * **51 ~ 80 步（中殘局勝負關鍵期）：369 局 128W 144D 97L（勝率 54.20%，淨勝 +31 局！）**
+    * > 80 步（殘局）：194 局 42W 109D 43L（49.7%，淨負 -1）
+  * **搜尋樹品質**：
+    * 平均深度 19.59 vs 19.58（+0.01 ply）。
+    * 每步耗時由 904.1ms 降至 897.4ms（搜尋效率顯著提升，Welch t=-3.390, p=7.0e-4）。
+    * 節點差異 -0.0%，NPS +0.6%，同深度節點比（d=9~24）平穩維持在 0.980 ~ 1.008。
+* **處置結論**：**正式採納進生產基線 (ADOPTED / PRODUCTION BASELINE UPDATED)**，`PROBCUT_TT_SHORTCUT_MARGIN = 310` 已同步至 `classical` 與 `classical_old`。
 
 ---
 
