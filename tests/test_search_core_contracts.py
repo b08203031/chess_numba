@@ -320,9 +320,9 @@ class TestSearchCoreContracts(unittest.TestCase):
         self.assertIn('search_context.tune[TUNE_LMR_TABLE_SCALE]', cap_fp_body)
         self.assertIn('search_context.tune[TUNE_LMR_NOT_IMP]', cap_fp_body)
 
-        # 2. ProbCut must be guarded against Root and PV nodes (Step 12a and Step 12b)
-        probcut_start = search.index('# Step 12a. Small ProbCut')
-        probcut_end = search.index('# --- Move Ordering ---', probcut_start)
+        # 2. ProbCut must be guarded against Root and PV nodes
+        probcut_start = search.index('# Step 12. ProbCut')
+        probcut_end = search.index('# --- TT-based ProbCut Shortcut', probcut_start)
         self.assertIn('not is_pv and ply > 0', search[probcut_start:probcut_end])
 
         # 3. _see_ge_jit supports victim_type == -2 sentinel for known-empty target squares
