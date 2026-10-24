@@ -206,8 +206,6 @@ def store_tt(tt, zobrist_key, depth, score, static_eval, flag, best_move, curren
                 tt[idx]['best_move'] = final_best_move
                 tt[idx]['is_pv'] = is_pv
             else:
-                if static_eval != 32767 and existing_entry['static_eval'] == 32767:
-                    tt[idx]['static_eval'] = np.int16(static_eval)
                 # Secondary aging. Important for elementary mate finding.
                 if existing_entry['depth'] >= 8 and existing_entry['flag'] != TT_FLAG_EXACT:
                     existing_score = existing_entry['score']
@@ -222,11 +220,6 @@ def store_tt(tt, zobrist_key, depth, score, static_eval, flag, best_move, curren
     for i in range(4):
         idx = base_index + i
         existing_entry = tt[idx]
-        
-        # 空位無條件優先使用，避免 QSearch (depth=0) 或跨世代時誤覆寫有效項目
-        if existing_entry['flag'] == TT_FLAG_NONE:
-            replace_idx = idx
-            break
         
         # 計算相對老化程度
         age = (current_generation - existing_entry['generation'] + 256) % 256

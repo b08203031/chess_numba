@@ -2348,8 +2348,6 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
 
                     # --- Step 14b: History Pruning ---
                     prune_quiet_move = False
-                    history_score = np.int64(0)
-                    main_history_score = np.int32(0)
                     if ENABLE_HISTORY_PRUNING and see_piece != -1:
                         # Continuation History Pruning (Stockfish 17 Step 14)
                         if ENABLE_CONTINUATION_HISTORY_PRUNING:
@@ -2359,7 +2357,7 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                             if cont_prune_score < search_context.tune[TUNE_CONT_PRUNE_THR] * depth:
                                 prune_quiet_move = True
 
-                        if (not prune_quiet_move) or search_context.diag_enabled:
+                        if not prune_quiet_move:
                             history_score = get_quiet_stat_score(
                                 search_context, ply, from_sq, to_sq,
                                 see_piece, pawn_key_idx,
@@ -2387,9 +2385,8 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                                         and hp_raw_score < hp_threshold
                                         and history_score >= hp_threshold):
                                     _diag_add(search_context, DIAG_HP_CONT1_CAP_RESCUE)
-                        if not prune_quiet_move:
-                            if history_score < PRUNING_HISTORY_THRESHOLD * depth and main_history_score < 0:
-                                prune_quiet_move = True
+                        if history_score < PRUNING_HISTORY_THRESHOLD * depth and main_history_score < 0:
+                            prune_quiet_move = True
 
                     if prune_quiet_move:
                         pruned_moves += 1
@@ -3375,10 +3372,8 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
         prev_move = search_context.move_stack[ply - 1]
         prev_piece = search_context.piece_stack[ply - 1]
         
-        # Reward the opponent's previous quiet move if it successfully caused us to fail low
-        if (prev_move != NO_MOVE and prev_piece != -1
-                and not search_context.move_is_capture_stack[ply - 1]
-                and get_special_move_flag(prev_move) != SPECIAL_MOVE_FLAG_PROMOTION):
+        # Reward the opponent's previous move if it successfully caused us to fail low
+        if prev_move != NO_MOVE and prev_piece != -1:
             if (prev_piece % 6) != 0:
                 prev_to = get_to_square(prev_move)
                 prev_from = get_from_square(prev_move)
