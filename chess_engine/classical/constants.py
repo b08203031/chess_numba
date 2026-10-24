@@ -1237,7 +1237,7 @@ LPH_ORDER_SCALE = 8              # score += scale * lph // (1+ply)
 NMP_MIN_DEPTH = 1            # SF19 has no NMP depth floor (was 3 before Phase 8b)
 # SF19 `beta >= -2000` (NNUE internal units, PawnValue~208) scaled to HCE cp: -2000*100/208.
 NMP_BETA_FLOOR = -960
-NMP_BASE = 245
+NMP_BASE = 230
 NMP_DEPTH_COEF = 12
 NMP_IMP_COEF = 45
 NMP_EVAL_MARGIN_DIV = 155
@@ -1273,7 +1273,7 @@ STOP_CHECK_MASK = 4095
 
 # --- Singular extension ---
 SINGULAR_TT_DEPTH_SLACK = 3      # tt.depth >= depth - slack
-SINGULAR_MARGIN_BASE = 52        # margin = (BASE + ttpv_bonus) * depth // DIV (rescaled to 100cp HCE)
+SINGULAR_MARGIN_BASE = 58        # margin = (BASE + ttpv_bonus) * depth // DIV (rescaled to 100cp HCE)
 SINGULAR_TTPV_BONUS = 62
 SINGULAR_MARGIN_DIV = 64
 SINGULAR_DOUBLE_EXT_MIN_DEPTH = 10
