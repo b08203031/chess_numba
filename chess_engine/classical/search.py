@@ -51,7 +51,7 @@ from chess_engine.classical.constants import (
     CORRECTION_HISTORY_PAWN_WEIGHT, CORRECTION_HISTORY_MINOR_WEIGHT, CORRECTION_HISTORY_NON_PAWN_WEIGHT, CORRECTION_HISTORY_UPDATE_DEPTH, SCORE_MIN, SCORE_MAX,
     CORRECTION_HISTORY_CNTCV_FALLBACK, CORRECTION_HISTORY_OUTER_SCALE,
     HISTORY_MAX_CONTINUATION, HISTORY_MAX_PAWN, PAWN_HISTORY_MASK, LOW_PLY_HISTORY_MAX,
-    GOOD_QUIET_THRESHOLD,
+    GOOD_QUIET_THRESHOLD, SCORE_TT_MOVE,
     FIFTY_MOVE_RULE_LIMIT, FIFTY_MOVE_SCALE_THRESHOLD, FIFTY_MOVE_MAX_SCALE,
     HISTORY_QUIET_MALUS_SCALE_NUM, HISTORY_QUIET_MALUS_SCALE_DEN,
     HISTORY_QUIET_MALUS_DECAY_NUM, HISTORY_QUIET_MALUS_DECAY_DEN,
@@ -1860,39 +1860,44 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
             depth -= 1
 
     # =========================================================================
-    # Step 12. ProbCut (aligned to SF19 Step 12: after NMP and IIR)
+    # Step 12a. Small ProbCut / TT-based ProbCut Shortcut (SF19 Step 13)
+    # =========================================================================
+    _pc_style = search_context.tune[TUNE_PROBCUT_STYLE]
+    if (search_context.enable_probcut and _pc_style != 2 and ENABLE_PROBCUT_TT_SHORTCUT
+            and not is_pv and ply > 0 and not is_exclusion_search
+            and not is_currently_in_check
+            and halfmove_clock < TT_CUTOFF_HALFMOVE_MAX
+            and abs(beta) < MATE_IN_MAX_PLY and abs(beta) < VALUE_KNOWN_WIN
+            and not is_loss(beta)):
+        probcut_beta_s12 = beta + PROBCUT_TT_SHORTCUT_MARGIN
+        if (tt_flag == TT_FLAG_BETA or tt_flag == TT_FLAG_EXACT) and tt_depth >= max(1, depth - 4):
+            tt_score_s12 = tt_score_raw
+            if tt_score_s12 > MATE_IN_MAX_PLY:
+                tt_score_s12 -= ply
+            elif tt_score_s12 < -MATE_IN_MAX_PLY:
+                tt_score_s12 += ply
+
+            if fifty_move_scale < FIFTY_MOVE_MAX_SCALE and abs(tt_score_s12) < MATE_IN_MAX_PLY:
+                tt_score_s12 = tt_score_s12 * fifty_move_scale // FIFTY_MOVE_MAX_SCALE
+
+            if (tt_score_s12 >= probcut_beta_s12
+                    and not is_decisive(tt_score_s12) and not is_win(tt_score_s12)):
+                search_context.pv_table[ply, ply] = NO_MOVE
+                _diag_add(search_context, DIAG_PROBCUT)
+                tt_hits += np.uint64(1)
+                return (np.int32(probcut_beta_s12), tt_move, nodes_searched, quiescence_nodes, tt_hits)
+
+    # =========================================================================
+    # Step 12b. ProbCut (aligned to SF19 Step 12: after NMP and IIR)
     # =========================================================================
     # PR-B: SF18 !is_decisive(beta); also skip known-win band (VALUE_KNOWN_WIN).
     # TUNE_PROBCUT_STYLE: 0=flat margin, 1=SF11-ish, 2=force off
-    _pc_style = search_context.tune[TUNE_PROBCUT_STYLE]
     probcut_r = PROBCUT_R_IMPROVING if improving else PROBCUT_R_NOT_IMPROVING
     probcut_min_depth = probcut_r + 1
     if (search_context.enable_probcut and _pc_style != 2 and not is_pv and ply > 0
             and not is_exclusion_search and depth >= probcut_min_depth
             and abs(beta) < MATE_IN_MAX_PLY and abs(beta) < VALUE_KNOWN_WIN
             and not is_currently_in_check and not is_win(static_score) and not is_loss(beta)):
-        # --- TT-based ProbCut Shortcut (SF 18 Step 12) ---
-        # If a previous search at depth >= depth - 4 proved a lower bound >= probcut_beta,
-        # we can prune immediately without capture generation, SEE, or recursive sub-search.
-        if ENABLE_PROBCUT_TT_SHORTCUT and ply > 0:
-            probcut_beta_s12 = beta + PROBCUT_TT_SHORTCUT_MARGIN
-            if tt_flag == TT_FLAG_BETA or tt_flag == TT_FLAG_EXACT:
-                if tt_depth >= depth - probcut_r:
-                    tt_score_s12 = tt_score_raw
-                    if tt_score_s12 > MATE_IN_MAX_PLY:
-                        tt_score_s12 -= ply
-                    elif tt_score_s12 < -MATE_IN_MAX_PLY:
-                        tt_score_s12 += ply
-
-                    if fifty_move_scale < FIFTY_MOVE_MAX_SCALE and abs(tt_score_s12) < MATE_IN_MAX_PLY:
-                        tt_score_s12 = tt_score_s12 * fifty_move_scale // FIFTY_MOVE_MAX_SCALE
-
-                    if (tt_score_s12 >= probcut_beta_s12
-                            and not is_decisive(tt_score_s12) and not is_win(tt_score_s12)):
-                        search_context.pv_table[ply, ply] = NO_MOVE
-                        _diag_add(search_context, DIAG_PROBCUT)
-                        tt_hits += np.uint64(1)
-                        return (np.int32(probcut_beta_s12), tt_move, nodes_searched, quiescence_nodes, tt_hits)
 
         if _pc_style == 1:
             # SF11-ish raisedBeta; margins scaled by HCE_SCALE for our eval
@@ -1941,6 +1946,12 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
 
             pc_moves = search_context.moves_buffer[ply]
             pc_scores = search_context.move_scores[ply]
+
+            if tt_move != NO_MOVE:
+                for i in range(pc_move_count):
+                    if pc_moves[i] == tt_move:
+                        pc_scores[i] = SCORE_TT_MOVE
+                        break
     
             for i in range(pc_move_count):
                 # Selection sort
@@ -1990,11 +2001,13 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
 
                 saved_pc_stack_move = search_context.move_stack[ply]
                 saved_pc_stack_piece = search_context.piece_stack[ply]
+                saved_pc_is_cap = search_context.move_is_capture_stack[ply]
                 pc_moved_piece_type = pc_unmake[0]
                 if pc_moved_piece_type != -1 and pc_original_side == BLACK:
                     pc_moved_piece_type += 6
                 search_context.move_stack[ply] = pc_move
                 search_context.piece_stack[ply] = pc_moved_piece_type
+                search_context.move_is_capture_stack[ply] = True
                 search_context.reduction_stack[ply + 1] = 0
                 res_pc = _search(
                     piece_bbs, occupancy_bbs, game_state, _i32(depth - probcut_r),
@@ -2003,6 +2016,7 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                 )
                 search_context.move_stack[ply] = saved_pc_stack_move
                 search_context.piece_stack[ply] = saved_pc_stack_piece
+                search_context.move_is_capture_stack[ply] = saved_pc_is_cap
                 pc_score = -res_pc[0]
                 
                 # IMPORTANT: Must aggregate the search stats from ProbCut back into the parent
@@ -2018,18 +2032,21 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                     return (np.int32(0), NO_MOVE, nodes_searched, quiescence_nodes, tt_hits)
     
                 if pc_score >= probcut_beta:
-                    probcut_return_score = pc_score - (probcut_beta - beta)
-                    # PR-B: do not propagate unproven known-win / mate from reduced ProbCut
-                    if is_win(probcut_return_score) or is_decisive(probcut_return_score):
-                        probcut_return_score = beta
-                    # Store in TT for future use (aligned with SF19: probCutDepth + 1 = depth - probcut_r + 1)
-                    tt_store_score_pc = probcut_return_score
+                    # SF19: Store unadjusted pc_score in TT at probCutDepth + 1 = depth - probcut_r + 1
+                    tt_store_score_pc = pc_score
                     if tt_store_score_pc > MATE_IN_MAX_PLY: tt_store_score_pc += ply
                     elif tt_store_score_pc < -MATE_IN_MAX_PLY: tt_store_score_pc -= ply
+                    tt_static_eval_pc = np.int16(32767)
+                    if raw_static_eval != -INFINITY and abs(raw_static_eval) < MATE_SCORE - MAX_PLY:
+                        tt_static_eval_pc = np.int16(raw_static_eval)
                     pc_tt_depth = max(1, depth - probcut_r + 1)
-                    store_tt(search_context.transposition_table, tt_key, pc_tt_depth, tt_store_score_pc, np.int16(32767), TT_FLAG_BETA, pc_move, search_context.tt_generation, tt_pv)
-                    _diag_add(search_context, DIAG_PROBCUT)
-                    return (np.int32(probcut_return_score), pc_move, nodes_searched, quiescence_nodes, tt_hits)
+                    store_tt(search_context.transposition_table, tt_key, pc_tt_depth, tt_store_score_pc, tt_static_eval_pc, TT_FLAG_BETA, pc_move, search_context.tt_generation, tt_pv)
+
+                    # Do not return unproven mate or known-win scores from reduced ProbCut
+                    if not is_decisive(pc_score) and not is_win(pc_score):
+                        probcut_return_score = pc_score - (probcut_beta - beta)
+                        _diag_add(search_context, DIAG_PROBCUT)
+                        return (np.int32(probcut_return_score), pc_move, nodes_searched, quiescence_nodes, tt_hits)
 
     # --- Move Ordering ---
     # Retrieve Counter Move if available (SF: [prev_piece][prev_to])
@@ -2348,6 +2365,8 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
 
                     # --- Step 14b: History Pruning ---
                     prune_quiet_move = False
+                    history_score = np.int64(0)
+                    main_history_score = np.int32(0)
                     if ENABLE_HISTORY_PRUNING and see_piece != -1:
                         # Continuation History Pruning (Stockfish 17 Step 14)
                         if ENABLE_CONTINUATION_HISTORY_PRUNING:
@@ -2357,7 +2376,7 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                             if cont_prune_score < search_context.tune[TUNE_CONT_PRUNE_THR] * depth:
                                 prune_quiet_move = True
 
-                        if not prune_quiet_move:
+                        if (not prune_quiet_move) or search_context.diag_enabled:
                             history_score = get_quiet_stat_score(
                                 search_context, ply, from_sq, to_sq,
                                 see_piece, pawn_key_idx,
@@ -2385,8 +2404,9 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                                         and hp_raw_score < hp_threshold
                                         and history_score >= hp_threshold):
                                     _diag_add(search_context, DIAG_HP_CONT1_CAP_RESCUE)
-                        if history_score < PRUNING_HISTORY_THRESHOLD * depth and main_history_score < 0:
-                            prune_quiet_move = True
+                        if not prune_quiet_move:
+                            if history_score < PRUNING_HISTORY_THRESHOLD * depth and main_history_score < 0:
+                                prune_quiet_move = True
 
                     if prune_quiet_move:
                         pruned_moves += 1
@@ -3372,8 +3392,10 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
         prev_move = search_context.move_stack[ply - 1]
         prev_piece = search_context.piece_stack[ply - 1]
         
-        # Reward the opponent's previous move if it successfully caused us to fail low
-        if prev_move != NO_MOVE and prev_piece != -1:
+        # Reward the opponent's previous quiet move if it successfully caused us to fail low
+        if (prev_move != NO_MOVE and prev_piece != -1
+                and not search_context.move_is_capture_stack[ply - 1]
+                and get_special_move_flag(prev_move) != SPECIAL_MOVE_FLAG_PROMOTION):
             if (prev_piece % 6) != 0:
                 prev_to = get_to_square(prev_move)
                 prev_from = get_from_square(prev_move)

@@ -872,7 +872,7 @@ PRUNING_HISTORY_THRESHOLD = -6500  # E23 keep; E25B −7000 aborted ~negative @n
 
 # Continuation history prune threshold (SF19 Step 14: -4136 * depth, tuned from -1800 to -1500)
 ENABLE_CONTINUATION_HISTORY_PRUNING = True
-PRUNING_CONTINUATION_THRESHOLD = -1350
+PRUNING_CONTINUATION_THRESHOLD = -1450
 
 CORRECTION_HISTORY_SIZE = 16384
 CORRECTION_HISTORY_MASK = 16383
@@ -1273,7 +1273,7 @@ STOP_CHECK_MASK = 4095
 
 # --- Singular extension ---
 SINGULAR_TT_DEPTH_SLACK = 3      # tt.depth >= depth - slack
-SINGULAR_MARGIN_BASE = 52        # margin = (BASE + ttpv_bonus) * depth // DIV (rescaled to 100cp HCE)
+SINGULAR_MARGIN_BASE = 58        # margin = (BASE + ttpv_bonus) * depth // DIV (rescaled to 100cp HCE)
 SINGULAR_TTPV_BONUS = 62
 SINGULAR_MARGIN_DIV = 64
 SINGULAR_DOUBLE_EXT_MIN_DEPTH = 10
