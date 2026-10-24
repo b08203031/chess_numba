@@ -1145,7 +1145,7 @@ PROBCUT_TT_DEPTH_OFFSET = 3  # store TT at depth - 3 after ProbCut cut
 
 # Step 12: TT-based ProbCut Shortcut (SF 18 Step 12: 428 * 78 // 100 ≈ 334)
 ENABLE_PROBCUT_TT_SHORTCUT = True
-PROBCUT_TT_SHORTCUT_MARGIN = 334
+PROBCUT_TT_SHORTCUT_MARGIN = 360
 
 
 # Delta Pruning (QS) — keep milder than aggressive node-exp values
