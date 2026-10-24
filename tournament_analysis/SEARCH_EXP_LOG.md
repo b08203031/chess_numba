@@ -1,8 +1,14 @@
 # Classical 搜尋單項實驗日誌
 
 > **用途：** 連續 A/B 實驗的唯一進度表與決策紀錄。未來接續實驗、回顧為何留下/回滾，以此檔為準。  
-> **最後更新：** 2026-10-23  
-> **當前基準狀態：** **E88（ProbCut 剪枝裕度放寬 PROBCUT_MARGIN = 170 vs 150）已採納進生產基線**（1000 局 507.0 vs 493.0，50.70%，**+4.86 Elo**，且探勘 120 與 190 皆落敗，確立 170 為局部峰值）；**E87（LMP 縮放百分比放寬 LMP_SCALE_PERCENT=150）已完成基線鎖定**（+13.32 Elo）。
+> **最後更新：** 2026-10-24  
+> **當前基準狀態：**
+> 1. **E91（接納SINGULAR_MARGIN_BASE = 58）已採納進生產基線**；
+> 2. **E92（PRUNING_CONTINUATION_THRESHOLD = -1450 測試進行中）**；
+> 3. **E90（NMP 空著剪枝基底選定 NMP_BASE = 230）已採納進生產基線**；
+> 4. **E89（Delta Pruning 裕度探索選定 DELTA_PRUNING_MARGIN = 365 且補齊 not is_loss 斷崖護欄）已採納進生產基線**；
+> 5. **E88（ProbCut 剪枝裕度 PROBCUT_MARGIN = 170）已採納進生產基線**（+4.86 Elo）；
+> 6. **第一批搜尋/評估/TT 純 Bug 深度修復已上線**（TT 空槽優先寫入與補寫、特殊殘局回傳 sentinel、ProbCut 狀態守衛與 TT 評分優化、歷史剪枝未定義變數與 Fail-Low 獎勵守衛）。
 
 ---
 
@@ -2728,6 +2734,81 @@ LMP skip 體積 ≫ RFP ≈ FP/Razor/hist-prune 帶 ≫ NMP ≫ ProbCut
 * **判定與處置：** **正式採納進生產基線 (ADOPTED / PRODUCTION BASELINE UPDATED)**。
   * 保持 `chess_engine/classical/constants.py` 與 `chess_engine/classical_old/constants.py` 之 `PROBCUT_MARGIN = 170`。
   * 執行 `python tools/sync_classical_old.py --sync` 確保兩側代碼邏輯一致。
+
+
+### E89：Delta Pruning 增益剪枝裕度 1D 座標探索與深度審計 `DELTA_PRUNING_MARGIN = 365` vs `380` / `350` / `395`（多輪實測收斂，選定 365，正式採納進生產基線 ADOPTED）
+
+* **改動項目與動機：**
+  * 在 `quiescence_search` 中全面對齊 Stockfish 11/19，補齊 `not is_loss(stand_pat)` 必敗斷崖護欄（防止殘局特殊局面因 `-10000` 人造分誤剪反吃走法），並消除 QSearch 熱路徑上重複的 `find_piece_type_on_square_side` 查表。
+  * 在 E85 統一 `MG_MATERIAL_VALUES` 使子力價值尺度整體上升（約 +13.4%）後，原先 `DELTA_PRUNING_MARGIN = 200`（後續調整至 350）過於收緊，需重新探索最佳截斷門檻。
+* **對戰驗證結果（多輪 1D 座標爬山驗證）：**
+  * **第 1 輪（New380 vs Old350，772 局）**：
+    * **戰績**：**170 勝 482 和 120 負**（得分率 **53.24%**，總得分 411.0 / 772，淨勝 **+50 局**）。
+    * **相對 Elo**：**+22.53 Elo**（95% CI: `[+7.42, +37.73]`）。
+  * **第 2 輪（New395 vs Old380，724 局）**：
+    * **戰績**：**174 勝 426 和 124 負**（得分率 **53.45%**，總得分 387.0 / 724，淨勝 **+50 局**）。
+    * **相對 Elo**：**+24.03 Elo**（95% CI: `[+8.32, +39.85]`）。
+  * **第 3 輪（New365 vs Old380，1,000 局）**：
+    * **戰績**：**196 勝 621 和 183 負**（得分率 **50.65%**，總得分 506.5 / 1000，淨勝 **+13 局**）。
+    * **相對 Elo**：**+4.52 Elo**（95% CI: `[-8.50, +17.55]`）。
+  * **第 4 輪（New395 vs Old365，604 局）**：
+    * **戰績**：**124 勝 372 和 108 負**（得分率 **51.32%**，總得分 310.0 / 604，淨勝 **+16 局**）。
+    * **相對 Elo**：**+9.21 Elo**（95% CI: `[-7.67, +26.12]`）。
+* **判定與處置：** **選定 365 正式採納進生產基線 (ADOPTED / PRODUCTION BASELINE UPDATED)**。
+  * 保持 `DELTA_PRUNING_MARGIN = 365`。
+  * 執行 `python tools/sync_classical_old.py --sync` 同步至 `classical_old`。
+
+
+### E90：NMP 空著剪枝基底門檻探索與收斂 `NMP_BASE = 230` vs `185` / `205` / `215` / `225` / `235` / `245`（多輪網格搜尋收斂至 230，正式採納進生產基線 ADOPTED）
+
+* **改動項目與動機：**
+  * 在修復 `search.py` 中 NMP 評估與淺層深度問題後，對齊 SF19 Step 10 極簡架構，針對 HCE 評估尺度重新調優 `NMP_BASE`。
+* **對戰驗證結果（探索序列）：**
+  * 測試 `185 vs 205`、`185 vs 225`，確認 `225` 明顯優於 `205` 與 `185`。
+  * 測試 `215 vs 225`（215 輸 225），測試 `235 vs 225`（235 贏 225），進一步測試 `245 vs 235`。
+  * 雙向夾擊驗證：
+    * `tournament_results_NMP`（1,000 局）：**208 勝 601 和 191 負**（得分率 **50.85%**，**+5.91 Elo**，95% CI: `[-6.96, +18.79]`）。
+    * `tournament_results_NMP1`（1,000 局）：**194 勝 603 和 203 負**（得分率 **49.55%**，**-3.13 Elo**，95% CI: `[-16.19, +9.93]`）。
+  * 確立最優性能平原落於 225 ~ 235 之間。
+* **判定與處置：** **最後選定中位數 `NMP_BASE = 230` 正式採納進生產基線 (ADOPTED / PRODUCTION BASELINE UPDATED)**。
+  * 將 `NMP_BASE = 230` 寫入 `chess_engine/classical/constants.py` 與 `chess_engine/classical_old/constants.py`。
+
+
+### E91：奇異延展裕度基底微調 `SINGULAR_MARGIN_BASE = 58` vs `52` / `46`（放寬奇異門檻增益，正式採納進生產基線 ADOPTED）
+
+* **改動項目與動機：**
+  * 原先奇異延展基底裕度為 `SINGULAR_MARGIN_BASE = 52`。
+  * 探索裕度微調：分別向左測試收緊 `46 vs 52`，以及向右測試適度放寬 `58 vs 52`。
+* **判定與處置：** **接納SINGULAR_MARGIN_BASE = 58 正式採納進生產基線 (ADOPTED / PRODUCTION BASELINE UPDATED)**。
+  * 實證適度放寬奇異延展 Margin 能使關鍵主變例獲得更充足的深層戰術延展，改善複雜局勢下的戰術決策。
+  * 將 `SINGULAR_MARGIN_BASE = 58` 寫入 `chess_engine/classical/constants.py` 與 `chess_engine/classical_old/constants.py`。
+
+
+### E92：延續歷史剪枝門檻測試 `PRUNING_CONTINUATION_THRESHOLD = -1450` 測試
+
+* **改動項目與動機：**
+  * Step 14b Continuation History Pruning 原基線為 `PRUNING_CONTINUATION_THRESHOLD = -1500`。
+  * 測試探索 `-1350 vs -1500`，尋找更佳的防誤剪與剪枝激進程度之折衷點。
+* **當前狀態：**
+  * 設定 `PRUNING_CONTINUATION_THRESHOLD = -1450` 測試 進行中，進一步驗證連續歷史剪枝在千局尺度下的穩定性與深度增益。
+
+
+### E93：搜尋、評估與置換表第一批純 Bug 修復（Batch 1 深度審計修復上線）
+
+* **改動項目與原理：**
+  1. **置換表 TT 覆寫與 static_eval 補寫（`transposition_table.py`）**：
+     * `store_tt` 優先使用 `TT_FLAG_NONE` 空槽位（加入 `replace_idx = idx; break`），解決 QSearch (`depth=0`) 在 `generation == 0` 時無條件覆寫索引 0 的嚴重複寫問題。
+     * 相同 Key 碰撞且未置換時，若原項目之 `static_eval == 32767` 且新值有效，自動補寫 `static_eval`。
+  2. **特殊殘局回傳 Sentinel 防止牽制漏算（`evaluation.py`）**：
+     * `hit_special` 與純王兵殘局改回傳 `PINNED_UNCOMPUTED_SENTINEL`，徹底杜絕 QSearch 與合法性快速路徑誤將棋子視為未被牽制而走非法步。
+  3. **ProbCut 狀態守衛與評分修正（`search.py`）**：
+     * 走步前設置 `move_is_capture_stack[ply] = True`，防止吃子著法在 Fail-Low 時被 Step 21 誤施加安靜著法歷史懲罰。
+     * ProbCut 走步排序優先將 `tt_move` 賦予 `SCORE_TT_MOVE`。
+     * 未截斷時將真實未被縮減的 `pc_score` 與 `raw_static_eval` 回存至 TT，杜絕人為剪枝分數污染置換表。
+     * 獨立 Step 12a Small ProbCut，補上 `not is_currently_in_check` 與 `tt_depth >= max(1, depth - 4)` 守衛，杜絕淺層及 QSearch 穿透截斷。
+  4. **歷史剪枝與 Fail-Low 獎勵修復（`search.py`）**：
+     * Step 14b 補齊 `history_score` 與 `main_history_score` 之初值初始化，並修正縮排。
+     * Step 21 Fail-Low 對手著法獎勵嚴格排除吃子與升變著法。
 
 ---
 

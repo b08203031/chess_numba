@@ -207,7 +207,7 @@ P3 的診斷分成三條 opt-in funnel：
         *   **開放 `res_ex` 淺層剪枝（2026-10-16 修復）**：將 Step 14（SEE Pruning）、Step 14a（LMP）、Step 14c（FP）從原先粗暴的 `not is_exclusion_search` 徹底解放，改為以 `not is_loss(max_eval)` 守衛（對齊 SF19 `!is_loss(bestValue)`）。保證搜尋過至少 1 個非落敗候選步後，正常發揮 LMP 與 FP 剪枝，根除 `res_ex` 根節點全寬硬搜 30+ 著法的嚴重爆炸問題。
     *   **門檻與 SE Margin 尺度（2026-10-16 尺度校正）**：
         *   `ply > 0`、`excluded_move == NO_MOVE`、`move == tt_move`、`depth >= MIN_SINGULAR_DEPTH (+1 if ttPv)`；TT bound 為 Lower/Exact 且 TT depth 足夠（`depth - 3`）；以 `abs(se_tt_score) < VALUE_KNOWN_WIN` 排除已知勝負區間。
-        *   **SE Margin 縮放回 HCE 100cp 尺度**：SF 原生常數以 `PawnValue = 208` 記分，直接搬用會導致 Margin 寬出約 1.3～2.1 倍、`exclusion_beta` 過低而頻繁誤觸負延展。現將 `SINGULAR_MARGIN_DIV = 64`、`SINGULAR_MARGIN_BASE = 48`、`SINGULAR_TTPV_BONUS = 52`，精準錨定至 HCE 100cp 空間。
+        *   **SE Margin 縮放回 HCE 100cp 尺度**：SF 原生常數以 `PawnValue = 208` 記分，直接搬用會導致 Margin 寬出約 1.3～2.1 倍、`exclusion_beta` 過低而頻繁誤觸負延展。現將 `SINGULAR_MARGIN_DIV = 64`、`SINGULAR_MARGIN_BASE = 58`（E91 接納放寬至 58）、`SINGULAR_TTPV_BONUS = 62`，精準錨定至 HCE 100cp 空間。
     *   **中斷與 Multi-Cut 剪枝（SF18/SF19 Step 15/16）**：
         *   **超時檢查前置**：優先判定 `search_context.stop_flag[0]`，避免超時返回的 0 在 `beta <= 0` 時誤觸 Multi-Cut。
         *   若 `exclusion_score >= beta` 且非勝負分（`not is_win` 與 `not is_decisive`），直接回傳 `exclusion_score` 截斷，無需任何 `unmake_move`（**E31 採納**）。
@@ -219,6 +219,7 @@ P3 的診斷分成三條 opt-in funnel：
         *   第二階段（負延展 -2 → -1 緩和調優，E65）：400 局，每步 300,000 nodes，TT 64MB。比分 89W 229D 82L（勝率 50.88%，Elo: +6.08 ± 22.2），>80 步殘局完全止血。
         *   第三階段（奇異起點深度調優 MIN_SINGULAR_DEPTH 8 → 9，E66）：600 局（300 對成對換先開局），時控 300,000 nodes/move。比分 Candidate **143W 344D 113L**（勝率 **52.50%**，Elo: **+17.39 [-1.48, +36.36]**）。
         *   第四階段（2026-10-16 深度體系修復）：全面補齊 Step 20/21 歷史與殺手表防護、`cutoff_cnt[ply + 2]` 孫層隔離、`static_score` 防污染、開放 Step 14 剪枝，以及 Margin 縮放回 100cp。修復後各項搜尋契約完全就緒，可啟動無污染環境下的起點深度重測。
+        *   第五階段（奇異延展裕度基底微調，E91）：測試 `SINGULAR_MARGIN_BASE = 58` vs `52` / `46`，實證適度放寬 Margin 能使關鍵主變例獲得更充足的深層延展，接納SINGULAR_MARGIN_BASE = 58 正式採納進生產基線。
 
 ### 4.9 內部迭代加深 (Internal Iterative Deepening, IID) / IIR
 *   **理念**：如果當前節點沒有 TT 移動（例如是新節點），則先以較淺的深度搜尋該節點，以獲得一個合適的移動進行排序，再進行完整搜尋。現行實作為 **IIR**（直接減深），而非昂貴的子搜尋 IID。
@@ -261,7 +262,7 @@ P3 的診斷分成三條 opt-in funnel：
 ### 4.14 延續歷史淺層剪枝 (Continuation History Pruning, SF17 Step 14)
 * **理念（SF17 Step 14）**：在淺層非 PV 節點，若安靜著法在局部延續歷史（1-ply、2-ply 應手）與兵結構歷史的未加權和極度為負（多次被證偽為敗著），直接在走棋前跳過。
 * **解決缺陷**：舊版歷史剪枝依賴全局 `main_history_score < 0` 守護，導致熱門格位的戰術昏著無法被剪枝。延續歷史剪枝直接針對「特定戰術上下文」進行精準截斷。
-* **門檻縮放**：SF17 原生為 `-4313 * depth`（總表容量 68,192）；本引擎等比縮放（總表容量 28,672）為 `PRUNING_CONTINUATION_THRESHOLD = -1800`。
+* **門檻縮放與後續微調**：SF17 原生為 `-4313 * depth`（總表容量 68,192）；本引擎初期等比縮放為 `-1800`，E53 調優至 `-1500`（+10.43 Elo）；E92 測試探索 `-1350 vs -1500`，目前設定 PRUNING_CONTINUATION_THRESHOLD = -1450 測試 進行中。
 * **開關與實戰驗證**：`ENABLE_CONTINUATION_HISTORY_PRUNING = True`。400 盤固定 300,000 nodes 對戰，戰績 105W 210D 85L（得分率 52.50%，Elo **+17.39 ± 23.46**，超長局勝率 57.90%）。確認帶來顯著正向收益，正式採納進生產基線（**E38 採納**，同步至 `classical_old`）。
 
 ### 4.15 Tactical anti-misprune（已移除）
