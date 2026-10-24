@@ -1017,3 +1017,18 @@ NMP gate/R、ProbCut style、NMP beta requirement 的預設值也由常量明確
    * `_see_ge_jit` 原以 `victim_type == -1` 作為「未知受害者」預設值並觸發 `find_piece_type_on_square_side` 掃描 6 個敵方 bitboard。新增 `victim_type == -2` 哨兵代表「已知目標格為空（Quiet 著法或 En Passant）」，直接設為無受害者而不掃描 bitboard（100% 0-node delta 純 NPS 加速）。
 4. **ProbCut 補齊 `not is_pv and ply > 0` 節點守衛（`search.py`）**：
    * 原 ProbCut 區塊位於 `not is_pv` 守衛之外，在迭代加深進入 Aspiration Window（`abs(beta) < VALUE_KNOWN_WIN`）時可能於 PV 節點或 Root 節點觸發投機剪枝。補齊 `not is_pv and ply > 0` 嚴格對齊非 PV 剪枝安全合約。
+
+### 17.8 Phase 13：置換表空槽優先、殘局牽制 Sentinel 與搜尋純 Bug 修復（E91～E93，+7.30 Elo 正式採納）
+在經歷單項剪枝探索後，針對搜尋核心、置換表儲存與殘局評估進行了深度審計與漏洞修復，並於 Google Colab 完成 1,000 局（500 組成對換先開局）實戰檢驗：
+1. **置換表空槽優先覆寫與 static_eval 增量補齊（`transposition_table.py`）**：
+   * 原先替換邏輯依賴 `depth + is_pv*2 - age*8` 的替換價值評估。在 QSearch (`depth=0`) 跨世代存入時，可能將剛被填滿但深度較低的有效條目覆蓋。修正為：若當前 4-entry bucket 內存在 `flag == TT_FLAG_NONE` 空槽，**無條件優先佔用空槽**（`replace_idx = idx; break`）。
+   * 當遭遇相同 Key 命中但未達到覆蓋深度的條目時，若舊條目缺損靜態評估（`static_eval == 32767`）且當前評估有效，自動補寫 `static_eval`，避免後續反向徒勞剪枝（RFP）丟失參考基準。
+2. **特殊殘局 Sentinel 牽制防護（`evaluation.py`）**：
+   * `hit_special` 特殊必勝殘局與多兵純王兵殘局在評估提前返回時，原先回傳 `np.uint64(0)` 作為牽制位元棋盤，導致 QSearch 與合步快速路徑誤認為「已精確計算牽制且無任何棋子被牽制」，引發非法牽制走法或走法生成混亂。修復為一致回傳 `PINNED_UNCOMPUTED_SENTINEL`。
+3. **歷史剪枝變數初始化與 Fail-Low 对手獎勵防護（`search.py`）**：
+   * Step 14b 歷史剪枝補齊 `history_score` 與 `main_history_score` 初始化，並將次級歷史門檻檢查置於 `if not prune_quiet_move:` 區塊內。
+   * Step 21 Fail-low 对手走法獎勵排除吃子與升變走法，杜絕戰術吃子被誤當作安靜防守步進行歷史加分。
+4. **實測對局戰績（1,000 局成對換先開局，HEAD = cf312b0 vs 完全未動基線，同參數）**：
+   * **總比分**：Candidate **194 勝 633 和 173 負**（得分率 **51.05%**，淨勝 **+21 局**，相對 **+7.30 Elo**，95% CI: `[-4.94, +19.55]`）。
+   * **超長殘局突破**：>80 步超長局拿下 **62W 137D 38L（勝率 55.06%，淨勝 +24 局！）**，充分驗證了 TT 記憶保護與殘局 Sentinel 在極深層棋局轉化中的關鍵勝率加乘。
+   * **處置結論**：**正式採納進生產基線 (ADOPTED)**，新舊引擎代碼全面同步升級至 `cf312b0`。
