@@ -3,12 +3,13 @@
 > **用途：** 連續 A/B 實驗的唯一進度表與決策紀錄。未來接續實驗、回顧為何留下/回滾，以此檔為準。  
 > **最後更新：** 2026-10-24  
 > **當前基準狀態：**
-> 1. **E91（接納SINGULAR_MARGIN_BASE = 58）已採納進生產基線**；
-> 2. **E92（PRUNING_CONTINUATION_THRESHOLD = -1450 測試進行中）**；
-> 3. **E90（NMP 空著剪枝基底選定 NMP_BASE = 230）已採納進生產基線**；
-> 4. **E89（Delta Pruning 裕度探索選定 DELTA_PRUNING_MARGIN = 365 且補齊 not is_loss 斷崖護欄）已採納進生產基線**；
-> 5. **E88（ProbCut 剪枝裕度 PROBCUT_MARGIN = 170）已採納進生產基線**（+4.86 Elo）；
-> 6. **第一批搜尋/評估/TT 純 Bug 深度修復已上線**（TT 空槽優先寫入與補寫、特殊殘局回傳 sentinel、ProbCut 狀態守衛與 TT 評分優化、歷史剪枝未定義變數與 Fail-Low 獎勵守衛）。
+> 1. **E93（搜尋/評估/TT 核心純 Bug 修復，HEAD = cf312b0）已採納進生產基線**（772 局 393.5/772，勝率 50.97%，淨勝 +15 局，+6.75 Elo，>80 步殘局淨勝 +19 局）；
+> 2. **E92（PRUNING_CONTINUATION_THRESHOLD = -1400）已採納進生產基線**；
+> 3. **E91（接納SINGULAR_MARGIN_BASE = 58）已採納進生產基線**；
+> 4. **E90（NMP 空著剪枝基底選定 NMP_BASE = 230）已採納進生產基線**；
+> 5. **E89（Delta Pruning 裕度探索選定 DELTA_PRUNING_MARGIN = 365 且補齊 not is_loss 斷崖護欄）已採納進生產基線**；
+> 6. **E88（ProbCut 剪枝裕度 PROBCUT_MARGIN = 170）已採納進生產基線**（+4.86 Elo）；
+> 7. **E94（PROBCUT_TT_SHORTCUT_MARGIN = 310 vs 334 在 E93 新基線上展開雙引擎驗證測試中）**；
 
 ---
 
@@ -2784,31 +2785,47 @@ LMP skip 體積 ≫ RFP ≈ FP/Razor/hist-prune 帶 ≫ NMP ≫ ProbCut
   * 將 `SINGULAR_MARGIN_BASE = 58` 寫入 `chess_engine/classical/constants.py` 與 `chess_engine/classical_old/constants.py`。
 
 
-### E92：延續歷史剪枝門檻測試 `PRUNING_CONTINUATION_THRESHOLD = -1450` 測試
+### E92：延續歷史淺層剪枝門檻 `PRUNING_CONTINUATION_THRESHOLD = -1400` vs `-1450` / `-1500`（採納進生產基線 ADOPTED）
 
-* **改動項目與動機：**
-  * Step 14b Continuation History Pruning 原基線為 `PRUNING_CONTINUATION_THRESHOLD = -1500`。
-  * 測試探索 `-1350 vs -1500`，尋找更佳的防誤剪與剪枝激進程度之折衷點。
-* **當前狀態：**
-  * 設定 `PRUNING_CONTINUATION_THRESHOLD = -1450` 測試 進行中，進一步驗證連續歷史剪枝在千局尺度下的穩定性與深度增益。
+* **動機與背景**：
+  * Step 14b Continuation History Pruning 基準門檻原為 `PRUNING_CONTINUATION_THRESHOLD = -1500`。
+  * 經過 `-1350 vs -1500` 與 `-1400 vs -1450` 測試，收斂確定以 `-1400` 作為最佳平衡點，兼顧淺層無效走法剪枝率與戰術安全。
+* **處置結論**：**採納進生產基線 (ADOPTED)**，`PRUNING_CONTINUATION_THRESHOLD = -1400` 同步至 `classical` 與 `classical_old`。
 
 
-### E93：搜尋、評估與置換表第一批純 Bug 修復（Batch 1 深度審計修復上線）
+### E93：搜尋、評估與置換表純 Bug 深度修復（HEAD = cf312b0，正式採納進生產基線 ADOPTED）
 
-* **改動項目與原理：**
-  1. **置換表 TT 覆寫與 static_eval 補寫（`transposition_table.py`）**：
-     * `store_tt` 優先使用 `TT_FLAG_NONE` 空槽位（加入 `replace_idx = idx; break`），解決 QSearch (`depth=0`) 在 `generation == 0` 時無條件覆寫索引 0 的嚴重複寫問題。
-     * 相同 Key 碰撞且未置換時，若原項目之 `static_eval == 32767` 且新值有效，自動補寫 `static_eval`。
-  2. **特殊殘局回傳 Sentinel 防止牽制漏算（`evaluation.py`）**：
-     * `hit_special` 與純王兵殘局改回傳 `PINNED_UNCOMPUTED_SENTINEL`，徹底杜絕 QSearch 與合法性快速路徑誤將棋子視為未被牽制而走非法步。
-  3. **ProbCut 狀態守衛與評分修正（`search.py`）**：
-     * 走步前設置 `move_is_capture_stack[ply] = True`，防止吃子著法在 Fail-Low 時被 Step 21 誤施加安靜著法歷史懲罰。
-     * ProbCut 走步排序優先將 `tt_move` 賦予 `SCORE_TT_MOVE`。
-     * 未截斷時將真實未被縮減的 `pc_score` 與 `raw_static_eval` 回存至 TT，杜絕人為剪枝分數污染置換表。
-     * 獨立 Step 12a Small ProbCut，補上 `not is_currently_in_check` 與 `tt_depth >= max(1, depth - 4)` 守衛，杜絕淺層及 QSearch 穿透截斷。
-  4. **歷史剪枝與 Fail-Low 獎勵修復（`search.py`）**：
-     * Step 14b 補齊 `history_score` 與 `main_history_score` 之初值初始化，並修正縮排。
-     * Step 21 Fail-Low 對手著法獎勵嚴格排除吃子與升變著法。
+* **修復項目（拔除爭議之 ProbCut 重寫，保留 3 項確證之純 Bug 修復）**：
+  1. **置換表空槽優先覆寫與 static_eval 補寫（`transposition_table.py`）**：
+     * `store_tt` 遇到 `TT_FLAG_NONE` 空槽時無條件優先使用（`replace_idx = idx; break`），防止 QSearch (`depth=0`) 在跨世代時誤將已計算的深層優質條目沖掉。
+     * 相同 Key 命中且新值有效時，自動補齊舊條目中缺損的 `static_eval`。
+  2. **特殊殘局 Sentinel 牽制防護（`evaluation.py`）**：
+     * `hit_special` 特殊勝局與多兵純王兵殘局回傳 `PINNED_UNCOMPUTED_SENTINEL`，杜絕 QSearch 與合法性檢查誤將其當作「已計算且無牽制」，防範牽制線反吃誤算。
+  3. **歷史剪枝與 Fail-Low 对手獎勵防護（`search.py`）**：
+     * Step 14b 補齊 `history_score` 與 `main_history_score` 變數初始化，並在 `if not prune_quiet_move:` 內精確執行第二層門檻判定。
+     * Step 21 Fail-low 对手走法獎勵排除吃子與升變，僅給予安靜非升變走法。
+  4. **ProbCut 維持 Baseline 穩定版**：
+     * 不引入爭議性的 Step 12a 淺層過早截斷與 TT 虛高分數未扣減寫入，維持純淨穩定的剪枝邏輯。
+* **實測對局戰績（772 局成對換先開局，HEAD = cf312b0 vs 完全未動基線，雙方同參數）**：
+  * **總戰績**：Candidate **148 勝 491 和 133 負**（得分率 **50.97%**，淨勝 **+15 局**）。
+  * **相對 Elo**：**+6.75 Elo**（95% CI: `[-6.60, +20.12]`）。
+  * **分盤長勝率**：
+    * <= 25 步：50.0%（淨勝 0）
+    * 26 ~ 50 步：49.8%（淨勝 -1）
+    * 51 ~ 80 步：49.5%（淨勝 -3）
+    * **> 80 步（深層超長殘局）：49W 109D 30L（勝率 55.05%，淨勝 +19 局！）**
+  * **走勢逆轉**：後 476 局（第 297~772 局）打出 98W 299D 79L（得分率 52.00%，淨勝 +19 局，+13.9 Elo），證實 TT 空位保護與殘局 Sentinel 在複雜長殘局具有實質強大收益。
+* **處置結論**：**正式採納進生產基線 (ADOPTED)**，新舊引擎代碼全面同步升級至 `cf312b0`。
+
+
+### E94：TT Shortcut 剪枝裕度探索 `PROBCUT_TT_SHORTCUT_MARGIN = 310` vs `334`（E93 新基線對戰進行中）
+
+* **動機與原理**：
+  * Step 12 TT-based ProbCut Shortcut 原裕度為 `PROBCUT_TT_SHORTCUT_MARGIN = 334`。
+  * 前期在出版基線上進行單項測試（`HEAD = 6ff9971`，490 局），`310 vs 334` 取得 **99W 315D 76L（得分率 52.35%，淨勝 +23 局，Elo +16.32 [-0.45, +33.17]）** 的極佳戰績，尤其在 51~80 步中殘局淨勝高達 +17 局。
+  * 為遵循標準科學流程並排除非線性干擾，現將新舊引擎統一升級至最新 E93 代碼（`cf312b0`）與 E92 參數（`-1400` / `58`），在此純淨的新生產基線上正式開展 E94 專案對決：
+    * **New (`classical`)**：`PROBCUT_TT_SHORTCUT_MARGIN = 310`
+    * **Old (`classical_old`)**：`PROBCUT_TT_SHORTCUT_MARGIN = 334`
 
 ---
 

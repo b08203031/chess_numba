@@ -1614,7 +1614,7 @@ def _evaluate_position_jit(piece_bbs, occupancy_bbs, game_state, lazy: bool, sea
     )
     if hit_special:
         val = np.int32(special_score) if side_to_move == 0 else np.int32(-special_score)
-        return val, np.uint64(0), np.uint64(0)
+        return val, PINNED_UNCOMPUTED_SENTINEL, PINNED_UNCOMPUTED_SENTINEL
 
     # --- Multi-pawn pure king-and-pawn endgame (not covered by single-pawn KPK) ---
     all_pieces_except_pawns_and_kings = (
@@ -1628,7 +1628,7 @@ def _evaluate_position_jit(piece_bbs, occupancy_bbs, game_state, lazy: bool, sea
         if sf == SCALE_FACTOR_DRAW:
             score = np.int32(0)
         val = np.int32(score) if side_to_move == 0 else np.int32(-score)
-        return val, np.uint64(0), np.uint64(0)
+        return val, PINNED_UNCOMPUTED_SENTINEL, PINNED_UNCOMPUTED_SENTINEL
 
     # Precompute King Squares for evaluation components
     white_king_sq = get_lsb_index(piece_bbs[5])
