@@ -3427,13 +3427,6 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
 
     original_best_move = best_move
 
-    if ply == 0 and best_move == NO_MOVE:
-        generated_end = max(search_context.mp_captures_end[ply], search_context.mp_quiets_end[ply])
-        for i in range(generated_end):
-            if moves[i] != excluded_move:
-                best_move = moves[i]
-                break
-    
     # --- Update Correction History ---
     if (not is_exclusion_search and depth >= CORRECTION_HISTORY_UPDATE_DEPTH
             and not is_currently_in_check and abs(max_eval) < MATE_SCORE - MAX_PLY):
