@@ -2248,7 +2248,7 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                         continue
                     skip_post_legality_s = True
 
-            if is_capture or is_promotion:
+            if is_capture and not is_promotion:
                 cap_piece = int(find_piece_type_on_square_side(piece_bbs, from_sq, side_to_move))
                 if flag == SPECIAL_MOVE_FLAG_EN_PASSANT:
                     cap_victim = PAWN
@@ -2302,7 +2302,7 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                 if ENABLE_CAPTURE_FUTILITY and cap_piece >= 0 and cap_victim >= 0:
                     threshold = threshold - cap_hist * search_context.tune[TUNE_CAP_SEE_HIST_NUM] // CAP_SEE_CAPTHIST_DEN
                 _diag_add(search_context, DIAG_MAIN_CAP_SEE_TRY)
-                cap_victim_see = -2 if flag == SPECIAL_MOVE_FLAG_EN_PASSANT else (cap_victim if is_capture else -1)
+                cap_victim_see = -2 if flag == SPECIAL_MOVE_FLAG_EN_PASSANT else cap_victim
                 if not _see_ge_jit(piece_bbs, occupancy_bbs, side_to_move, from_sq, to_sq, threshold, pinned_white, pinned_black, cap_piece, cap_victim_see, get_promotion_piece(move) + 1):
                     pruned_moves += 1
                     _diag_add(search_context, DIAG_SEE_CAP_SKIP)
