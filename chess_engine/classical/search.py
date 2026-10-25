@@ -2244,7 +2244,7 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                         continue
                     skip_post_legality_s = True
 
-            if is_capture:
+            if is_capture or is_promotion:
                 cap_piece = int(find_piece_type_on_square_side(piece_bbs, from_sq, side_to_move))
                 if flag == SPECIAL_MOVE_FLAG_EN_PASSANT:
                     cap_victim = PAWN
@@ -2280,12 +2280,14 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                         if cap_lmr_d < 0:
                             cap_lmr_d = 0
                         if cap_lmr_d < CAP_FP_MAX_LMR_DEPTH:
-                            victim_val = int(MG_MATERIAL_VALUES[cap_victim])
+                            victim_val = int(MG_MATERIAL_VALUES[cap_victim]) if cap_victim >= 0 else 0
+                            promo_gain = int(MG_MATERIAL_VALUES[get_promotion_piece(move) + 1] - MG_MATERIAL_VALUES[PAWN]) if is_promotion else 0
                             futility_value = (
                                 tt_refined_eval
                                 + CAP_FP_BASE
                                 + CAP_FP_LMR_MULT * cap_lmr_d
                                 + victim_val
+                                + promo_gain
                                 + (cap_hist * CAP_FP_CAPTHIST_NUM // CAP_FP_CAPTHIST_DEN)
                             )
                             if futility_value <= alpha:
@@ -2298,7 +2300,7 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                 if ENABLE_CAPTURE_FUTILITY and cap_piece >= 0 and cap_victim >= 0:
                     threshold = threshold - cap_hist * search_context.tune[TUNE_CAP_SEE_HIST_NUM] // CAP_SEE_CAPTHIST_DEN
                 _diag_add(search_context, DIAG_MAIN_CAP_SEE_TRY)
-                cap_victim_see = -2 if flag == SPECIAL_MOVE_FLAG_EN_PASSANT else cap_victim
+                cap_victim_see = -2 if flag == SPECIAL_MOVE_FLAG_EN_PASSANT else (cap_victim if is_capture else -1)
                 if not _see_ge_jit(piece_bbs, occupancy_bbs, side_to_move, from_sq, to_sq, threshold, pinned_white, pinned_black, cap_piece, cap_victim_see, get_promotion_piece(move) + 1):
                     pruned_moves += 1
                     _diag_add(search_context, DIAG_SEE_CAP_SKIP)
@@ -2548,7 +2550,7 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
         # Avoid the old unconditional call for shallow/first captures that can
         # never enter LMR, while keeping the result available after make_move.
         # MovePicker has already partitioned non-TT captures via SEE(0).
-        if (is_capture and search_context.enable_lmr and depth >= LMR_MIN_DEPTH
+        if ((is_capture or is_promotion) and search_context.enable_lmr and depth >= LMR_MIN_DEPTH
                 and searched_legal_moves >= 1):
             if move == tt_move:
                 _diag_add(search_context, DIAG_LMR_CAP_SEE_TRY)
@@ -2583,7 +2585,7 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                 _diag_add(search_context, DIAG_CHECK_GATE_SEE_TRY)
                 if flag == SPECIAL_MOVE_FLAG_CASTLING:
                     check_gate_see_ok = True
-                elif (is_capture and search_context.enable_lmr and depth >= LMR_MIN_DEPTH
+                elif ((is_capture or is_promotion) and search_context.enable_lmr and depth >= LMR_MIN_DEPTH
                         and searched_legal_moves >= 1):
                     check_gate_see_ok = not is_bad_capture
                 else:
@@ -2846,7 +2848,7 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                 is_eligible = False
                 if is_quiet_move and quiet_move_counter >= LMR_MIN_QUIET_MOVE_INDEX and moved_piece_type != -1:
                     is_eligible = True
-                elif is_capture:
+                elif is_capture or is_promotion:
                     is_eligible = True
 
                 if is_eligible:
@@ -2889,8 +2891,8 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                     if tt_capture:
                         r += search_context.tune[TUNE_LMR_TTCAP]  # TT capture bonus (SF: 1039)
 
-                    if is_capture:
-                        if not is_bad_capture:
+                    if is_capture or is_promotion:
+                        if not is_bad_capture and (is_capture or get_promotion_piece(move) + 1 == QUEEN):
                             r -= search_context.tune[TUNE_GOOD_CAP_RELIEF]
                         else:
                             r += search_context.tune[TUNE_BAD_CAP_BONUS]

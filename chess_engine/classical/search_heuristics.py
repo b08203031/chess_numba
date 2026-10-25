@@ -330,11 +330,12 @@ def score_captures_lazy(piece_bbs, occupancy_bbs, game_state, moves, scores, sta
         move = moves[i]
         to_square = get_to_square(move)
         from_sq = get_from_square(move)
+        flag = get_special_move_flag(move)
         
         victim_type = find_piece_type_on_square_side(piece_bbs, to_square, 1 - side_to_move)
         aggressor_type = find_piece_type_on_square_side(piece_bbs, from_sq, side_to_move)
         
-        if victim_type == -1 and get_special_move_flag(move) == SPECIAL_MOVE_FLAG_EN_PASSANT:
+        if victim_type == -1 and flag == SPECIAL_MOVE_FLAG_EN_PASSANT:
             victim_type = 0 # Pawn value for En Passant
 
         mvv_lva = 0
@@ -342,8 +343,15 @@ def score_captures_lazy(piece_bbs, occupancy_bbs, game_state, moves, scores, sta
         if victim_rel != -1:
             mvv_lva = MG_MATERIAL_VALUES[victim_rel] - MG_MATERIAL_VALUES[aggressor_type % 6]
         
-        # Base score formula: mvv_lva + capture_history_bonus
-        base_score = mvv_lva
+        promo_bonus = 0
+        if flag == SPECIAL_MOVE_FLAG_PROMOTION:
+            if get_promotion_piece(move) + 1 == QUEEN:
+                promo_bonus = MG_MATERIAL_VALUES[QUEEN] - MG_MATERIAL_VALUES[PAWN]
+            else:
+                promo_bonus = -500
+
+        # Base score formula: mvv_lva + promo_bonus + capture_history_bonus
+        base_score = mvv_lva + promo_bonus
         if victim_rel != -1:
             base_score += search_context.capture_history[aggressor_type, to_square, victim_rel]
             
@@ -363,11 +371,12 @@ def score_captures_with_tt_lazy(piece_bbs, occupancy_bbs, game_state, moves, sco
         else:
             to_square = get_to_square(move)
             from_sq = get_from_square(move)
+            flag = get_special_move_flag(move)
             
             victim_type = find_piece_type_on_square_side(piece_bbs, to_square, 1 - side_to_move)
             aggressor_type = find_piece_type_on_square_side(piece_bbs, from_sq, side_to_move)
             
-            if victim_type == -1 and get_special_move_flag(move) == SPECIAL_MOVE_FLAG_EN_PASSANT:
+            if victim_type == -1 and flag == SPECIAL_MOVE_FLAG_EN_PASSANT:
                 victim_type = 0 # Pawn value for En Passant
 
             mvv_lva = 0
@@ -375,12 +384,18 @@ def score_captures_with_tt_lazy(piece_bbs, occupancy_bbs, game_state, moves, sco
             if victim_rel != -1:
                 mvv_lva = MG_MATERIAL_VALUES[victim_rel] - MG_MATERIAL_VALUES[aggressor_type % 6]
             
-            base_score = mvv_lva
-            if victim_rel != -1:
-                base_score += (
-                    QS_EVASION_CAPTURE_BUCKET
-                    + search_context.capture_history[aggressor_type, to_square, victim_rel]
-                )
+            promo_bonus = 0
+            if flag == SPECIAL_MOVE_FLAG_PROMOTION:
+                if get_promotion_piece(move) + 1 == QUEEN:
+                    promo_bonus = MG_MATERIAL_VALUES[QUEEN] - MG_MATERIAL_VALUES[PAWN]
+                else:
+                    promo_bonus = -500
+
+            base_score = mvv_lva + promo_bonus
+            if victim_rel != -1 or flag == SPECIAL_MOVE_FLAG_PROMOTION:
+                base_score += QS_EVASION_CAPTURE_BUCKET
+                if victim_rel != -1:
+                    base_score += search_context.capture_history[aggressor_type, to_square, victim_rel]
             elif aggressor_type >= 0:
                 # qsearch generates all evasions while in check.  Quiet evasions
                 # used to tie at zero and were therefore searched in generator
