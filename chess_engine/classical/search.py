@@ -1859,14 +1859,11 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                         _diag_add(search_context, DIAG_NMP_CUT)
                         return (np.int32(null_move_score), NO_MOVE, nodes_searched, quiescence_nodes, tt_hits)
 
-    if not is_currently_in_check and static_score >= beta:
-        improving = True
-
     # =========================================================================
     # Step 11. Internal Iterative Reduction (IIR) (SF19 Step 11)
     # =========================================================================
     if (tt_move == NO_MOVE and ENABLE_IIR and not is_exclusion_search
-            and not is_currently_in_check and not follow_pv and (is_pv or cut_node)):
+            and not is_currently_in_check and not follow_pv):
         if depth >= IIR_MIN_DEPTH:
             depth -= 1
 
@@ -2311,8 +2308,6 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                                         piece_bbs, occupancy_bbs, game_state, search_context, ply
                                     )
                                     static_eval_is_full = True
-                                    if static_score >= beta:
-                                        improving = True
                                     tt_refined_eval = static_score
                                     if trusted_tt_score:
                                         if tt_flag == TT_FLAG_BETA and tt_score_adj > tt_refined_eval:
@@ -2516,8 +2511,6 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                                     piece_bbs, occupancy_bbs, game_state, search_context, ply
                                 )
                                 static_eval_is_full = True
-                                if static_score >= beta:
-                                    improving = True
                                 tt_refined_eval = static_score
                                 if trusted_tt_score:
                                     if tt_flag == TT_FLAG_BETA and tt_score_adj > tt_refined_eval:
@@ -3478,6 +3471,14 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
 
     original_best_move = best_move
 
+    generated_end = max(search_context.mp_captures_end[ply], search_context.mp_quiets_end[ply])
+    if best_move == NO_MOVE and generated_end > 0:
+        # Fallback to first move that is not excluded
+        for i in range(generated_end):
+            if moves[i] != excluded_move:
+                best_move = moves[i]
+                break
+
     # --- Update Correction History ---
     if (not is_exclusion_search and depth >= CORRECTION_HISTORY_UPDATE_DEPTH
             and not is_currently_in_check and abs(max_eval) < MATE_SCORE - MAX_PLY):
@@ -3614,7 +3615,7 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
         search_context.tt_pv_stack[ply] = tt_pv
 
     if not is_exclusion_search:
-        store_tt(search_context.transposition_table, tt_key, depth, tt_score, tt_static_eval_to_store, final_flag, original_best_move, search_context.tt_generation, tt_pv)
+        store_tt(search_context.transposition_table, tt_key, depth, tt_score, tt_static_eval_to_store, final_flag, best_move, search_context.tt_generation, tt_pv)
 
     return (np.int32(max_eval), best_move, nodes_searched, quiescence_nodes, tt_hits)
 
