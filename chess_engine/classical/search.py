@@ -3427,9 +3427,8 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
 
     original_best_move = best_move
 
-    generated_end = max(search_context.mp_captures_end[ply], search_context.mp_quiets_end[ply])
-    if best_move == NO_MOVE and generated_end > 0:
-        # Fallback to first move that is not excluded
+    if ply == 0 and best_move == NO_MOVE:
+        generated_end = max(search_context.mp_captures_end[ply], search_context.mp_quiets_end[ply])
         for i in range(generated_end):
             if moves[i] != excluded_move:
                 best_move = moves[i]
@@ -3571,7 +3570,7 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
         search_context.tt_pv_stack[ply] = tt_pv
 
     if not is_exclusion_search:
-        store_tt(search_context.transposition_table, tt_key, depth, tt_score, tt_static_eval_to_store, final_flag, best_move, search_context.tt_generation, tt_pv)
+        store_tt(search_context.transposition_table, tt_key, depth, tt_score, tt_static_eval_to_store, final_flag, original_best_move, search_context.tt_generation, tt_pv)
 
     return (np.int32(max_eval), best_move, nodes_searched, quiescence_nodes, tt_hits)
 
