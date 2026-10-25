@@ -392,7 +392,7 @@ def score_captures_with_tt_lazy(piece_bbs, occupancy_bbs, game_state, moves, sco
                     promo_bonus = -500
 
             base_score = mvv_lva + promo_bonus
-            if victim_rel != -1 or flag == SPECIAL_MOVE_FLAG_PROMOTION:
+            if victim_rel != -1 or (flag == SPECIAL_MOVE_FLAG_PROMOTION and get_promotion_piece(move) + 1 == QUEEN):
                 base_score += QS_EVASION_CAPTURE_BUCKET
                 if victim_rel != -1:
                     base_score += search_context.capture_history[aggressor_type, to_square, victim_rel]

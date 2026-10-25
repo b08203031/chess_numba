@@ -1107,6 +1107,10 @@ def get_next_move(
                 else:
                     is_good = _see_ge_jit(piece_bbs, occupancy_bbs, side_to_move, c_from, c_to, 0, pinned_white, pinned_black, att_type, vic_type, get_promotion_piece(candidate_move) + 1)
                 
+                # Underpromotions (=R, =B, =N) are never good captures; defer to STAGE_BAD_CAPTURES
+                if sp_flag == SPECIAL_MOVE_FLAG_PROMOTION and (get_promotion_piece(candidate_move) + 1 != QUEEN):
+                    is_good = False
+                
                 if is_good:
                     move = candidate_move
                     return move
@@ -2846,7 +2850,7 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                 is_eligible = False
                 if is_quiet_move and quiet_move_counter >= LMR_MIN_QUIET_MOVE_INDEX and moved_piece_type != -1:
                     is_eligible = True
-                elif is_capture or is_promotion:
+                elif is_capture and not is_promotion:
                     is_eligible = True
 
                 if is_eligible:
@@ -2889,8 +2893,8 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                     if tt_capture:
                         r += search_context.tune[TUNE_LMR_TTCAP]  # TT capture bonus (SF: 1039)
 
-                    if is_capture or is_promotion:
-                        if not is_bad_capture and (is_capture or get_promotion_piece(move) + 1 == QUEEN):
+                    if is_capture:
+                        if not is_bad_capture:
                             r -= search_context.tune[TUNE_GOOD_CAP_RELIEF]
                         else:
                             r += search_context.tune[TUNE_BAD_CAP_BONUS]
