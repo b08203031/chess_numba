@@ -512,6 +512,7 @@ def quiescence_search(piece_bbs, occupancy_bbs, game_state, alpha, beta, ply, se
     original_alpha = alpha
     best_move = NO_MOVE
     stand_pat = np.int32(32767)
+    raw_stand_pat = np.int32(32767)
     best_eval = np.int32(-32767)
     pinned_white = np.uint64(0)
     pinned_black = np.uint64(0)
@@ -611,15 +612,16 @@ def quiescence_search(piece_bbs, occupancy_bbs, game_state, alpha, beta, ply, se
 
         # --- QSearch TT static_eval probe ---
         if tt_entry['flag'] != TT_FLAG_NONE and tt_entry['static_eval'] != 32767:
-            stand_pat = np.int32(tt_entry['static_eval'])
+            raw_stand_pat = np.int32(tt_entry['static_eval'])
         else:
             stand_pat_val, p_w, p_b = _evaluate_position_jit(piece_bbs, occupancy_bbs, game_state, False, search_context)
-            stand_pat = np.int32(stand_pat_val)
+            raw_stand_pat = np.int32(stand_pat_val)
             if p_w != PINNED_UNCOMPUTED_SENTINEL:
                 pinned_white = p_w
                 pinned_black = p_b
                 pinned_computed = True
-        
+
+        stand_pat = apply_correction_history_score(game_state, search_context, raw_stand_pat, ply)
         best_eval = stand_pat
 
         if stand_pat >= beta:
@@ -632,7 +634,7 @@ def quiescence_search(piece_bbs, occupancy_bbs, game_state, alpha, beta, ply, se
             tt_score = val
             if tt_score > MATE_IN_MAX_PLY: tt_score += ply
             elif tt_score < -MATE_IN_MAX_PLY: tt_score -= ply
-            store_tt(search_context.transposition_table, tt_key, 0, tt_score, np.int16(stand_pat), TT_FLAG_BETA, NO_MOVE, search_context.tt_generation, False)
+            store_tt(search_context.transposition_table, tt_key, 0, tt_score, np.int16(raw_stand_pat), TT_FLAG_BETA, NO_MOVE, search_context.tt_generation, False)
             return np.int32(val), q_nodes
         alpha = max(alpha, stand_pat)
 
@@ -641,7 +643,7 @@ def quiescence_search(piece_bbs, occupancy_bbs, game_state, alpha, beta, ply, se
             tt_score = np.int32(stand_pat)
             if tt_score > MATE_IN_MAX_PLY: tt_score += ply
             elif tt_score < -MATE_IN_MAX_PLY: tt_score -= ply
-            store_tt(search_context.transposition_table, tt_key, 0, tt_score, np.int16(stand_pat), TT_FLAG_EXACT, NO_MOVE, search_context.tt_generation, False)
+            store_tt(search_context.transposition_table, tt_key, 0, tt_score, np.int16(raw_stand_pat), TT_FLAG_EXACT, NO_MOVE, search_context.tt_generation, False)
             return np.int32(stand_pat), q_nodes
 
     _diag_add(search_context, DIAG_Q_MOVES, move_count)
@@ -976,6 +978,12 @@ def quiescence_search(piece_bbs, occupancy_bbs, game_state, alpha, beta, ply, se
             
         legal_moves_tried += 1
 
+        qs_moved_piece = unmake_info[0]
+        if qs_moved_piece != -1 and qs_side == BLACK:
+            qs_moved_piece += 6
+        search_context.move_stack[ply] = move
+        search_context.piece_stack[ply] = qs_moved_piece
+
         score, child_q_nodes = quiescence_search(
             piece_bbs, occupancy_bbs, game_state,
             _i32(-beta), _i32(-alpha), _i32(ply + 1), search_context, _i32(q_ply + 1),
@@ -1013,8 +1021,8 @@ def quiescence_search(piece_bbs, occupancy_bbs, game_state, alpha, beta, ply, se
     tt_flag = TT_FLAG_BETA if best_eval >= beta else (TT_FLAG_ALPHA if alpha <= original_alpha else TT_FLAG_EXACT)
 
     tt_static_eval_to_store = np.int16(32767)
-    if not is_currently_in_check and stand_pat != 32767:
-        tt_static_eval_to_store = np.int16(stand_pat)
+    if not is_currently_in_check and raw_stand_pat != 32767 and abs(raw_stand_pat) < MATE_SCORE - MAX_PLY:
+        tt_static_eval_to_store = np.int16(raw_stand_pat)
     store_tt(search_context.transposition_table, tt_key, 0, tt_score, tt_static_eval_to_store, tt_flag, best_move, search_context.tt_generation, False)
 
     return np.int32(best_eval), q_nodes
@@ -1851,11 +1859,14 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                         _diag_add(search_context, DIAG_NMP_CUT)
                         return (np.int32(null_move_score), NO_MOVE, nodes_searched, quiescence_nodes, tt_hits)
 
+    if not is_currently_in_check and static_score >= beta:
+        improving = True
+
     # =========================================================================
     # Step 11. Internal Iterative Reduction (IIR) (SF19 Step 11)
     # =========================================================================
     if (tt_move == NO_MOVE and ENABLE_IIR and not is_exclusion_search
-            and not is_currently_in_check and not follow_pv):
+            and not is_currently_in_check and not follow_pv and (is_pv or cut_node)):
         if depth >= IIR_MIN_DEPTH:
             depth -= 1
 
@@ -1973,6 +1984,14 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                     unmake_move(piece_bbs, occupancy_bbs, game_state, pc_move, pc_unmake)
                     continue
     
+                saved_pc_stack_move = search_context.move_stack[ply]
+                saved_pc_stack_piece = search_context.piece_stack[ply]
+                pc_moved_piece_type = pc_unmake[0]
+                if pc_moved_piece_type != -1 and pc_original_side == BLACK:
+                    pc_moved_piece_type += 6
+                search_context.move_stack[ply] = pc_move
+                search_context.piece_stack[ply] = pc_moved_piece_type
+
                 pc_q_score, pc_q_nodes = quiescence_search(
                     piece_bbs, occupancy_bbs, game_state,
                     _i32(-probcut_beta), _i32(-probcut_beta + 1), _i32(ply + 1), search_context, _i32(0),
@@ -1981,20 +2000,16 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                 pc_q_score = -pc_q_score
 
                 if search_context.stop_flag[0]:
+                    search_context.move_stack[ply] = saved_pc_stack_move
+                    search_context.piece_stack[ply] = saved_pc_stack_piece
                     unmake_move(piece_bbs, occupancy_bbs, game_state, pc_move, pc_unmake)
                     return (np.int32(0), NO_MOVE, nodes_searched, quiescence_nodes, tt_hits)
 
                 if pc_q_score < probcut_beta:
+                    search_context.move_stack[ply] = saved_pc_stack_move
+                    search_context.piece_stack[ply] = saved_pc_stack_piece
                     unmake_move(piece_bbs, occupancy_bbs, game_state, pc_move, pc_unmake)
                     continue
-
-                saved_pc_stack_move = search_context.move_stack[ply]
-                saved_pc_stack_piece = search_context.piece_stack[ply]
-                pc_moved_piece_type = pc_unmake[0]
-                if pc_moved_piece_type != -1 and pc_original_side == BLACK:
-                    pc_moved_piece_type += 6
-                search_context.move_stack[ply] = pc_move
-                search_context.piece_stack[ply] = pc_moved_piece_type
                 search_context.reduction_stack[ply + 1] = 0
                 res_pc = _search(
                     piece_bbs, occupancy_bbs, game_state, _i32(depth - probcut_r),
@@ -2212,7 +2227,7 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                         _diag_add(search_context, DIAG_MAIN_QUIET_PRE_KING_ILLEGAL)
 
         # --- NEW: Shallow Depth Pruning (Stockfish Step 14) ---
-        if (ply > 0 and move != tt_move and search_context.enable_see_pruning and not is_loss(max_eval)
+        if (ply > 0 and move != tt_move and side_non_pawn_count > 0 and search_context.enable_see_pruning and not is_loss(max_eval)
                 and depth <= PRUNING_SHALLOW_DEPTH and not is_currently_in_check and not is_pv):
             side_to_move = original_side
 
@@ -2291,9 +2306,41 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                                 + (cap_hist * CAP_FP_CAPTHIST_NUM // CAP_FP_CAPTHIST_DEN)
                             )
                             if futility_value <= alpha:
-                                pruned_moves += 1
-                                _diag_add(search_context, DIAG_SEE_CAP_SKIP)
-                                continue
+                                if not static_eval_is_full:
+                                    raw_static_eval, static_score, improving, cached_pinned_white, cached_pinned_black = compute_full_corrected_static_eval(
+                                        piece_bbs, occupancy_bbs, game_state, search_context, ply
+                                    )
+                                    static_eval_is_full = True
+                                    if static_score >= beta:
+                                        improving = True
+                                    tt_refined_eval = static_score
+                                    if trusted_tt_score:
+                                        if tt_flag == TT_FLAG_BETA and tt_score_adj > tt_refined_eval:
+                                            tt_refined_eval = tt_score_adj
+                                        elif tt_flag == TT_FLAG_ALPHA and tt_score_adj < tt_refined_eval:
+                                            tt_refined_eval = tt_score_adj
+                                        elif tt_flag == TT_FLAG_EXACT and trusted_exact_depth:
+                                            tt_refined_eval = tt_score_adj
+                                    lmr_r = compute_lmr_reduction_1024(
+                                        depth,
+                                        searched_legal_moves + 1,
+                                        improving,
+                                        search_context.tune[TUNE_LMR_TABLE_SCALE],
+                                        search_context.tune[TUNE_LMR_NOT_IMP],
+                                    )
+                                    cap_lmr_d = max(0, (depth - 1) - (lmr_r // 1024))
+                                    futility_value = (
+                                        tt_refined_eval
+                                        + CAP_FP_BASE
+                                        + CAP_FP_LMR_MULT * cap_lmr_d
+                                        + victim_val
+                                        + promo_gain
+                                        + (cap_hist * CAP_FP_CAPTHIST_NUM // CAP_FP_CAPTHIST_DEN)
+                                    )
+                                if cap_lmr_d < CAP_FP_MAX_LMR_DEPTH and futility_value <= alpha:
+                                    pruned_moves += 1
+                                    _diag_add(search_context, DIAG_SEE_CAP_SKIP)
+                                    continue
 
                 # --- Capture SEE Pruning ---
                 threshold = search_context.tune[TUNE_SEE_CAP_MARGIN] * depth
@@ -2469,6 +2516,8 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                                     piece_bbs, occupancy_bbs, game_state, search_context, ply
                                 )
                                 static_eval_is_full = True
+                                if static_score >= beta:
+                                    improving = True
                                 tt_refined_eval = static_score
                                 if trusted_tt_score:
                                     if tt_flag == TT_FLAG_BETA and tt_score_adj > tt_refined_eval:
