@@ -1107,6 +1107,10 @@ def get_next_move(
                 else:
                     is_good = _see_ge_jit(piece_bbs, occupancy_bbs, side_to_move, c_from, c_to, 0, pinned_white, pinned_black, att_type, vic_type, get_promotion_piece(candidate_move) + 1)
                 
+                # Underpromotions (=R, =B, =N) are never good captures; defer to STAGE_BAD_CAPTURES
+                if sp_flag == SPECIAL_MOVE_FLAG_PROMOTION and (get_promotion_piece(candidate_move) + 1 != QUEEN):
+                    is_good = False
+                
                 if is_good:
                     move = candidate_move
                     return move
@@ -2212,7 +2216,7 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                         _diag_add(search_context, DIAG_MAIN_QUIET_PRE_KING_ILLEGAL)
 
         # --- NEW: Shallow Depth Pruning (Stockfish Step 14) ---
-        if (ply > 0 and move != tt_move and search_context.enable_see_pruning and not is_loss(max_eval)
+        if (ply > 0 and move != tt_move and side_non_pawn_count > 0 and search_context.enable_see_pruning and not is_loss(max_eval)
                 and depth <= PRUNING_SHALLOW_DEPTH and not is_currently_in_check and not is_pv):
             side_to_move = original_side
 
@@ -2244,7 +2248,7 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                         continue
                     skip_post_legality_s = True
 
-            if is_capture:
+            if is_capture or is_promotion:
                 cap_piece = int(find_piece_type_on_square_side(piece_bbs, from_sq, side_to_move))
                 if flag == SPECIAL_MOVE_FLAG_EN_PASSANT:
                     cap_victim = PAWN
@@ -2298,7 +2302,7 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                 if ENABLE_CAPTURE_FUTILITY and cap_piece >= 0 and cap_victim >= 0:
                     threshold = threshold - cap_hist * search_context.tune[TUNE_CAP_SEE_HIST_NUM] // CAP_SEE_CAPTHIST_DEN
                 _diag_add(search_context, DIAG_MAIN_CAP_SEE_TRY)
-                cap_victim_see = -2 if flag == SPECIAL_MOVE_FLAG_EN_PASSANT else cap_victim
+                cap_victim_see = -2 if flag == SPECIAL_MOVE_FLAG_EN_PASSANT else (cap_victim if is_capture else -1)
                 if not _see_ge_jit(piece_bbs, occupancy_bbs, side_to_move, from_sq, to_sq, threshold, pinned_white, pinned_black, cap_piece, cap_victim_see, get_promotion_piece(move) + 1):
                     pruned_moves += 1
                     _diag_add(search_context, DIAG_SEE_CAP_SKIP)
@@ -2548,7 +2552,7 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
         # Avoid the old unconditional call for shallow/first captures that can
         # never enter LMR, while keeping the result available after make_move.
         # MovePicker has already partitioned non-TT captures via SEE(0).
-        if (is_capture and search_context.enable_lmr and depth >= LMR_MIN_DEPTH
+        if ((is_capture or is_promotion) and search_context.enable_lmr and depth >= LMR_MIN_DEPTH
                 and searched_legal_moves >= 1):
             if move == tt_move:
                 _diag_add(search_context, DIAG_LMR_CAP_SEE_TRY)
@@ -2583,7 +2587,7 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                 _diag_add(search_context, DIAG_CHECK_GATE_SEE_TRY)
                 if flag == SPECIAL_MOVE_FLAG_CASTLING:
                     check_gate_see_ok = True
-                elif (is_capture and search_context.enable_lmr and depth >= LMR_MIN_DEPTH
+                elif ((is_capture or is_promotion) and search_context.enable_lmr and depth >= LMR_MIN_DEPTH
                         and searched_legal_moves >= 1):
                     check_gate_see_ok = not is_bad_capture
                 else:
@@ -2846,7 +2850,7 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                 is_eligible = False
                 if is_quiet_move and quiet_move_counter >= LMR_MIN_QUIET_MOVE_INDEX and moved_piece_type != -1:
                     is_eligible = True
-                elif is_capture:
+                elif is_capture and not is_promotion:
                     is_eligible = True
 
                 if is_eligible:
