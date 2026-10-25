@@ -876,7 +876,7 @@ PRUNING_HISTORY_THRESHOLD = -6500  # E23 keep; E25B −7000 aborted ~negative @n
 
 # Continuation history prune threshold (SF19 Step 14: -4136 * depth, tuned from -1800 to -1500)
 ENABLE_CONTINUATION_HISTORY_PRUNING = True
-PRUNING_CONTINUATION_THRESHOLD = -1500
+PRUNING_CONTINUATION_THRESHOLD = -1400
 
 CORRECTION_HISTORY_SIZE = 16384
 CORRECTION_HISTORY_MASK = 16383
@@ -1149,12 +1149,12 @@ PROBCUT_TT_DEPTH_OFFSET = 3  # store TT at depth - 3 after ProbCut cut
 
 # Step 12: TT-based ProbCut Shortcut (SF 18 Step 12: 428 * 78 // 100 ≈ 334)
 ENABLE_PROBCUT_TT_SHORTCUT = True
-PROBCUT_TT_SHORTCUT_MARGIN = 334
+PROBCUT_TT_SHORTCUT_MARGIN = 290
 
 
 # Delta Pruning (QS) — keep milder than aggressive node-exp values
 # QS delta (P0 try 300 regressed fixed-depth suite nodes → keep 350)
-DELTA_PRUNING_MARGIN = 350
+DELTA_PRUNING_MARGIN = 365
 
 # --- Static Exchange Evaluation (SEE) Threshold / SEE 閾值 ---
 SEE_THRESHOLD = 0
@@ -1241,7 +1241,7 @@ LPH_ORDER_SCALE = 8              # score += scale * lph // (1+ply)
 NMP_MIN_DEPTH = 1            # SF19 has no NMP depth floor (was 3 before Phase 8b)
 # SF19 `beta >= -2000` (NNUE internal units, PawnValue~208) scaled to HCE cp: -2000*100/208.
 NMP_BETA_FLOOR = -960
-NMP_BASE = 205
+NMP_BASE = 230
 NMP_DEPTH_COEF = 12
 NMP_IMP_COEF = 45
 NMP_EVAL_MARGIN_DIV = 155
@@ -1277,7 +1277,7 @@ STOP_CHECK_MASK = 4095
 
 # --- Singular extension ---
 SINGULAR_TT_DEPTH_SLACK = 3      # tt.depth >= depth - slack
-SINGULAR_MARGIN_BASE = 52        # margin = (BASE + ttpv_bonus) * depth // DIV (rescaled to 100cp HCE)
+SINGULAR_MARGIN_BASE = 58        # margin = (BASE + ttpv_bonus) * depth // DIV (rescaled to 100cp HCE)
 SINGULAR_TTPV_BONUS = 62
 SINGULAR_MARGIN_DIV = 64
 SINGULAR_DOUBLE_EXT_MIN_DEPTH = 10

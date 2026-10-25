@@ -171,7 +171,7 @@ P3 的診斷分成三條 opt-in funnel：
     *   在非排除搜尋、非將軍、深度足夠（`depth >= 5`）時，以 `probCutBeta = beta + margin` 且搜尋深度 `depth - 4` 嘗試吃子走步。若 QSearch 與子搜尋皆 hold 且 `>= probCutBeta`，則存入 TT 並回傳截斷。
 *   **Step 12: TT-based ProbCut Shortcut (純 TT 快速捷徑，對齊 SF 18)**：
     *   **位置**：放置於 ProbCut 入口處（在吃子生成、SEE 計算與 QSearch 之前）。
-    *   **邏輯**：若 TT 條目已存在且下界有效（`BOUND_LOWER` 或 `BOUND_EXACT`），深度 `tt_depth >= depth - 4`，且其分數 `tt_score >= beta + PROBCUT_TT_SHORTCUT_MARGIN`（310 cp，原 334 cp 於 E94 調優至 310 cp，經 972 局以 LLR +2.96 成功觸發 SPRT H1 Accepted，獲 +16.81 Elo 正式採納，對齊 SF18 的 428 cp 乘以 HCE 0.78 縮放）：
+    *   **邏輯**：若 TT 條目已存在且下界有效（`BOUND_LOWER` 或 `BOUND_EXACT`），深度 `tt_depth >= depth - 4`，且其分數 `tt_score >= beta + PROBCUT_TT_SHORTCUT_MARGIN`（290 cp，原 334 cp 於 E94 調至 310 cp 獲 +16.81 Elo SPRT 通過，E95 進一步調至 290 cp 獲 +6.95 Elo 淨勝 +20 局正式採納，對齊 SF18 的 428 cp 乘以 HCE 0.78 縮放）：
         *   此節點在 `depth - 4` 已經被證明能獲得壓倒性高分，符合 ProbCut 截斷本意。
         *   直接判定 Fail-High 回傳 `probcut_beta`，達成 $O(1)$ 零搜尋開銷截斷，徹底跳過整段昂貴的吃子生成、SEE 評估、QSearch、子搜尋，以及後續的 NMP 與 Razoring。
         *   守護條件：嚴格排除 `ply == 0`（根節點禁止啟發式截斷）、排除奇異延伸搜尋、排除被將軍盤面、排除將死與確知勝負分數。
@@ -1043,3 +1043,16 @@ NMP gate/R、ProbCut style、NMP beta requirement 的預設值也由常量明確
   * **中殘局突破**：在 51~80 步的中殘局勝負手階段拿下 **146W 157D 102L（勝率 55.43%，淨勝 +44 局！）**。
   * **搜尋效率提升**：平均每步耗時由 903.8ms 顯著降低至 897.0ms（每步提速 -6.8ms），NPS 提升 +0.6%，每步平均節點 248,225 vs 248,301，完全無異常膨脹。
 * **處置結論**：**正式採納進生產基線 (ADOPTED / PRODUCTION BASELINE UPDATED)**，`PROBCUT_TT_SHORTCUT_MARGIN = 310` 同步至 `classical` 與 `classical_old`。
+
+### 17.10 Phase 15：TT-based ProbCut Shortcut 門檻梯度平原探索（E95，290 vs 310，+6.95 Elo 正式採納）
+在完成 E94（310 vs 334，+16.81 Elo SPRT 突破）確立 TT ProbCut Shortcut 巨大勝勢後，針對門檻梯度進一步向下探索最佳收斂區間。以 1,000 局成對換先開局（400k nodes/move）比對 `290 vs 310`（`copy 7.ipynb`），並平行比對 `300 vs 310`（`copy 8.ipynb`）：
+* **修改常數**：`PROBCUT_TT_SHORTCUT_MARGIN` 由 `310` 微調至 `290`（-20 cp）。
+* **實測對局戰績（1000 局成對換先，HEAD = 4f9f9a0，New=290 vs Old=310）**：
+  * **總戰績**：Candidate **199 勝 622 和 179 負**（得分率 **51.00%**，總得分 510.0 / 1000，淨勝 **+20 局**，相對 **+6.95 Elo**，95% CI: `[-5.08, +18.99]`）。
+  * **超長殘局突破**：在 $> 80$ 步的深層殘局中打出 **66W 141D 53L（勝率 52.50%，淨勝 +13 局！）**。
+  * **搜尋效率**：平均深度 19.78 vs 19.76 (+0.01 ply)，每步節點數 250,738 vs 250,659 (+0.0%)，NPS 349k vs 359k (-2.8%)。
+* **平行對照組（300 vs 310，1000 局）雙向驗證**：
+  * 戰績：Candidate **203 勝 610 和 187 負**（得分率 **50.80%**，淨勝 **+16 局**，相對 **+5.56 Elo**，95% CI: `[-7.44, +18.57]`）。
+  * 同樣在 $> 80$ 步超長殘局展現關鍵淨勝 +15 局（69W 132D 54L），且 NPS / 每步耗時與 310 幾乎完全一致（差異僅 0.1%）。
+  * 雙向驗證確立 `PROBCUT_TT_SHORTCUT_MARGIN` 落於 290 ~ 300 cp 之間形成堅實的性能增益平原。
+* **處置結論**：**方案 A 正式採納進生產基線 (ADOPTED / PRODUCTION BASELINE UPDATED)**，`PROBCUT_TT_SHORTCUT_MARGIN = 290` 同步至 `classical` 與 `classical_old`。
