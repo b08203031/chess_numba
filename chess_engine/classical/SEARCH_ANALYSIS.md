@@ -207,7 +207,7 @@ P3 的診斷分成三條 opt-in funnel：
         *   **開放 `res_ex` 淺層剪枝（2026-10-16 修復）**：將 Step 14（SEE Pruning）、Step 14a（LMP）、Step 14c（FP）從原先粗暴的 `not is_exclusion_search` 徹底解放，改為以 `not is_loss(max_eval)` 守衛（對齊 SF19 `!is_loss(bestValue)`）。保證搜尋過至少 1 個非落敗候選步後，正常發揮 LMP 與 FP 剪枝，根除 `res_ex` 根節點全寬硬搜 30+ 著法的嚴重爆炸問題。
     *   **門檻與 SE Margin 尺度（2026-10-16 尺度校正）**：
         *   `ply > 0`、`excluded_move == NO_MOVE`、`move == tt_move`、`depth >= MIN_SINGULAR_DEPTH (+1 if ttPv)`；TT bound 為 Lower/Exact 且 TT depth 足夠（`depth - 3`）；以 `abs(se_tt_score) < VALUE_KNOWN_WIN` 排除已知勝負區間。
-        *   **SE Margin 縮放回 HCE 100cp 尺度**：SF 原生常數以 `PawnValue = 208` 記分，直接搬用會導致 Margin 寬出約 1.3～2.1 倍、`exclusion_beta` 過低而頻繁誤觸負延展。現將 `SINGULAR_MARGIN_DIV = 64`、`SINGULAR_MARGIN_BASE = 58`（E91 接納放寬至 58）、`SINGULAR_TTPV_BONUS = 62`，精準錨定至 HCE 100cp 空間。
+        *   **SE Margin 縮放回 HCE 100cp 尺度**：SF 原生常數以 `PawnValue = 208` 記分，直接搬用會導致 Margin 寬出約 1.3～2.1 倍、`exclusion_beta` 過低而頻繁誤觸負延展。現將 `SINGULAR_MARGIN_DIV = 64`、`SINGULAR_MARGIN_BASE = 58`（E91 接納放寬至 58）、`SINGULAR_TTPV_BONUS = 65`（E96 採納至 65），精準錨定至 HCE 100cp 空間。
     *   **中斷與 Multi-Cut 剪枝（SF18/SF19 Step 15/16）**：
         *   **超時檢查前置**：優先判定 `search_context.stop_flag[0]`，避免超時返回的 0 在 `beta <= 0` 時誤觸 Multi-Cut。
         *   若 `exclusion_score >= beta` 且非勝負分（`not is_win` 與 `not is_decisive`），直接回傳 `exclusion_score` 截斷，無需任何 `unmake_move`（**E31 採納**）。
@@ -220,6 +220,7 @@ P3 的診斷分成三條 opt-in funnel：
         *   第三階段（奇異起點深度調優 MIN_SINGULAR_DEPTH 8 → 9，E66）：600 局（300 對成對換先開局），時控 300,000 nodes/move。比分 Candidate **143W 344D 113L**（勝率 **52.50%**，Elo: **+17.39 [-1.48, +36.36]**）。
         *   第四階段（2026-10-16 深度體系修復）：全面補齊 Step 20/21 歷史與殺手表防護、`cutoff_cnt[ply + 2]` 孫層隔離、`static_score` 防污染、開放 Step 14 剪枝，以及 Margin 縮放回 100cp。修復後各項搜尋契約完全就緒，可啟動無污染環境下的起點深度重測。
         *   第五階段（奇異延展裕度基底微調，E91）：測試 `SINGULAR_MARGIN_BASE = 58` vs `52` / `46`，實證適度放寬 Margin 能使關鍵主變例獲得更充足的深層延展，接納SINGULAR_MARGIN_BASE = 58 正式採納進生產基線。
+        *   第六階段（TT PV 延展獎勵最佳化，E96，2026-10-26）：探索 `SINGULAR_TTPV_BONUS`（54 vs 62 vs 65 vs 70）。1000 局成對換先實測（`copy 4.ipynb`），`65 vs 62` 取得 Candidate **203W 626D 171L**（勝率 **51.60%**，淨勝 **+32 局**，Elo: **+11.12 ± 13.16**，LLR=+1.55），且在 51~80 步中長盤取得 +35 局優勢，平均深度與同深度節點比完全持平（1.000）。正式採納 `SINGULAR_TTPV_BONUS = 65` 為生產基準。
 
 ### 4.9 內部迭代加深 (Internal Iterative Deepening, IID) / IIR
 *   **理念**：如果當前節點沒有 TT 移動（例如是新節點），則先以較淺的深度搜尋該節點，以獲得一個合適的移動進行排序，再進行完整搜尋。現行實作為 **IIR**（直接減深），而非昂貴的子搜尋 IID。
