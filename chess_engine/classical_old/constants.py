@@ -1105,7 +1105,7 @@ for i in range(1, 256):
 
 # LMR_BASE: E7 kept 480 (was 512). E20 keep 460. E56 tuned to 463 (+9.6 Elo). E60 tuned to 437 (+15.6 Elo).
 # Phase 6 SPSA 60 iters: 449 / 29 / 200
-LMR_BASE_OFFSET = 465  # Alpha 0.40 candidate (was 470 in 0.50)
+LMR_BASE_OFFSET = 455  # Alpha 0.40 candidate (was 470 in 0.50)
 LMR_TTPV_INCREASE = 768
 LMR_TTPV_DECREASE_BASE = 2048
 LMR_TTPV_PV_BONUS = 768
