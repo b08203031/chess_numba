@@ -1,7 +1,7 @@
 # Classical 搜尋單項實驗日誌
 
 > **用途：** 連續 A/B 實驗的唯一進度表與決策紀錄。未來接續實驗、回顧為何留下/回滾，以此檔為準。  
-> **最後更新：** 2026-10-24  
+> **最後更新：** 2026-10-26  
 > **當前基準狀態：**
 > 1. **E93（搜尋/評估/TT 核心純 Bug 修復，HEAD = cf312b0）已採納進生產基線**（1000 局 510.5/1000，勝率 51.05%，淨勝 +21 局，+7.30 Elo，>80 步殘局淨勝 +24 局）；
 > 2. **E92（PRUNING_CONTINUATION_THRESHOLD = -1400）已採納進生產基線**；
@@ -2879,6 +2879,22 @@ LMP skip 體積 ≫ RFP ≈ FP/Razor/hist-prune 帶 ≫ NMP ≫ ProbCut
   * 同樣在 >80 步深層殘局取得淨勝 +15 局（69W 132D 54L），且 NPS/耗時幾乎完全持平（346.8k vs 347.2k，-0.1%）。
   * 雙向驗證確立 `PROBCUT_TT_SHORTCUT_MARGIN` 落在 290 ~ 300 區間皆顯著優於 334 且微幅勝過 310（+16 ~ +20 淨勝局）。
 * **處置結論**：**方案 A 正式採納進生產基線 (ADOPTED / PRODUCTION BASELINE UPDATED)**，`PROBCUT_TT_SHORTCUT_MARGIN = 290` 已同步至 `classical` 與 `classical_old`。
+
+---
+
+### E96：前向剪枝修訂回退與奇異擴充 TT PV Bonus 探索 SINGULAR_TTPV_BONUS = 65 vs 62
+
+* **動機與原理**：
+  * **前向剪枝探索（Tasks A1~A5）實測總結**：
+    * 針對升變、Step 14 淺層剪枝、Capture Futility 及 Quiescence Search 之修正（包含 A3/A4 變體），在 Colab 1000 局高強度對戰（copy 8.ipynb）中錄得 176W 637D 187L（得分率 49.5%，-3.82 Elo，LLR=-2.41）。
+    * 實測證實在無全局大規模重調參支援下，局部前向剪枝與歷史表補償容易引發葉節點震盪與剪枝失衡，判定全數回退至 commit 17f9138 前乾淨基準。
+  * **奇異擴充獎勵 SINGULAR_TTPV_BONUS 探索**：
+    * 70 vs 62（copy 6.ipynb，1000 局）：188W 634D 178L，得分率 50.5%，+3.47 Elo，淨勝 +10 局，正向增益。
+    * 54 vs 62（copy 5.ipynb，1000 局）：193W 596D 211L，得分率 49.1%，-6.25 Elo，LLR=-2.59，裕度過寬導致分支膨脹。
+    * 依梯度內插選定 65（介於基準 62 與 70 之中間值），展開 A/B 對局驗證。
+* **處置結論**：
+  * **回退**：search.py 與 search_heuristics.py 完整復原至 17f9138~1 狀態。
+  * **A/B 設定**：classical 配置 SINGULAR_TTPV_BONUS = 65，classical_old 配置基準 62。
 
 ---
 
