@@ -970,7 +970,7 @@ LMP_MOVE_COUNT = np.array([
 ], dtype=np.int32)
 # Percent scale on LMP limit (100=table). Higher → later prune (fatter tree).
 # E4: 100→105 kept (+15.7 Elo @100k). E57: 105→107 (+5.2 Elo @300k). E62: 107→118 (+8.1 Elo @300k). E64: 118→137 (+8.7 Elo @300k).
-LMP_SCALE_PERCENT = 145
+LMP_SCALE_PERCENT = 155
 
 # --- 1024-scale LMR — base table matches SF11 (24.8 * log), not above ---
 REDUCTIONS = np.zeros(256, dtype=np.int32)
