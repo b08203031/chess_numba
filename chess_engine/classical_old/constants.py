@@ -1115,7 +1115,7 @@ LMR_STAT_SCORE_DIV = 4096        # r -= stat * hist_scale // DIV
 # SF19 Dynamic Depth Protection: scale up divisor at deeper plies to mitigate over-reduction
 LMR_DIVISOR_MIN_DEPTH = 10       # Depth threshold where dynamic divisor kicks in (<=10 maintains SPSA agility)
 LMR_DIVISOR_DEPTH_STEP = 128     # Divisor increment per depth ply above threshold (+25% at d=18, matching SF19)
-LMR_RESEARCH_DEEPER_MARGIN = 26  # E99 tuned: 26 vs 32 (+5.56 Elo, 50.8% @1000 games)
+LMR_RESEARCH_DEEPER_MARGIN = 24  # E99 tuned: 26 vs 32 (+5.56 Elo, 50.8% @1000 games)
 LMR_RESEARCH_SHALLOWER_MARGIN = 15
 
 # --- QS fail-high / stand-pat smoothing (a*score + b*beta) // div ---
