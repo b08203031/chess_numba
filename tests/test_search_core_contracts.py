@@ -40,7 +40,7 @@ class TestSearchCoreContracts(unittest.TestCase):
         constants = (ROOT / 'chess_engine/classical/constants.py').read_text(encoding='utf-8')
         heuristics = (ROOT / 'chess_engine/classical/search_heuristics.py').read_text(encoding='utf-8')
         scorer = heuristics.index('def score_captures_with_tt_lazy(')
-        next_scorer = heuristics.index('def score_captures(', scorer)
+        next_scorer = heuristics.index('def score_quiets(', scorer)
         body = heuristics[scorer:next_scorer]
 
         self.assertIn('QS_EVASION_CAPTURE_BUCKET = 20000', constants)
@@ -215,7 +215,7 @@ class TestSearchCoreContracts(unittest.TestCase):
         self.assertIn('DIAG_POST_LMR_MALUS_SAMPLE', lmr_body)
         self.assertNotIn('update_continuation_histories_for_move(', lmr_body)
         lmr_stat_start = heuristics.index('def get_lmr_stat_score(')
-        lmr_stat_end = heuristics.index('def get_lmr_reduction(', lmr_stat_start)
+        lmr_stat_end = heuristics.index('def partial_insertion_sort_moves(', lmr_stat_start)
         self.assertNotIn('butterfly_history', heuristics[lmr_stat_start:lmr_stat_end])
 
         cutoff = search.index('if alpha >= beta:', lmr_end)

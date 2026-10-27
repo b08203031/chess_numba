@@ -717,11 +717,6 @@ DIAG_SIZE = DIAG_HP_CONT1_CAP_RESCUE + 1
 
 # Move Ordering Bonuses
 SCORE_TT_MOVE = 100000
-SCORE_GOOD_CAPTURE_BONUS = 20000
-SCORE_KILLER_1 = 15000
-SCORE_KILLER_2 = 14000
-SCORE_COUNTER_MOVE = 10000
-SCORE_BAD_CAPTURE_PENALTY = -5000
 GOOD_QUIET_THRESHOLD = -1200
 
 # QSearch check-evasion ordering.  Captures keep a separate score bucket so
@@ -729,25 +724,8 @@ GOOD_QUIET_THRESHOLD = -1200
 QS_EVASION_CAPTURE_BUCKET = 20000
 QS_EVASION_QUIET_CLAMP = 5000
 
-# Contempt Factor: Score penalty for draws when the engine is winning.
-# This encourages the engine to prefer winning lines over draws.
-CONTEMPT = 20 # centipawns
-
-PAWN_PUSH_RANK_BONUS = 2000
-PAWN_PUSH_ATTACK_BONUS = 3000
-# KING_TROPISM_BONUS removed (unused move-ordering stub; eval tropism also removed)
-KING_ATTACK_BONUS = 2000 # Bonus for quiet moves attacking the opponent's King zone
-ROOK_QUEEN_BATTERY_BONUS = 5000 # Bonus for Rook moving to same file/rank as Queen
-
-# History Heuristics Constants (full history reform — HCE-conservative SF structure)
-MAX_HISTORY = 16384  # legacy alias; prefer HISTORY_MAX_*
-# Compatibility mode: Phase-1a read/write semantics on modern tables.
-# 2026-07-16: full/soft full hist ~-30 Elo vs Old1a → default back to 1a behavior.
-# Tables keep 7D cont / main shape for future experiments; ic/cap forced to 0 when True.
-HISTORY_COMPAT_1A = True
-# Restored Phase 1a ceilings (match classical_old gravity saturation)
+# History Heuristics Constants (Phase 1a ceilings & tables)
 HISTORY_MAX_MAIN = 16384
-HISTORY_MAX_PIECE_TO = 16384
 # E10 kept 10240; E14 kept 12288 (marginal +5 Elo; stop deeper BF for now).
 HISTORY_MAX_BUTTERFLY = 12288
 # E15 kept: capture ceiling 8192→10240.
@@ -759,28 +737,10 @@ HISTORY_MAX_PAWN = 4096
 PAWN_HISTORY_SIZE = 8192
 PAWN_HISTORY_MASK = 8191
 
-# Continuation: [in_check][is_capture][ply_idx 0..4][prev_pc][prev_to][curr_pc][curr_to]
-CONT_PLY_OFFSETS = (1, 2, 3, 4, 6)  # ply_idx i ↔ ply - CONT_PLY_OFFSETS[i]
-CONT_NUM_PLY = 5
-# Update weights (SF-ish, sum style); applied at write, reads are 1:1
-CONT_WEIGHT_0 = 1040
-CONT_WEIGHT_1 = 780
-CONT_WEIGHT_2 = 300
-CONT_WEIGHT_3 = 537
-CONT_WEIGHT_4 = 423
-CONT_WEIGHT_SUM_DIV = 131072  # cont_bonus * w * cmhc // this
-CONT_NEAR_BIAS = 71           # +bias for ply_idx < 2
-# CMHC multipliers (1024 = neutral); index by agreement count 0..6 (clamped)
-CONT_CMHC_TABLE = (96, 113, 101, 105, 127, 121, 126)
-
 # 50-move rule constants
 FIFTY_MOVE_RULE_LIMIT = 100
 FIFTY_MOVE_SCALE_THRESHOLD = 80
 FIFTY_MOVE_MAX_SCALE = 256
-
-# History tuning in Search
-SEE_HISTORY_DIVISOR = 512
-LMR_HISTORY_DIVISOR = 10240
 
 # Quiet ordering weights (MovePicker) - Decoupled from history pruning
 ORDERING_WEIGHT_MAIN = 3
@@ -793,14 +753,8 @@ ORDERING_WEIGHT_CONT_4 = 2
 ORDERING_WEIGHT_CONT_5 = 1
 
 # History pruning weights & thresholds (Step 14b History Pruning)
-# 1a-compat: piece-to * 2 + main (as butterfly) * 1 + cont read-weights 4,2,1,2,1
-# full mode: 2*main + piece_to*W/1024 + unweighted cont sum
-# E8/H1 kept: main/piece-to weight 2→3 (1a-compat read path).
-HISTORY_WEIGHT_MAIN = 3          # full: main*2; 1a-compat: piece-to uses this scale
-HISTORY_WEIGHT_PIECE_TO = 256
-HISTORY_WEIGHT_PIECE_TO_DEN = 1024
-# E9/H2 kept: cont-1 weight 4→5 (1a-compat).
-HISTORY_WEIGHT_CONT_1 = 5        # 1a-compat read weights (full mode ignores, uses 1)
+HISTORY_WEIGHT_MAIN = 3
+HISTORY_WEIGHT_CONT_1 = 5
 HISTORY_WEIGHT_CONT_2 = 2
 HISTORY_WEIGHT_CONT_3 = 1
 HISTORY_WEIGHT_CONT_4 = 2
@@ -809,36 +763,15 @@ HISTORY_WEIGHT_CONT_5 = 1
 # arbitrarily large negative veto.  This is a weighted-score floor; ordering,
 # LMR statScore, and the underlying continuation table remain unchanged.
 HISTORY_PRUNE_CONT1_FLOOR = -4096
-# 1a write: full bonus to piece-to and main (butterfly), cont raw bonus per layer
-HISTORY_QUIET_MAIN_SCALE_NUM_1A = 1024
-HISTORY_QUIET_PIECE_TO_SCALE_NUM_1A = 1024
-HISTORY_QUIET_CONT_SCALE_NUM_1A = 1024
 
 LOW_PLY_HISTORY_SIZE = 5
 LOW_PLY_HISTORY_MAX = 7183
-LOW_PLY_HISTORY_FILL = 100       # soft age: reset low-ply toward this each iteration
 
-# --- Write scales (HCE soft full — after -31 Elo @200k nodes) ---
-HISTORY_QUIET_MAIN_SCALE_NUM = 824
-HISTORY_QUIET_MAIN_SCALE_DEN = 1024
-HISTORY_QUIET_PIECE_TO_SCALE_NUM = 384   # was 512; less piece-to churn
-HISTORY_QUIET_PIECE_TO_SCALE_DEN = 1024
-HISTORY_QUIET_CONT_SCALE_NUM = 512       # was 820; damp cont writes (long-game pollution)
-HISTORY_QUIET_CONT_SCALE_DEN = 1024
+# --- Quiet malus scales & geometric decay ---
 HISTORY_QUIET_MALUS_SCALE_NUM = 956     # was 1024; decoupled from DECAY (decay moved to bottom of loop)
 HISTORY_QUIET_MALUS_SCALE_DEN = 1024
 HISTORY_QUIET_MALUS_DECAY_NUM = 956
 HISTORY_QUIET_MALUS_DECAY_DEN = 1024
-HISTORY_CAP_BONUS_SCALE_NUM = 1152       # was 1280
-HISTORY_CAP_BONUS_SCALE_DEN = 1024
-HISTORY_CAP_MALUS_SCALE_NUM = 1126       # back toward Phase 1a
-HISTORY_CAP_MALUS_SCALE_DEN = 1024
-HISTORY_REFUTE_SCALE_NUM = 512           # was 680
-HISTORY_REFUTE_SCALE_DEN = 1024
-HISTORY_TT_MOVE_BONUS_EXTRA = 0          # was 280; TT quiet bump noisy on HCE
-HISTORY_PARENT_STAT_DIV = 64             # was 40; weaker parent-stat feed
-# Malus only updates shallow cont (ply offsets 1–2), reduces deep-history pollution
-HISTORY_MALUS_SHALLOW_CONT = True
 
 # Pawn history asymmetric gravity input (SF: 1038 if bonus > -7 else 525)
 HISTORY_PAWN_BONUS_NUM = 1038
@@ -850,18 +783,11 @@ HISTORY_PAWN_MALUS_THRESHOLD = -7
 HISTORY_LPH_SCALE_NUM = 663
 HISTORY_LPH_SCALE_DEN = 1024
 
-# Reverse quiet: off after match regression (pollutes main in HCE)
-ENABLE_REVERSE_QUIET = False
-
 # Quiet check ordering
 # E1 (2026-07-16): experiment CHECK_SEE_GATE=True (SEE >= -75 before CHECK_BONUS)
 CHECK_BONUS = 20000
 CHECK_SEE_THRESHOLD = -84  # Rescaled x1.134 for MG_MATERIAL_VALUES SEE (was -75)
 ENABLE_CHECK_SEE_GATE = True
-
-# Threat reordering — disabled (regressed when enabled)
-ENABLE_THREAT_REORDERING = False
-THREAT_MULTIPLIER = 20
 
 # Capture history victim dimension: piece type 0..5 (SF CapturePieceToHistory)
 CAPTURE_HISTORY_VICTIM_TYPES = 6
@@ -886,11 +812,6 @@ CORRECTION_HISTORY_CNTCV_FALLBACK = 0
 CORRECTION_HISTORY_OUTER_SCALE = 1024
 SCORE_MIN = -30000
 SCORE_MAX = 30000
-CONTINUATION_HISTORY_FACTOR = 4
-
-# Special value to indicate that the search was stopped due to timeout
-# 特殊值，表示搜尋因超時而停止
-STOP_SEARCH_FLAG = 66666
 
 PAWN_KEY_INDEX = 5
 MINOR_KEY_INDEX = 6
@@ -898,7 +819,6 @@ NON_PAWN_KEY_WHITE_INDEX = 7
 NON_PAWN_KEY_BLACK_INDEX = 8
 
 # --- Aspiration Windows / 期望窗口 ---
-ASPIRATION_WINDOW_SIZE = 70 # centipawns (tuned via sweep experiment for optimal search efficiency)
 ASPIRATION_WINDOW_MIN = 15         # HCE 適配最低初始窗口
 ASPIRATION_WINDOW_BASE = 20        # Match baseline / SF11-style HCE starting window
 ASPIRATION_WINDOW_SCALE_DIV = 120  # 分數縮放除數，數值越小，分數高時窗口擴張越快
@@ -934,35 +854,20 @@ TUNE_LMR_MC_FACTOR = 18      # r -= mc * factor (higher → softer LMR)
 TUNE_LMR_TTMOVE_RED = 19     # r subtract for researching TT move
 # Structural experiment modes (runtime; see NMP_* production defaults below)
 # NMP Phase 8 continuous parameters & reserved slots
-TUNE_NMP_EVAL_DIV = 20       # dynamic R eval excess divisor (was TUNE_NMP_SCOPE)
+TUNE_NMP_EVAL_DIV = 20       # dynamic R eval excess divisor
 TUNE_SINGULAR_MARGIN_BASE = 21  # Singular extension base margin (rescaled to 100cp)
 TUNE_SINGULAR_TTPV_BONUS = 22   # Singular extension tt_pv bonus
-TUNE_RESERVED_21 = TUNE_SINGULAR_MARGIN_BASE  # Backward compatibility alias
-TUNE_RESERVED_22 = TUNE_SINGULAR_TTPV_BONUS   # Backward compatibility alias
 TUNE_PROBCUT_STYLE = 23
 TUNE_LMR_TABLE_SCALE = 24    # percent on REDUCTIONS[d]*REDUCTIONS[mc]
 TUNE_LMR_NOT_IMP = 25        # not-improving numerator (higher → more reduction)
-TUNE_NMP_BASE = 26           # continuous gate base threshold (was TUNE_NMP_G_BASE)
-TUNE_NMP_DEPTH_COEF = 27     # continuous gate depth coefficient (was TUNE_NMP_G_DEPTH)
-TUNE_NMP_IMP_COEF = 28       # continuous gate improving coefficient (was TUNE_NMP_G_IMP)
-TUNE_RFP_BLEND_BETA = 29      # Fail-soft RFP beta weight (was TUNE_RESERVED_29)
-TUNE_RESERVED_29 = TUNE_RFP_BLEND_BETA
+TUNE_NMP_BASE = 26           # continuous gate base threshold
+TUNE_NMP_DEPTH_COEF = 27     # continuous gate depth coefficient
+TUNE_NMP_IMP_COEF = 28       # continuous gate improving coefficient
+TUNE_RFP_BLEND_BETA = 29     # Fail-soft RFP beta weight
 TUNE_NMP_R_BASE = 30         # dynamic R base (NMP_R_BASE, default 7)
 TUNE_NMP_R_DIV = 31          # dynamic R depth divisor (NMP_R_DIV, default 3)
-TUNE_NMP_VERIFY_DEPTH = 32   # verification search min depth threshold (was TUNE_NMP_VERIFY_D)
-TUNE_CONT_PRUNE_THR = 33      # Continuation history pruning threshold (was TUNE_RESERVED_33)
-TUNE_RESERVED_33 = TUNE_CONT_PRUNE_THR
-
-# Backward compatibility aliases for tune slots
-TUNE_NMP_SCOPE = TUNE_NMP_EVAL_DIV
-TUNE_NMP_GATE = TUNE_RESERVED_21
-TUNE_NMP_R = TUNE_RESERVED_22
-TUNE_NMP_G_BASE = TUNE_NMP_BASE
-TUNE_NMP_G_DEPTH = TUNE_NMP_DEPTH_COEF
-TUNE_NMP_G_IMP = TUNE_NMP_IMP_COEF
-TUNE_NMP_NEED_BETA = TUNE_RESERVED_29
-TUNE_NMP_VERIFY_D = TUNE_NMP_VERIFY_DEPTH
-TUNE_NMP_SCOPE_MIND = TUNE_RESERVED_33
+TUNE_NMP_VERIFY_DEPTH = 32   # verification search min depth threshold
+TUNE_CONT_PRUNE_THR = 33     # Continuation history pruning threshold
 # Phase 4 History & Move Ordering runtime slots
 TUNE_HIST_BONUS_SCALE = 34  # stat bonus linear slope (HISTORY_BONUS_SCALE)
 TUNE_HIST_BONUS_CAP = 35    # stat bonus cap (HISTORY_BONUS_CAP)
@@ -976,23 +881,16 @@ TUNE_HIST_MALUS_SCALE = 41  # failed-quiet initial malus multiplier numerator (H
 TUNE_CHECK_SEE_THR = 42     # quiet check ordering SEE gate threshold (CHECK_SEE_THRESHOLD)
 TUNE_CAP_SEE_HIST_NUM = 43  # capture SEE history relief numerator (CAP_SEE_CAPTHIST_NUM / 1024)
 TUNE_SIZE = 44
-# E2 tried 70 (puzzle +6 pass, nodes +25%); match @200k nodes: depth↓, no Elo.
-LMR_TABLE_SCALE_PERCENT = 113  # Alpha 0.40 candidate (was 114 in 0.50)
+# E59/E97 tuned: 113 confirmed optimal vs 108 and 118 (both regressed vs 113).
+LMR_TABLE_SCALE_PERCENT = 113  # Production baseline (113 > 108, 113 > 118)
 LMR_NOT_IMP_NUM = 205  # Alpha 0.40 candidate (was 208 in 0.50)
 ENABLE_IIR = True           # Internal Iterative Reduction (Replaces old IID)
 ENABLE_SINGULAR_EXTENSIONS = True # Singular Extensions
 ENABLE_MATE_DISTANCE_PRUNING = True # Mate Distance Pruning
 ENABLE_MULTICUT = True  # Multi-Cut Pruning (Phase 2: Enabled with corrected exclusion_score >= beta)
 
-# Multi-Cut Parameters
-MULTICUT_MIN_DEPTH = 5  # Only apply Multi-Cut at this depth or higher
-MULTICUT_M = 3          # Number of fail-highs required to trigger prune
-MULTICUT_C = 6          # Number of moves to probe
-
-
-# IID and Singular Extension Parameters
+# Singular Extension Parameters
 MIN_SINGULAR_DEPTH = 9
-SINGULAR_MARGIN_MULTIPLIER = 2          # Margin = 2 * depth
 SINGULAR_DOUBLE_EXT_MULTIPLIER = 2     # Double margin = 2 * depth (total offset 4 * depth for double ext check)
 
 # NEW: Pruning Switches (based on Stockfish Analysis)
@@ -1037,7 +935,6 @@ ALPHA_RAISE_DEPTH_HI = 13
 ALPHA_RAISE_DEPTH_DELTA = 1
 ALPHA_RAISE_MIN_IMPROVEMENT = 0
 
-NULL_MOVE_REDUCTION = 2
 MAX_QUIESCENCE_DEPTH = 5
 
 # --- Prune margins (HCE cp; SF11 formulas remain useful baselines) ---
@@ -1055,30 +952,16 @@ RFP_MAX_DEPTH = 8
 RFP_BASE_MULT = 168   # E64 (was 171; SPSA L1 13.8k + L2 1000@300k +8.7 Elo)
 RFP_NO_TT_PENALTY = 30
 RFP_SCORE_BETA_WEIGHT = 412  # E76 peak baseline: (412 * beta + 612 * eval) / 1024
-RFP_SCORE_EVAL_WEIGHT = 612
-RFP_SCORE_DIVISOR = 1024
 
-NMP_STATIC_MARGIN = 150      # not used as primary NMP gate
 NMP_MIN_SIDE_NON_PAWNS = 1   # SF19: pos.non_pawn_material(us) != 0 (was 2 before Phase 8b)
 NMP_VERIFICATION_DEPTH = 16  # SF19: verify only when depth >= 16 (was 8 before Phase 8b)
 LOW_MATERIAL_PRUNING_PIECE_COUNT = 7
-# Production NMP structure: cut_node only (Phase 8 SF19 alignment).
-NMP_SCOPE_MODE = 0
-NMP_SCOPE_MIN_DEPTH = 6
-NMP_GATE_MODE = 0
-NMP_R_MODE = 0
-PROBCUT_STYLE_MODE = 0     # 0=flat, 1=SF-style, 2=off
-NMP_NEED_BETA = 0
-TUNE_RESERVED_21_VAL = 0
-TUNE_RESERVED_22_VAL = 0
-TUNE_RESERVED_29_VAL = RFP_SCORE_BETA_WEIGHT
-TUNE_RESERVED_33_VAL = PRUNING_CONTINUATION_THRESHOLD
+PROBCUT_STYLE_MODE = 0       # 0=flat, 1=SF-style, 2=off
 
 # Late Move Reductions (LMR)
 LMR_MIN_DEPTH = 3
 # SF11: LMR when moveCount > 1 (+ root extras). Quiet index 2 ≈ not on first quiet.
 LMR_MIN_QUIET_MOVE_INDEX = 2
-LMR_REDUCTION = 1
 
 # Late Move Pruning — SF11: (5 + depth^2) * (1+improving) / 2 - 1
 # improving factor applied at search-time (// (2 - improving))
@@ -1088,15 +971,6 @@ LMP_MOVE_COUNT = np.array([
 # Percent scale on LMP limit (100=table). Higher → later prune (fatter tree).
 # E4: 100→105 kept (+15.7 Elo @100k). E57: 105→107 (+5.2 Elo @300k). E62: 107→118 (+8.1 Elo @300k). E64: 118→137 (+8.7 Elo @300k).
 LMP_SCALE_PERCENT = 150
-
-# LMR Table (legacy integer plies; live path uses 1024-scale REDUCTIONS)
-LMR_TABLE = np.zeros((MAX_PLY, 256), dtype=np.int32)
-for d in range(MAX_PLY):
-    for mc in range(256):
-        if d < 2 or mc < 2:
-            LMR_TABLE[d, mc] = 0
-        else:
-            LMR_TABLE[d, mc] = int(0.77 + math.log(d) * math.log(mc) / 2.0)
 
 # --- 1024-scale LMR — base table matches SF11 (24.8 * log), not above ---
 REDUCTIONS = np.zeros(256, dtype=np.int32)
@@ -1114,7 +988,6 @@ LMR_TTCAPTURE_BONUS = 1207   # Alpha 0.40 candidate (was 1211 in 0.50)
 # Match classical_old hard-coded LMR (±1024). P1 1536 withdrawn 2026-07-16.
 LMR_BAD_CAPTURE_BONUS = 1046    # E57 (was 1024; SPSA L1+L2 400@300k +5.2 Elo)
 LMR_GOOD_CAPTURE_RELIEF = 1030  # E57 (was 1024; SPSA L1+L2 400@300k +5.2 Elo)
-LMR_LATE_CAPTURE_BONUS = 0
 LMR_KILLER_COUNTER_RELIEF = 1024
 LMR_MOVECOUNT_FACTOR = 27    # Alpha 0.40 candidate (was 26 in 0.50)
 LMR_HISTORY_SCALE = 198      # Alpha 0.40 candidate (was 197 in 0.50)
@@ -1132,16 +1005,13 @@ LMR_ALLNODE_SCALE_DENOM_OFFSET = 268
 
 
 # ProbCut — E88: 150 -> 170 adopted (+4.86 Elo vs 150; 120 and 190 regressed)
-PROBCUT_R = 4  # Retained for tuning registry backwards compatibility (no used)
 PROBCUT_MARGIN = 170
-PROBCUT_MIN_DEPTH = 5  # Retained for tuning registry backwards compatibility
 # SF19 Step 12: Dynamic ProbCut reduction based on improving flag
 PROBCUT_R_IMPROVING = 5
 PROBCUT_R_NOT_IMPROVING = 3
 # ProbCut style=1 (SF11-ish): raisedBeta = beta + (BASE - IMP*improving) * HCE_SCALE
 PROBCUT_SF_BASE = 189
 PROBCUT_SF_IMPROVING = 45
-PROBCUT_TT_DEPTH_OFFSET = 3  # store TT at depth - 3 after ProbCut cut
 
 # Step 12: TT-based ProbCut Shortcut (SF 18 Step 12: 428 * 78 // 100 ≈ 334)
 ENABLE_PROBCUT_TT_SHORTCUT = True
@@ -1153,7 +1023,6 @@ PROBCUT_TT_SHORTCUT_MARGIN = 290
 DELTA_PRUNING_MARGIN = 365
 
 # --- Static Exchange Evaluation (SEE) Threshold / SEE 閾值 ---
-SEE_THRESHOLD = 0
 # QS SEE (P0 try -60: puzzle OK but no clear node win on suite → keep -80)
 QS_SEE_THRESHOLD = -86  # Rescaled x1.134 for MG_MATERIAL_VALUES SEE (was -80)
 ENABLE_SEE_IN_QUIESCENCE = True
@@ -1174,7 +1043,6 @@ HINDSIGHT_EVAL_SUM_MARGIN = 200   # static + parent_eval > this → shallower
 
 # --- Dissonance (TT score vs static) ---
 DISSONANCE_TT_DEPTH_SLACK = 2    # trust TT when tt.depth >= depth - slack
-RAZOR_DISSONANCE_MAX = 250       # skip razor if |tt-static| above this
 FP_DISSONANCE_THRESHOLD = 190    # add dissonance//2 to FP margin when above
 
 # Force full HCE when lazy/TT static near known-win band
@@ -1186,15 +1054,7 @@ TT_CONSISTENCY_MIN_DEPTH = 4     # cutNode consistency: or depth > this
 TT_DEEP_VERIFY_DEPTH = 7         # child-TT verification at depth >= this
 TT_PENALIZE_MIN_DEPTH = 5        # penalize mismatched bound when depth > this
 
-# --- History bonus / malus on cutoffs ---
-# 2026-07-16: quadratic regressed (~-31 Elo). Prefer Phase-1a linear for HCE.
-# USE_LINEAR: stat = min(SCALE * depth, CAP); else SF11 quadratic skeleton.
-HISTORY_USE_LINEAR_BONUS = True
-HISTORY_BONUS_QUAD_A = 16
-HISTORY_BONUS_QUAD_B = 96
-HISTORY_MALUS_QUAD_A = 18
-HISTORY_MALUS_QUAD_B = 88
-HISTORY_BONUS_DEPTH_CLAMP = 14
+# --- History bonus / malus on cutoffs (Phase-1a linear) ---
 HISTORY_BONUS_SCALE = 137        # SPSA P6 (was 136)
 HISTORY_BONUS_CAP = 2026         # SPSA P6 (was 2025; SPSA L1 12k + L2 600@300k +6.9 Elo)
 HISTORY_MALUS_CAP = 1600         # Plan A rollback (was 1788; prevents over-penalization in 300k search)
@@ -1202,34 +1062,9 @@ HISTORY_NODE_WIDTH_DIV = 256     # non-PV: bonus += bonus * (q+c) // div
 CAPTURE_MALUS_SCALE_NUM = 1126
 CAPTURE_MALUS_SCALE_DEN = 1024
 FAIL_LOW_MIN_LEGAL_MOVES = 4     # gate fail-low feedback (1a); reduce noise
-# Fail-low structured feedback (conservative vs SF)
-FAIL_LOW_PARENT_STAT_DIV = 120
-FAIL_LOW_DEPTH_BONUS_SCALE = 40
-FAIL_LOW_DEPTH_BONUS_CAP = 320
-FAIL_LOW_MOVECOUNT_THR = 8
-FAIL_LOW_MOVECOUNT_BONUS = 120
-FAIL_LOW_STATIC_MARGIN = 90
-FAIL_LOW_STATIC_BONUS = 90
-FAIL_LOW_PARENT_STATIC_MARGIN = 70
-FAIL_LOW_PARENT_STATIC_BONUS = 90
-FAIL_LOW_BASE_DEPTH_MULT = 100
-FAIL_LOW_BASE_OFFSET = 60
-FAIL_LOW_BASE_CAP = 1000
-FAIL_LOW_SCALE_DIV = 512
-FAIL_LOW_CONT_NUM = 200
-FAIL_LOW_CONT_DEN = 16384
-FAIL_LOW_MAIN_NUM = 180
-FAIL_LOW_MAIN_DEN = 32768
-FAIL_LOW_PAWN_NUM = 260
-FAIL_LOW_PAWN_DEN = 8192
-FAIL_LOW_CAP_DEPTH_MULT = 40
-FAIL_LOW_CAP_BASE = 200
-FAIL_LOW_CAP_CAP = 700
 
-# --- Quiet move ordering (score_quiets additive bonuses) ---
-# Live path adds these on top of history; SCORE_KILLER_* are absolute scores elsewhere.
+# --- Quiet move ordering (score_quiets additive bonuses; killer 2 uses midpoint of killer 1 & counter) ---
 QUIET_ORDER_KILLER_1 = 400000
-QUIET_ORDER_KILLER_2 = 350000
 QUIET_ORDER_COUNTER = 300000
 LPH_ORDER_SCALE = 8              # score += scale * lph // (1+ply)
 
@@ -1245,26 +1080,10 @@ NMP_EVAL_MARGIN_MAX = 4
 NMP_R_BASE = 7
 NMP_R_DIV = 3
 
-# Backward compatibility aliases
-NMP_LEGACY_BASE = NMP_BASE
-NMP_LEGACY_DEPTH_COEF = NMP_DEPTH_COEF
-NMP_LEGACY_IMPROVING_COEF = NMP_IMP_COEF
-NMP_LEGACY_R_BASE = NMP_R_BASE
-NMP_LEGACY_R_DEPTH_DIV = NMP_R_DIV
-NMP_SF_MARGIN_DEPTH_COEF = 32
-NMP_SF_MARGIN_BASE = 292
-NMP_SF_MARGIN_IMPROVING = 30
-NMP_SF_R_BASE = 854
-NMP_SF_R_DEPTH = 68
-NMP_SF_R_DIV = 258
-
-# --- IIR / FP / LMP / check extension depth gates ---
+# --- IIR / FP / LMP depth gates ---
 IIR_MIN_DEPTH = 4
 FP_MAX_DEPTH = 6
 LMP_MIN_LIMIT = 2                # floor after table * scale
-# SF19 Step 17: Check extension eliminated to prevent check explosion
-ENABLE_CHECK_EXTENSION = False
-CHECK_EXT_NON_PV_MAX_DEPTH = 5   # non-PV non-TT: extend only if depth <= this (when enabled)
 
 # Search/timer synchronization. Must remain 2^n - 1 because hot paths use
 # ``nodes & mask`` instead of modulo. This bounds stop latency to about 4k
@@ -1287,8 +1106,6 @@ LMR_TT_DEPTH_GE_CUT = 955        # extra when cut_node
 LMR_ADVANCED_PAWN_RELIEF = 1536  # -1.5 ply on advanced pawn push
 LMR_ADVANCED_PAWN_WHITE_RANK = 5 # white to_rank >= this
 LMR_ADVANCED_PAWN_BLACK_RANK = 2 # black to_rank <= this
-LMR_LATE_CAPTURE_MAX_DEPTH = 8   # when LMR_LATE_CAPTURE_BONUS > 0
-LMR_LATE_CAPTURE_MIN_MC = 2
 LMR_TTMOVE_CUTNODE_EXTRA = 150   # tt-move LMR: +extra on cut nodes
 LMR_R_FLOOR = -10                # clamp r before ply conversion
 LMR_D_MAX_EXTRA = 2              # d <= search_depth + this
@@ -1298,7 +1115,7 @@ LMR_STAT_SCORE_DIV = 4096        # r -= stat * hist_scale // DIV
 # SF19 Dynamic Depth Protection: scale up divisor at deeper plies to mitigate over-reduction
 LMR_DIVISOR_MIN_DEPTH = 10       # Depth threshold where dynamic divisor kicks in (<=10 maintains SPSA agility)
 LMR_DIVISOR_DEPTH_STEP = 128     # Divisor increment per depth ply above threshold (+25% at d=18, matching SF19)
-LMR_RESEARCH_DEEPER_MARGIN = 32  # eval > max_eval + this → +1 depth research
+LMR_RESEARCH_DEEPER_MARGIN = 26  # E99 tuned: 26 vs 32 (+5.56 Elo, 50.8% @1000 games)
 LMR_RESEARCH_SHALLOWER_MARGIN = 15
 
 # --- QS fail-high / stand-pat smoothing (a*score + b*beta) // div ---

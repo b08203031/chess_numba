@@ -61,7 +61,7 @@
     *   **Piece-to**：`history_table[piece][to]`；與 `butterfly[from][to]`、pawn history 共同排序 quiet。
     *   **延續歷史**：`[ply_idx][prev_piece][prev_to][curr_piece][curr_to]`，offsets 1/2/3/4/6。
     *   **低層歷史**：`low_ply_history[5][65536]`。
-    *   **將軍獎勵 / 威脅重排**：仍 `CHECK_BONUS=20000`、`ENABLE_THREAT_REORDERING=False`。
+    *   **將軍獎勵**：`CHECK_BONUS=20000`（透過 `ENABLE_CHECK_SEE_GATE` 過濾虧損將軍；舊威脅重排死碼已清除）。
     *   **反制步 / 吃子歷史**：`[prev_piece][prev_to]`、`capture[agg][to][victim0..5]`。
     *   **寫入**：線性 depth bonus/malus + gravity；reverse quiet 關閉。
     *   **衰減**：每次 root search 對各 history 表以向零截斷方式除以 2；full-history/soft-age 已回退。
@@ -144,7 +144,7 @@ P3 的診斷分成三條 opt-in funnel：
 *   **理念**：如果靜態評估值非常高，以至於減去一個很大的安全邊界後依然高於 Beta，我們可以直接進行截斷。
 *   **邏輯**：
     *   適用於 `depth <= 2`。
-    *   條件：`static_eval - margin >= beta`。
+    *   條件：`static_eval - margin >= beta`（`margin = RFP_BASE_MULT * depth`，E98 探索 175 與 160 均未勝出，維持基準 `RFP_BASE_MULT = 168`）。
 
 ### 4.3 剃刀剪枝 (Razoring)
 *   **理念**：如果在極淺的深度下靜態估值顯著低於 Alpha，我們假設該分支無法挽回，提前進入靜態搜尋以節省時間。
@@ -190,6 +190,7 @@ P3 的診斷分成三條 opt-in funnel：
     *   **殺手/反擊步安全網**：殺手步與反擊步給予 1 ply 的歸約豁免 (`r -= 1024`)。
     *   調整：受歷史分數調節（歷史表現好的移動減少歸約，表現差的增加歸約）。
     *   例外：給予將軍、升變等強迫性移動通常不進行歸約。
+    *   **重搜加深門檻優化（E99）**：當 LMR 走步在零窗口意外 Fail-High 時，若 `evaluation > max_eval + LMR_RESEARCH_DEEPER_MARGIN` 則予以加深 1 層重搜。E99 將門檻由粗暴移植的 32 cp 下調至 26 cp，1000 局對戰錄得 50.80%（+5.56 Elo，淨勝 +16 局，>50 步長局淨勝 +22 局），精準打擊深層戰術死角，正式採納為生產基準。
 
 ### 4.8 奇異延展 (Singular Extensions, SE) 與 Multi-Cut（SF18 Step 15 對齊）
 *   **理念**：如果 TT 移動顯著好於其他所有候選移動（單一優勢），則加深該著法的搜尋，以確保強迫線計算精準。反之若排除 TT 移動後其他移動仍能 Fail-High（`>= beta`），則觸發 Multi-Cut 立即截斷。
@@ -211,9 +212,9 @@ P3 的診斷分成三條 opt-in funnel：
     *   **中斷與 Multi-Cut 剪枝（SF18/SF19 Step 15/16）**：
         *   **超時檢查前置**：優先判定 `search_context.stop_flag[0]`，避免超時返回的 0 在 `beta <= 0` 時誤觸 Multi-Cut。
         *   若 `exclusion_score >= beta` 且非勝負分（`not is_win` 與 `not is_decisive`），直接回傳 `exclusion_score` 截斷，無需任何 `unmake_move`（**E31 採納**）。
-    *   **單 / 雙延展**：若 `exclusion_score < exclusion_beta`，賦予 `singular_extension = 1`；若非 PV 節點（`not is_pv`）、差距達到 `double_margin`（`2 * depth`）且 `depth >= 10`，賦予雙延展 `singular_extension = 2`（限制在 non-PV 杜絕搜尋樹爆炸）。
+    *   **單 / 雙延展**：若 `exclusion_score < exclusion_beta`，賦予 `singular_extension = 1`；若非 PV 節點（`not is_pv`）、差距達到 `double_margin`（`2 * depth`）且 `depth >= 10`，賦予雙延展 `singular_extension = 2`（限制在 non-PV 杜絕搜尋樹爆炸；E98 嘗試起點深度放寬至 9 引起膨脹未勝出，維持 10）。
     *   **負延展（SF18/19 Step 15/16 對齊，2026-10-14 修復與調優）**：若非 PV 節點且非奇異（`elif not is_pv:`）：若置換表自身評估預期高於邊界（`se_tt_score >= beta`）則賦予 `-1`；若在 `cut_node` 則賦予 `-1`；若原步優勢存疑（`se_tt_score <= exclusion_score`）則賦予 `-1`。徹底修復舊版因誤用 `exclusion_score >= beta` 導致負延展 100% 成為死碼的缺陷。
-    *   **延展合併與將軍延伸 Pre-make（E36 採納）**：走棋後與將軍延展（`check_extension`）合併：正向延展取較大值（`max`），負向延展在無將軍時覆蓋。對於將軍延伸的 `_see_ge_jit` 檢驗，全面改為在 `make_move` 前直接利用父盤面評估（`check_gate_see_ok`），徹底根除了舊代碼在走棋後 `unmake -> SEE -> remake` 的兩次冗餘棋盤突變開銷。
+    *   **延展計算（2026-10 對齊 SF19 Step 17 簡化）**：早期 E36 曾實作 Pre-make 將軍延伸（`check_gate_see_ok`），後續對齊 SF19 Step 17 廢除將軍延伸以抑制搜尋爆炸，死分支已清除，現直接計算 `search_depth = max(0, depth - 1 + singular_extension)`。
     *   **實戰驗證（Step 15 完整體系推進，2026-10-16）**：
         *   第一階段（SE 漏洞修復與狀態隔離）：對抗前一版基線，完成 400 局並取得獲勝。
         *   第二階段（負延展 -2 → -1 緩和調優，E65）：400 局，每步 300,000 nodes，TT 64MB。比分 89W 229D 82L（勝率 50.88%，Elo: +6.08 ± 22.2），>80 步殘局完全止血。
@@ -596,7 +597,7 @@ S1a 證實 non-PV NMP 可略瘦樹，但戰術 pass 代價過大。
 | **100** | pass 458、nodes 基準 | 66 局 score 47%、Elo −21、depth **−0.22**（最接近 Old） |
 
 - 3s half（scale=70）：244/250  
-- **2026-07-16 決策：生產 `LMR_TABLE_SCALE_PERCENT = 100`（撤回 70）**  
+- **2026-07-16 決策：生產 `LMR_TABLE_SCALE_PERCENT = 100`（後續 E59 推進至 113；2026-10-27 E97 雙向實測驗證 113 勝 108 與 118，確立 113 為最優基準）**  
 - 完整戰役報告：[`tournament_analysis/REPORT_2026-07-15_16_search_campaign.md`](../../tournament_analysis/REPORT_2026-07-15_16_search_campaign.md)
 
 **2026-07-16 搜尋參數對齊 classical_old：**  

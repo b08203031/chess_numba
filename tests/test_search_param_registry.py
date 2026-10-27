@@ -42,7 +42,7 @@ class TestSearchParamRegistry(unittest.TestCase):
                 self.assertLess(spec.runtime_index, int(C.TUNE_SIZE))
 
     def test_old_missing_names_are_not_silently_tunable(self):
-        for stale in ("FP_MARGIN_D1", "FP_MARGIN_D2", "RFP_MARGIN_D1", "SINGULAR_EXTENSION_MARGIN"):
+        for stale in ("FP_MARGIN_D1", "FP_MARGIN_D2", "RFP_MARGIN_D1", "SINGULAR_EXTENSION_MARGIN", "PROBCUT_R", "SCORE_GOOD_CAPTURE_BONUS", "RAZOR_DISSONANCE_MAX"):
             self.assertNotIn(stale, SEARCH_PARAM_BY_NAME)
             self.assertNotIn(stale, param_config.SEARCH_PARAMS)
 
@@ -84,7 +84,7 @@ class TestSearchParamRegistry(unittest.TestCase):
         self.assertEqual(quantize_integer_value("LMR_CUTNODE_BONUS", 99999), 3000)
 
     def test_runtime_mode_defaults_are_explicit_constants(self):
-        self.assertEqual(get_spec("NMP_BASE").default, 205)
+        self.assertEqual(get_spec("NMP_BASE").default, 230)
         self.assertEqual(get_spec("NMP_DEPTH_COEF").default, 12)
         self.assertEqual(get_spec("NMP_IMP_COEF").default, 45)
         self.assertEqual(get_spec("NMP_EVAL_MARGIN_DIV").default, 155)

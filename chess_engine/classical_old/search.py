@@ -28,10 +28,10 @@ from chess_engine.classical_old.constants import (
     ASPIRATION_WINDOW_MIN, ASPIRATION_WINDOW_BASE, ASPIRATION_WINDOW_SCALE_DIV,
     MAX_PLY, LMR_MIN_DEPTH, LMR_MIN_QUIET_MOVE_INDEX,
     ENABLE_SEE_IN_QUIESCENCE, MATE_SCORE, MATE_IN_MAX_PLY, VALUE_KNOWN_WIN, NO_MOVE,
-    RFP_MAX_DEPTH, RFP_NO_TT_PENALTY, RFP_SCORE_BETA_WEIGHT, RFP_SCORE_EVAL_WEIGHT, RFP_SCORE_DIVISOR,
+    RFP_MAX_DEPTH, RFP_NO_TT_PENALTY, RFP_SCORE_BETA_WEIGHT,
     ENABLE_DELTA_PRUNING, LMP_MOVE_COUNT,
-    PROBCUT_R, PROBCUT_R_IMPROVING, PROBCUT_R_NOT_IMPROVING,
-    PROBCUT_SF_BASE, PROBCUT_SF_IMPROVING, PROBCUT_TT_DEPTH_OFFSET, PROBCUT_MIN_DEPTH,
+    PROBCUT_R_IMPROVING, PROBCUT_R_NOT_IMPROVING,
+    PROBCUT_SF_BASE, PROBCUT_SF_IMPROVING,
     ENABLE_PROBCUT_TT_SHORTCUT, PROBCUT_TT_SHORTCUT_MARGIN,
     ENABLE_IIR,
     ENABLE_ALPHA_RAISE_DEPTH_REDUCTION, ENABLE_FOLLOW_PV, ENABLE_HIST_LMR_DEPTH_PRUNING,
@@ -58,29 +58,26 @@ from chess_engine.classical_old.constants import (
     HISTORY_LPH_SCALE_NUM, HISTORY_LPH_SCALE_DEN,
     ENABLE_MATE_DISTANCE_PRUNING,
     LMR_TTPV_INCREASE, LMR_TTPV_DECREASE_BASE, LMR_TTPV_PV_BONUS,
-    LMR_LATE_CAPTURE_BONUS,
     LMR_CUTOFF_CNT_BASE, LMR_CUTOFF_CNT_EXTRA, LMR_ALLNODE_EXTRA,
     LMR_CORRECTION_DIVISOR, LMR_ALLNODE_SCALE_NUM, LMR_ALLNODE_SCALE_DENOM_BASE,
     LMR_ALLNODE_SCALE_DENOM_OFFSET,
     # Search internals (margins / formula coeffs)
     HCE_SCALE_NUM, HCE_SCALE_DEN,
     HINDSIGHT_REDUCE_MIN_PRIOR, HINDSIGHT_INCREASE_MIN_PRIOR, HINDSIGHT_EVAL_SUM_MARGIN,
-    DISSONANCE_TT_DEPTH_SLACK, RAZOR_DISSONANCE_MAX, FP_DISSONANCE_THRESHOLD,
+    DISSONANCE_TT_DEPTH_SLACK, FP_DISSONANCE_THRESHOLD,
     RAZORING_MAX_DEPTH, RAZORING_COEFF,
     FULL_EVAL_KNOWN_WIN_MARGIN,
     TT_CUTOFF_HALFMOVE_MAX, TT_CONSISTENCY_MIN_DEPTH, TT_DEEP_VERIFY_DEPTH, TT_PENALIZE_MIN_DEPTH,
     HISTORY_BONUS_SCALE, HISTORY_BONUS_CAP, HISTORY_MALUS_CAP, HISTORY_NODE_WIDTH_DIV,
     CAPTURE_MALUS_SCALE_NUM, CAPTURE_MALUS_SCALE_DEN, FAIL_LOW_MIN_LEGAL_MOVES,
-    NMP_MIN_DEPTH, NMP_BETA_FLOOR, NMP_LEGACY_DEPTH_COEF, NMP_LEGACY_IMPROVING_COEF, NMP_LEGACY_BASE,
-    NMP_SF_MARGIN_DEPTH_COEF, NMP_SF_MARGIN_BASE, NMP_SF_MARGIN_IMPROVING,
-    NMP_EVAL_MARGIN_DIV, NMP_EVAL_MARGIN_MAX, NMP_SF_R_BASE, NMP_SF_R_DEPTH, NMP_SF_R_DIV,
-    NMP_LEGACY_R_BASE, NMP_LEGACY_R_DEPTH_DIV,
-    IIR_MIN_DEPTH, FP_MAX_DEPTH, LMP_MIN_LIMIT, ENABLE_CHECK_EXTENSION, CHECK_EXT_NON_PV_MAX_DEPTH, STOP_CHECK_MASK,
+    NMP_MIN_DEPTH, NMP_BETA_FLOOR,
+    NMP_EVAL_MARGIN_DIV, NMP_EVAL_MARGIN_MAX,
+    IIR_MIN_DEPTH, FP_MAX_DEPTH, LMP_MIN_LIMIT, STOP_CHECK_MASK,
     SINGULAR_TT_DEPTH_SLACK, SINGULAR_MARGIN_BASE, SINGULAR_TTPV_BONUS, SINGULAR_MARGIN_DIV,
     SINGULAR_DOUBLE_EXT_MIN_DEPTH,
     LMR_TT_SCORE_GT_ALPHA, LMR_TT_DEPTH_GE, LMR_TT_DEPTH_GE_CUT,
     LMR_ADVANCED_PAWN_RELIEF, LMR_ADVANCED_PAWN_WHITE_RANK, LMR_ADVANCED_PAWN_BLACK_RANK,
-    LMR_LATE_CAPTURE_MAX_DEPTH, LMR_LATE_CAPTURE_MIN_MC, LMR_TTMOVE_CUTNODE_EXTRA,
+    LMR_TTMOVE_CUTNODE_EXTRA,
     LMR_R_FLOOR, LMR_D_MAX_EXTRA, LMR_CAPTURE_VICTIM_SCALE, LMR_CAPTURE_VICTIM_DIV,
     LMR_STAT_SCORE_DIV, LMR_DIVISOR_MIN_DEPTH, LMR_DIVISOR_DEPTH_STEP,
     LMR_RESEARCH_DEEPER_MARGIN, LMR_RESEARCH_SHALLOWER_MARGIN,
@@ -158,12 +155,10 @@ from chess_engine.classical_old.constants import (
     TUNE_LMP_SCALE, TUNE_KILLER_RELIEF, TUNE_QS_SEE,
     TUNE_LMR_CUTNODE, TUNE_LMR_NO_TTMOVE, TUNE_LMR_TTCAP, TUNE_LMR_MC_FACTOR, TUNE_LMR_TTMOVE_RED,
     TUNE_SINGULAR_MARGIN_BASE, TUNE_SINGULAR_TTPV_BONUS,
-    TUNE_NMP_SCOPE, TUNE_NMP_GATE, TUNE_NMP_R, TUNE_PROBCUT_STYLE,
+    TUNE_PROBCUT_STYLE,
     TUNE_LMR_TABLE_SCALE, TUNE_LMR_NOT_IMP,
     TUNE_NMP_BASE, TUNE_NMP_DEPTH_COEF, TUNE_NMP_IMP_COEF, TUNE_NMP_EVAL_DIV,
     TUNE_NMP_R_BASE, TUNE_NMP_R_DIV, TUNE_NMP_VERIFY_DEPTH,
-    TUNE_NMP_G_BASE, TUNE_NMP_G_DEPTH, TUNE_NMP_G_IMP, TUNE_NMP_NEED_BETA,
-    TUNE_NMP_VERIFY_D, TUNE_NMP_SCOPE_MIND,
     TUNE_HIST_BONUS_SCALE, TUNE_HIST_BONUS_CAP, TUNE_HIST_MALUS_CAP,
     TUNE_HIST_MALUS_DECAY, TUNE_LMR_DIV_STEP, TUNE_HIST_MALUS_SCALE,
     TUNE_CAP_SEE_HIST_NUM,
@@ -2189,7 +2184,6 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
         skip_post_legality_s = False
         quiet_counted = False
         singular_extension = 0
-        check_gate_see_ok = False
 
         # P1 shadow diagnostics: classify before SEE, but never reject or
         # reorder a production candidate here.  Baseline legality remains
@@ -2560,39 +2554,6 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
             else:
                 is_bad_capture = (search_context.mp_stage[ply] == STAGE_BAD_CAPTURES)
 
-        # Pre-compute SEE on parent board for check extension to avoid post-make unmake/remake round-trip
-        if ENABLE_CHECK_EXTENSION and not is_pv and move != tt_move and depth > CHECK_EXT_NON_PV_MAX_DEPTH:
-            if flag == SPECIAL_MOVE_FLAG_CASTLING:
-                rook_to_sq_ce = (from_sq + to_sq) >> 1
-                occ_after_castle_ce = (all_occ_s ^ BB_SQUARES[from_sq]) | BB_SQUARES[to_sq]
-                gives_check_candidate = (
-                    (ROOK_RAYS[their_king_sq_s] & BB_SQUARES[rook_to_sq_ce]) != 0
-                    and (get_rook_attacks(rook_to_sq_ce, occ_after_castle_ce) & their_king_bb_s) != 0
-                )
-            else:
-                gives_check_candidate = (
-                    flag == SPECIAL_MOVE_FLAG_EN_PASSANT or is_promotion
-                    or _qsearch_ordinary_move_gives_check(
-                        piece_bbs, move, original_side, their_king_bb_s,
-                        check_sq_pawn_s, check_sq_knight_s, check_sq_bishop_s,
-                        check_sq_rook_s, check_sq_queen_s,
-                        blockers_for_their_king_s,
-                    )
-                )
-            if gives_check_candidate:
-                _diag_add(search_context, DIAG_CHECK_GATE_SEE_TRY)
-                if flag == SPECIAL_MOVE_FLAG_CASTLING:
-                    check_gate_see_ok = True
-                elif (is_capture and search_context.enable_lmr and depth >= LMR_MIN_DEPTH
-                        and searched_legal_moves >= 1):
-                    check_gate_see_ok = not is_bad_capture
-                else:
-                    check_gate_see_ok = _see_ge_jit(
-                        piece_bbs, occupancy_bbs, original_side,
-                        from_sq, to_sq, 0, pinned_white, pinned_black,
-                        -1, -1, get_promotion_piece(move) + 1,
-                    )
-
         # --- Step 15: Singular Extensions & Multi-Cut (Pre-make, move == tt_move) ---
         if (ENABLE_SINGULAR_EXTENSIONS and ply > 0 and excluded_move == NO_MOVE
                 and move == tt_move and depth >= MIN_SINGULAR_DEPTH
@@ -2780,23 +2741,7 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
             quiet_move_counter += 1
 
         # --- Determine total extension ---
-        check_extension = 0
-        if ENABLE_CHECK_EXTENSION and is_giving_check_after_move:
-            if is_pv or move == tt_move or depth <= CHECK_EXT_NON_PV_MAX_DEPTH:
-                check_extension = 1
-            elif check_gate_see_ok:
-                check_extension = 1
-        
-        current_extension = check_extension
-        if singular_extension != 0:
-            if singular_extension > 0:
-                current_extension = max(check_extension, singular_extension)
-            else:
-                current_extension = singular_extension
-        if check_extension > 0:
-            _diag_add(search_context, DIAG_CHECK_EXT)
-
-        search_depth = max(0, depth - 1 + current_extension)
+        search_depth = max(0, depth - 1 + singular_extension)
 
         searched_legal_moves += 1
         search_context.move_count_stack[ply] = searched_legal_moves
@@ -2894,9 +2839,6 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                             r -= search_context.tune[TUNE_GOOD_CAP_RELIEF]
                         else:
                             r += search_context.tune[TUNE_BAD_CAP_BONUS]
-                        if (LMR_LATE_CAPTURE_BONUS > 0 and depth < LMR_LATE_CAPTURE_MAX_DEPTH
-                                and searched_legal_moves > LMR_LATE_CAPTURE_MIN_MC):
-                            r += LMR_LATE_CAPTURE_BONUS
 
                     is_pawn = (moved_piece_type % 6) == PAWN
                     if is_pawn:

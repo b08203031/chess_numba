@@ -3,7 +3,7 @@
 本目錄 (`tune_search/`) 包含了一套專為搜尋參數設計的自動化調優系統。與靜態評估調參不同，搜尋參數（如剪枝邊界、LMR 深度等）無法通過靜態數據集 (MSE) 進行優化，必須通過**實戰對局 (Match Playing)** 來驗證優劣。
 
 本系統採用 **SPSA (Simultaneous Perturbation Stochastic Approximation)** 演算法，透過讓引擎自我對弈來不斷調整參數，以提升棋力。參數定義現在集中在
-`search_param_registry.py`：目前盤點 **118 個實際搜尋標量**，其中 **44 個**已映射到
+`search_param_registry.py`：目前盤點 **96 個實際搜尋標量**，其中 **44 個**已映射到
 `SearchContext.tune[]`，其餘是需要重啟/JIT 的 compile-time 候選。這避免把不存在的
 舊名稱（例如早期的 `FP_MARGIN_D1`）誤當成可調參數。
 
@@ -52,7 +52,7 @@
 
 ## 3. 參數清冊與分階段調參
 
-不要把 117 個軸一次塞進 SPSA；高維度會讓每個回合的勝負訊號過於稀薄。調參器預設
+不要把 96 個軸一次塞進 SPSA；高維度會讓每個回合的勝負訊號過於稀薄。調參器預設
 只選 runtime profile 的 44 個軸，並提供依搜尋機制拆分的 profile（含專屬 `see` profile）：
 
 ```bash
@@ -74,7 +74,7 @@ python -m tune_search.search_tuner --params LMR_BASE_OFFSET,LMR_HISTORY_SCALE,LM
 `history`、`ordering`、`safeguards`、`aspiration` 和明確的 `all` 都來自同一份 registry。
 其中 `lmr_runtime` 只選 13 個 live slot，`lmr_compile` 只選 10 個需要重啟/JIT 的
 LMR 常數；`lmr` 才是兩者合併的完整 23 軸。每個條目都記錄預設值、邊界、最小步長、
-連續/離散型別與 SPSA 的 `r_end`。離散模式（例如 `NMP_GATE_MODE`）適合單獨做 A/B
+連續/離散型別與 SPSA 的 `r_end`。離散模式（例如 `PROBCUT_STYLE_MODE`）適合單獨做 A/B
 或小 block；不應和大量連續軸盲目混合。
 
 調參器現在按參數使用自己的 `c_end` 與 `r_end`，而不是舊版對所有數值共用
@@ -257,14 +257,14 @@ python tools/run_search_param_match.py \
     *   `PAWN`、`KNIGHT`... `WHITE`、`BLACK`、`MAX_PLY`、`MATE_SCORE`、`INFINITY`。
     *   這些是資料結構的索引或遊戲規則邊界，不是調參標量。
 2.  **無序離散開關（Categorical Modes，禁止混合 SPSA，約 5 個）**：
-    *   `NMP_GATE_MODE`、`NMP_R_MODE`、`PROBCUT_STYLE_MODE`、`NMP_NEED_BETA` 等。
+    *   例如 `PROBCUT_STYLE_MODE`（`0=flat, 1=SF-style, 2=off`）。
     *   值 2 不代表在 1 與 3 之間，SPSA 的差分梯度無數學意義。請單獨以 `tools/run_search_param_match.py` 進行 A/B 比對。
     *   可用 `--profile runtime_continuous` 自動排除這些離散軸。
-3.  **核心即時調參標量（Runtime 42 軸）**：
+3.  **核心即時調參標量（Runtime 44 軸）**：
     *   Phase 7 新增 slot 39–41：`HISTORY_QUIET_MALUS_DECAY_NUM`、`LMR_DIVISOR_DEPTH_STEP`、`HISTORY_QUIET_MALUS_SCALE_NUM`（見 `chess_engine/classical/PHASE7_HISTORY_LMR_ALIGNMENT_PLAN.md`；Colab 執行器 `tune_colab_runner_p7.ipynb`）。
     *   已直接映射到 `SearchContext.tune[]`，免重啟、免重新編譯，為主要的 L1 SPSA 戰場。
 4.  **其餘候選演算法常數（Compile-time，約 90 個）**：
-    *   包含 Correction History 各項權重、Capture FP / SEE 門檻、LATE CAPTURE 獎懲、IIR 深度、50 步規則縮放等。
+    *   包含 Correction History 各項權重、Capture FP / SEE 門檻、IIR 深度、50 步規則縮放等。
     *   處理原則：**先確認主路徑穩定**。當發現某模組（例如 Correction History）成為當前搜尋瓶頸時，才挑選該模組的 2–4 個常數映射到 `SearchContext.tune[]` 新 slot，進行 runtime 調參，切勿一口氣塞入上百維度。
 
 ---
