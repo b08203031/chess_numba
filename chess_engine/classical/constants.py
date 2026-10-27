@@ -970,7 +970,7 @@ LMP_MOVE_COUNT = np.array([
 ], dtype=np.int32)
 # Percent scale on LMP limit (100=table). Higher → later prune (fatter tree).
 # E4: 100→105 kept (+15.7 Elo @100k). E57: 105→107 (+5.2 Elo @300k). E62: 107→118 (+8.1 Elo @300k). E64: 118→137 (+8.7 Elo @300k).
-LMP_SCALE_PERCENT = 150
+LMP_SCALE_PERCENT = 135
 
 # --- 1024-scale LMR — base table matches SF11 (24.8 * log), not above ---
 REDUCTIONS = np.zeros(256, dtype=np.int32)
@@ -1116,7 +1116,7 @@ LMR_STAT_SCORE_DIV = 4096        # r -= stat * hist_scale // DIV
 LMR_DIVISOR_MIN_DEPTH = 10       # Depth threshold where dynamic divisor kicks in (<=10 maintains SPSA agility)
 LMR_DIVISOR_DEPTH_STEP = 128     # Divisor increment per depth ply above threshold (+25% at d=18, matching SF19)
 LMR_RESEARCH_DEEPER_MARGIN = 26  # E99 tuned: 26 vs 32 (+5.56 Elo, 50.8% @1000 games)
-LMR_RESEARCH_SHALLOWER_MARGIN = 18
+LMR_RESEARCH_SHALLOWER_MARGIN = 15
 
 # --- QS fail-high / stand-pat smoothing (a*score + b*beta) // div ---
 QS_STANDPAT_SMOOTH_A = 467
