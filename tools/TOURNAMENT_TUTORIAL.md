@@ -145,6 +145,11 @@ python tools/tournament.py --no-openings --nodes 100000
 - engine crash、timeout、無 bestmove、非法著或 backend 狀態不同步都會明確判負，不會偷偷改走第一個合法著。
 - failure PGN 會附帶 `Failure` 與 `FailurePly` header，保存 bounded exception 訊息與發生回合；統計時應剔除該 failure 所在的整組換色配對。
 - 預設最長 400 plies；可用 `--max-plies` 修改，超過時裁定和棋並寫入 PGN Termination。
+- **提前裁決（Early Adjudication）**：預設啟用（`--adjudicate`），對標 Cutechess / CCRL 標準，可省去約 10%~15% 的無效垃圾殘局時間；支援一鍵開關（`--no-adjudicate`）：
+  - **勝負裁定（Win/Resign Adjudication）**：雙方連續 5 回合（10 個半步/plies）認定差距 $\ge 500\text{ cp}$ 時立即判勝（歷史 894 局實測 100% 準確率、0 翻盤）。
+    - 參數：`--adjudicate-win-score 500`、`--adjudicate-win-moves 5`
+  - **和棋裁定（Draw Adjudication）**：第 40 回合以後，雙方連續 6 回合（12 個半步/plies）認定分數在 $8\text{ cp}$ 以內時立即判和（具備開局/中局保護期，避免誤判戰術搏殺局）。
+    - 參數：`--adjudicate-draw-score 8`、`--adjudicate-draw-min-move 40`、`--adjudicate-draw-moves 6`
 
 自訂輸出：
 

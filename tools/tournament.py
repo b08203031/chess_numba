@@ -180,6 +180,12 @@ def run_tournament(
     sprt_elo0: float = 0.0,
     sprt_elo1: float = 10.0,
     seed: int = 0,
+    adjudicate: bool = True,
+    adjudicate_win_score: int = 500,
+    adjudicate_win_plies: int = 10,
+    adjudicate_draw_score: int = 8,
+    adjudicate_draw_min_move: int = 40,
+    adjudicate_draw_plies: int = 12,
 ) -> list[StageResult]:
     """Run one or more stages while keeping the same worker pool alive."""
     del early_trash_max_elo  # Kept in the public signature for compatibility.
@@ -260,6 +266,14 @@ def run_tournament(
         f"openings={len(openings)}; seed={seed}",
         flush=True,
     )
+    if adjudicate:
+        print(
+            f"Adjudication: win >= {adjudicate_win_score} cp ({adjudicate_win_plies} plies), "
+            f"draw <= {adjudicate_draw_score} cp ({adjudicate_draw_plies} plies after move {adjudicate_draw_min_move})",
+            flush=True,
+        )
+    else:
+        print("Adjudication: disabled (games play until game-over or max plies)", flush=True)
     if selected == "inprocess":
         print("JIT plan: classical once + classical_old once; worker contexts share compiled code.", flush=True)
     print(
@@ -297,6 +311,12 @@ def run_tournament(
                 early_trash_min_games=early_trash_min_games,
                 early_trash_max_score_pct=early_trash_max_score_pct,
                 max_plies=max_plies,
+                adjudicate=adjudicate,
+                adjudicate_win_score=adjudicate_win_score,
+                adjudicate_win_plies=adjudicate_win_plies,
+                adjudicate_draw_score=adjudicate_draw_score,
+                adjudicate_draw_min_move=adjudicate_draw_min_move,
+                adjudicate_draw_plies=adjudicate_draw_plies,
             )
             results.append(result)
             _print_result(result, engine1_name, engine2_name)
@@ -353,6 +373,42 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--search-timeout", type=float, default=300.0, metavar="SECONDS")
     parser.add_argument("--clear-cache", action="store_true", help="explicitly clear Numba caches before startup")
     parser.add_argument("--no-clear-cache", action="store_true", help=argparse.SUPPRESS)
+    parser.add_argument(
+        "--adjudicate",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="toggle early adjudication (default: enabled; --no-adjudicate disables)",
+    )
+    parser.add_argument(
+        "--adjudicate-win-score",
+        type=int,
+        default=500,
+        help="centipawn threshold for win adjudication (default: 500)",
+    )
+    parser.add_argument(
+        "--adjudicate-win-moves",
+        type=int,
+        default=5,
+        help="consecutive full moves for win adjudication (default: 5, i.e. 10 plies)",
+    )
+    parser.add_argument(
+        "--adjudicate-draw-score",
+        type=int,
+        default=8,
+        help="centipawn threshold for draw adjudication (default: 8)",
+    )
+    parser.add_argument(
+        "--adjudicate-draw-min-move",
+        type=int,
+        default=40,
+        help="minimum move number to enable draw adjudication (default: 40)",
+    )
+    parser.add_argument(
+        "--adjudicate-draw-moves",
+        type=int,
+        default=6,
+        help="consecutive full moves for draw adjudication (default: 6, i.e. 12 plies)",
+    )
     return parser
 
 
@@ -413,6 +469,12 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             sprt_elo0=args.sprt_elo0,
             sprt_elo1=args.sprt_elo1,
             seed=args.seed,
+            adjudicate=args.adjudicate,
+            adjudicate_win_score=args.adjudicate_win_score,
+            adjudicate_win_plies=args.adjudicate_win_moves * 2,
+            adjudicate_draw_score=args.adjudicate_draw_score,
+            adjudicate_draw_min_move=args.adjudicate_draw_min_move,
+            adjudicate_draw_plies=args.adjudicate_draw_moves * 2,
         )
         return 0
     except (OSError, RuntimeError, ValueError) as exc:

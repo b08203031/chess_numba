@@ -138,6 +138,32 @@ def parse_info_line(line: str) -> str:
     return ", ".join(parts)
 
 
+def extract_score_from_info(info: str) -> Optional[int]:
+    """Extract centipawn score from a formatted PGN info comment or return None."""
+    if not info:
+        return None
+    for part in info.split(","):
+        part = part.strip()
+        if part.startswith("eval="):
+            val_str = part[5:].strip()
+            if val_str.startswith("#"):
+                try:
+                    moves = int(val_str[1:])
+                    return 30000 if moves > 0 else -30000
+                except ValueError:
+                    return None
+            if val_str.startswith("cp "):
+                try:
+                    return int(val_str[3:])
+                except ValueError:
+                    return None
+            try:
+                return int(round(float(val_str) * 100.0))
+            except ValueError:
+                return None
+    return None
+
+
 class UciEngine:
     """Long-lived UCI subprocess with a non-blocking stdout reader."""
 
@@ -163,6 +189,7 @@ class UciEngine:
         self._moves: list[str] = []
         self._start_fen: Optional[str] = None
         self._cache_dir: Optional[str] = None
+        self.last_score_cp: Optional[int] = None
 
     def start(self) -> None:
         if self.process is not None:
@@ -251,6 +278,7 @@ class UciEngine:
         self._ready(timeout_s=max(30.0, self.search_timeout_s))
         self._start_fen = start_fen
         self._moves = []
+        self.last_score_cp = None
 
     def push(self, move_uci: str) -> None:
         self._moves.append(move_uci)
@@ -269,6 +297,7 @@ class UciEngine:
         else:
             timeout_s = self.search_timeout_s
         deadline = time.monotonic() + timeout_s
+        self.last_score_cp = None
         last_info = ""
         stopped = False
         while True:
@@ -285,6 +314,22 @@ class UciEngine:
                 if show_info:
                     print(f"[warmup {self.name}] {line}", flush=True)
                 last_info = line
+                tokens = line.split()
+                for idx, token in enumerate(tokens):
+                    if token == "score" and idx + 2 < len(tokens):
+                        kind, val = tokens[idx + 1], tokens[idx + 2]
+                        if kind == "cp":
+                            try:
+                                self.last_score_cp = int(val)
+                            except ValueError:
+                                pass
+                        elif kind == "mate":
+                            try:
+                                m = int(val)
+                                self.last_score_cp = 30000 if m > 0 else -30000
+                            except ValueError:
+                                pass
+                        break
             if not line.startswith("bestmove"):
                 continue
             parts = line.split()
@@ -399,6 +444,7 @@ class InProcessEngine:
         self.tt_generation = 0
         self._last_search_move_uci: Optional[str] = None
         self._last_search_move_encoded: Optional[int] = None
+        self.last_score_cp: Optional[int] = None
 
     def start(self) -> None:
         return
@@ -411,6 +457,7 @@ class InProcessEngine:
         self.tt_generation = 0
         self._last_search_move_uci = None
         self._last_search_move_encoded = None
+        self.last_score_cp = None
 
     def push(self, move_uci: str) -> None:
         if self.game_state is None:
@@ -504,6 +551,7 @@ class InProcessEngine:
         uci = self.factory.move_to_uci(np.uint16(encoded))
         self._last_search_move_encoded = encoded
         self._last_search_move_uci = uci
+        self.last_score_cp = int(score)
         try:
             move = chess.Move.from_uci(uci)
         except ValueError as exc:
@@ -703,6 +751,12 @@ def play_game(
     start_fen: Optional[str] = None,
     event: str = "Engine Match",
     max_plies: int = 400,
+    adjudicate: bool = True,
+    adjudicate_win_score: int = 500,
+    adjudicate_win_plies: int = 10,
+    adjudicate_draw_score: int = 8,
+    adjudicate_draw_min_move: int = 40,
+    adjudicate_draw_plies: int = 12,
 ) -> GameResult:
     board = chess.Board(start_fen) if start_fen else chess.Board()
     game = chess.pgn.Game()
@@ -724,11 +778,17 @@ def play_game(
         raise EngineError(f"Could not initialize game {game_number}: {exc}") from exc
 
     node = game
+    white_win_streak = 0
+    black_win_streak = 0
+    draw_streak = 0
+
     for _ply in range(max_plies):
         if board.is_game_over(claim_draw=True):
             break
         mover = white_engine if board.turn == chess.WHITE else black_engine
         limit = white_limit if board.turn == chess.WHITE else black_limit
+        turn_before_move = board.turn
+        fullmove_before_move = board.fullmove_number
         try:
             move, info = mover.get_move(limit)
         except Exception as exc:
@@ -764,6 +824,63 @@ def play_game(
                 game.headers["FailurePly"] = move_uci
                 game.headers["Result"] = result
                 return GameResult(result, game, "\n".join(logs) + "\n")
+
+        if adjudicate:
+            mover_score = getattr(mover, "last_score_cp", None)
+            if mover_score is None and info:
+                mover_score = extract_score_from_info(info)
+
+            if mover_score is not None:
+                white_pov = mover_score if turn_before_move == chess.WHITE else -mover_score
+                if white_pov >= adjudicate_win_score:
+                    white_win_streak += 1
+                    black_win_streak = 0
+                elif white_pov <= -adjudicate_win_score:
+                    black_win_streak += 1
+                    white_win_streak = 0
+                else:
+                    white_win_streak = 0
+                    black_win_streak = 0
+
+                if (
+                    fullmove_before_move >= adjudicate_draw_min_move
+                    and abs(white_pov) <= adjudicate_draw_score
+                ):
+                    draw_streak += 1
+                else:
+                    draw_streak = 0
+
+                if white_win_streak >= adjudicate_win_plies:
+                    result = "1-0"
+                    game.headers["Termination"] = (
+                        f"adjudicated: White decisive advantage "
+                        f"(+{adjudicate_win_score} cp for {adjudicate_win_plies} plies)"
+                    )
+                    game.headers["Result"] = result
+                    logs.append(f"Result: {result} (adjudicated win)")
+                    return GameResult(result, game, "\n".join(logs) + "\n")
+                if black_win_streak >= adjudicate_win_plies:
+                    result = "0-1"
+                    game.headers["Termination"] = (
+                        f"adjudicated: Black decisive advantage "
+                        f"(-{adjudicate_win_score} cp for {adjudicate_win_plies} plies)"
+                    )
+                    game.headers["Result"] = result
+                    logs.append(f"Result: {result} (adjudicated win)")
+                    return GameResult(result, game, "\n".join(logs) + "\n")
+                if draw_streak >= adjudicate_draw_plies:
+                    result = "1/2-1/2"
+                    game.headers["Termination"] = (
+                        f"adjudicated draw (score within {adjudicate_draw_score} cp "
+                        f"for {adjudicate_draw_plies} plies after move {adjudicate_draw_min_move})"
+                    )
+                    game.headers["Result"] = result
+                    logs.append(f"Result: {result} (adjudicated draw)")
+                    return GameResult(result, game, "\n".join(logs) + "\n")
+            else:
+                white_win_streak = 0
+                black_win_streak = 0
+                draw_streak = 0
     else:
         result = "1/2-1/2"
         game.headers["Termination"] = f"adjudicated draw at {max_plies} plies"
@@ -795,6 +912,7 @@ def run_depth1_warmup_game(engines: EnginePair, *, worker_id: int = 0) -> GameRe
         start_fen=None,
         event="Tournament Warm-up (discarded)",
         max_plies=400,
+        adjudicate=False,
     )
     termination = result.pgn.headers.get("Termination", "")
     failure_markers = (
@@ -830,14 +948,32 @@ def play_pair(
     *,
     event: str,
     max_plies: int,
+    adjudicate: bool = True,
+    adjudicate_win_score: int = 500,
+    adjudicate_win_plies: int = 10,
+    adjudicate_draw_score: int = 8,
+    adjudicate_draw_min_move: int = 40,
+    adjudicate_draw_plies: int = 12,
 ) -> PairResult:
     game_a = play_game(
         engines.first, engines.second, first_limit, second_limit,
         2 * pair_number - 1, start_fen=opening_fen, event=event, max_plies=max_plies,
+        adjudicate=adjudicate,
+        adjudicate_win_score=adjudicate_win_score,
+        adjudicate_win_plies=adjudicate_win_plies,
+        adjudicate_draw_score=adjudicate_draw_score,
+        adjudicate_draw_min_move=adjudicate_draw_min_move,
+        adjudicate_draw_plies=adjudicate_draw_plies,
     )
     game_b = play_game(
         engines.second, engines.first, second_limit, first_limit,
         2 * pair_number, start_fen=opening_fen, event=event, max_plies=max_plies,
+        adjudicate=adjudicate,
+        adjudicate_win_score=adjudicate_win_score,
+        adjudicate_win_plies=adjudicate_win_plies,
+        adjudicate_draw_score=adjudicate_draw_score,
+        adjudicate_draw_min_move=adjudicate_draw_min_move,
+        adjudicate_draw_plies=adjudicate_draw_plies,
     )
     return PairResult(pair_number, game_a, game_b)
 
@@ -929,6 +1065,12 @@ def run_stage(
     early_trash_min_games: int = 80,
     early_trash_max_score_pct: float = 40.0,
     max_plies: int = 400,
+    adjudicate: bool = True,
+    adjudicate_win_score: int = 500,
+    adjudicate_win_plies: int = 10,
+    adjudicate_draw_score: int = 8,
+    adjudicate_draw_min_move: int = 40,
+    adjudicate_draw_plies: int = 12,
 ) -> StageResult:
     if games < 2 or games % 2:
         raise ValueError("Games must be an even integer >= 2")
@@ -951,6 +1093,12 @@ def run_stage(
             return play_pair(
                 worker, pair_number, opening, first_limit, second_limit,
                 event=event, max_plies=max_plies,
+                adjudicate=adjudicate,
+                adjudicate_win_score=adjudicate_win_score,
+                adjudicate_win_plies=adjudicate_win_plies,
+                adjudicate_draw_score=adjudicate_draw_score,
+                adjudicate_draw_min_move=adjudicate_draw_min_move,
+                adjudicate_draw_plies=adjudicate_draw_plies,
             )
         finally:
             workers.put(worker)
