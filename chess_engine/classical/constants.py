@@ -1000,8 +1000,8 @@ LMR_CORRECTION_DIVISOR = 32768
 
 # SF19 Step 18: Scale up reductions for expected ALL nodes: r += r * 276 / (256 * depth + 268)
 LMR_ALLNODE_SCALE_NUM = 260  # E100 tuned: 260 vs 276 (+6.95 Elo, 51.0% @1000 games, net +20)
-LMR_ALLNODE_SCALE_DENOM_BASE = 256 #目前基準: 256，嘗試290vs220
-LMR_ALLNODE_SCALE_DENOM_OFFSET = 298 #目前基準: 268，嘗試298vs238
+LMR_ALLNODE_SCALE_DENOM_BASE = 256
+LMR_ALLNODE_SCALE_DENOM_OFFSET = 298  # Candidate 298 vs Baseline 268 (gradient probe 298 vs 238: +9.04 Elo)
 
 
 # ProbCut — E88: 150 -> 170 adopted (+4.86 Elo vs 150; 120 and 190 regressed)
