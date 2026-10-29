@@ -3194,7 +3194,7 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
             _diag_add(search_context, DIAG_HIST_CAP_MALUS)
 
         # --- Best Move Quiet History Bonus & Malus ---
-        if not best_is_capture and best_moved_piece != -1:
+        if not best_is_capture and get_special_move_flag(best_move) != SPECIAL_MOVE_FLAG_PROMOTION and best_moved_piece != -1:
             aggressor_type = best_moved_piece
             best_to_sq = get_to_square(best_move)
             best_from_sq = get_from_square(best_move)
@@ -3367,16 +3367,6 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                     if opp_prev_move_3 != NO_MOVE and opp_prev_piece_3 != -1:
                         update_continuation_history(search_context, 4, opp_prev_move_3, opp_prev_piece_3, prev_move, prev_piece, sub_bonus)
 
-    original_best_move = best_move
-
-    generated_end = max(search_context.mp_captures_end[ply], search_context.mp_quiets_end[ply])
-    if best_move == NO_MOVE and generated_end > 0:
-        # Fallback to first move that is not excluded
-        for i in range(generated_end):
-            if moves[i] != excluded_move:
-                best_move = moves[i]
-                break
-    
     # --- Update Correction History ---
     if (not is_exclusion_search and depth >= CORRECTION_HISTORY_UPDATE_DEPTH
             and not is_currently_in_check and abs(max_eval) < MATE_SCORE - MAX_PLY):
@@ -3389,13 +3379,13 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
             side = game_state[0]
             
             is_capture = False
-            if original_best_move != NO_MOVE:
-                to_sq = get_to_square(original_best_move)
-                move_flag = get_special_move_flag(original_best_move)
+            if best_move != NO_MOVE:
+                to_sq = get_to_square(best_move)
+                move_flag = get_special_move_flag(best_move)
                 enemy_side = 1 - side
                 is_capture = ((occupancy_bbs[enemy_side] & BB_SQUARES[to_sq]) != 0) or (move_flag == SPECIAL_MOVE_FLAG_EN_PASSANT)
             
-            has_best_move = (original_best_move != NO_MOVE)
+            has_best_move = (best_move != NO_MOVE)
             if not is_capture and (max_eval > static_score) == has_best_move:
                 # Based on static_score calculation of bonus
                 diff = max_eval - static_score
