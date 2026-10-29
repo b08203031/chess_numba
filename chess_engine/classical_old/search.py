@@ -3460,35 +3460,6 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                                 search_context.continuation_correction_history[pc_4, get_to_square(m_4), pc_prev, to_prev] = \
                                     curr_val + bonus_4 - trunc_div(curr_val * abs(bonus_4), CORRECTION_HISTORY_LIMIT)
 
-                # Update Continuation Correction History (duplicate block kept for parity)
-                if ply > 0:
-                    m_prev = search_context.move_stack[ply - 1]
-                    pc_prev = search_context.piece_stack[ply - 1]
-                    if m_prev != NO_MOVE and pc_prev != -1:
-                        to_prev = get_to_square(m_prev)
-                        
-                        if ply >= 2:
-                            m_2 = search_context.move_stack[ply - 2]
-                            pc_2 = search_context.piece_stack[ply - 2]
-                            if m_2 != NO_MOVE and pc_2 != -1:
-                                bonus_2 = trunc_div(
-                                    bonus * CORRECTION_CONT_2PLY_NUM, CORRECTION_CONT_SCALE_DEN
-                                )
-                                curr_val = search_context.continuation_correction_history[pc_2, get_to_square(m_2), pc_prev, to_prev]
-                                search_context.continuation_correction_history[pc_2, get_to_square(m_2), pc_prev, to_prev] = \
-                                    curr_val + bonus_2 - trunc_div(curr_val * abs(bonus_2), CORRECTION_HISTORY_LIMIT)
-                                    
-                        if ply >= 4:
-                            m_4 = search_context.move_stack[ply - 4]
-                            pc_4 = search_context.piece_stack[ply - 4]
-                            if m_4 != NO_MOVE and pc_4 != -1:
-                                bonus_4 = trunc_div(
-                                    bonus * CORRECTION_CONT_4PLY_NUM, CORRECTION_CONT_SCALE_DEN
-                                )
-                                curr_val = search_context.continuation_correction_history[pc_4, get_to_square(m_4), pc_prev, to_prev]
-                                search_context.continuation_correction_history[pc_4, get_to_square(m_4), pc_prev, to_prev] = \
-                                    curr_val + bonus_4 - trunc_div(curr_val * abs(bonus_4), CORRECTION_HISTORY_LIMIT)
-
     tt_score = max_eval
     if tt_score > MATE_IN_MAX_PLY: tt_score += ply
     elif tt_score < -MATE_IN_MAX_PLY: tt_score -= ply

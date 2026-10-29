@@ -717,7 +717,7 @@ DIAG_SIZE = DIAG_HP_CONT1_CAP_RESCUE + 1
 
 # Move Ordering Bonuses
 SCORE_TT_MOVE = 100000
-GOOD_QUIET_THRESHOLD = -1200
+GOOD_QUIET_THRESHOLD = -1300
 
 # QSearch check-evasion ordering.  Captures keep a separate score bucket so
 # large accumulated quiet-history values cannot jump ahead of every capture.

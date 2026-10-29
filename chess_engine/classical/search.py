@@ -1173,8 +1173,19 @@ def get_next_move(
             quiets_end = search_context.mp_quiets_end[ply]
             current_idx = search_context.mp_current_idx[ply]
             
-            # These are the quiets with score < GOOD_QUIET_THRESHOLD that were left at the end of the array.
+            # These are the quiets with score < GOOD_QUIET_THRESHOLD that were left unsorted at the end of the array.
+            # Perform on-demand lazy selection sort so bad quiets are yielded in strictly descending score order.
             if current_idx < quiets_end:
+                best_idx = current_idx
+                best_score = scores[current_idx]
+                for j in range(current_idx + 1, quiets_end):
+                    if scores[j] > best_score:
+                        best_idx = j
+                        best_score = scores[j]
+                if best_idx != current_idx:
+                    moves[current_idx], moves[best_idx] = moves[best_idx], moves[current_idx]
+                    scores[current_idx], scores[best_idx] = scores[best_idx], scores[current_idx]
+
                 candidate_move = moves[current_idx]
                 search_context.mp_current_idx[ply] += 1
                 
