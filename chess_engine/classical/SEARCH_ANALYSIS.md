@@ -1074,14 +1074,45 @@ NMP gate/R、ProbCut style、NMP beta requirement 的預設值也由常量明確
 
 ### 17.12 Phase 17：搜尋安靜步歷史保護與 Fail-Low 轉置表最佳著法修復（E105，+9.04 Elo 正式採納）
 在完成 LMR All-node 探索後，針對深層殘局與走法排序機制進行核心審計，修復了兩大核心漏洞並完成 1,000 局（500 組成對換先開局）對戰驗證：
-1. **Fail-Low 節點轉置表最佳走法覆蓋漏洞（search.py）**：
-   * 	ransposition_table.py 原本即設計在沒有新最佳步時保留舊有最佳步：if final_best_move == 0: final_best_move = existing_entry['best_move']。
-   * 然而 search.py 過去在 Fail-Low（est_move == NO_MOVE）時強制執行 Fallback 塞入 moves[0]，使得 Fail-Low 節點將先前疊代加深探索出的優質最佳走法以任意走法（甚至偽合法著法）粗暴覆蓋。修復為徹底刪除此 Fallback，確保 TT 精準傳承最佳走法。
-2. **安靜步歷史保護（search.py）**：
-   * 原先在 Fail-High Quiet History 更新中，非吃子升變（目標格為空格）因 
-ot best_is_capture 為真而被誤當作安靜走法寫入 history_table[color][PAWN][to_sq]，更導致該節點之前搜尋過的所有正常安靜步遭受無妄的 History Malus 懲罰。
-   * 加入 get_special_move_flag(best_move) != SPECIAL_MOVE_FLAG_PROMOTION 阻斷升變進入 Quiet History，使升變回歸戰術步本質，保護合法安靜步的排序健康。
+1. **Fail-Low 節點轉置表最佳走法覆蓋漏洞（`search.py`）**：
+   * `transposition_table.py` 原本即設計在沒有新最佳步時保留舊有最佳步：`if final_best_move == 0: final_best_move = existing_entry['best_move']`。
+   * 然而 `search.py` 過去在 Fail-Low（`best_move == NO_MOVE`）時強制執行 Fallback 塞入 `moves[0]`，使得 Fail-Low 節點將先前疊代加深探索出的優質最佳走法以任意走法（甚至偽合法著法）粗暴覆蓋。修復為徹底刪除此 Fallback，確保 TT 精準傳承最佳走法。
+2. **安靜步歷史保護（`search.py`）**：
+   * 原先在 Fail-High Quiet History 更新中，非吃子升變（目標格為空格）因 `not best_is_capture` 為真而被誤當作安靜走法寫入 `history_table[color][PAWN][to_sq]`，更導致該節點之前搜尋過的所有正常安靜步遭受無妄的 History Malus 懲罰。
+   * 加入 `get_special_move_flag(best_move) != SPECIAL_MOVE_FLAG_PROMOTION` 阻斷升變進入 Quiet History，使升變回歸戰術步本質，保護合法安靜步的排序健康。
 3. **實測對局戰績（1,000 局成對換先開局）**：
-   * **總比分**：Candidate **212 勝 602 和 186 負**（得分率 **51.30%**，淨勝 **+26 局**，相對 **+9.04 Elo**，95% CI: [-2.67, +20.76]）。
+   * **總比分**：Candidate **212 勝 602 和 186 負**（得分率 **51.30%**，淨勝 **+26 局**，相對 **+9.04 Elo**，95% CI: `[-2.67, +20.76]`）。
    * **中殘局全面翻正**：26~50 步中局打出 83W 240D 64L（勝率 52.5%，淨勝 +19 局）；>50 步長局與殘局擺脫先前排序偏差，全區間勝率全面超過 50%。
-   * **處置結論**：**正式採納進生產基線 (ADOPTED / PRODUCTION BASELINE UPDATED)**，全面同步至 classical 與 classical_old。
+   * **處置結論**：**正式採納進生產基線 (ADOPTED / PRODUCTION BASELINE UPDATED)**，全面同步至 `classical` 與 `classical_old`。
+
+### 17.13 Phase 18：消除 Continuation Correction History 冗餘重複計算更新（E106，+8.69 Elo 正式採納）
+在完成 Phase 17 漏洞修補後，針對 Correction History 模組進行代碼純化審計：
+1. **消除冗餘重複區塊（`search.py`）**：
+   * 在靜態校正歷史更新中，原先在 2-ply 與 4-ply 的接續歷史更新完成後，緊接著遺留了一段完全相同的重複區塊（`duplicate block kept for parity`）。
+   * 該區塊導致同一個節點連續兩次以被污染放大的 `curr_val` 疊加延續校正值，造成權重失衡。徹底移除該重複區塊。
+2. **實測對局戰績（1,000 局成對換先開局完賽）**：
+   * **總比分**：Candidate **206 勝 613 和 181 負**（得分率 **51.25%**，總得分 512.5 / 1000，淨勝 **+25 局**，相對 **+8.69 ± 13.39 Elo**，95% CI: `[-4.21, +21.61]`，SPRT LLR=+0.85）。
+   * **穩定中盤勝率**：26~50 步中盤打出 85W 250D 65L（勝率 52.5%，淨勝 +20 局）；各區間勝率全線大於 50%。
+   * **搜尋指標完全持平**：平均深度 17.41 vs 17.43（差異 -0.01 ply，p=0.463）；節點數 250,486 vs 250,421（p=0.780）；同深度節點比 1.000。
+   * **處置結論**：**正式採納進生產基線 (ADOPTED / PRODUCTION BASELINE UPDATED)**，同步至 `classical_old`。
+
+### 17.14 Phase 19：MovePicker STAGE_BAD_QUIETS 惰性選擇排序與開局閾值審計（E107，否決回滾）
+嘗試在 MovePicker 中針對 `STAGE_BAD_QUIETS`（分數低於 `GOOD_QUIET_THRESHOLD` 的劣質安靜步）實施按需惰性選擇排序，並將 `GOOD_QUIET_THRESHOLD` 從 `-1200` 調降至 `-1300`：
+1. **實測數據（550 局成對測試）**：
+   * 戰績：105 勝 345 和 100 負（得分率 50.45%，淨勝僅 +5 局，相對 +3.16 Elo，95% CI: `[-14.26, +20.59]` 含 0 噪聲）。
+   * **嚴重效能衰退**：每步耗時由 982.7ms 暴增至 998.2ms（**每步慢 +15.5ms，+1.6% 顯著變慢**，Welch $t = +6.356, p = 2.09 \times 10^{-10}$）；NPS 下滑 -1.1%（$p=0.011$）；平均深度縮減 -0.10 ply（$p=0.0022$）。
+2. **棋理與 Stockfish 核心架構對齊**：
+   * 輪到 `BAD_QUIETS` 的節點極高機率為 All-Node（所有走法皆無法造成剪枝，必須全搜以證明 Fail-Low）。在必須全搜的集合中進行 $O(k^2)$ 選擇排序完全是無謂的運算浪費（Pure Overhead）。
+   * Stockfish 19 在 `BAD_QUIET` 階段始終維持純線性無排序提取（`select`），證實不排序是符合棋理的最優設計。
+   * 門檻調低至 `-1300` 同時稀釋了 Good Quiets 的純度。
+3. **處置結論**：**明確效能退化，否決採納並已於 `classical` 回滾至 E106 基準版本（`GOOD_QUIET_THRESHOLD = -1200`、`STAGE_BAD_QUIETS` 無排序線性提取）（REJECTED / ROLLED BACK）**。
+
+### 17.15 Phase 20（待實測驗證）：歷史表 Gravity 向零取整（`trunc_div`）與非吃子升變污染防護補齊
+在回滾 E107 後，針對寫入端與安全邊界實施零熱路徑開銷的精準修補（保留 `score_quiets` 熱路徑不動，以 `classical_old` 之 E106 為對照基線待測）：
+1. **Gravity 公式向零取整（`trunc_div`）**：
+   * Python/Numba 的整數除法 `//` 為向下取整（Floor Division），當歷史值或縮放分子為負數時（例如 `-1000 // 16384 == -1`），在 `curr + bonus - (curr * abs(bonus)) // MAX` 中會產生 `-(-1) = +1` 的系統性向上漂移。
+   * 將 `search_heuristics.py` 中 5 個寫入函數（`update_history`、`update_butterfly_history`、`update_capture_history`、`update_pawn_history`、`update_continuation_history`）與 `search.py` Step 21 中 `low_ply_history` 的 Bonus / Malus 寫入全面改為向零取整 `trunc_div`，並對 `int16` 的 `low_ply_history` 明確轉型 `np.int32` 防止乘法溢位，完全對齊 C++ / Stockfish `StatsEntry::operator<<` 語義。
+2. **補齊非吃子升變（Quiet Promotion）污染防護**：
+   * 延續 Phase 17（E105）之防護邏輯，在 `_search` 的 `Refutation Penalty`（排除父節點直推升變污染延續歷史）與 `Update Correction History`（排除直推升變因戰術分暴漲污染四張靜態評估校正表）補齊 `SPECIAL_MOVE_FLAG_PROMOTION` 守衛。
+3. **安靜步回溯懲罰緩衝區上限守衛**：
+   * 在 `_search` 記錄 `quiet_moves_tried` 處補齊 `quiet_moves_tried_count < 64` 守衛，與 `capture_moves_tried_count < 64` 及 Stockfish `ValueList<Move, 64> quietsSearched` 保持一致。

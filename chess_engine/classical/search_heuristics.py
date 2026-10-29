@@ -34,6 +34,10 @@ from chess_engine.classical.engine_types import (
     search_context_type
 )
 
+@numba.njit(cache=True, boundscheck=False, fastmath=True, inline='always')
+def trunc_div(n, d):
+    return n // d if n >= 0 else -(-n // d)
+
 @numba.njit(cache=True, boundscheck=False, fastmath=True)
 def update_history(history_table, piece_type, to_square, bonus):
     """
@@ -45,7 +49,7 @@ def update_history(history_table, piece_type, to_square, bonus):
     clamped_bonus = min(max(bonus, -HISTORY_MAX_MAIN), HISTORY_MAX_MAIN)
     
     # Gravity formula
-    new_value = current_value + clamped_bonus - (current_value * abs(clamped_bonus)) // HISTORY_MAX_MAIN
+    new_value = current_value + clamped_bonus - trunc_div(current_value * abs(clamped_bonus), HISTORY_MAX_MAIN)
     history_table[piece_type, to_square] = new_value
 
 @numba.njit(cache=True, boundscheck=False, fastmath=True)
@@ -57,7 +61,7 @@ def update_butterfly_history(butterfly_table, from_sq, to_sq, bonus):
     clamped_bonus = min(max(bonus, -HISTORY_MAX_BUTTERFLY), HISTORY_MAX_BUTTERFLY)
     
     # Gravity formula
-    new_value = current_value + clamped_bonus - (current_value * abs(clamped_bonus)) // HISTORY_MAX_BUTTERFLY
+    new_value = current_value + clamped_bonus - trunc_div(current_value * abs(clamped_bonus), HISTORY_MAX_BUTTERFLY)
     butterfly_table[from_sq, to_sq] = new_value
 
 @numba.njit(cache=True, boundscheck=False, fastmath=True)
@@ -72,7 +76,7 @@ def update_capture_history(capture_history, piece_type, to_square, victim_type, 
     clamped_bonus = min(max(bonus, -HISTORY_MAX_CAPTURE), HISTORY_MAX_CAPTURE)
     
     # Gravity formula
-    new_value = current_value + clamped_bonus - (current_value * abs(clamped_bonus)) // HISTORY_MAX_CAPTURE
+    new_value = current_value + clamped_bonus - trunc_div(current_value * abs(clamped_bonus), HISTORY_MAX_CAPTURE)
     capture_history[piece_type, to_square, victim_rel] = new_value
 
 @numba.njit(cache=True, boundscheck=False, fastmath=True, inline='always')
@@ -92,13 +96,13 @@ def update_pawn_history(pawn_history, pawn_key_idx, piece_type, to_square, bonus
     
     # SF-style asymmetric scaling (Phase 1a constants)
     if bonus > HISTORY_PAWN_MALUS_THRESHOLD:
-        scaled_bonus = bonus * HISTORY_PAWN_BONUS_NUM // HISTORY_PAWN_SCALE_DEN
+        scaled_bonus = trunc_div(bonus * HISTORY_PAWN_BONUS_NUM, HISTORY_PAWN_SCALE_DEN)
     else:
-        scaled_bonus = bonus * HISTORY_PAWN_MALUS_NUM // HISTORY_PAWN_SCALE_DEN
+        scaled_bonus = trunc_div(bonus * HISTORY_PAWN_MALUS_NUM, HISTORY_PAWN_SCALE_DEN)
     clamped_bonus = min(max(scaled_bonus, -HISTORY_MAX_PAWN), HISTORY_MAX_PAWN)
     
     # Gravity formula with explicit int32 casting to avoid int16 overflow under Numba
-    new_value = np.int32(current_value) + clamped_bonus - (np.int32(current_value) * abs(clamped_bonus)) // HISTORY_MAX_PAWN
+    new_value = np.int32(current_value) + clamped_bonus - trunc_div(np.int32(current_value) * abs(clamped_bonus), HISTORY_MAX_PAWN)
     pawn_history[pawn_key_idx, piece_type, to_square] = new_value
 
 @numba.njit(cache=True, boundscheck=False, fastmath=True)
@@ -112,7 +116,7 @@ def update_continuation_history(context, ply_offset, prev_move, prev_piece, curr
     current_val = context.continuation_history[ply_offset, prev_piece, prev_to, curr_piece, curr_to]
     clamped_bonus = min(max(bonus, -HISTORY_MAX_CONTINUATION), HISTORY_MAX_CONTINUATION)
     
-    new_val = np.int32(current_val) + clamped_bonus - (np.int32(current_val) * abs(clamped_bonus)) // HISTORY_MAX_CONTINUATION
+    new_val = np.int32(current_val) + clamped_bonus - trunc_div(np.int32(current_val) * abs(clamped_bonus), HISTORY_MAX_CONTINUATION)
     context.continuation_history[ply_offset, prev_piece, prev_to, curr_piece, curr_to] = new_val
 
 @numba.njit(cache=True, boundscheck=False, fastmath=True)

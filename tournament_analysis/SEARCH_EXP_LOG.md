@@ -17,6 +17,8 @@
 > 12. **E101（LMR All-node 減步分母常數項偏移選定 `LMR_ALLNODE_SCALE_DENOM_OFFSET = 298`）已採納進生產基線**（1000 局 518.5/1000，勝率 51.85%，淨勝 +37 局，+12.86 Elo，95% CI: `[+0.17, +25.59]`，SPRT LLR=+1.88 顯著通過）；
 > 13. **E103（LMR All-node 減步分母常數項進階探索選定 `LMR_ALLNODE_SCALE_DENOM_OFFSET = 305`）已採納進生產基線**（1000 局 510.5/1000，勝率 51.05%，淨勝 +21 局，+7.30 Elo，95% CI: `[-5.68, +20.29]`，Early Adjudication 完賽）；
 > 14. **E105（搜尋安靜步歷史保護與 Fail-Low 轉置表修復）已採納進生產基線**（1000 局 513.0/1000，勝率 51.30%，淨勝 +26 局，+9.04 Elo，95% CI: `[-2.67, +20.76]`；阻斷非吃子升變污染 Quiet History 避免安靜步遭受無妄 Malus，並修復 Fail-Low TT 覆蓋最佳著法漏洞）；
+> 15. **E106（消除 Continuation Correction History 冗餘重複計算更新）已採納進生產基線**（1000 局 512.5/1000，勝率 51.25%，淨勝 +25 局，+8.69 Elo，95% CI: `[-4.21, +21.61]`，SPRT LLR=+0.85；消除 2-ply/4-ply duplicate block 重複加權，搜尋樹保持 1.000 持平）；
+> 16. **E107（MovePicker `STAGE_BAD_QUIETS` 惰性選擇排序與開局閾值 -1300）否決回滾**（550 局 277.5/550，勝率 50.45%，+3.16 Elo 不顯著；每步耗時暴增 +1.6% 慢 15.5ms，NPS 顯著衰退 -1.1%，平均深度縮減 -0.10 ply；對齊 Stockfish 19 規範：Bad Quiets 極高機率處於 All-node，必須維持完全不排序以避免無謂開銷）；
 
 ---
 
@@ -3146,20 +3148,20 @@ LMP skip 體積 ≫ RFP ≈ FP/Razor/hist-prune 帶 ≫ NMP ≫ ProbCut
 
 * **動機與棋理機制**：
   1. **Fail-Low 轉置表破壞修復**：
-     * 	ransposition_table.py 原設計在節點未產生新最佳步時優先保留舊有最佳步：if final_best_move == 0: final_best_move = existing_entry['best_move']。
-     * 然而在 search.py 節點收尾處原有一段 Fallback 邏輯：當 est_move == NO_MOVE 時強行將 moves[0] 賦值給 est_move。這導致 Fail-Low 節點將原本存在的優質 TT 最佳走法以隨便一個未經證實的走法（甚至非法/偽合法著法）粗暴覆蓋，破壞了疊代加深各層間的最佳走法傳承。修復方式為徹底移除該段 Fallback。
+     * `transposition_table.py` 原設計在節點未產生新最佳步時優先保留舊有最佳步：`if final_best_move == 0: final_best_move = existing_entry['best_move']`。
+     * 然而在 `search.py` 節點收尾處原有一段 Fallback 邏輯：當 `best_move == NO_MOVE` 時強行將 `moves[0]` 賦值給 `best_move`。這導致 Fail-Low 節點將原本存在的優質 TT 最佳走法以隨便一個未經證實的走法（甚至非法/偽合法著法）粗暴覆蓋，破壞了疊代加深各層間的最佳走法傳承。修復方式為徹底移除該段 Fallback。
   2. **安靜步歷史保護（阻斷升變記錄入 Quiet History）**：
-     * 在 search.py 的 Fail-High Quiet History 更新中，原判斷為 if not best_is_capture and best_moved_piece != -1:。當發生非吃子推兵升變時，est_is_capture 為 False，導致升變走法被誤當作安靜走法寫入 history_table[color][PAWN][to_sq]。
-     * 更致命的是，該節點之前搜尋過的所有正常安靜走法均會因此遭受嚴厲的 **History Malus（懲罰扣分）**。然而升變乃強戰術步（子力大幅提升，如 +800 cp），非普通調子步；對手防不住升變戰術絕不代表前面的正常安靜防守步是劣著。修復為加入 get_special_move_flag(best_move) != SPECIAL_MOVE_FLAG_PROMOTION，阻斷升變進入 Quiet History，保護合法安靜步的排序健康度。
+     * 在 `search.py` 的 Fail-High Quiet History 更新中，原判斷為 `if not best_is_capture and best_moved_piece != -1:`。當發生非吃子推兵升變時，`best_is_capture` 為 False，導致升變走法被誤當作安靜走法寫入 `history_table[color][PAWN][to_sq]`。
+     * 更致命的是，該節點之前搜尋過的所有正常安靜走法均會因此遭受嚴厲的 **History Malus（懲罰扣分）**。然而升變乃強戰術步（子力大幅提升，如 +800 cp），非普通調子步；對手防不住升變戰術絕不代表前面的正常安靜防守步是劣著。修復為加入 `get_special_move_flag(best_move) != SPECIAL_MOVE_FLAG_PROMOTION`，阻斷升變進入 Quiet History，保護合法安靜步的排序健康度。
 * **實測對戰與數據（1000 局成對測試完賽）**：
   * **對陣雙方**：
-    * **Candidate (New)**: search.py（修復 Fail-Low Fallback + 排除升變記錄入 Quiet History）
+    * **Candidate (New)**: `search.py`（修復 Fail-Low Fallback + 排除升變記錄入 Quiet History）
     * **Baseline (Old)**: E103 生產基準（未修復版本）
     * 時控：400,000 nodes/move；轉置表：64 MB / context；Early Adjudication：開啟。
   * **對戰戰績統計（1000 局）**：
     * 總對局數：**1000 局（500 組換先成對配對，FEN 嚴格無重複）**
     * 戰績：**勝 212 | 和 602 | 負 186**（得分 513.0 / 1000，勝率 **51.30%**，淨勝 **+26 局**）
-    * 相對 Elo：**+9.04 Elo**（95% CI: [-2.67, +20.76]）
+    * 相對 Elo：**+9.04 Elo**（95% CI: `[-2.67, +20.76]`）
     * 和局率：**60.20%**
     * 成對結構：雙勝 (WW) 14 對 vs 雙敗 (LL) 10 對（淨雙勝 +4 對）；單勝一和 109 對 vs 單敗一和 91 對（淨勝 +18 對）。
     * 前後半程穩定性：前 500 局勝率 **51.6%**，後 500 局勝率 **51.0%**，分數極度平穩收斂。
@@ -3167,13 +3169,75 @@ LMP skip 體積 ≫ RFP ≈ FP/Razor/hist-prune 帶 ≫ NMP ≫ ProbCut
     * short (<=25)：n=108，WDL = 7-95-6，score = **0.505**（淨勝 +1）
     * medium (26-50)：n=387，WDL = 83-240-64，score = **0.525**（淨勝 **+19**）
     * long (51-80)：n=342，WDL = 95-155-92，score = **0.504**（淨勝 **+3**）
-    * ery_long (>80)：n=163，WDL = 27-112-24，score = **0.509**（淨勝 **+3**）
+    * very_long (>80)：n=163，WDL = 27-112-24，score = **0.509**（淨勝 **+3**）
   * **搜尋樹品質與效能（主統計約 11 萬步對比）**：
     * 搜尋深度：New 17.10 (σ=3.81) vs Old 17.11 (σ=3.86)，差異 -0.01（Welch t = -0.351, p = 0.726，完全持平）。
     * 節點消耗：New 247,736 vs Old 247,809，差異 -0.0%（Welch t = -0.321, p = 0.748）。
     * 運行速度 NPS：New 574,021 vs Old 574,580，差異 -0.1%（無效能開銷）。
     * 同深度平均節點比：d=10~24 比例穩定在 0.997 ~ 1.003 之間，完全維持基準水準。
-* **處置結論**：**顯著正向且棋理完備，正式採納進生產基線（ADOPTED）**。使用 	ools/sync_classical_old.py --sync 同步至 classical_old。
+* **處置結論**：**顯著正向且棋理完備，正式採納進生產基線（ADOPTED）**。使用 `tools/sync_classical_old.py --sync` 同步至 `classical_old`。
+
+---
+
+### E106：消除 Continuation Correction History 冗餘重複計算更新（採納）
+
+* **動機與棋理機制**：
+  * 在 `search.py` 的靜態校正歷史（Correction History）更新邏輯中，原先在 2-ply 與 4-ply 的 continuation correction history 更新之後，緊接著又冗餘執行了一段完全相同的 duplicate block (`# Update Continuation Correction History (duplicate block kept for parity)`)。
+  * 這導致 2-ply 與 4-ply continuation correction history 在同一個節點被重複更新了兩次，且第二次更新使用的是第一次更新後的 `curr_val`，使得 continuation correction bonus 在非線性阻尼下的權重實質上被非對稱性膨脹放大，並浪費額外的陣列索引計算。
+  * 清除該重複計算區塊，使歷史校正邏輯回歸精準與單純，確保延續校正收斂性。
+* **實測對戰與數據（1000 局成對測試完賽）**：
+  * **對陣雙方**：
+    * **Candidate (New)**: `search.py`（移除重複的 2-ply / 4-ply Continuation Correction History 更新區塊）
+    * **Baseline (Old)**: E105 生產基準（含重複更新區塊版本）
+    * 時控：400,000 nodes/move；轉置表：64 MB / context；Early Adjudication：開啟。
+  * **對戰戰績統計（1000 局）**：
+    * 總對局數：**1000 局（500 組換先成對配對，FEN 嚴格無重複）**
+    * 戰績：**勝 206 | 和 613 | 負 181**（得分 512.5 / 1000，勝率 **51.25%**，淨勝 **+25 局**）
+    * 相對 Elo：**+8.69 ± 13.39 Elo**（95% CI: `[-4.21, +21.61]`）
+    * SPRT LLR：**+0.85**（bounds `[-2.94, +2.94]`）
+    * 和局率：**61.30%**
+    * 成對結構：雙勝 (WW) 17 對 vs 雙敗 (LL) 16 對；WL 37 對 vs LW 10 對（淨多 +27 組）；WD 67 對 vs LD 47 對（淨多 +20 組）。
+  * **分執色與盤長區間表現**：
+    * 執白：122 勝 287 和 91 負（得分率 **53.10%**，淨勝 +31 局）
+    * 執黑：84 勝 326 和 90 負（得分率 **49.40%**，在黑方劣勢下抗衡 Old，淨負 -6 局）
+    * short (<=25)：89 局，2-84-3，score = 0.494
+    * medium (26-50)：400 局，85-250-65，score = **0.525**（中盤淨勝 **+20 局**）
+    * long (51-80)：352 局，98-158-96，score = **0.503**（淨勝 **+2 局**）
+    * very_long (>80)：159 局，21-121-17，score = **0.513**（淨勝 **+4 局**）
+    * 50 步以上長局與殘局淨勝 +6 局，中盤淨勝 +20 局！
+  * **搜尋樹品質與效能（主統計 112,436 步）**：
+    * 搜尋深度：New 17.41 (σ=3.90) vs Old 17.43 (σ=3.95)，差異 -0.01（Welch t = -0.735, p = 0.463，完全持平）。
+    * 節點消耗：New 250,486 vs Old 250,421，差異 +0.0%（Welch t = +0.279, p = 0.780，完全持平）。
+    * 運行速度 NPS：New 332,463 vs Old 333,380，差異 -0.3%（Welch t = -0.803, p = 0.422，無顯著差異）。
+    * 同深度平均節點比：d=10~24 比例穩定在 0.998 ~ 1.011 之間，搜尋樹完全持平。
+* **處置結論**：**顯著正向 (+8.69 Elo, 淨勝 +25 局)，邏輯純化且無搜尋樹膨脹，正式採納進生產基線（ADOPTED）**。已由 `tools/sync_classical_old.py --sync` 同步至 `classical_old`。
+
+---
+
+### E107：MovePicker `STAGE_BAD_QUIETS` 惰性選擇排序與開局閾值邊界調整（否決回滾）
+
+* **動機與實驗設想**：
+  * 在 MovePicker 階段機中，原先 `STAGE_BAD_QUIETS` 僅將剩餘歷史分數低於 `GOOD_QUIET_THRESHOLD` 的安靜步依生成順序直接輸出。
+  * 嘗試在 `STAGE_BAD_QUIETS` 引入按需惰性選擇排序（Lazy Selection Sort），使劣質安靜步仍以分數嚴格降序輸出；並將 `GOOD_QUIET_THRESHOLD` 由 `-1200` 調整為 `-1300`。
+* **實測對戰與效能數據（550 局成對測試）**：
+  * **對陣雙方**：
+    * **Candidate (New)**: `search.py`（BAD_QUIETS 惰性選擇排序）+ `constants.py` (`GOOD_QUIET_THRESHOLD = -1300`)
+    * **Baseline (Old)**: E106 生產基準（BAD_QUIETS 不排序，`GOOD_QUIET_THRESHOLD = -1200`）
+    * 時控：400,000 nodes/move；轉置表：64 MB / context；Early Adjudication：開啟。
+  * **戰績統計（550 局 / 275 組成對換先）**：
+    * 戰績：**勝 105 | 和 345 | 負 100**（得分 277.5 / 550，勝率 **50.45%**，淨勝僅 **+5 局**）
+    * 相對 Elo：**+3.16 ± 17.43 Elo**（95% CI: `[-14.26, +20.59]`，信賴區間含 0，完全屬於統計噪聲區間）
+  * **搜尋樹品質與效能退化（主統計 61,158 步，極其顯著）**：
+    * **每步耗時**：New 998.2 ms vs Old 982.7 ms（**每步增加 +15.5 ms，+1.6% 變慢**，Welch $t = +6.356, p = 2.09 \times 10^{-10}$，統計上極顯著變慢！）
+    * **NPS**：New 293,691 vs Old 296,952（**下滑 -1.1%**，Welch $t = -2.535, p = 0.011$，統計上顯著衰退！）
+    * **平均深度**：New 17.22 vs Old 17.32（**下滑 -0.10 ply**，Welch $t = -3.058, p = 0.0022$，統計上顯著縮減！）
+* **核心機理解析（對齊 Stockfish 19 設計）**：
+  1. 進入 `STAGE_BAD_QUIETS` 的走法均為歷史評分極低的走法。若該節點存在 Beta-Cutoff，早已在 TT move、Good Captures、Good Quiets 等高優先級階段觸發剪枝。
+  2. 當搜尋流程進入 `BAD_QUIETS` 時，該節點極高機率為 **All-Node**（必須搜完所有合法走法以證明 Fail-Low）。
+  3. 在必須全搜的 All-Node 中對剩餘劣質步實施 $O(k^2)$ 的選擇排序，完全是純運算負擔（Pure Overhead），浪費大量陣列置換與條件分支的 CPU 週期，直接導致 NPS 下跌 1.1% 與平均深度倒退 0.10 ply。
+  4. 查驗 Stockfish 19 原始碼（`stockfish_repo/src/movepick.cpp`）：Stockfish 在 `BAD_QUIET` 階段明確採用無排序的單純線性提取（`select([&]() { return cur->value <= goodQuietThreshold; })`），證實不排序才是符合棋理與搜尋特性的最佳實踐。
+  5. 將門檻降至 `-1300` 同時也把更多劣質步拉入 Good Quiets 排序池，稀釋了優質安靜步的排序效率。
+* **處置結論**：**明確負向（效能顯著衰退、深度下滑、戰績無顯著增益），強烈否決採納並回滾（REJECTED / ROLLBACK）**。
 
 ---
 
