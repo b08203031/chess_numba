@@ -14,6 +14,9 @@
 > 9. **E96（奇異擴充 TT PV 獎勵選定 `SINGULAR_TTPV_BONUS = 65`）已採納進生產基線**（1000 局 516.0/1000，勝率 51.60%，淨勝 +32 局，+11.12 Elo，95% CI: `[-1.23, +23.50]`，LLR=+1.55；51~80 步中長盤淨勝 +35 局；同深度節點比完美持平 1.000）；
 > 10. **E99（晚期移動步數剪枝比例選定 `LMP_SCALE_PERCENT = 165`）已採納進長時控生產基線**（400k LTC 實測 370 局 196.5/370，勝率 53.1%，淨勝 +23 局，+21.6 Elo，LLR=+1.16，有效化解深層防守盲區）；
 > 11. **E100（LMR All-node 減步縮放分子調降選定 `LMR_ALLNODE_SCALE_NUM = 260`）已採納進生產基線**（1000 局 510.0/1000，勝率 51.00%，淨勝 +20 局，+6.95 Elo，95% CI: `[-6.77, +20.69]`；長局 >50 步淨勝 +19 局；同深度節點比 1.000 持平）；
+> 12. **E101（LMR All-node 減步分母常數項偏移選定 `LMR_ALLNODE_SCALE_DENOM_OFFSET = 298`）已採納進生產基線**（1000 局 518.5/1000，勝率 51.85%，淨勝 +37 局，+12.86 Elo，95% CI: `[+0.17, +25.59]`，SPRT LLR=+1.88 顯著通過）；
+> 13. **E103（LMR All-node 減步分母常數項進階探索選定 `LMR_ALLNODE_SCALE_DENOM_OFFSET = 305`）已採納進生產基線**（1000 局 510.5/1000，勝率 51.05%，淨勝 +21 局，+7.30 Elo，95% CI: `[-5.68, +20.29]`，Early Adjudication 完賽）；
+> 14. **E105（搜尋安靜步歷史保護與 Fail-Low 轉置表修復）已採納進生產基線**（1000 局 513.0/1000，勝率 51.30%，淨勝 +26 局，+9.04 Elo，95% CI: `[-2.67, +20.76]`；阻斷非吃子升變污染 Quiet History 避免安靜步遭受無妄 Malus，並修復 Fail-Low TT 覆蓋最佳著法漏洞）；
 
 ---
 
@@ -3077,6 +3080,100 @@ LMP skip 體積 ≫ RFP ≈ FP/Razor/hist-prune 帶 ≫ NMP ≫ ProbCut
     * **一鍵開關**：`--adjudicate` / `--no-adjudicate`，**預設開啟**。
     * 支援自訂門檻：`--adjudicate-win-score`（預設 500）、`--adjudicate-win-moves`（預設 5）、`--adjudicate-draw-score`（預設 8）、`--adjudicate-draw-min-move`（預設 40）、`--adjudicate-draw-moves`（預設 6）。
   * `tests/test_adjudication.py`：新增 7 項單元合約測試，包含雙邊勝負裁定、和棋保護期門檻、一鍵開關、streak 中斷重置與 CLI 解析，全部 100% 通過。
+
+---
+
+### E103：LMR All-node 減深分母常數項進階探索（`LMR_ALLNODE_SCALE_DENOM_OFFSET = 305 vs 298`，正式採納）
+
+* **動機與原理**：
+  * 在 E101 確立 `LMR_ALLNODE_SCALE_DENOM_OFFSET = 298`（對比 268 獲 +12.86 Elo 顯著突破）後，順延該梯度微調探索邊界（298 -> 305，+7 cp 偏移量）。
+  * 驗證在分母結構 $256 \times \text{depth} + \text{OFFSET}$ 中進一步輕微放寬分母，是否能進一步鞏固中殘局戰術穩定性。
+* **實測對戰配置與統計（1,000 局成對換先，400k LTC，Early Adjudication 預設啟用）**：
+  * **對陣雙方**：
+    * **Candidate (New)**: `LMR_ALLNODE_SCALE_DENOM_BASE = 256`, `LMR_ALLNODE_SCALE_DENOM_OFFSET = 305`
+    * **Baseline (Old)**: `LMR_ALLNODE_SCALE_DENOM_BASE = 256`, `LMR_ALLNODE_SCALE_DENOM_OFFSET = 298`（E101 生產基準）
+    * 時控：400,000 nodes/move；轉置表：64 MB / context；Early Adjudication：開啟。
+  * **戰績統計**：
+    * 總對局數：**1,000 局（500 組嚴格成對開局庫換先測試）**
+    * 戰績：**205 勝 611 和 184 負**（總得分 **510.5 / 1000**，得分率 **51.05%**，淨勝 **+21 局**）
+    * 相對 Elo：**+7.30 ± 13.43 (95% CI: [-5.68, +20.29])**
+    * SPRT LLR：**+0.53**（bounds `[-2.94, +2.94]`）
+    * 前後半程穩定性：前 250 對（500 局）得分率 51.9%（+19.0 Elo）$\to$ 後 250 對（500 局）得分率 50.2%（+1.4 Elo）
+  * **先手與執色分析**：
+    * 持白：119 勝 296 和 85 負（勝率 **53.40%**，淨勝 +34 局）
+    * 持黑：86 勝 315 和 99 負（勝率 **48.70%**，在黑方劣勢下抗衡 Old，淨負 -13 局）
+    * 同 FEN 換先破冰對：DD 184 對 (36.8%)；WD 79 vs LD 52 (優勢 +27 組)；WW 16 vs LL 14 (淨多 +2 組)
+  * **盤長區間分析**：
+    * $\le 25$ 步短盤：8W 94D 7L（勝率 **50.5%**，淨勝 +1 局）
+    * 26~50 步中盤：73W 245D 63L（勝率 **51.3%**，淨勝 +10 局）
+    * 51~80 步長盤：102W 158D 92L（勝率 **51.4%**，淨勝 +10 局）
+    * $>80$ 步超長盤：22W 114D 22L（勝率 **50.0%**，淨勝 0 局）
+  * **搜尋效能指標（parse_search_stats 主統計 110,215 步）**：
+    * 搜尋深度：New 17.23 vs Old 17.23（差異 -0.00 ply，Welch $t = -0.087, p = 0.931$）
+    * 節點消耗：New 248,310 vs Old 248,313（差異 -0.0%，Welch $t = -0.017, p = 0.987$）
+    * NPS：New 570,611 vs Old 570,598（差異 +0.0%，Welch $t = +0.008, p = 0.993$）
+    * 每步耗時：New 487.6 ms vs Old 487.4 ms（差異 +0.2 ms）
+    * 同深度節點比（Same-depth ratio）：$d=13\sim 23$ 節點比嚴格保持在 0.999 ~ 1.003，比值完美貼合 1.000。
+  * **提前裁決表現**：
+    * 總對局平均步數 55.6 步（獲勝 56.8 步，和棋 54.6 步），勝負與和棋雙重防護機制正常運作，全賽程無任何異常報錯。
+* **判定**：**正式採納（Adopted）**！確認 `LMR_ALLNODE_SCALE_DENOM_OFFSET = 305` 為新生產基準，並同步至 `classical_old` 與 `tuner/constants_snapshot.py`。
+
+---
+
+### E104：LMR All-node 減深分母線性項探索（`LMR_ALLNODE_SCALE_DENOM_BASE = 270 vs 256`，否決回滾）
+
+* **動機與原理**：
+  * 在 E101 與 E103 相繼鎖定分子 `260` 與常數項 `305` 後，嘗試探索分母的線性斜率項：
+    $$r \mathrel{+}= \operatorname{trunc\_div}\left(260 \times r,\, \text{LMR\_ALLNODE\_SCALE\_DENOM\_BASE} \times \text{depth} + 305\right)$$
+  * 候選版本將 `DENOM_BASE` 由 `256` 提高至 `270`，試圖進一步緩和中深層 All-node 的減步幅度。
+* **實測對戰與數據（540+ 局成對測試即時評估）**：
+  * **對陣雙方**：
+    * **Candidate (New)**: `LMR_ALLNODE_SCALE_DENOM_BASE = 270`, `LMR_ALLNODE_SCALE_DENOM_OFFSET = 305`
+    * **Baseline (Old)**: `LMR_ALLNODE_SCALE_DENOM_BASE = 256`, `LMR_ALLNODE_SCALE_DENOM_OFFSET = 305`（E103 生產基準）
+    * 時控：400,000 nodes/move；轉置表：64 MB / context；Early Adjudication：開啟。
+  * **即時戰績統計（截至 540 局）**：
+    * 總對局數：**540 局（270 組換先成對配對）**
+    * 戰績：**107 勝 305 和 128 負**（得分 259.5 / 540，得分率 **48.06%**，淨負 **-21 局**）
+    * 相對 Elo：**-13.52 ± 19.33 Elo**（95% CI: `[-32.85, +5.81]`）
+    * SPRT LLR：**-2.11**（顯著逼近 H0 淘汰線 `-2.94`）
+* **核心機理與根因分析**：
+  * `BASE` 是隨搜尋深度遞增的線性放大係數（$270 \times \text{depth}$ vs $256 \times \text{depth}$）。在深度 $d \ge 16$ 的深層搜尋中，分母膨脹過快導致 All-node 的減步幅度顯著不足（Under-reduction），搜尋樹深層產生大量無效分支探索，嚴重稀釋高質量走法的計算預算，導致淨勝局持續崩塌（-21 局）。
+* **處置結論**：**明確負向，否決採納並回滾（REJECTED / ROLLBACK）**。終止對戰並將 `LMR_ALLNODE_SCALE_DENOM_BASE` 回滾維持為 `256`。
+
+---
+
+### E105：搜尋安靜步歷史保護與 Fail-Low 轉置表最佳著法修復（採納）
+
+* **動機與棋理機制**：
+  1. **Fail-Low 轉置表破壞修復**：
+     * 	ransposition_table.py 原設計在節點未產生新最佳步時優先保留舊有最佳步：if final_best_move == 0: final_best_move = existing_entry['best_move']。
+     * 然而在 search.py 節點收尾處原有一段 Fallback 邏輯：當 est_move == NO_MOVE 時強行將 moves[0] 賦值給 est_move。這導致 Fail-Low 節點將原本存在的優質 TT 最佳走法以隨便一個未經證實的走法（甚至非法/偽合法著法）粗暴覆蓋，破壞了疊代加深各層間的最佳走法傳承。修復方式為徹底移除該段 Fallback。
+  2. **安靜步歷史保護（阻斷升變記錄入 Quiet History）**：
+     * 在 search.py 的 Fail-High Quiet History 更新中，原判斷為 if not best_is_capture and best_moved_piece != -1:。當發生非吃子推兵升變時，est_is_capture 為 False，導致升變走法被誤當作安靜走法寫入 history_table[color][PAWN][to_sq]。
+     * 更致命的是，該節點之前搜尋過的所有正常安靜走法均會因此遭受嚴厲的 **History Malus（懲罰扣分）**。然而升變乃強戰術步（子力大幅提升，如 +800 cp），非普通調子步；對手防不住升變戰術絕不代表前面的正常安靜防守步是劣著。修復為加入 get_special_move_flag(best_move) != SPECIAL_MOVE_FLAG_PROMOTION，阻斷升變進入 Quiet History，保護合法安靜步的排序健康度。
+* **實測對戰與數據（1000 局成對測試完賽）**：
+  * **對陣雙方**：
+    * **Candidate (New)**: search.py（修復 Fail-Low Fallback + 排除升變記錄入 Quiet History）
+    * **Baseline (Old)**: E103 生產基準（未修復版本）
+    * 時控：400,000 nodes/move；轉置表：64 MB / context；Early Adjudication：開啟。
+  * **對戰戰績統計（1000 局）**：
+    * 總對局數：**1000 局（500 組換先成對配對，FEN 嚴格無重複）**
+    * 戰績：**勝 212 | 和 602 | 負 186**（得分 513.0 / 1000，勝率 **51.30%**，淨勝 **+26 局**）
+    * 相對 Elo：**+9.04 Elo**（95% CI: [-2.67, +20.76]）
+    * 和局率：**60.20%**
+    * 成對結構：雙勝 (WW) 14 對 vs 雙敗 (LL) 10 對（淨雙勝 +4 對）；單勝一和 109 對 vs 單敗一和 91 對（淨勝 +18 對）。
+    * 前後半程穩定性：前 500 局勝率 **51.6%**，後 500 局勝率 **51.0%**，分數極度平穩收斂。
+  * **對局長度分桶 WDL（全面轉正）**：
+    * short (<=25)：n=108，WDL = 7-95-6，score = **0.505**（淨勝 +1）
+    * medium (26-50)：n=387，WDL = 83-240-64，score = **0.525**（淨勝 **+19**）
+    * long (51-80)：n=342，WDL = 95-155-92，score = **0.504**（淨勝 **+3**）
+    * ery_long (>80)：n=163，WDL = 27-112-24，score = **0.509**（淨勝 **+3**）
+  * **搜尋樹品質與效能（主統計約 11 萬步對比）**：
+    * 搜尋深度：New 17.10 (σ=3.81) vs Old 17.11 (σ=3.86)，差異 -0.01（Welch t = -0.351, p = 0.726，完全持平）。
+    * 節點消耗：New 247,736 vs Old 247,809，差異 -0.0%（Welch t = -0.321, p = 0.748）。
+    * 運行速度 NPS：New 574,021 vs Old 574,580，差異 -0.1%（無效能開銷）。
+    * 同深度平均節點比：d=10~24 比例穩定在 0.997 ~ 1.003 之間，完全維持基準水準。
+* **處置結論**：**顯著正向且棋理完備，正式採納進生產基線（ADOPTED）**。使用 	ools/sync_classical_old.py --sync 同步至 classical_old。
 
 ---
 

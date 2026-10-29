@@ -197,6 +197,7 @@ P3 的診斷分成三條 opt-in funnel：
     *   **重搜加深門檻優化（E99）**：當 LMR 走步在零窗口意外 Fail-High 時，若 `evaluation > max_eval + LMR_RESEARCH_DEEPER_MARGIN` 則予以加深 1 層重搜。E99 將門檻由粗暴移植的 32 cp 下調至 26 cp，1000 局對戰錄得 50.80%（+5.56 Elo，淨勝 +16 局，>50 步長局淨勝 +22 局），精準打擊深層戰術死角，正式採納為生產基準。
     *   **All-node 減步縮放分子調降（E100）**：對預期非 PV 且非 Cut-node 的 All-node，按公式 $r \mathrel{+}= \operatorname{trunc\_div}(r \times \text{LMR\_ALLNODE\_SCALE\_NUM},\, 256 \times \text{depth} + 268)$ 增加減步。E100 實驗將該縮放分子由 `276` 調降至 `260`（減幅微降 5.8%），在 1000 局成對測試中獲得 **+6.95 Elo**（51.00%，淨勝 +20 局，>50 步長局淨勝 +19 局），且平均深度與各深度節點比（1.000）完全無損，有效修復深層殘局中因過度減步產生的戰術盲點，正式採納為生產基準。
     *   **All-node 減步分母常數項偏移優化（E101）**：在 E100 將分子鎖定在 `260` 後，進一步以雙向梯度探針探勘分母。候選版本將分母常數項由 `268` 放寬至 `298`（即分母為 $256 \times \text{depth} + 298$）。在嚴格對抗原基準（268）的 1,000 局 400k nodes 長時控成對對戰中，錄得 **206 勝 625 和 169 負（51.85%，淨勝 +37 局）**，相對 Elo **+12.86 ± 13.18 (95% CI: [+0.17, +25.59])**，SPRT LLR = **+1.88**。95% CI 下界嚴格大於 0 達成統計顯著性，平均深度（17.19 vs 17.19）完全無損，各深度節點比保持 1.000，正式採納為生產基準。
+    *   **All-node 減步分母常數項進階探索（E103）**：在 E101 確立 `298` 後，順延梯度進一步將常數項微調至 `305`（即分母為 $256 \times \text{depth} + 305$）。在 1,000 局成對測試（預設啟用 Early Adjudication）中獲得 **205 勝 611 和 184 負（51.05%，淨勝 +21 局）**，相對 Elo **+7.30 ± 13.43 (95% CI: [-5.68, +20.29])**。搜尋深度（17.23 vs 17.23）與節點比（1.000）完全持平，中長局持續展現正向優勢，正式採納為生產基準。
 
 ### 4.8 奇異延展 (Singular Extensions, SE) 與 Multi-Cut（SF18 Step 15 對齊）
 *   **理念**：如果 TT 移動顯著好於其他所有候選移動（單一優勢），則加深該著法的搜尋，以確保強迫線計算精準。反之若排除 TT 移動後其他移動仍能 Fail-High（`>= beta`），則觸發 Multi-Cut 立即截斷。
@@ -1064,3 +1065,23 @@ NMP gate/R、ProbCut style、NMP beta requirement 的預設值也由常量明確
   * 同樣在 $> 80$ 步超長殘局展現關鍵淨勝 +15 局（69W 132D 54L），且 NPS / 每步耗時與 310 幾乎完全一致（差異僅 0.1%）。
   * 雙向驗證確立 `PROBCUT_TT_SHORTCUT_MARGIN` 落於 290 ~ 300 cp 之間形成堅實的性能增益平原。
 * **處置結論**：**方案 A 正式採納進生產基線 (ADOPTED / PRODUCTION BASELINE UPDATED)**，`PROBCUT_TT_SHORTCUT_MARGIN = 290` 同步至 `classical` 與 `classical_old`。
+
+### 17.11 Phase 16：LMR All-node 減深縮放因子調優（E100～E103，+7.30 Elo 正式採納）
+* **修改常數**：
+  * LMR_ALLNODE_SCALE_NUM = 260（由 276 下調，E100 淨勝 +20 局，+6.95 Elo）。
+  * LMR_ALLNODE_SCALE_DENOM_OFFSET = 305（由 268 上調至 298，再上調至 305，E101 +12.86 Elo，E103 +7.30 Elo，淨勝 +21 局）。
+* **處置結論**：正式採納 NUM = 260 與 OFFSET = 305 作為新基準。
+
+### 17.12 Phase 17：搜尋安靜步歷史保護與 Fail-Low 轉置表最佳著法修復（E105，+9.04 Elo 正式採納）
+在完成 LMR All-node 探索後，針對深層殘局與走法排序機制進行核心審計，修復了兩大核心漏洞並完成 1,000 局（500 組成對換先開局）對戰驗證：
+1. **Fail-Low 節點轉置表最佳走法覆蓋漏洞（search.py）**：
+   * 	ransposition_table.py 原本即設計在沒有新最佳步時保留舊有最佳步：if final_best_move == 0: final_best_move = existing_entry['best_move']。
+   * 然而 search.py 過去在 Fail-Low（est_move == NO_MOVE）時強制執行 Fallback 塞入 moves[0]，使得 Fail-Low 節點將先前疊代加深探索出的優質最佳走法以任意走法（甚至偽合法著法）粗暴覆蓋。修復為徹底刪除此 Fallback，確保 TT 精準傳承最佳走法。
+2. **安靜步歷史保護（search.py）**：
+   * 原先在 Fail-High Quiet History 更新中，非吃子升變（目標格為空格）因 
+ot best_is_capture 為真而被誤當作安靜走法寫入 history_table[color][PAWN][to_sq]，更導致該節點之前搜尋過的所有正常安靜步遭受無妄的 History Malus 懲罰。
+   * 加入 get_special_move_flag(best_move) != SPECIAL_MOVE_FLAG_PROMOTION 阻斷升變進入 Quiet History，使升變回歸戰術步本質，保護合法安靜步的排序健康。
+3. **實測對局戰績（1,000 局成對換先開局）**：
+   * **總比分**：Candidate **212 勝 602 和 186 負**（得分率 **51.30%**，淨勝 **+26 局**，相對 **+9.04 Elo**，95% CI: [-2.67, +20.76]）。
+   * **中殘局全面翻正**：26~50 步中局打出 83W 240D 64L（勝率 52.5%，淨勝 +19 局）；>50 步長局與殘局擺脫先前排序偏差，全區間勝率全面超過 50%。
+   * **處置結論**：**正式採納進生產基線 (ADOPTED / PRODUCTION BASELINE UPDATED)**，全面同步至 classical 與 classical_old。
