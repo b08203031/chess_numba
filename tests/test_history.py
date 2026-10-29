@@ -20,6 +20,8 @@ from chess_engine.classical.search_heuristics import (
     get_lmr_stat_score,
     get_quiet_stat_components,
     get_quiet_stat_score,
+    trunc_div,
+    update_butterfly_history,
     update_capture_history,
     update_continuation_history,
     update_history,
@@ -125,6 +127,47 @@ class TestHistoryTables(unittest.TestCase):
         ))
         self.assertEqual(raw_score, -10000)
         self.assertEqual(prune_score, HISTORY_PRUNE_CONT1_FLOOR)
+
+    def test_gravity_trunc_div_eliminates_negative_upward_drift(self):
+        self.assertEqual(int(trunc_div(-1000, 16384)), 0)
+        self.assertEqual(int(trunc_div(1000, 16384)), 0)
+        self.assertEqual(int(trunc_div(-20000, 16384)), -1)
+        self.assertEqual(int(trunc_div(20000, 16384)), 1)
+
+        ctx = make_context()
+        # Symmetric gravity check on symmetric tables (+100 with -10 vs -100 with +10)
+        ctx.history_table[1, 18] = -100
+        update_history(ctx.history_table, 1, 18, 10)
+        self.assertEqual(int(ctx.history_table[1, 18]), -90)  # floor // would drift to -89
+
+        ctx.history_table[1, 19] = 100
+        update_history(ctx.history_table, 1, 19, -10)
+        self.assertEqual(int(ctx.history_table[1, 19]), 90)
+
+        ctx.butterfly_history[1, 18] = -100
+        update_butterfly_history(ctx.butterfly_history, 1, 18, 10)
+        self.assertEqual(int(ctx.butterfly_history[1, 18]), -90)
+
+        ctx.capture_history[1, 18, 0] = -100
+        update_capture_history(ctx.capture_history, 1, 18, 0, 10)
+        self.assertEqual(int(ctx.capture_history[1, 18, 0]), -90)
+
+        prev_m = encode_move(8, 16, 0, 0)
+        curr_m = encode_move(1, 18, 0, 0)
+        ctx.continuation_history[0, 0, 16, 1, 18] = -100
+        update_continuation_history(ctx, 0, prev_m, 0, curr_m, 1, 10)
+        self.assertEqual(int(ctx.continuation_history[0, 0, 16, 1, 18]), -90)
+
+        # Pawn history with small negative value where floor // used to add +1
+        ctx.pawn_history[7, 1, 18] = -100
+        update_pawn_history(ctx.pawn_history, 7, 1, 18, 16)
+        # scaled_bonus = trunc_div(16 * 1038, 1024) = 16; damping = trunc_div(-100 * 16, 4096) = 0 -> -84
+        self.assertEqual(int(ctx.pawn_history[7, 1, 18]), -84)
+
+        # Pawn history negative bonus scaling uses trunc_div (-5250 / 1024 -> -5, not floor -6)
+        ctx.pawn_history[7, 1, 19] = 0
+        update_pawn_history(ctx.pawn_history, 7, 1, 19, -10)
+        self.assertEqual(int(ctx.pawn_history[7, 1, 19]), -5)
 
 if __name__ == "__main__":
     unittest.main()

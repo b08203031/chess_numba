@@ -405,6 +405,34 @@ class TestSearchCoreContracts(unittest.TestCase):
         self.assertIn('qs_att_type,', search[gives_check_call:see_gate])
         self.assertIn('if qs_att_type < 0:', search[see_gate:see_gate + 350])
 
+    def test_history_gravity_and_quiet_promotion_guards(self):
+        constants = (ROOT / 'chess_engine/classical/constants.py').read_text(encoding='utf-8')
+        heuristics = (ROOT / 'chess_engine/classical/search_heuristics.py').read_text(encoding='utf-8')
+        search = (ROOT / 'chess_engine/classical/search.py').read_text(encoding='utf-8')
+
+        # Step 1 rollback invariants
+        self.assertIn('GOOD_QUIET_THRESHOLD = -1200', constants)
+        bad_quiets = search.index('elif mp_stage == STAGE_BAD_QUIETS:')
+        bad_quiets_end = search.index('return NO_MOVE', bad_quiets)
+        self.assertNotIn('for j in range(current_idx + 1, quiets_end):', search[bad_quiets:bad_quiets_end])
+
+        # Step 2: write-path trunc_div only; score_quiets hot path untouched
+        score_quiets_idx = heuristics.index('def score_quiets(')
+        self.assertIn('score += LPH_ORDER_SCALE * lph_score // (1 + ply)', heuristics[score_quiets_idx:])
+        self.assertNotIn('trunc_div(', heuristics[score_quiets_idx:])
+
+        # Step 3: < 64 quiet buffer cap, quiet promotion guards, LPH trunc_div
+        self.assertIn('if quiet_moves_tried_count < 64:', search)
+        refute_idx = search.index('# --- Refutation Penalty ---')
+        cap_bonus_idx = search.index('# --- Best Move Capture History Bonus ---', refute_idx)
+        self.assertIn('get_special_move_flag(parent_move) != SPECIAL_MOVE_FLAG_PROMOTION', search[refute_idx:cap_bonus_idx])
+
+        corr_idx = search.index('# --- Update Correction History ---')
+        corr_end = search.index('tt_score = max_eval', corr_idx)
+        self.assertIn('move_flag == SPECIAL_MOVE_FLAG_PROMOTION', search[corr_idx:corr_end])
+        self.assertIn('if not is_capture_or_promo and (max_eval > static_score) == has_best_move:', search[corr_idx:corr_end])
+        self.assertEqual(search.count('trunc_div(curr * abs(clamped), LOW_PLY_HISTORY_MAX)'), 2)
+
 
 if __name__ == '__main__':
     unittest.main()

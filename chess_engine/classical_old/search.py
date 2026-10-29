@@ -181,6 +181,7 @@ from chess_engine.classical_old.engine_types import (
 from chess_engine.classical_old.move import move_to_uci
 
 from chess_engine.classical_old.search_heuristics import (
+    trunc_div,
     update_history, update_butterfly_history, update_capture_history,
     update_continuation_history, update_pawn_history,
     score_captures_lazy, score_captures_with_tt_lazy,
@@ -194,10 +195,6 @@ from chess_engine.classical_old.search_heuristics import (
 quiescence_search_return_type = numba.types.Tuple([
     numba.int32, numba.uint64
 ])
-
-@numba.njit(inline='always')
-def trunc_div(n, d):
-    return n // d if n >= 0 else -(-n // d)
 
 
 # ---------------------------------------------------------------------------
@@ -2760,9 +2757,10 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                     _diag_add(search_context, DIAG_ORDER_COUNTER_TRY)
 
         if is_quiet_move:
-            quiet_moves_tried[quiet_moves_tried_count] = move
-            quiet_pieces_tried[quiet_moves_tried_count] = moved_piece_type
-            quiet_moves_tried_count += 1
+            if quiet_moves_tried_count < 64:
+                quiet_moves_tried[quiet_moves_tried_count] = move
+                quiet_pieces_tried[quiet_moves_tried_count] = moved_piece_type
+                quiet_moves_tried_count += 1
         elif is_capture and moved_piece_type != -1:
             victim_type = unmake_info[1]  # relative 0..5 or -1
             if victim_type != -1:
@@ -3141,7 +3139,9 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
             parent_move = search_context.move_stack[ply - 1]
             parent_aggressor = search_context.piece_stack[ply - 1]
 
-            if parent_move != NO_MOVE and parent_aggressor != -1 and not parent_was_capture:
+            if (parent_move != NO_MOVE and parent_aggressor != -1
+                    and not parent_was_capture
+                    and get_special_move_flag(parent_move) != SPECIAL_MOVE_FLAG_PROMOTION):
                 parent_move_count = search_context.move_count_stack[ply - 1]
                 parent_tt_hit = search_context.tt_hit_stack[ply - 1]
 
@@ -3240,10 +3240,10 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                     update_continuation_history(search_context, 4, prev_move_played, prev_piece_played, best_move, aggressor_type, bonus)
 
             if ply < 5:
-                lph_bonus = bonus * HISTORY_LPH_SCALE_NUM // HISTORY_LPH_SCALE_DEN
-                curr = search_context.low_ply_history[ply, best_move]
+                lph_bonus = trunc_div(bonus * HISTORY_LPH_SCALE_NUM, HISTORY_LPH_SCALE_DEN)
+                curr = np.int32(search_context.low_ply_history[ply, best_move])
                 clamped = min(max(lph_bonus, -LOW_PLY_HISTORY_MAX), LOW_PLY_HISTORY_MAX)
-                search_context.low_ply_history[ply, best_move] = curr + clamped - (curr * abs(clamped)) // LOW_PLY_HISTORY_MAX
+                search_context.low_ply_history[ply, best_move] = curr + clamped - trunc_div(curr * abs(clamped), LOW_PLY_HISTORY_MAX)
                 _diag_add(search_context, DIAG_HIST_LPH_UPD)
 
             # Update Counter Move (Phase 1a: prev_piece x prev_to)
@@ -3304,10 +3304,10 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                         update_continuation_history(search_context, 4, prev_move_played, prev_piece_played, bad_move, bad_aggressor, -actual_malus)
 
                 if ply < 5:
-                    lph_malus = actual_malus * HISTORY_LPH_SCALE_NUM // HISTORY_LPH_SCALE_DEN
-                    curr = search_context.low_ply_history[ply, bad_move]
+                    lph_malus = trunc_div(actual_malus * HISTORY_LPH_SCALE_NUM, HISTORY_LPH_SCALE_DEN)
+                    curr = np.int32(search_context.low_ply_history[ply, bad_move])
                     clamped = min(max(-lph_malus, -LOW_PLY_HISTORY_MAX), LOW_PLY_HISTORY_MAX)
-                    search_context.low_ply_history[ply, bad_move] = curr + clamped - (curr * abs(clamped)) // LOW_PLY_HISTORY_MAX
+                    search_context.low_ply_history[ply, bad_move] = curr + clamped - trunc_div(curr * abs(clamped), LOW_PLY_HISTORY_MAX)
 
                 actual_malus = actual_malus * search_context.tune[TUNE_HIST_MALUS_DECAY] // HISTORY_QUIET_MALUS_DECAY_DEN
 
@@ -3378,15 +3378,19 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
             np_black_key = game_state[NON_PAWN_KEY_BLACK_INDEX]
             side = game_state[0]
             
-            is_capture = False
+            is_capture_or_promo = False
             if best_move != NO_MOVE:
                 to_sq = get_to_square(best_move)
                 move_flag = get_special_move_flag(best_move)
                 enemy_side = 1 - side
-                is_capture = ((occupancy_bbs[enemy_side] & BB_SQUARES[to_sq]) != 0) or (move_flag == SPECIAL_MOVE_FLAG_EN_PASSANT)
+                is_capture_or_promo = (
+                    ((occupancy_bbs[enemy_side] & BB_SQUARES[to_sq]) != 0)
+                    or (move_flag == SPECIAL_MOVE_FLAG_EN_PASSANT)
+                    or (move_flag == SPECIAL_MOVE_FLAG_PROMOTION)
+                )
             
             has_best_move = (best_move != NO_MOVE)
-            if not is_capture and (max_eval > static_score) == has_best_move:
+            if not is_capture_or_promo and (max_eval > static_score) == has_best_move:
                 # Based on static_score calculation of bonus
                 diff = max_eval - static_score
                 bonus = trunc_div(
