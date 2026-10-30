@@ -1107,12 +1107,24 @@ NMP gate/R、ProbCut style、NMP beta requirement 的預設值也由常量明確
    * 門檻調低至 `-1300` 同時稀釋了 Good Quiets 的純度。
 3. **處置結論**：**明確效能退化，否決採納並已於 `classical` 回滾至 E106 基準版本（`GOOD_QUIET_THRESHOLD = -1200`、`STAGE_BAD_QUIETS` 無排序線性提取）（REJECTED / ROLLED BACK）**。
 
-### 17.15 Phase 20（待實測驗證）：歷史表 Gravity 向零取整（`trunc_div`）與非吃子升變污染防護補齊
-在回滾 E107 後，針對寫入端與安全邊界實施零熱路徑開銷的精準修補（保留 `score_quiets` 熱路徑不動，以 `classical_old` 之 E106 為對照基線待測）：
-1. **Gravity 公式向零取整（`trunc_div`）**：
-   * Python/Numba 的整數除法 `//` 為向下取整（Floor Division），當歷史值或縮放分子為負數時（例如 `-1000 // 16384 == -1`），在 `curr + bonus - (curr * abs(bonus)) // MAX` 中會產生 `-(-1) = +1` 的系統性向上漂移。
-   * 將 `search_heuristics.py` 中 5 個寫入函數（`update_history`、`update_butterfly_history`、`update_capture_history`、`update_pawn_history`、`update_continuation_history`）與 `search.py` Step 21 中 `low_ply_history` 的 Bonus / Malus 寫入全面改為向零取整 `trunc_div`，並對 `int16` 的 `low_ply_history` 明確轉型 `np.int32` 防止乘法溢位，完全對齊 C++ / Stockfish `StatsEntry::operator<<` 語義。
-2. **補齊非吃子升變（Quiet Promotion）污染防護**：
-   * 延續 Phase 17（E105）之防護邏輯，在 `_search` 的 `Refutation Penalty`（排除父節點直推升變污染延續歷史）與 `Update Correction History`（排除直推升變因戰術分暴漲污染四張靜態評估校正表）補齊 `SPECIAL_MOVE_FLAG_PROMOTION` 守衛。
-3. **安靜步回溯懲罰緩衝區上限守衛**：
-   * 在 `_search` 記錄 `quiet_moves_tried` 處補齊 `quiet_moves_tried_count < 64` 守衛，與 `capture_moves_tried_count < 64` 及 Stockfish `ValueList<Move, 64> quietsSearched` 保持一致。
+### 17.15 Phase 20：歷史表 Gravity 向零取整（`trunc_div`）與非吃子升變污染防護補齊（E108，+9.2 Elo 正式採納）
+在回滾 E107 後，針對寫入端與安全邊界實施零熱路徑開銷的精準修補，並在 400k nodes/move LTC 下完成 908 局成對測試：
+1. **修補內容**：
+   * **Gravity 公式向零取整（`trunc_div`）**：Python/Numba 的整數除法 `//` 為向下取整（Floor Division），當歷史值或縮放分子為負數時（例如 `-1000 // 16384 == -1`），在 `curr + bonus - (curr * abs(bonus)) // MAX` 中會產生 `-(-1) = +1` 的系統性向上漂移。將 `search_heuristics.py` 中 5 個寫入函數與 `search.py` Step 21 中 `low_ply_history` 的 Bonus / Malus 寫入全面改為向零取整 `trunc_div`，並對 `int16` 的 `low_ply_history` 明確轉型 `np.int32` 防止乘法溢位，完全對齊 C++ / Stockfish `StatsEntry::operator<<` 語義。
+   * **補齊非吃子升變（Quiet Promotion）污染防護**：延續 Phase 17（E105）之防護邏輯，在 `_search` 的 `Refutation Penalty`（排除父節點直推升變污染延續歷史）與 `Update Correction History`（排除直推升變因戰術分暴漲污染四張靜態評估校正表）補齊 `SPECIAL_MOVE_FLAG_PROMOTION` 守衛。
+   * **安靜步回溯懲罰緩衝區上限守衛**：在 `_search` 記錄 `quiet_moves_tried` 處補齊 `quiet_moves_tried_count < 64` 守衛，與 Stockfish `ValueList<Move, 64> quietsSearched` 保持一致。
+   * **零熱路徑負擔**：完全保留 `score_quiets` 熱路徑不變，無任何執行期效能代價。
+2. **實測對戰數據（908 局成對測試）**：
+   * 戰績：**183 勝 566 和 159 負**（得分 466.0 / 908，勝率 **51.32%**，淨勝 **+24 局**，相對 **+9.2 ± 13.9 Elo**，95% CI: `[-4.70, +23.10]`，SPRT LLR=+0.84）。
+   * 執白 55.51%（119W 266D 69L），執黑 47.14%（64W 300D 90L），先後手全線提升。
+3. **處置結論**：**顯著正向 (+9.2 Elo, 淨勝 +24 局)，正式採納進生產基線（ADOPTED / PRODUCTION BASELINE UPDATED）**。已同步至 `classical_old`。
+
+### 17.16 Phase 21：Continuation Correction History 權重上下界探測（E109，確立 10000 為最優甜點）
+在完成 Phase 20 後，針對 Continuation Correction History 縮放權重 `CORRECTION_CNTCV_WEIGHT`（基準值 10000）實施雙向 ±10% 探測：
+1. **調降至 9000（Commit `376d025`）**：
+   * 290 局戰績 53W 172D 65L（勝率 47.93%，淨負 -12 局，相對 **-14.4 ± 25.5 Elo**，LLR=-1.12）。
+   * 結論：權重過低會削弱延續校正對深層動態盤面特徵的修正力度，戰力顯著受損。
+2. **調升至 11000（Commit `fb20b88`）**：
+   * 796 局戰績 164W 465D 167L（勝率 49.81%，淨負 -3 局，相對 **-1.3 ± 15.6 Elo**，LLR=-1.07）。
+   * 結論：權重過高會過度擬合歷史搜尋模式，產生校正噪聲。
+3. **處置結論**：**上下雙界皆退化，確立 `CORRECTION_CNTCV_WEIGHT = 10000` 為局部最優甜點（Sweet Spot）。否決調動，代碼鎖定並維持 10000（REJECTED / MAINTAIN 10000）**。
