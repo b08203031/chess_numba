@@ -160,17 +160,20 @@ python -m tests.perft divide --depth 4
       * `weights/`: 儲存 `*.pth` 與 `*.npy` 權重檔案。
 * `tests/`: 單元測試與效能基準測試目錄。
   * `test_nnue_validation.py`: NNUE JIT、量化與數據管線安全性單元測試。
+  * `test_vision_and_assistant.py`: 通用螢幕棋盤定位、ONNX 棋子分類器與 `assistant.py` 狀態機回歸測試。
   * `test_puzzle.py` & `test_puzzle_nn.py`: 戰術謎題測試。
   * `test_search.py`: 搜尋邏輯測試。
   * `perft.py`: 移動生成器性能與正確性測試。
   * `benchmark*.py`: 引擎效能基準測試。
 * `tools/`: 工具與對決管理目錄。
-  * `screen_recognizer.py`: 螢幕棋盤影像識別模組。
+  * `screen_recognizer.py`: 螢幕棋盤影像識別模組（支援無色彩限制 8×8 鞍點格網定位與通用 ONNX 棋子分類器）。
+  * `train_piece_cnn.py`: 跨網站通用 13 類棋子影像分類器（PyTorch 訓練與零額外依賴 ONNX 匯出腳本）。
   * `match_core.py`: 共用 in-process context 池、UCI adapter、裁判、PGN 與 SPRT。
   * `tournament.py` & `match_runner.py`: 單進程共享 JIT 的引擎對決，以及對 Stockfish 的混合式 match runner。
   * `filter_book.py`: 開局庫過濾工具。
 * `data/`: 資料儲存目錄。
-  * `templates/`: 棋子識別影像範本。
+  * `models/piece_classifier.onnx`: 通用 13 類棋格辨識輕量 CNN 模型（供 `cv2.dnn` 批次推理）。
+  * `templates/`: 棋子識別影像範本（Default 與 `custom/` 自訂學習範本）。
   * `openings.epd`: 聯賽開局庫。
 * `external/`: 外部工具。
   * `stockfish/`: 包含官方 Stockfish 執行檔，用於聯賽對手或資料標記。

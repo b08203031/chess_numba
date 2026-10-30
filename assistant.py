@@ -12,11 +12,13 @@ except Exception:
     except Exception:
         pass
 
+import collections
 import tkinter as tk
 from tkinter import ttk, messagebox
 import threading
 import queue
 import subprocess
+
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), 'tools')))
 import time
 import chess
@@ -37,37 +39,33 @@ UNICODE_PIECES = {
     None: ''
 }
 
-BOARD_COLORS = [ "#B58863", "#F0D9B5"]  # Light, Dark squares (Wood theme)
-HIGHLIGHT_COLOR = "#FFFF00" # Yellow for best move
-LAST_MOVE_COLOR = "#BBCB2B" # Greenish for last move
+BOARD_COLORS = ["#B58863", "#F0D9B5"]  # Dark, Light squares (Wood theme)
+HIGHLIGHT_COLOR = "#FFFF00"            # Yellow for best move
+LAST_MOVE_COLOR = "#BBCB2B"            # Greenish for last move
+
 
 def sanitize_fen_input(text, field_type):
     """
     Sanitizes user input for FEN fields to prevent UCI command injection.
     """
-    # Security: Remove any potential control characters and validate format
     stripped = text.strip()
-    
+
     if field_type == 'castling':
-        # Castling rights: only K, Q, k, q, or -
         if stripped == "-":
             return "-"
-            
-        if re.match(r"^[KQkq]+$", stripped):
-            if len(stripped) <= 4:
-                return stripped
+        if re.match(r"^[KQkq]+$", stripped) and len(stripped) <= 4:
+            return stripped
         return "-"
 
     elif field_type == 'ep':
-        # En Passant: [a-h][36] or -
         if stripped == "-":
             return "-"
-        
         if re.match(r"^[a-h][36]$", stripped):
             return stripped
         return "-"
-            
+
     return "-"
+
 
 class ToolTip(object):
     """
@@ -81,18 +79,17 @@ class ToolTip(object):
         self.tw = None
 
     def enter(self, event=None):
-        x = y = 0
         x = self.widget.winfo_rootx() + 25
         y = self.widget.winfo_rooty() + 20
-        
-        # creates a toplevel window
+
         self.tw = tk.Toplevel(self.widget)
-        # Leaves only the label and removes the app window
         self.tw.wm_overrideredirect(True)
         self.tw.wm_geometry("+%d+%d" % (x, y))
-        label = tk.Label(self.tw, text=self.text, justify='left',
-                       background='#ffffe0', relief='solid', borderwidth=1,
-                       font=("Segoe UI", "9", "normal"))
+        label = tk.Label(
+            self.tw, text=self.text, justify='left',
+            background='#ffffe0', relief='solid', borderwidth=1,
+            font=("Segoe UI", "9", "normal")
+        )
         label.pack(ipadx=5, ipady=2)
 
     def close(self, event=None):
@@ -100,28 +97,29 @@ class ToolTip(object):
             self.tw.destroy()
             self.tw = None
 
+
 class EngineProcess:
     """
     Manages the subprocess for the chess engine (main.py).
-    Handles UCI communication via stdin/stdout.
+    Handles UCI communication via stdin/stdout with strict search_id tracking
+    so stale bestmove/info outputs from interrupted searches never leak into new searches.
     """
-    def __init__(self, callback_queue):
+    def __init__(self, callback_queue, engine_script="main.py"):
         self.callback_queue = callback_queue
         self.process = None
         self.running = False
         self.threads = []
-        
-        # Determine the path to main.py
+        self._lock = threading.Lock()
+        self._inflight_search_ids = collections.deque()
+
         script_dir = os.path.dirname(os.path.abspath(__file__))
-        self.engine_path = os.path.join(script_dir, "main.py")
+        self.engine_path = os.path.join(script_dir, engine_script)
 
     def start(self):
         if self.running:
             return
 
         try:
-            # Use 'python' or sys.executable to run main.py
-            # Use -u for unbuffered output to ensure we get prints immediately
             cmd = [sys.executable, "-u", self.engine_path]
             self.process = subprocess.Popen(
                 cmd,
@@ -129,24 +127,37 @@ class EngineProcess:
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 cwd=os.path.dirname(os.path.abspath(__file__)),
-                text=True,  # Text mode for strings
-                bufsize=1   # Line buffered
+                text=True,
+                bufsize=1
             )
             self.running = True
-            
-            # Start threads to read output
+
             t_out = threading.Thread(target=self._read_stdout, daemon=True)
             t_err = threading.Thread(target=self._read_stderr, daemon=True)
             self.threads = [t_out, t_err]
             for t in self.threads:
                 t.start()
-            
-            # Initialize UCI
+
+            # Initialize UCI; main.py runs warmup_search_jit() on first `isready` and replies `readyok`
             self.send_command("uci")
             self.send_command("isready")
-            
+
         except Exception as e:
             self.callback_queue.put({"type": "error", "message": f"Failed to start engine: {e}"})
+
+    def start_search(self, position_cmd: str, go_cmd: str, search_id: int, own_book: bool = True):
+        """Atomically configures OwnBook, sets position (with full move history), and starts `go`."""
+        if not (self.running and self.process):
+            return
+        with self._lock:
+            self._inflight_search_ids.append(search_id)
+            try:
+                self.process.stdin.write(f"setoption name OwnBook value {'true' if own_book else 'false'}\n")
+                self.process.stdin.write(position_cmd + "\n")
+                self.process.stdin.write(go_cmd + "\n")
+                self.process.stdin.flush()
+            except BrokenPipeError:
+                self.running = False
 
     def stop_calculation(self):
         """Sends 'stop' command to engine to gracefully end current search."""
@@ -164,11 +175,12 @@ class EngineProcess:
 
     def send_command(self, cmd):
         if self.running and self.process:
-            try:
-                self.process.stdin.write(cmd + "\n")
-                self.process.stdin.flush()
-            except BrokenPipeError:
-                self.running = False
+            with self._lock:
+                try:
+                    self.process.stdin.write(cmd + "\n")
+                    self.process.stdin.flush()
+                except BrokenPipeError:
+                    self.running = False
 
     def _read_stdout(self):
         while self.running and self.process:
@@ -179,30 +191,22 @@ class EngineProcess:
                 line = line.strip()
                 if not line:
                     continue
-                
-                # Print raw output to terminal for user visibility
+
                 print(line, flush=True)
-
-                # Forward raw line to the GUI console
                 self.callback_queue.put({"type": "raw_log", "message": line})
-
-                # Parse UCI output
                 self._parse_uci_output(line)
-            except Exception as e:
-                # self.callback_queue.put({"type": "log", "message": f"Stdout Error: {e}"})
+            except Exception:
                 break
 
     def _read_stderr(self):
-        """Read stderr to prevent deadlock, can be logged if needed."""
         while self.running and self.process:
             try:
                 line = self.process.stderr.readline()
                 if not line:
                     break
                 line = line.strip()
-                # Forward stderr to main thread logs
                 self.callback_queue.put({"type": "raw_log", "message": f"[STDERR] {line}"})
-            except:
+            except Exception:
                 break
 
     def _parse_uci_output(self, line):
@@ -211,112 +215,80 @@ class EngineProcess:
             return
 
         cmd = parts[0]
-        
-        if cmd == "info":
-            # Example: info depth 5 score cp 20 pv e2e4 e7e5
-            info_data = {"type": "info"}
-            
-            # Parse String Info (e.g. "Playing from book")
+
+        if cmd == "readyok":
+            self.callback_queue.put({"type": "readyok"})
+
+        elif cmd == "info":
+            with self._lock:
+                cur_sid = self._inflight_search_ids[0] if self._inflight_search_ids else None
+            info_data = {"type": "info", "search_id": cur_sid}
+
             if "string" in parts:
                 idx = parts.index("string")
-                info_data["string"] = " ".join(parts[idx+1:])
+                info_data["string"] = " ".join(parts[idx + 1:])
 
-            # Parse Score
             if "score" in parts:
                 idx = parts.index("score")
                 if idx + 2 < len(parts):
-                    score_type = parts[idx+1] # cp or mate
-                    score_val = parts[idx+2]
-                    info_data["score_type"] = score_type
-                    info_data["score_val"] = score_val
+                    info_data["score_type"] = parts[idx + 1]
+                    info_data["score_val"] = parts[idx + 2]
 
-            # Parse Depth
-            if "depth" in parts:
-                idx = parts.index("depth")
-                if idx + 1 < len(parts):
-                    info_data["depth"] = parts[idx+1]
+            for key in ("depth", "seldepth", "nodes", "nps", "time"):
+                if key in parts:
+                    idx = parts.index(key)
+                    if idx + 1 < len(parts):
+                        info_data[key] = parts[idx + 1]
 
-            # Parse SelDepth
-            if "seldepth" in parts:
-                idx = parts.index("seldepth")
-                if idx + 1 < len(parts):
-                    info_data["seldepth"] = parts[idx+1]
-
-            # Parse Nodes
-            if "nodes" in parts:
-                idx = parts.index("nodes")
-                if idx + 1 < len(parts):
-                    info_data["nodes"] = parts[idx+1]
-
-            # Parse NPS
-            if "nps" in parts:
-                idx = parts.index("nps")
-                if idx + 1 < len(parts):
-                    info_data["nps"] = parts[idx+1]
-
-            # Parse Time
-            if "time" in parts:
-                idx = parts.index("time")
-                if idx + 1 < len(parts):
-                    info_data["time"] = parts[idx+1]
-
-            # Parse PV and map FRC castling to Standard Castling for display
             castling_map = {"e1h1": "e1g1", "e1a1": "e1c1", "e8h8": "e8g8", "e8a8": "e8c8"}
             if "pv" in parts:
                 idx = parts.index("pv")
-                pv_moves = parts[idx+1:]
-                
-                # We do a simple string replacement for the first move if it's a King move
-                # This could be more robust using chess.Board, but for display purposes this is usually sufficient
-                mapped_pv = []
-                for move in pv_moves:
-                    # Very simple heuristic: if the move is in castling_map and starts with e1/e8
-                    # we just replace it. A true robust way requires board state tracking through the PV.
-                    if move in castling_map:
-                        mapped_pv.append(castling_map[move])
-                    else:
-                        mapped_pv.append(move)
-                        
+                pv_moves = parts[idx + 1:]
+                mapped_pv = [castling_map.get(m, m) for m in pv_moves]
                 info_data["pv"] = " ".join(mapped_pv)
 
             self.callback_queue.put(info_data)
 
         elif cmd == "bestmove":
-            # Example: bestmove e2e4 ponder ...
-            move = parts[1]
-            self.callback_queue.put({"type": "bestmove", "move": move})
+            move = parts[1] if len(parts) > 1 else "0000"
+            with self._lock:
+                sid = self._inflight_search_ids.popleft() if self._inflight_search_ids else None
+            self.callback_queue.put({"type": "bestmove", "move": move, "search_id": sid})
+
 
 class ChessVisionApp(tk.Tk):
     def __init__(self):
         super().__init__()
         self.title("西洋棋視覺助理 (Chess Vision App)")
-        self.geometry("500x780")
-        
+        self.geometry("500x800")
+
         # Defer topmost to avoid locking the window on startup
         self.after(500, lambda: self.attributes('-topmost', True))
-        
+
         # State
         self.board = chess.Board()
         self.game_pgn = chess.pgn.Game.from_board(self.board)
         self.game_node = self.game_pgn
         self.message_queue = queue.Queue()
-        self.recognizer = None # Lazy load
-        self.engine = EngineProcess(self.message_queue)
-        self.engine.start()
+
+        self._recognizer_lock = threading.Lock()
+        self.recognizer = None
+
         self.analyzing = False
-        self.warming_up = False
+        self.warming_up = True
+        self.current_search_id = 0
         self.is_first_analysis = True
         self.auto_detecting_opponent = False
         self.last_detected_fen = ""
-        self.autoplay_mode_var = tk.StringVar(value="fixed") # "fixed" or "self"
+        self.autoplay_mode_var = tk.StringVar(value="fixed")  # "fixed" or "self"
         self.use_book_var = tk.BooleanVar(value=True)
-        
+
         # Manual Mode & Arrow States
         self.redo_stack = []
         self.selected_square = None
         self.best_move_arrow = None
         self.dragging = False
-        
+
         # Logs Initialization
         script_dir = os.path.dirname(os.path.abspath(__file__))
         self.logs_dir = os.path.join(script_dir, "logs")
@@ -324,15 +296,132 @@ class ChessVisionApp(tk.Tk):
             os.makedirs(self.logs_dir)
         timestamp = time.strftime("%Y%m%d_%H%M%S")
         self.log_filename = os.path.join(self.logs_dir, f"game_eval_{timestamp}.log")
-        
+
         # UI Components
+        self._ui_state = {}
+        self._cached_hwnd = None
         self._create_ui()
-        
+        self._refresh_ui_snapshot()
+
+        # Start engine after UI is ready so `readyok` updates status label cleanly
+        self.engine = EngineProcess(self.message_queue)
+        self.engine.start()
+
+        # Initialize recognizer asynchronously in background so buttons never hit NoneType
+        threading.Thread(target=self._ensure_recognizer, daemon=True).start()
+
         # Start message polling
-        self.after(100, self._process_queue)
-        
-        # Warm-up (Silent)
-        self.after(1000, self._run_warmup)
+        self.after(20, self._process_queue)
+
+    def _post_ui(self, fn, *args):
+        """
+        Thread-safe UI callback dispatch:
+        - Executes synchronously if already on the Tkinter main thread.
+        - Otherwise enqueues onto `self.message_queue` so worker threads never touch Tcl locks.
+        """
+        if threading.current_thread() is threading.main_thread():
+            fn(*args)
+        else:
+            self.message_queue.put({"type": "ui_call", "fn": fn, "args": args})
+
+    def _refresh_ui_snapshot(self):
+        """Captures Tkinter variable values & HWND onto plain Python attributes on the main thread."""
+        if threading.current_thread() is not threading.main_thread():
+            return
+        d = self.__dict__
+        state = d.setdefault("_ui_state", {})
+        for key, attr in (
+            ("my_color", "my_color_var"),
+            ("side", "side_var"),
+            ("auto_detect", "auto_detect_var"),
+            ("auto_detect_opponent", "auto_detect_opponent_var"),
+            ("auto_play", "auto_play_var"),
+            ("autoplay_mode", "autoplay_mode_var"),
+            ("use_book", "use_book_var"),
+        ):
+            var = d.get(attr)
+            if var is not None:
+                try:
+                    state[key] = var.get()
+                except Exception:
+                    pass
+        try:
+            state["go_cmd"] = self._build_go_cmd()
+        except Exception:
+            pass
+        try:
+            if d.get("tk") is not None:
+                d["_cached_hwnd"] = self.winfo_id()
+        except Exception:
+            pass
+
+    def _ui_get(self, key: str, var_attr: str, default=None):
+        """Reads UI state safely from either main thread or background worker threads."""
+        d = self.__dict__
+        if threading.current_thread() is threading.main_thread():
+            var = d.get(var_attr)
+            if var is not None:
+                try:
+                    val = var.get()
+                    state = d.setdefault("_ui_state", {})
+                    state[key] = val
+                    return val
+                except Exception:
+                    pass
+        state = d.get("_ui_state")
+        if state and key in state:
+            return state[key]
+        var = d.get(var_attr)
+        if var is not None:
+            try:
+                return var.get()
+            except Exception:
+                pass
+        return default
+
+    def _ensure_recognizer(self):
+        """Thread-safe lazy initialization of ScreenRecognizer."""
+        if self.recognizer is not None:
+            return self.recognizer
+        with self._recognizer_lock:
+            if self.recognizer is None:
+                from tools import screen_recognizer
+                rec = screen_recognizer.ScreenRecognizer(mode="universal")
+                self.recognizer = rec
+                if rec.mode != "universal":
+                    self._post_ui(lambda: self.piece_style_var.set("Default"))
+        return self.recognizer
+
+    @staticmethod
+    def build_uci_position_cmd(board: chess.Board) -> str:
+        """
+        Builds a full-history UCI `position` command (`position startpos moves ...` or
+        `position fen <root> moves ...`) so the engine accurately tracks 3-fold repetition
+        and the 50-move rule throughout the game.
+        """
+        root_board = board.root()
+        moves_uci = [m.uci() for m in board.move_stack]
+        root_fen = root_board.fen()
+        base = "startpos" if root_fen == chess.STARTING_FEN else f"fen {root_fen}"
+        if moves_uci:
+            return f"position {base} moves {' '.join(moves_uci)}"
+        return f"position {base}"
+
+    def _build_go_cmd(self) -> str:
+        d = self.__dict__
+        limit_nodes_var = d.get("limit_by_nodes_var")
+        if limit_nodes_var is not None and limit_nodes_var.get():
+            try:
+                nodes_limit = max(100, int(d["nodes_limit_var"].get()))
+            except Exception:
+                nodes_limit = 100000
+            return f"go nodes {nodes_limit}"
+        try:
+            time_var = d.get("time_var")
+            time_limit = max(50, int(float(time_var.get()) * 1000)) if time_var is not None else 10000
+        except Exception:
+            time_limit = 10000
+        return f"go movetime {time_limit}"
 
     def get_pgn_string(self):
         """Returns the current game in standard PGN format."""
@@ -351,56 +440,109 @@ class ChessVisionApp(tk.Tk):
         self.clipboard_append(pgn_str)
         messagebox.showinfo("PGN", "PGN 已複製到剪貼簿 (PGN copied to clipboard)")
 
-    def init_game_from_board(self, board):
-        """Initializes a new game / PGN rooted at the given board position."""
-        self.board = chess.Board(board.fen())
-        self.game_pgn = chess.pgn.Game.from_board(self.board)
-        self.game_node = self.game_pgn
+    def _sync_ui_vars_from_board(self):
+        """Must be called on the Tkinter main thread."""
         ep = chess.square_name(self.board.ep_square) if self.board.ep_square is not None else "-"
         self.ep_var.set(ep)
         self.castling_var.set(self.board.fen().split()[2])
         self.side_var.set("w" if self.board.turn == chess.WHITE else "b")
+
+    def init_game_from_board(self, board):
+        """Initializes a new game / PGN rooted at the given board position (Main thread)."""
+        self.board = chess.Board(board.fen())
+        self.game_pgn = chess.pgn.Game.from_board(self.board)
+        self.game_node = self.game_pgn
         self.best_move_arrow = None
+        self._sync_ui_vars_from_board()
 
     def find_matching_legal_move(self, target_board):
+        """1-ply convenience wrapper."""
+        seq = self.find_matching_move_sequence(target_board, max_plies=1)
+        return seq[0] if seq and len(seq) == 1 else None
+
+    def find_matching_move_sequence(self, target_board, max_plies=2):
         """
-        Finds a legal move from self.board that leads to target_board's piece placement.
-        Returns the chess.Move object if found, or None.
+        Finds a 1-ply or 2-ply legal move sequence from `self.board` that produces
+        `target_board`'s exact piece placement.
+          - Returns `[]` if `target_board` already matches `self.board`.
+          - Returns `[m1]` if 1 legal move matches.
+          - Returns `[m1, m2]` if 2 legal moves (e.g. our move + opponent reply) match.
+          - Returns `None` if no legal <=max_plies sequence matches.
         """
         if target_board is None:
             return None
-        target_pieces = target_board.board_fen() if hasattr(target_board, 'board_fen') else str(target_board).split()[0]
-        for move in self.board.legal_moves:
-            self.board.push(move)
-            matched = (self.board.board_fen() == target_pieces)
-            self.board.pop()
-            if matched:
-                return move
+        if isinstance(target_board, str):
+            target_board = chess.Board(target_board)
+
+        target_pieces = target_board.board_fen()
+        if self.board.board_fen() == target_pieces:
+            return []
+
+        b_work = self.board.copy(stack=False)
+
+        # Changed squares filter: any move m1's from_square MUST differ between b_work and target_board
+        diff_squares = {
+            sq for sq in chess.SQUARES
+            if b_work.piece_at(sq) != target_board.piece_at(sq)
+        }
+
+        # 1. Check 1-ply legal moves first
+        for m1 in b_work.legal_moves:
+            if m1.from_square not in diff_squares:
+                continue
+            b_work.push(m1)
+            if b_work.board_fen() == target_pieces:
+                b_work.pop()
+                return [m1]
+            b_work.pop()
+
+        if max_plies < 2:
+            return None
+
+        # 2. Check 2-ply legal move sequences (our move + fast opponent reply / manual pair)
+        for m1 in b_work.legal_moves:
+            if m1.from_square not in diff_squares:
+                continue
+            b_work.push(m1)
+            diff_after_m1 = {
+                sq for sq in chess.SQUARES
+                if b_work.piece_at(sq) != target_board.piece_at(sq)
+            }
+            for m2 in b_work.legal_moves:
+                if m2.from_square not in diff_after_m1:
+                    continue
+                b_work.push(m2)
+                if b_work.board_fen() == target_pieces:
+                    b_work.pop()
+                    b_work.pop()
+                    return [m1, m2]
+                b_work.pop()
+            b_work.pop()
+
         return None
 
     def apply_move(self, move: chess.Move):
         """
-        Applies a legal move to the board and records it into the PGN game tree.
-        Automatically updates en passant, castling rights, and side to move.
-        Both en passant and castling rights are strictly maintained via move transition.
+        Applies a legal move to `self.board` and records it into the PGN game tree (Main thread).
         """
         if move not in self.board.legal_moves:
             print(f"[WARN] Move {move} is not legal in position {self.board.fen()}")
             return False
-            
+
         self.board.push(move)
         if self.game_node is not None:
             self.game_node = self.game_node.add_variation(move)
-            
-        # Update EP & Castling consistently from board move transition
-        ep = chess.square_name(self.board.ep_square) if self.board.ep_square is not None else "-"
-        self.ep_var.set(ep)
-        self.castling_var.set(self.board.fen().split()[2])
-        self.side_var.set("w" if self.board.turn == chess.WHITE else "b")
+
+        self._sync_ui_vars_from_board()
         return True
 
+    def _is_text_input_focused(self) -> bool:
+        focused = self.focus_get()
+        if focused is None:
+            return False
+        return isinstance(focused, (tk.Entry, ttk.Entry, ttk.Combobox, tk.Text))
+
     def _create_ui(self):
-        # Configure Notebook Tab style to make tabs larger
         style = ttk.Style()
         style.configure("TNotebook.Tab", font=("Arial", 11, "bold"), padding=[12, 6])
 
@@ -409,21 +551,18 @@ class ChessVisionApp(tk.Tk):
         self.notebook.pack(fill="x", padx=10, pady=5)
         self.notebook.bind("<<NotebookTabChanged>>", self.on_tab_changed)
 
-        # 2. Main Control Buttons Frame (Put back to original place - below tabs, above analysis results)
+        # 2. Main Control Buttons Frame
         btn_frame = ttk.Frame(self)
         btn_frame.pack(fill="x", padx=10, pady=5)
 
-        # Start Button
         self.btn_analyze = ttk.Button(btn_frame, text="▶ 開始分析 (Start)", command=self.start_analysis_thread)
         self.btn_analyze.pack(side="left", fill="x", expand=True, padx=(0, 5))
         ToolTip(self.btn_analyze, "快速鍵 (Shortcut): Enter")
 
-        # Stop Button
         self.btn_stop = ttk.Button(btn_frame, text="⏹ 停止 (Stop)", command=self.stop_analysis, state="disabled")
         self.btn_stop.pack(side="left", fill="x", expand=True, padx=(5, 5))
         ToolTip(self.btn_stop, "快速鍵 (Shortcut): Esc")
 
-        # New Game Button
         self.btn_new_game = ttk.Button(btn_frame, text="🔄 新遊戲 (New Game)", command=self.new_game)
         self.btn_new_game.pack(side="left", fill="x", expand=True, padx=(5, 0))
         ToolTip(self.btn_new_game, "快速鍵 (Shortcut): Ctrl+N")
@@ -432,31 +571,34 @@ class ChessVisionApp(tk.Tk):
         self.tab_auto = ttk.Frame(self.notebook, padding=10)
         self.notebook.add(self.tab_auto, text="自動偵測 (Auto)")
 
-        # Grid settings for Tab 1
         row_idx = 0
-        
+
         # Side to Move
         ttk.Label(self.tab_auto, text="輪到誰走 (Side to Move):").grid(row=row_idx, column=0, sticky="w")
         self.side_var = tk.StringVar(value="w")
-        ttk.Radiobutton(self.tab_auto, text="白方 (White)", variable=self.side_var, value="w").grid(row=row_idx, column=1, sticky="w")
-        ttk.Radiobutton(self.tab_auto, text="黑方 (Black)", variable=self.side_var, value="b").grid(row=row_idx, column=2, sticky="w")
+        ttk.Radiobutton(self.tab_auto, text="白方 (White)", variable=self.side_var, value="w",
+                        command=self._on_side_radio_changed).grid(row=row_idx, column=1, sticky="w")
+        ttk.Radiobutton(self.tab_auto, text="黑方 (Black)", variable=self.side_var, value="b",
+                        command=self._on_side_radio_changed).grid(row=row_idx, column=2, sticky="w")
         row_idx += 1
 
         # My Color (for board orientation)
         ttk.Label(self.tab_auto, text="我的顏色 (My Color):").grid(row=row_idx, column=0, sticky="w")
         self.my_color_var = tk.StringVar(value="w")
-        ttk.Radiobutton(self.tab_auto, text="白方 (White)", variable=self.my_color_var, value="w", command=self.draw_board).grid(row=row_idx, column=1, sticky="w")
-        ttk.Radiobutton(self.tab_auto, text="黑方 (Black)", variable=self.my_color_var, value="b", command=self.draw_board).grid(row=row_idx, column=2, sticky="w")
+        ttk.Radiobutton(self.tab_auto, text="白方 (White)", variable=self.my_color_var, value="w",
+                        command=self.draw_board).grid(row=row_idx, column=1, sticky="w")
+        ttk.Radiobutton(self.tab_auto, text="黑方 (Black)", variable=self.my_color_var, value="b",
+                        command=self.draw_board).grid(row=row_idx, column=2, sticky="w")
         row_idx += 1
 
-        # Auto Detect Checkbox
+        # Auto Detect Rights Checkbox
         self.auto_detect_var = tk.BooleanVar(value=True)
-        chk_auto = ttk.Checkbutton(self.tab_auto, text="自動偵測權利 (Auto-detect Rights)", variable=self.auto_detect_var)
+        chk_auto = ttk.Checkbutton(self.tab_auto, text="自動偵測權利與視角 (Auto-detect Rights & Side)", variable=self.auto_detect_var)
         chk_auto.grid(row=row_idx, column=0, columnspan=3, sticky="w", pady=2)
-        ToolTip(chk_auto, "嘗試自動判斷王車易位權與吃過路兵 (Try to infer castling rights & en passant)")
+        ToolTip(chk_auto, "自動推斷王車易位權、吃過路兵與開局黑白視角")
         row_idx += 1
 
-        # Castling Rights (Combobox instead of checkboxes)
+        # Castling Rights
         ttk.Label(self.tab_auto, text="王車易位 (Castling Rights):").grid(row=row_idx, column=0, sticky="w")
         self.castling_var = tk.StringVar(value="KQkq")
         castling_choices = ["KQkq", "KQ", "kq", "K", "Q", "k", "q", "Kk", "Kq", "Qk", "Qq", "KQk", "KQq", "Kkq", "Qkq", "-"]
@@ -465,7 +607,7 @@ class ChessVisionApp(tk.Tk):
         ToolTip(cb_castling, "王車易位權 (例如: KQkq, -)\nCastling rights (e.g. KQkq, -)")
         row_idx += 1
 
-        # En Passant (Combobox instead of entry)
+        # En Passant
         ttk.Label(self.tab_auto, text="吃過路兵 (En Passant):").grid(row=row_idx, column=0, sticky="w")
         self.ep_var = tk.StringVar(value="-")
         ep_choices = ["-", "a3", "b3", "c3", "d3", "e3", "f3", "g3", "h3", "a6", "b6", "c6", "d6", "e6", "f6", "g6", "h6"]
@@ -474,10 +616,10 @@ class ChessVisionApp(tk.Tk):
         ToolTip(cb_ep, "過路兵目標格 (例如: e3, -)\nTarget square (e.g. e3, -)")
         row_idx += 1
 
-        # Time Limit (Combobox in seconds instead of milliseconds entry)
+        # Time Limit
         ttk.Label(self.tab_auto, text="思考時間 (Time Limit s):").grid(row=row_idx, column=0, sticky="w")
         self.time_var = tk.StringVar(value="10")
-        time_choices = ["1", "2", "5", "10", "30", "60"]
+        time_choices = ["0.5", "1", "2", "5", "10", "30", "60"]
         cb_time = ttk.Combobox(self.tab_auto, textvariable=self.time_var, values=time_choices, width=6)
         cb_time.grid(row=row_idx, column=1, columnspan=2, sticky="w")
         ToolTip(cb_time, "秒 (1 = 1秒)\nSeconds (1 = 1s)")
@@ -488,17 +630,17 @@ class ChessVisionApp(tk.Tk):
         chk_limit_nodes = ttk.Checkbutton(self.tab_auto, text="限定節點數 (Limit Nodes)", variable=self.limit_by_nodes_var)
         chk_limit_nodes.grid(row=row_idx, column=0, sticky="w", pady=2)
         ToolTip(chk_limit_nodes, "開啟時以設定的節點數為搜尋上限\nWhen enabled, limit search by node count")
-        
+
         self.nodes_limit_var = tk.StringVar(value="100000")
         self.entry_nodes_limit = ttk.Entry(self.tab_auto, textvariable=self.nodes_limit_var, width=8)
         self.entry_nodes_limit.grid(row=row_idx, column=1, columnspan=2, sticky="w")
         ToolTip(self.entry_nodes_limit, "節點數上限 (預設 100000)\nMaximum node count (default 100000)")
         row_idx += 1
 
-        # Opening Book Option / 使用開局書
+        # Opening Book Option
         chk_book = ttk.Checkbutton(self.tab_auto, text="使用開局書 (Use Opening Book)", variable=self.use_book_var, command=self.on_toggle_book)
         chk_book.grid(row=row_idx, column=0, columnspan=3, sticky="w", pady=2)
-        ToolTip(chk_book, "開啟時在開局階段直接查閱 Polyglot 開局書快速出子\nWhen enabled, play opening book moves instantly")
+        ToolTip(chk_book, "開啟時在開局階段直接查閱 Polyglot 開局書快速出子")
         row_idx += 1
 
         # Always on top Checkbox
@@ -510,48 +652,72 @@ class ChessVisionApp(tk.Tk):
         # Auto-Play Checkbox and Mode
         auto_play_frame = ttk.Frame(self.tab_auto)
         auto_play_frame.grid(row=row_idx, column=0, columnspan=3, sticky="w", pady=2)
-        
+
         self.auto_play_var = tk.BooleanVar(value=False)
-        chk_autoplay = ttk.Checkbutton(auto_play_frame, text="自動下棋 (Auto-Play)", variable=self.auto_play_var)
+        chk_autoplay = ttk.Checkbutton(
+            auto_play_frame, text="自動下棋 (Auto-Play)",
+            variable=self.auto_play_var, command=self.on_toggle_auto_play
+        )
         chk_autoplay.pack(side="left")
         ToolTip(chk_autoplay, "自動在螢幕上點擊滑鼠下棋 (Auto-click best move)")
-        
-        ttk.Radiobutton(auto_play_frame, text="固定方 (Fixed)", variable=self.autoplay_mode_var, value="fixed").pack(side="left", padx=(10, 0))
-        ttk.Radiobutton(auto_play_frame, text="自己對戰 (Self-Play)", variable=self.autoplay_mode_var, value="self").pack(side="left")
+
+        ttk.Radiobutton(
+            auto_play_frame, text="固定方 (Fixed)", variable=self.autoplay_mode_var,
+            value="fixed", command=self.on_autoplay_mode_changed
+        ).pack(side="left", padx=(10, 0))
+        ttk.Radiobutton(
+            auto_play_frame, text="自己對戰 (Self-Play)", variable=self.autoplay_mode_var,
+            value="self", command=self.on_autoplay_mode_changed
+        ).pack(side="left")
         row_idx += 1
 
-        # Auto-Detect Checkbox
+        # Auto-Detect Opponent Checkbox
         self.auto_detect_opponent_var = tk.BooleanVar(value=False)
-        chk_autodetect_opp = ttk.Checkbutton(self.tab_auto, text="自動偵測對手 (Auto-Detect Opponent)", variable=self.auto_detect_opponent_var)
+        chk_autodetect_opp = ttk.Checkbutton(
+            self.tab_auto, text="自動偵測對手 (Auto-Detect Opponent)",
+            variable=self.auto_detect_opponent_var, command=self.on_toggle_auto_detect_opponent
+        )
         chk_autodetect_opp.grid(row=row_idx, column=0, columnspan=3, sticky="w", pady=2)
-        ToolTip(chk_autodetect_opp, "對手下棋後自動開始分析 (Auto-start on opponent move)")
+        ToolTip(chk_autodetect_opp, "推薦步顯示後自動偵測我方與對手落子，輪到我方時自動啟動分析")
         row_idx += 1
 
-        # Piece Style Selector & Calibration Buttons
-        ttk.Label(self.tab_auto, text="棋子風格 (Piece Style):").grid(row=row_idx, column=0, sticky="w", pady=2)
-        self.piece_style_var = tk.StringVar(value="Default")
-        cb_style = ttk.Combobox(self.tab_auto, textvariable=self.piece_style_var, values=["Default", "Custom"], width=8, state="readonly")
+        # Piece Style Selector & Learn Button
+        ttk.Label(self.tab_auto, text="辨識模式 (Piece Mode):").grid(row=row_idx, column=0, sticky="w", pady=2)
+        self.piece_style_var = tk.StringVar(value="Universal (AI)")
+        cb_style = ttk.Combobox(
+            self.tab_auto, textvariable=self.piece_style_var,
+            values=["Universal (AI)", "Default", "Custom"], width=13, state="readonly"
+        )
         cb_style.grid(row=row_idx, column=1, sticky="w", pady=2)
         cb_style.bind("<<ComboboxSelected>>", self.on_piece_style_selected)
-        
-        self.btn_learn = ttk.Button(self.tab_auto, text="學習 (Learn)", command=self.learn_piece_style, width=8)
+        ToolTip(cb_style, "Universal (AI): 跨網站通用 CNN 免學習辨識\nDefault/Custom: 傳統圖示模板匹配")
+
+        self.btn_learn = ttk.Button(self.tab_auto, text="學習 (Learn)", command=self.learn_piece_style, width=10)
         self.btn_learn.grid(row=row_idx, column=2, sticky="w", padx=2, pady=2)
-        ToolTip(self.btn_learn, "將網頁棋盤設為起始位置後，點此一鍵學習自訂風格")
+        ToolTip(self.btn_learn, "遇到特殊造型棋子時，設為起始盤面點此一鍵擷取自訂模板")
         row_idx += 1
 
-        self.btn_calibrate = ttk.Button(self.tab_auto, text="🔍 偵測預覽與手動校正 (Preview & Calibrate)", command=self.open_calibration_window)
-        self.btn_calibrate.grid(row=row_idx, column=0, columnspan=3, sticky="ew", pady=5)
+        # Calibration & Quick Re-detect Frame
+        calib_frame = ttk.Frame(self.tab_auto)
+        calib_frame.grid(row=row_idx, column=0, columnspan=3, sticky="ew", pady=4)
+        self.btn_redetect = ttk.Button(calib_frame, text="🎯 重新定位棋盤", command=self.redetect_board_now)
+        self.btn_redetect.pack(side="left", fill="x", expand=True, padx=(0, 3))
+        ToolTip(self.btn_redetect, "移動或捲動網頁視窗後，一鍵重新自動搜尋 8x8 棋盤格網")
+
+        self.btn_calibrate = ttk.Button(calib_frame, text="🔍 預覽與手動校正", command=self.open_calibration_window)
+        self.btn_calibrate.pack(side="left", fill="x", expand=True, padx=(3, 0))
+        ToolTip(self.btn_calibrate, "開啟螢幕截圖預覽並手動微調四個棋盤角點")
         row_idx += 1
 
         # Tab 2: Manual Play / Analysis Mode
         self.tab_manual = ttk.Frame(self.notebook, padding=10)
         self.notebook.add(self.tab_manual, text="手動分析 (Manual)")
 
-        # Grid settings for Tab 2
         ttk.Label(self.tab_manual, text="輸入 FEN (FEN Input):").grid(row=0, column=0, sticky="w", pady=5)
         self.manual_fen_var = tk.StringVar(value=chess.STARTING_FEN)
         self.entry_manual_fen = ttk.Entry(self.tab_manual, textvariable=self.manual_fen_var, width=32)
         self.entry_manual_fen.grid(row=0, column=1, columnspan=2, sticky="ew", pady=5)
+        self.entry_manual_fen.bind("<Return>", lambda e: self.load_manual_fen())
 
         ttk.Button(self.tab_manual, text="載入 FEN (Load)", command=self.load_manual_fen).grid(row=1, column=0, pady=5, sticky="ew", padx=2)
         ttk.Button(self.tab_manual, text="清空棋盤 (Clear)", command=self.clear_manual_board).grid(row=1, column=1, pady=5, sticky="ew", padx=2)
@@ -564,7 +730,6 @@ class ChessVisionApp(tk.Tk):
 
         chk_book_manual = ttk.Checkbutton(self.tab_manual, text="使用開局書 (Use Opening Book)", variable=self.use_book_var, command=self.on_toggle_book)
         chk_book_manual.grid(row=3, column=0, columnspan=3, sticky="w", pady=2)
-        ToolTip(chk_book_manual, "手動模式下是否啟用開局庫 (Polyglot book)")
 
         ttk.Button(self.tab_manual, text="翻轉棋盤 (Flip Board)", command=self.flip_board).grid(row=4, column=0, columnspan=3, pady=5, sticky="ew")
 
@@ -572,11 +737,9 @@ class ChessVisionApp(tk.Tk):
         self.tab_console = ttk.Frame(self.notebook, padding=10)
         self.notebook.add(self.tab_console, text="日誌主控台 (Console)")
 
-        # Scrolled Text Box for Console in Tab 3
         console_frame = ttk.Frame(self.tab_console)
         console_frame.pack(fill="both", expand=True)
-        self.console_text = tk.Text(console_frame, height=9, width=50, state="disabled", wrap="word", 
-                                    font=("Consolas", 9))
+        self.console_text = tk.Text(console_frame, height=9, width=50, state="disabled", wrap="word", font=("Consolas", 9))
         self.console_text.pack(side="left", fill="both", expand=True)
         sb = ttk.Scrollbar(console_frame, orient="vertical", command=self.console_text.yview)
         sb.pack(side="right", fill="y")
@@ -588,48 +751,95 @@ class ChessVisionApp(tk.Tk):
         self.btn_copy_pgn = ttk.Button(self.tab_console, text="📋 複製當前對局 PGN (Copy PGN)", command=self.copy_pgn_to_clipboard)
         self.btn_copy_pgn.pack(pady=2, fill="x")
 
-        # 3. Info Frame (Always visible below tabs and buttons)
+        # 3. Info Frame
         info_frame = ttk.LabelFrame(self, text="分析結果 (Analysis)", padding=10)
         info_frame.pack(fill="x", padx=10, pady=5)
-        
-        # Status Label (Warming Up / Ready)
-        self.lbl_status = ttk.Label(info_frame, text="狀態 (Status): 等待熱機... (Warming Up...)", font=("Arial", 10, "italic"), foreground="red")
+
+        self.lbl_status = ttk.Label(info_frame, text="狀態 (Status): 引擎熱機中... (Warming Up JIT...)", font=("Arial", 10, "italic"), foreground="red")
         self.lbl_status.pack(anchor="w", pady=(0, 5))
 
         self.lbl_score = ttk.Label(info_frame, text="評分 (Score): --", font=("Arial", 12, "bold"))
         self.lbl_score.pack(anchor="w")
-        
+
         self.lbl_bestmove = ttk.Label(info_frame, text="最佳著法 (Best Move): --", font=("Arial", 12, "bold"), foreground="blue")
         self.lbl_bestmove.pack(anchor="w")
-        
+
         self.lbl_pv = ttk.Label(info_frame, text="變例 (PV): --", wraplength=460)
         self.lbl_pv.pack(anchor="w", fill="x")
 
         # 4. Board Canvas
         self.canvas_size = 400
         self.square_size = self.canvas_size // 8
-        
-        # Try to load images
+
         self.load_piece_images()
-        
+
         self.canvas = tk.Canvas(self, width=self.canvas_size, height=self.canvas_size)
         self.canvas.pack(padx=10, pady=5, expand=True, fill=tk.BOTH)
         self.canvas.bind("<Configure>", self.on_canvas_resize)
 
-        # Shortcuts (Global Default)
-        self.bind('<Return>', lambda e: self.start_analysis_thread())
-        self.bind('<Escape>', lambda e: self.stop_analysis())
+        # Global Shortcuts (guarded against hijacking text Entry / Combobox widgets)
+        self.bind('<Return>', self._on_return_shortcut)
+        self.bind('<Escape>', self._on_escape_shortcut)
         self.bind('<Control-n>', lambda e: self.new_game())
 
-        # Initial Draw
         self.draw_board()
+
+    def _on_return_shortcut(self, event=None):
+        if self._is_text_input_focused():
+            return
+        self.start_analysis_thread()
+
+    def _on_escape_shortcut(self, event=None):
+        self.canvas.focus_set()
+        self.stop_analysis()
+
+    def _on_side_radio_changed(self):
+        self.board.turn = (chess.WHITE if self.side_var.get() == 'w' else chess.BLACK)
+
+    def on_toggle_auto_play(self):
+        if self.auto_play_var.get() and self.autoplay_mode_var.get() == "fixed":
+            # In Fixed Auto-Play, users almost always want continuous play across opponent replies
+            if not self.auto_detect_opponent_var.get():
+                self.auto_detect_opponent_var.set(True)
+
+    def on_autoplay_mode_changed(self):
+        if self.autoplay_mode_var.get() == "self":
+            # Selecting Self-Play radio button automatically enables Auto-Play
+            if not self.auto_play_var.get():
+                self.auto_play_var.set(True)
+
+    def on_toggle_auto_detect_opponent(self):
+        """Starts or stops background turn monitoring immediately when toggled."""
+        if not self.auto_detect_opponent_var.get():
+            self.auto_detecting_opponent = False
+            if not self.analyzing and not self.warming_up:
+                self.lbl_status.config(text="狀態 (Status): 準備就緒 (Ready)", foreground="green")
+            return
+
+        if self.warming_up or self.analyzing:
+            return
+        try:
+            if self.notebook.index("current") != 0:
+                return
+        except Exception:
+            pass
+
+        if self.autoplay_mode_var.get() == "fixed":
+            if self.side_var.get() != self.my_color_var.get():
+                if not self.auto_detecting_opponent:
+                    threading.Thread(target=self._auto_detect_loop, daemon=True).start()
+            elif self.best_move_arrow is not None and not self.auto_play_var.get():
+                # Recommendation already shown for our turn -> wait for our move then opponent's
+                if not self.auto_detecting_opponent:
+                    threading.Thread(target=self._auto_detect_manual_play_loop, daemon=True).start()
 
     def toggle_topmost(self):
         self.attributes('-topmost', self.always_on_top_var.get())
 
     def on_toggle_book(self):
         val = self.use_book_var.get()
-        self.engine.send_command(f"setoption name OwnBook value {'true' if val else 'false'}")
+        if hasattr(self, "engine"):
+            self.engine.send_command(f"setoption name OwnBook value {'true' if val else 'false'}")
         print(f"[INFO] 開局書設定為 (OwnBook set to): {val}")
 
     def on_canvas_resize(self, event):
@@ -641,81 +851,104 @@ class ChessVisionApp(tk.Tk):
             self.draw_board()
 
     def load_piece_images(self):
-        """Loads piece images from templates folder."""
+        """Loads piece images for the assistant's preview canvas."""
         self.piece_images = {}
         if not HAS_PIL:
-            print("[WARN] Pillow library not found. Falling back to unicode pieces.")
             return
 
         try:
-            # Clear original cache to force reload if switching styles
             self.original_pil_images = {}
-            
             script_dir = os.path.dirname(os.path.abspath(__file__))
-            style_name = "Default"
-            if hasattr(self, 'piece_style_var'):
-                style_name = self.piece_style_var.get()
-                
-            if style_name == "Custom":
-                template_dir = os.path.abspath(os.path.join(script_dir, "data", "templates", "custom"))
+            style_name = self.piece_style_var.get() if hasattr(self, 'piece_style_var') else "Universal (AI)"
+
+            custom_dir = os.path.abspath(os.path.join(script_dir, "data", "templates", "custom"))
+            default_dir = os.path.abspath(os.path.join(script_dir, "data", "templates"))
+            if style_name == "Custom" and os.path.isdir(custom_dir):
+                template_dir = custom_dir
             else:
-                template_dir = os.path.abspath(os.path.join(script_dir, "data", "templates"))
-                
+                template_dir = default_dir
+
             pieces = ['wP', 'wN', 'wB', 'wR', 'wQ', 'wK', 'bP', 'bN', 'bB', 'bR', 'bQ', 'bK']
-            
             for p in pieces:
                 path = os.path.join(template_dir, f"{p}.png")
                 if os.path.exists(path):
                     self.original_pil_images[p] = Image.open(path)
-            
+
             for p, img in self.original_pil_images.items():
                 img_resized = img.resize((self.square_size, self.square_size), Image.Resampling.LANCZOS)
                 self.piece_images[p] = ImageTk.PhotoImage(img_resized)
-                
         except Exception as e:
             print(f"[WARN] Failed to load piece images: {e}")
             self.piece_images = {}
 
-    def _run_warmup(self):
-        """Runs a silent short search to warm up the engine JIT."""
-        if not self.analyzing:
-            print("[INFO] Warming up engine...")
-            self.warming_up = True
-            # Use Kiwipete position to avoid book hits and force search
-            kiwipete = "r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1"
-            self.engine.send_command(f"position fen {kiwipete}")
-            self.engine.send_command("go depth 15")
+    def redetect_board_now(self):
+        """Force re-detecting the 8x8 chessboard on screen."""
+        if self.warming_up:
+            messagebox.showwarning("Warning", "引擎正在熱機中，請稍候... (Engine Warming Up)")
+            return
+        try:
+            rec = self._ensure_recognizer()
+            rec.invalidate_board_cache()
+            screenshot = rec.capture_screen()
+            board_img = rec.find_board(screenshot, exclude_rect=self.get_exclude_rect(), verbose=True)
+            if board_img is None:
+                self.lbl_status.config(text="狀態 (Status): 找不到棋盤，請確認棋盤完整顯示或使用手動校正", foreground="red")
+                messagebox.showwarning("Warning", "未能在螢幕上自動找到 8x8 棋盤！\n請確認棋盤完整顯示且未被遮擋，或點擊「預覽與手動校正」。")
+                return
+
+            # Also auto-check starting orientation if applicable
+            vis_pieces = rec.identify_board_pieces(board_img)
+            orient = rec.detect_starting_orientation(vis_pieces)
+            if orient in ('w', 'b') and self.auto_detect_var.get():
+                self.my_color_var.set(orient)
+                self.draw_board()
+
+            self.lbl_status.config(text="狀態 (Status): 已成功重新定位螢幕 8x8 棋盤！(Board Locked)", foreground="green")
+        except Exception as e:
+            messagebox.showerror("Error", f"重新定位棋盤失敗: {e}")
 
     def new_game(self):
-        """Resets the engine's transposition table and starts a fresh PGN game rooted at the current board."""
-        if self.analyzing:
-            messagebox.showwarning("Warning", "請先停止當前分析 (Please stop analysis first)")
-            return
-        
+        """Resets engine TT & starts a fresh PGN game rooted at the current screen/manual board."""
+        if self.analyzing or self.auto_detecting_opponent:
+            self.stop_analysis()
+
         self.engine.send_command("ucinewgame")
         self.engine.send_command(f"setoption name OwnBook value {'true' if self.use_book_var.get() else 'false'}")
-        
-        # Read the current board position as the root of the new PGN
+
         new_board = None
-        current_tab = 0
         try:
             current_tab = self.notebook.index("current")
-        except:
-            pass
+        except Exception:
+            current_tab = 0
 
-        if current_tab == 0 and self.recognizer:
+        if current_tab == 0:
             try:
-                fen_raw = self.recognizer.get_fen_from_screen(
-                    player_color=self.my_color_var.get(),
-                    active_player=self.side_var.get(),
-                    castling='-', en_passant='-',
-                    exclude_rect=self.get_exclude_rect(),
-                    verbose=False
-                )
-                if fen_raw:
+                rec = self._ensure_recognizer()
+                if not rec.manual_calibrated:
+                    rec.invalidate_board_cache()
+                screenshot = rec.capture_screen()
+                board_img = rec.get_warped_board(screenshot) if rec.M is not None else None
+                if board_img is None:
+                    board_img = rec.find_board(screenshot, exclude_rect=self.get_exclude_rect(), verbose=False)
+                if board_img is not None:
+                    vis_pieces = rec.identify_board_pieces(board_img)
+                    if self.auto_detect_var.get():
+                        orient = rec.detect_starting_orientation(vis_pieces)
+                        if orient in ('w', 'b'):
+                            self.my_color_var.set(orient)
+                    fen_raw = rec.get_fen_from_board_image(
+                        board_img,
+                        player_color=self.my_color_var.get(),
+                        active_player=self.side_var.get(),
+                        castling='-',
+                        en_passant='-',
+                    )
                     b_screen = chess.Board(fen_raw)
+                    # At standard starting position, White always moves first
+                    active = 'w' if b_screen.board_fen() == chess.STARTING_BOARD_FEN else self.side_var.get()
                     rights = self.infer_castling_rights(b_screen, "KQkq")
                     parts = fen_raw.split()
+                    parts[1] = active
                     parts[2] = rights
                     parts[3] = "-"
                     new_board = chess.Board(" ".join(parts))
@@ -725,13 +958,12 @@ class ChessVisionApp(tk.Tk):
         elif current_tab == 1:
             try:
                 new_board = chess.Board(self.manual_fen_var.get().strip())
-            except:
+            except Exception:
                 new_board = None
 
         if new_board is None:
             new_board = chess.Board()
 
-        # Clear PGN and initialize new game rooted at current board
         self.init_game_from_board(new_board)
         self.manual_fen_var.set(self.board.fen())
         self.last_detected_fen = self.board.fen()
@@ -746,48 +978,58 @@ class ChessVisionApp(tk.Tk):
 
     def start_analysis_thread(self, current_fen=None):
         if self.warming_up:
-             messagebox.showwarning("Warning", "引擎正在熱機中，請稍候... (Engine Warming Up)")
-             return
-             
-        # Check current tab to see if we are in manual analysis mode
+            messagebox.showwarning("Warning", "引擎正在熱機中，請稍候... (Engine Warming Up)")
+            return
+
         try:
             current_tab = self.notebook.index("current")
-        except:
+        except Exception:
             current_tab = 0
 
         if current_tab == 1:
             self.start_manual_analysis()
             return
 
-        # If in fixed mode and it's opponent's turn, launch auto-detect opponent loop
-        if self.autoplay_mode_var.get() == "fixed" and self.side_var.get() != self.my_color_var.get():
-             if self.auto_detect_opponent_var.get():
-                 if not self.auto_detecting_opponent:
-                     print("[INFO] 目前為固定方模式且輪到對手，啟動對手即刻偵測...")
-                     threading.Thread(target=self._auto_detect_loop, daemon=True).start()
-             else:
-                 print("[INFO] 目前為固定方模式且輪到對手，等待對手走子。")
-             return
-             
+        # Stop any active background opponent/player watcher before starting fresh analysis
+        self.auto_detecting_opponent = False
+        self._refresh_ui_snapshot()
+
+        is_self_play = (self.auto_play_var.get() and self.autoplay_mode_var.get() == "self")
+
+        # In Fixed mode, if UI currently indicates opponent's turn and no pre-synced FEN was given:
+        # start opponent watcher (which also immediately checks if opponent has ALREADY moved on screen!)
+        if not is_self_play and current_fen is None and self.side_var.get() != self.my_color_var.get():
+            if self.auto_detect_opponent_var.get():
+                print("[INFO] 目前為固定方模式且輪到對手，啟動對手偵測...")
+                threading.Thread(target=self._auto_detect_loop, daemon=True).start()
+                return
+            # Even if auto_detect_opponent is off, let _run_analysis capture the screen once:
+            # if the opponent already moved on screen, _run_analysis will advance turn to us and analyze!
+
         if self.analyzing:
             return
-        
+
         self.analyzing = True
+        self.current_search_id += 1
+        search_id = self.current_search_id
+
         self.btn_analyze.config(state="disabled")
         self.btn_stop.config(state="normal")
+        self.lbl_status.config(text="狀態 (Status): 思考計算中... (Analyzing...)", foreground="orange")
         self.lbl_score.config(text="評分 (Score): 計算中...")
         self.lbl_bestmove.config(text="最佳著法 (Best Move): ...")
         self.lbl_pv.config(text="變例 (PV): ...")
         self.best_move_arrow = None
-        
-        threading.Thread(target=self._run_analysis, args=(current_fen,), daemon=True).start()
+
+        threading.Thread(target=self._run_analysis, args=(current_fen, search_id), daemon=True).start()
 
     def stop_analysis(self):
-        if self.analyzing:
-            self.engine.stop_calculation()
-            self.analyzing = False # Stop immediately internally
-            
         self.auto_detecting_opponent = False
+        if self.analyzing:
+            self.current_search_id += 1  # Invalidate any in-flight search bestmove
+            self.engine.stop_calculation()
+            self.analyzing = False
+
         self.lbl_status.config(text="狀態 (Status): 準備就緒 (Ready) [停止]", foreground="green")
         self.btn_analyze.config(state="normal")
         self.btn_stop.config(state="disabled")
@@ -798,12 +1040,18 @@ class ChessVisionApp(tk.Tk):
         self.side_var.set(new_side)
         self.board.turn = (chess.WHITE if new_side == 'w' else chess.BLACK)
 
-    def execute_auto_play(self, move_uci):
-        """Simulate mouse clicks to play the move on screen using Windows API with minimal latency."""
-        if not self.recognizer:
-            return
+    def execute_auto_play(self, move_uci, player_color=None, is_self_play=None):
+        """Simulate mouse clicks to play `move_uci` on screen using Windows API."""
+        rec = self._ensure_recognizer()
+        if player_color is None:
+            player_color = self._ui_get("my_color", "my_color_var", "w")
+        if is_self_play is None:
+            is_self_play = (
+                self._ui_get("auto_play", "auto_play_var", False)
+                and self._ui_get("autoplay_mode", "autoplay_mode_var", "fixed") == "self"
+            )
 
-        coords = self.recognizer.get_move_screen_coords(move_uci, player_color=self.my_color_var.get())
+        coords = rec.get_move_screen_coords(move_uci, player_color=player_color)
         if not coords:
             print("[WARN] 無法計算自動下棋的螢幕座標")
             return
@@ -811,7 +1059,6 @@ class ChessVisionApp(tk.Tk):
         start_pt, end_pt = coords
         print(f"[INFO] Auto-playing {move_uci}: clicking {start_pt} then {end_pt}")
 
-        # Mouse event constants
         MOUSEEVENTF_LEFTDOWN = 0x0002
         MOUSEEVENTF_LEFTUP = 0x0004
 
@@ -823,378 +1070,463 @@ class ChessVisionApp(tk.Tk):
             ctypes.windll.user32.mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, 0)
             time.sleep(0.02)
 
-        # Execute start and end clicks quickly
         click(start_pt[0], start_pt[1])
         time.sleep(0.04)
         click(end_pt[0], end_pt[1])
-        
-        # Handle Pawn Promotion
+
+        # Handle Pawn Promotion (supports both White-at-bottom and Black-at-bottom orientations!)
         if len(move_uci) == 5 and move_uci[-1] in ['q', 'r', 'b', 'n']:
             promo_piece = move_uci[-1]
             print(f"[INFO] 偵測到升變: {promo_piece}，準備點擊選擇選單...")
             time.sleep(0.15)
-            
-            sq_size = self.recognizer.board_side_length // 8
-            target_rank = int(move_uci[3]) - 1
-            is_white_promo = (target_rank == 7)
+
+            # Compute screen-space square height accurately via inv_M
+            pt0 = rec.get_move_screen_coords("a1a2", player_color=player_color)
+            sq_screen_h = abs(pt0[1][1] - pt0[0][1]) if pt0 else (rec.board_side_length // 8)
+
+            target_rank = int(move_uci[3]) - 1  # 7 for rank 8 (White), 0 for rank 1 (Black)
+            promo_at_visual_top = (target_rank == 7) if (player_color == 'w') else (target_rank == 0)
             offset_multiplier = {'q': 0, 'n': 1, 'r': 2, 'b': 3}
-            
+
             if promo_piece == 'q':
                 click(end_pt[0], end_pt[1])
             else:
-                y_offset = offset_multiplier[promo_piece] * sq_size
-                if not is_white_promo:
-                    y_offset = -y_offset 
-                click(end_pt[0], end_pt[1] + y_offset)
-        
-        # Brief wait for move registration and transition to opponent turn detection
-        time.sleep(0.1)
-        self.after(0, self.on_our_move_completed)
+                direction = 1 if promo_at_visual_top else -1
+                y_offset = direction * offset_multiplier[promo_piece] * sq_screen_h
+                click(end_pt[0], end_pt[1] + int(y_offset))
+
+        # Wait briefly for move animation to settle before next turn / opponent detection
+        time.sleep(0.22 if is_self_play else 0.10)
+        self._post_ui(self.on_our_move_completed)
 
     def get_exclude_rect(self):
         try:
-            import ctypes
             from ctypes import wintypes
-            
-            hwnd = self.winfo_id()
-            rect = wintypes.RECT()
-            # GetWindowRect returns coordinates in physical pixels
-            if ctypes.windll.user32.GetWindowRect(hwnd, ctypes.byref(rect)):
-                x = rect.left
-                y = rect.top
-                w = rect.right - rect.left
-                h = rect.bottom - rect.top
+            d = self.__dict__
+            if threading.current_thread() is threading.main_thread() and d.get("tk") is not None:
+                d["_cached_hwnd"] = self.winfo_id()
+            hwnd = d.get("_cached_hwnd")
+            if hwnd:
+                rect = wintypes.RECT()
+                if ctypes.windll.user32.GetWindowRect(hwnd, ctypes.byref(rect)):
+                    w = rect.right - rect.left
+                    h = rect.bottom - rect.top
+                    if w > 0 and h > 0:
+                        return (rect.left, rect.top, w, h)
+
+            if threading.current_thread() is threading.main_thread() and d.get("tk") is not None:
+                x, y = self.winfo_x(), self.winfo_y()
+                w, h = self.winfo_width(), self.winfo_height()
                 if w > 0 and h > 0:
                     return (x, y, w, h)
-            
-            # Fallback to tkinter's winfo if GetWindowRect fails
-            x = self.winfo_x()
-            y = self.winfo_y()
-            w = self.winfo_width()
-            h = self.winfo_height()
-            if w > 0 and h > 0:
-                return (x, y, w, h)
             return None
-        except:
+        except Exception:
             return None
 
-    def on_our_move_completed(self):
-        # Detect Game Over
-        if self.board.is_game_over():
-            outcome = self.board.outcome()
-            reason = "將殺 (Checkmate)" if self.board.is_checkmate() else "平局/逼和 (Draw/Stalemate)"
-            self.lbl_status.config(text=f"狀態 (Status): 遊戲結束 ({reason}) - {outcome.result()}", foreground="purple")
+    def _check_and_handle_game_over(self, board_obj: chess.Board) -> bool:
+        if board_obj.is_game_over(claim_draw=True):
+            outcome = board_obj.outcome(claim_draw=True)
+            res_str = outcome.result() if outcome else "*"
+            reason = "將殺 (Checkmate)" if board_obj.is_checkmate() else "平局/和棋 (Draw)"
+            self.lbl_status.config(text=f"狀態 (Status): 遊戲結束 ({reason}) - {res_str}", foreground="purple")
             self.auto_play_var.set(False)
             self.auto_detect_opponent_var.set(False)
+            self.auto_detecting_opponent = False
             self.analyzing = False
+            self.btn_analyze.config(state="normal")
+            self.btn_stop.config(state="disabled")
+            return True
+        return False
+
+    def on_our_move_completed(self):
+        """Called on main thread right after `execute_auto_play` finishes clicking."""
+        if self._check_and_handle_game_over(self.board):
             return
 
+        # 1. Self-Play Mode: does NOT depend on auto_detect_opponent_var!
+        if self.auto_play_var.get() and self.autoplay_mode_var.get() == "self":
+            print("[INFO] 自己對戰模式：自動觸發下一回合分析...")
+            self.start_analysis_thread(current_fen=self.board.fen())
+            return
+
+        # 2. Fixed Mode with Auto-Detect Opponent
         if self.auto_detect_opponent_var.get():
-            if self.autoplay_mode_var.get() == "self":
-                # In self-play mode, side was already toggled to next side by apply_move
-                print("[INFO] 自己對戰模式：自動觸發下一回合分析...")
-                self.start_analysis_thread()
-            else:
-                # Standard play: our move completed, start fast opponent detection
-                print("[INFO] 已完成我方著法，啟動對手極速偵測...")
-                threading.Thread(target=self._auto_detect_loop, daemon=True).start()
+            print("[INFO] 已完成我方著法，啟動對手極速偵測...")
+            threading.Thread(target=self._auto_detect_loop, daemon=True).start()
         else:
             self.lbl_status.config(text="狀態 (Status): 準備就緒 (Ready)", foreground="green")
 
+    def _capture_warped_board_safe(self, rec):
+        screenshot = rec.capture_screen()
+        board_img = None
+        if rec.M is not None:
+            board_img = rec.get_warped_board(screenshot, validate=True)
+        if board_img is None:
+            board_img = rec.find_board(screenshot, exclude_rect=self.get_exclude_rect(), verbose=False)
+        return board_img
+
     def _auto_detect_manual_play_loop(self):
-        """Background thread to detect manual play: first wait for player, then wait for opponent."""
-        print("[INFO] Started Auto-Detect Manual Play loop...")
-        self.auto_detecting_opponent = True
-        
-        def update_status(text, color):
-            self.lbl_status.config(text=text, foreground=color)
-            
-        self.after(0, update_status, "狀態 (Status): 等待我方下棋... (Waiting for your move)", "blue")
-        
-        try:
-            import cv2
-            import numpy as np
-        except ImportError:
-            self.auto_detecting_opponent = False
-            return
-
-        # Phase 1: Wait for player's move
-        try:
-            baseline_fen_raw = self.recognizer.get_fen_from_screen(
-                player_color=self.my_color_var.get(),
-                active_player=self.side_var.get(),
-                castling='-', en_passant='-',
-                exclude_rect=self.get_exclude_rect(),
-                verbose=False
-            )
-            self.last_detected_fen = baseline_fen_raw
-            if not baseline_fen_raw:
-                print("[WARN] Manual-detect failed to get initial baseline FEN.")
-                self.auto_detecting_opponent = False
-                self.after(0, update_status, "狀態 (Status): 自動偵測失敗 (Auto-detect failed)", "red")
-                return
-            
-            print(f"[INFO] Initial baseline FEN for manual play: {baseline_fen_raw}")
-        except Exception as e:
-            print(f"Error getting initial FEN: {e}")
-            self.auto_detecting_opponent = False
-            return
-
-        consecutive_stable_frames = 0
-        current_detected_fen = baseline_fen_raw
-
-        # 1. Loop waiting for player to move
-        while self.auto_detecting_opponent and self.analyzing:
-            time.sleep(0.04)
-            if not self.auto_detecting_opponent or not self.analyzing:
-                break
-                
-            try:
-                new_fen_raw = self.recognizer.get_fen_from_screen(
-                    player_color=self.my_color_var.get(),
-                    active_player=self.side_var.get(),
-                    castling='-', en_passant='-',
-                    exclude_rect=self.get_exclude_rect(),
-                    reuse_transform=(self.recognizer.M is not None),
-                    verbose=False
-                )
-                
-                if new_fen_raw and new_fen_raw != baseline_fen_raw:
-                    if new_fen_raw == current_detected_fen:
-                        consecutive_stable_frames += 1
-                    else:
-                        consecutive_stable_frames = 1
-                        current_detected_fen = new_fen_raw
-                        
-                    if consecutive_stable_frames >= 2:
-                        print(f"[INFO] Player manual move detected! New FEN: {current_detected_fen}")
-                        
-                        def on_player_moved(new_fen):
-                            try:
-                                board_check = chess.Board(new_fen)
-                                matched_move = self.find_matching_legal_move(board_check)
-                                if matched_move:
-                                    print(f"[INFO] 玩家走子識別成功: {matched_move.uci()}")
-                                    self.apply_move(matched_move)
-                                else:
-                                    print(f"[WARN] 未能在合法著法中匹配玩家走子，以當下盤面重新同步")
-                                    updated_rights = self.infer_castling_rights(board_check, self.castling_var.get())
-                                    parts = new_fen.split()
-                                    parts[2] = updated_rights
-                                    parts[3] = "-"
-                                    self.init_game_from_board(chess.Board(" ".join(parts)))
-                                    self.side_var.set("w" if self.board.turn == chess.WHITE else "b")
-                                self.draw_board()
-                            except Exception as e:
-                                print(f"[WARN] on_player_moved 異常: {e}")
-                            self.lbl_status.config(text="狀態 (Status): 等待對手下棋... (Waiting for opponent)", foreground="blue")
-                            
-                        self.after(0, on_player_moved, current_detected_fen)
-                        
-                        time.sleep(0.1)
-                        
-                        # Capture new baseline FEN
-                        baseline_fen_after_us = self.recognizer.get_fen_from_screen(
-                            player_color=self.my_color_var.get(),
-                            active_player=self.side_var.get(),
-                            castling='-', en_passant='-',
-                            exclude_rect=self.get_exclude_rect(),
-                            reuse_transform=(self.recognizer.M is not None),
-                            verbose=False
-                        )
-                        if not baseline_fen_after_us:
-                            baseline_fen_after_us = current_detected_fen
-                        
-                        self.last_detected_fen = baseline_fen_after_us
-                        print(f"[INFO] New baseline FEN for opponent: {baseline_fen_after_us}")
-                        
-                        # Reset for Phase 2
-                        baseline_fen_raw = baseline_fen_after_us
-                        consecutive_stable_frames = 0
-                        current_detected_fen = baseline_fen_after_us
-                        break
-            except Exception as e:
-                print(f"Error during manual player detect: {e}")
-                
-        # 2. Loop waiting for opponent to move
-        while self.auto_detecting_opponent and self.analyzing:
-            time.sleep(0.04)
-            if not self.auto_detecting_opponent or not self.analyzing:
-                break
-                
-            try:
-                new_fen_raw = self.recognizer.get_fen_from_screen(
-                    player_color=self.my_color_var.get(),
-                    active_player=self.side_var.get(),
-                    castling='-', en_passant='-',
-                    exclude_rect=self.get_exclude_rect(),
-                    reuse_transform=(self.recognizer.M is not None),
-                    verbose=False
-                )
-                
-                if new_fen_raw and new_fen_raw != baseline_fen_raw:
-                    if new_fen_raw == current_detected_fen:
-                        consecutive_stable_frames += 1
-                    else:
-                        consecutive_stable_frames = 1
-                        current_detected_fen = new_fen_raw
-                        
-                    if consecutive_stable_frames >= 2:
-                        print(f"[INFO] Opponent move detected in manual loop! New FEN: {current_detected_fen}")
-                        self.auto_detecting_opponent = False
-                        
-                        def resume_turn(target_fen):
-                            board_check = chess.Board(target_fen)
-                            matched_move = self.find_matching_legal_move(board_check)
-                            if matched_move:
-                                self.apply_move(matched_move)
-                            else:
-                                parts = target_fen.split()
-                                parts[2] = self.infer_castling_rights(board_check, self.castling_var.get())
-                                parts[3] = "-"
-                                self.init_game_from_board(chess.Board(" ".join(parts)))
-                            self.draw_board()
-                            self.start_analysis_thread(current_fen=self.board.fen())
-                            
-                        self.after(0, resume_turn, current_detected_fen)
-                        break
-            except Exception as e:
-                print(f"Error during manual opponent detect: {e}")
-
-    def _auto_detect_loop(self):
-        """High-speed background thread to detect when opponent has moved using pixel diff."""
+        """
+        Background watcher when Auto-Play is OFF and Auto-Detect Opponent is ON:
+          Phase 1: Wait for the user to make their move on screen (recommendation arrow stays visible).
+          Phase 2: Wait for the opponent to reply on screen, then automatically trigger engine analysis.
+        Handles instant bot/premove replies (2-ply jump) seamlessly!
+        """
         if self.auto_detecting_opponent:
             return
         self.auto_detecting_opponent = True
-        print("[INFO] Started Ultra-Fast Auto-Detect Opponent loop...")
-        
-        def update_status(text, color):
+        print("[INFO] Started Auto-Detect Manual Play loop (Phase 1: user move -> Phase 2: opponent move)...")
+
+        def set_status(text, color):
             self.lbl_status.config(text=text, foreground=color)
-            
-        self.after(0, update_status, "狀態 (Status): 等待對手下棋... (Waiting for opponent)", "blue")
+
+        self._post_ui(lambda: self.btn_stop.config(state="normal"))
+        self._post_ui(set_status, "狀態 (Status): 推薦步已標示，等待我方下棋... (Waiting for your move)", "blue")
 
         try:
             import cv2
             import numpy as np
-        except ImportError:
-            self.auto_detecting_opponent = False
-            return
+            rec = self._ensure_recognizer()
 
-        # Short pause for our move animation to settle
-        time.sleep(0.08)
-
-        # Baseline capture using cached perspective transform M
-        try:
-            screenshot = self.recognizer.capture_screen()
-            baseline_board = None
-            if self.recognizer.M is not None:
-                baseline_board = self.recognizer.get_warped_board(screenshot)
+            baseline_board = self._capture_warped_board_safe(rec)
             if baseline_board is None:
-                baseline_board = self.recognizer.find_board(screenshot, exclude_rect=self.get_exclude_rect(), verbose=False)
-            
-            if baseline_board is None:
-                print("[WARN] Auto-detect failed to get baseline board.")
-                self.auto_detecting_opponent = False
-                self.after(0, update_status, "狀態 (Status): 自動偵測失敗 (Board not found)", "red")
+                print("[WARN] Manual-detect failed to locate chessboard.")
+                self._post_ui(set_status, "狀態 (Status): 自動偵測失敗 - 找不到棋盤 (Board not found)", "red")
                 return
 
+            # Check if the user ALREADY moved on screen while the engine was finishing its calculation!
+            init_fen = rec.get_fen_from_board_image(
+                baseline_board,
+                player_color=self._ui_get("my_color", "my_color_var", "w"),
+                active_player=self._ui_get("side", "side_var", "w"),
+                castling='-',
+                en_passant='-',
+            )
+            init_screen_board = chess.Board(init_fen)
+            init_seq = self.find_matching_move_sequence(init_screen_board, max_plies=2)
+
+            phase = 1
+            if init_seq is not None and len(init_seq) == 2:
+                # Both user and instant-bot already moved!
+                def apply_two_and_analyze(m_pair):
+                    self.apply_move(m_pair[0])
+                    self.apply_move(m_pair[1])
+                    self.best_move_arrow = None
+                    self.draw_board()
+                    if not self._check_and_handle_game_over(self.board):
+                        self.start_analysis_thread(current_fen=self.board.fen())
+                self.auto_detecting_opponent = False
+                self._post_ui(apply_two_and_analyze, init_seq)
+                return
+            elif init_seq is not None and len(init_seq) == 1:
+                # User already made their move; jump straight to Phase 2 (waiting for opponent)!
+                done_evt = threading.Event()
+                def apply_user_early(mv):
+                    self.apply_move(mv)
+                    self.best_move_arrow = None
+                    self.draw_board()
+                    self.lbl_status.config(text="狀態 (Status): 等待對手下棋... (Waiting for opponent)", foreground="blue")
+                    self._refresh_ui_snapshot()
+                    done_evt.set()
+                self._post_ui(apply_user_early, init_seq[0])
+                done_evt.wait(timeout=1.0)
+                phase = 2
+
             baseline_gray = cv2.cvtColor(baseline_board, cv2.COLOR_BGR2GRAY)
-            self.last_detected_fen = self.board.fen()
-            print("[INFO] Baseline captured. Monitoring board for opponent moves...")
-        except Exception as e:
-            print(f"[WARN] Error capturing baseline: {e}")
-            self.auto_detecting_opponent = False
-            return
+            previous_gray = baseline_gray
+            stable_count = 0
 
-        previous_gray = baseline_gray
-        stable_count = 0
+            while self.auto_detecting_opponent:
+                time.sleep(0.04)
+                if not self.auto_detecting_opponent:
+                    break
 
-        while self.auto_detecting_opponent:
-            time.sleep(0.035) # ~28 FPS ultra-fast polling
-            if not self.auto_detecting_opponent:
-                break
-
-            try:
-                screenshot = self.recognizer.capture_screen()
-                current_board = self.recognizer.get_warped_board(screenshot)
+                current_board = self._capture_warped_board_safe(rec)
                 if current_board is None:
                     continue
 
                 current_gray = cv2.cvtColor(current_board, cv2.COLOR_BGR2GRAY)
-
-                # Fast difference against baseline
                 diff_baseline = cv2.absdiff(current_gray, baseline_gray)
-                changed_pixels = np.count_nonzero(diff_baseline > 28)
+                changed_pixels = np.count_nonzero(diff_baseline > 26)
 
-                if changed_pixels > 1200:
-                    # Motion detected! Check consecutive frame diff for animation settling
+                if changed_pixels > 900:
                     diff_prev = cv2.absdiff(current_gray, previous_gray)
-                    settling_pixels = np.count_nonzero(diff_prev > 25)
-
+                    settling_pixels = np.count_nonzero(diff_prev > 24)
                     if settling_pixels < 350:
                         stable_count += 1
                     else:
                         stable_count = 0
 
                     if stable_count >= 2:
-                        # Opponent move settled! Directly recognize current_board image
-                        new_fen_raw = self.recognizer.get_fen_from_board_image(
+                        new_fen_raw = rec.get_fen_from_board_image(
                             current_board,
-                            player_color=self.my_color_var.get(),
-                            active_player=self.side_var.get(),
+                            player_color=self._ui_get("my_color", "my_color_var", "w"),
+                            active_player=self._ui_get("side", "side_var", "w"),
                             castling='-',
                             en_passant='-',
                         )
-
                         board_screen = chess.Board(new_fen_raw)
-                        matched_move = self.find_matching_legal_move(board_screen)
+                        seq = self.find_matching_move_sequence(board_screen, max_plies=2)
 
-                        if matched_move:
-                            print(f"[INFO] 對手走子極速識別成功: {matched_move.uci()}")
-                            self.auto_detecting_opponent = False
-
-                            def on_opponent_matched(move_obj):
-                                self.apply_move(move_obj)
-                                self.draw_board()
-                                # Immediately start analysis with current board FEN without re-capturing!
-                                self.start_analysis_thread(current_fen=self.board.fen())
-
-                            self.after(0, on_opponent_matched, matched_move)
-                            break
-                        else:
-                            # If board pieces changed but didn't match single legal move (e.g. piece sync mismatch)
-                            if self.board.board_fen() != board_screen.board_fen():
-                                print("[INFO] 對手盤面變動但非單步推進，同步新局面並即刻分析")
+                        if phase == 1:
+                            if seq is not None and len(seq) == 2:
+                                print(f"[INFO] 偵測到我方與對手連續落子: {seq[0].uci()} -> {seq[1].uci()}")
                                 self.auto_detecting_opponent = False
+                                def on_both_moves(m_pair):
+                                    self.apply_move(m_pair[0])
+                                    self.apply_move(m_pair[1])
+                                    self.best_move_arrow = None
+                                    self.draw_board()
+                                    if not self._check_and_handle_game_over(self.board):
+                                        self.start_analysis_thread(current_fen=self.board.fen())
+                                self._post_ui(on_both_moves, seq)
+                                return
 
-                                def on_resync_matched(fen_val):
+                            elif seq is not None and len(seq) == 1:
+                                print(f"[INFO] 玩家走子識別成功: {seq[0].uci()}，切換為等待對手...")
+                                sync_evt = threading.Event()
+                                is_over_box = [False]
+                                def on_player_moved(mv):
+                                    self.apply_move(mv)
+                                    self.best_move_arrow = None
+                                    self.draw_board()
+                                    if self._check_and_handle_game_over(self.board):
+                                        is_over_box[0] = True
+                                    else:
+                                        self.lbl_status.config(
+                                            text="狀態 (Status): 等待對手下棋... (Waiting for opponent)",
+                                            foreground="blue",
+                                        )
+                                    self._refresh_ui_snapshot()
+                                    sync_evt.set()
+                                self._post_ui(on_player_moved, seq[0])
+                                sync_evt.wait(timeout=1.0)
+                                if is_over_box[0]:
+                                    return
+
+                                baseline_gray = current_gray
+                                previous_gray = current_gray
+                                stable_count = 0
+                                phase = 2
+                                continue
+
+                            elif board_screen.board_fen() != self.board.board_fen():
+                                # Non-standard jump -> resync as opponent's turn and move to Phase 2
+                                print("[WARN] 玩家盤面跳躍，重新同步並等待對手...")
+                                sync_evt = threading.Event()
+                                def on_player_resync(fen_val):
+                                    b_sync = chess.Board(fen_val)
+                                    opp_color = 'b' if self.my_color_var.get() == 'w' else 'w'
+                                    rights = self.infer_castling_rights(b_sync, self.castling_var.get())
+                                    parts = fen_val.split()
+                                    parts[1] = opp_color
+                                    parts[2] = rights
+                                    parts[3] = "-"
+                                    self.init_game_from_board(chess.Board(" ".join(parts)))
+                                    self.draw_board()
+                                    self.lbl_status.config(
+                                        text="狀態 (Status): 等待對手下棋... (Waiting for opponent)",
+                                        foreground="blue",
+                                    )
+                                    self._refresh_ui_snapshot()
+                                    sync_evt.set()
+                                self._post_ui(on_player_resync, new_fen_raw)
+                                sync_evt.wait(timeout=1.0)
+                                baseline_gray = current_gray
+                                previous_gray = current_gray
+                                stable_count = 0
+                                phase = 2
+                                continue
+                            else:
+                                # Cursor / highlight change without piece move
+                                baseline_gray = current_gray
+                                stable_count = 0
+
+                        else:  # phase == 2 (Waiting for opponent)
+                            if seq is not None and len(seq) >= 1:
+                                print(f"[INFO] 對手走子識別成功: {[m.uci() for m in seq]}")
+                                self.auto_detecting_opponent = False
+                                def on_opp_moved(moves_to_apply):
+                                    for mv in moves_to_apply:
+                                        self.apply_move(mv)
+                                    self.draw_board()
+                                    if not self._check_and_handle_game_over(self.board):
+                                        self.start_analysis_thread(current_fen=self.board.fen())
+                                self._post_ui(on_opp_moved, seq)
+                                return
+                            elif board_screen.board_fen() != self.board.board_fen():
+                                print("[INFO] 對手盤面變動非單步推進，同步新局面並立即分析")
+                                self.auto_detecting_opponent = False
+                                def on_opp_resync(fen_val):
                                     b_sync = chess.Board(fen_val)
                                     rights = self.infer_castling_rights(b_sync, self.castling_var.get())
                                     parts = fen_val.split()
+                                    parts[1] = self.my_color_var.get()
                                     parts[2] = rights
                                     parts[3] = "-"
-                                    parts[1] = self.my_color_var.get()
                                     new_fen = " ".join(parts)
                                     self.init_game_from_board(chess.Board(new_fen))
                                     self.draw_board()
-                                    self.start_analysis_thread(current_fen=new_fen)
-
-                                self.after(0, on_resync_matched, new_fen_raw)
-                                break
+                                    if not self._check_and_handle_game_over(self.board):
+                                        self.start_analysis_thread(current_fen=self.board.fen())
+                                self._post_ui(on_opp_resync, new_fen_raw)
+                                return
                             else:
-                                # Transient flicker / mouse cursor passing by
+                                baseline_gray = current_gray
                                 stable_count = 0
                 else:
                     stable_count = 0
 
                 previous_gray = current_gray
 
-            except Exception:
-                pass
+        except Exception as e:
+            print(f"[WARN] Error in manual auto-detect loop: {e}")
+            traceback.print_exc()
+        finally:
+            self.auto_detecting_opponent = False
+
+    def _auto_detect_loop(self):
+        """
+        High-speed background thread to detect when the opponent has moved.
+        Also immediately detects if the opponent ALREADY moved before baseline was captured
+        (e.g., instant bot reply or human premove, or starting as Black after White moved).
+        """
+        if self.auto_detecting_opponent:
+            return
+        self.auto_detecting_opponent = True
+        print("[INFO] Started Ultra-Fast Auto-Detect Opponent loop...")
+
+        def update_status(text, color):
+            self.lbl_status.config(text=text, foreground=color)
+
+        self._post_ui(lambda: self.btn_stop.config(state="normal"))
+        self._post_ui(update_status, "狀態 (Status): 等待對手下棋... (Waiting for opponent)", "blue")
+
+        try:
+            import cv2
+            import numpy as np
+            rec = self._ensure_recognizer()
+
+            time.sleep(0.06)
+
+            baseline_board = self._capture_warped_board_safe(rec)
+            if baseline_board is None:
+                print("[WARN] Auto-detect failed to get baseline board.")
+                self._post_ui(update_status, "狀態 (Status): 自動偵測失敗 - 找不到棋盤 (Board not found)", "red")
+                return
+
+            player_color = self._ui_get("my_color", "my_color_var", "w")
+            # Orientation check on starting board (e.g. user playing Black at move 1)
+            if self._ui_get("auto_detect", "auto_detect_var", True) and len(self.board.move_stack) == 0:
+                vis_pieces = rec.identify_board_pieces(baseline_board)
+                orient = rec.detect_starting_orientation(vis_pieces)
+                if orient in ('w', 'b') and orient != player_color:
+                    player_color = orient
+                    self._post_ui(lambda o=orient: (self.my_color_var.set(o), self._refresh_ui_snapshot(), self.draw_board()))
+                    time.sleep(0.02)
+
+            # Immediate check: did a fast bot / premove opponent ALREADY move on `baseline_board`?
+            init_fen_raw = rec.get_fen_from_board_image(
+                baseline_board,
+                player_color=player_color,
+                active_player=self._ui_get("side", "side_var", "w"),
+                castling='-',
+                en_passant='-',
+            )
+            init_board_screen = chess.Board(init_fen_raw)
+            init_seq = self.find_matching_move_sequence(init_board_screen, max_plies=1)
+            if init_seq and len(init_seq) == 1:
+                mv = init_seq[0]
+                print(f"[INFO] 對手已提前完成走子 (即時偵測命中): {mv.uci()}")
+                self.auto_detecting_opponent = False
+                def on_early_opp(move_obj):
+                    self.apply_move(move_obj)
+                    self.draw_board()
+                    if not self._check_and_handle_game_over(self.board):
+                        self.start_analysis_thread(current_fen=self.board.fen())
+                self._post_ui(on_early_opp, mv)
+                return
+
+            baseline_gray = cv2.cvtColor(baseline_board, cv2.COLOR_BGR2GRAY)
+            previous_gray = baseline_gray
+            stable_count = 0
+
+            while self.auto_detecting_opponent:
+                time.sleep(0.035)
+                if not self.auto_detecting_opponent:
+                    break
+
+                current_board = self._capture_warped_board_safe(rec)
+                if current_board is None:
+                    continue
+
+                current_gray = cv2.cvtColor(current_board, cv2.COLOR_BGR2GRAY)
+                diff_baseline = cv2.absdiff(current_gray, baseline_gray)
+                changed_pixels = np.count_nonzero(diff_baseline > 26)
+
+                if changed_pixels > 900:
+                    diff_prev = cv2.absdiff(current_gray, previous_gray)
+                    settling_pixels = np.count_nonzero(diff_prev > 24)
+                    if settling_pixels < 350:
+                        stable_count += 1
+                    else:
+                        stable_count = 0
+
+                    if stable_count >= 2:
+                        new_fen_raw = rec.get_fen_from_board_image(
+                            current_board,
+                            player_color=self._ui_get("my_color", "my_color_var", "w"),
+                            active_player=self._ui_get("side", "side_var", "w"),
+                            castling='-',
+                            en_passant='-',
+                        )
+                        board_screen = chess.Board(new_fen_raw)
+                        seq = self.find_matching_move_sequence(board_screen, max_plies=2)
+
+                        if seq and len(seq) >= 1:
+                            print(f"[INFO] 對手走子極速識別成功: {[m.uci() for m in seq]}")
+                            self.auto_detecting_opponent = False
+                            def on_opponent_matched(moves_list):
+                                for m_obj in moves_list:
+                                    self.apply_move(m_obj)
+                                self.draw_board()
+                                if not self._check_and_handle_game_over(self.board):
+                                    self.start_analysis_thread(current_fen=self.board.fen())
+                            self._post_ui(on_opponent_matched, seq)
+                            return
+                        elif self.board.board_fen() != board_screen.board_fen():
+                            print("[INFO] 對手盤面變動但非單步推進，同步新局面並即刻分析")
+                            self.auto_detecting_opponent = False
+                            def on_resync_matched(fen_val):
+                                b_sync = chess.Board(fen_val)
+                                rights = self.infer_castling_rights(b_sync, self.castling_var.get())
+                                parts = fen_val.split()
+                                parts[1] = self.my_color_var.get()
+                                parts[2] = rights
+                                parts[3] = "-"
+                                new_fen = " ".join(parts)
+                                self.init_game_from_board(chess.Board(new_fen))
+                                self.draw_board()
+                                if not self._check_and_handle_game_over(self.board):
+                                    self.start_analysis_thread(current_fen=self.board.fen())
+                            self._post_ui(on_resync_matched, new_fen_raw)
+                            return
+                        else:
+                            baseline_gray = current_gray
+                            stable_count = 0
+                else:
+                    stable_count = 0
+
+                previous_gray = current_gray
+
+        except Exception as e:
+            print(f"[WARN] Error in opponent auto-detect loop: {e}")
+        finally:
+            self.auto_detecting_opponent = False
 
     def infer_castling_rights(self, board, current_rights=None):
         """
-        Infer likely castling rights for root/fallback positions based on piece positions and existing rights.
+        Infer likely castling rights based on piece positions and existing rights.
         Castling rights can ONLY be lost, NEVER regained.
         """
         if current_rights is None:
@@ -1205,39 +1537,28 @@ class ChessVisionApp(tk.Tk):
             return "-"
 
         rights = ""
-        # White Kingside ('K')
         if "K" in current_rights:
             if (board.piece_at(chess.E1) == chess.Piece(chess.KING, chess.WHITE) and
-                board.piece_at(chess.H1) == chess.Piece(chess.ROOK, chess.WHITE)):
+                    board.piece_at(chess.H1) == chess.Piece(chess.ROOK, chess.WHITE)):
                 rights += "K"
-
-        # White Queenside ('Q')
         if "Q" in current_rights:
             if (board.piece_at(chess.E1) == chess.Piece(chess.KING, chess.WHITE) and
-                board.piece_at(chess.A1) == chess.Piece(chess.ROOK, chess.WHITE)):
+                    board.piece_at(chess.A1) == chess.Piece(chess.ROOK, chess.WHITE)):
                 rights += "Q"
-
-        # Black Kingside ('k')
         if "k" in current_rights:
             if (board.piece_at(chess.E8) == chess.Piece(chess.KING, chess.BLACK) and
-                board.piece_at(chess.H8) == chess.Piece(chess.ROOK, chess.BLACK)):
+                    board.piece_at(chess.H8) == chess.Piece(chess.ROOK, chess.BLACK)):
                 rights += "k"
-
-        # Black Queenside ('q')
         if "q" in current_rights:
             if (board.piece_at(chess.E8) == chess.Piece(chess.KING, chess.BLACK) and
-                board.piece_at(chess.A8) == chess.Piece(chess.ROOK, chess.BLACK)):
+                    board.piece_at(chess.A8) == chess.Piece(chess.ROOK, chess.BLACK)):
                 rights += "q"
 
         return rights if rights else "-"
 
     def infer_en_passant_square(self, prev_board, current_board, side_just_moved=None):
-        """
-        Helper to check if transition from prev_board to current_board yields an en passant square.
-        """
         if prev_board is None or current_board is None:
             return "-"
-
         try:
             if isinstance(current_board, str):
                 current_board = chess.Board(current_board)
@@ -1253,163 +1574,191 @@ class ChessVisionApp(tk.Tk):
                 if b_test.board_fen() == curr_pieces:
                     ep_sq = b_test.ep_square
                     b_test.pop()
-                    if ep_sq is not None:
-                        return chess.square_name(ep_sq)
-                    return "-"
+                    return chess.square_name(ep_sq) if ep_sq is not None else "-"
                 b_test.pop()
             return "-"
         except Exception:
             return "-"
 
-    def _run_analysis(self, precomputed_fen=None):
+    def _run_analysis(self, precomputed_fen=None, search_id=0):
         try:
             if precomputed_fen:
-                fen_final = precomputed_fen
+                # Board was already updated on the main thread
+                position_cmd = self.build_uci_position_cmd(self.board)
+                fen_final = self.board.fen()
             else:
                 try:
-                    from tools import screen_recognizer
-                except ImportError as e:
-                    self.message_queue.put({"type": "error", "message": f"無法載入 screen_recognizer: {e}"})
-                    self.message_queue.put({"type": "analysis_finished"})
+                    rec = self._ensure_recognizer()
+                except Exception as e:
+                    self.message_queue.put({"type": "error", "message": f"Recognizer Init Failed: {e}"})
+                    self.message_queue.put({"type": "analysis_aborted", "search_id": search_id})
                     return
 
-                if not self.recognizer:
-                    try:
-                        self.recognizer = screen_recognizer.ScreenRecognizer()
-                    except Exception as e:
-                        self.message_queue.put({"type": "error", "message": f"Recognizer Init Failed: {e}"})
-                        traceback.print_exc()
-                        self.message_queue.put({"type": "analysis_finished"})
-                        return
+                board_img = self._capture_warped_board_safe(rec)
+                if board_img is None:
+                    self.message_queue.put({"type": "error", "message": "無法從螢幕辨識到 8x8 棋盤 (Board Not Found)\n請確認棋盤完整顯示或使用「預覽與手動校正」。"})
+                    self.message_queue.put({"type": "analysis_aborted", "search_id": search_id})
+                    return
 
-                # Capture screen reusing transform if M is already known
-                use_cached_M = (self.recognizer.M is not None)
-                fen_raw = self.recognizer.get_fen_from_screen(
-                    player_color=self.my_color_var.get(),
-                    active_player=self.side_var.get(),
-                    castling='-', # Placeholder
-                    en_passant='-', # Placeholder
-                    exclude_rect=self.get_exclude_rect(),
-                    reuse_transform=use_cached_M,
-                    verbose=False,
+                # Auto-detect board orientation at game start so playing Black never gets inverted
+                player_color = self._ui_get("my_color", "my_color_var", "w")
+                if self._ui_get("auto_detect", "auto_detect_var", True) and (self.is_first_analysis or len(self.board.move_stack) == 0):
+                    vis_pieces = rec.identify_board_pieces(board_img)
+                    orient = rec.detect_starting_orientation(vis_pieces)
+                    if orient in ('w', 'b') and orient != player_color:
+                        player_color = orient
+                        self._post_ui(lambda o=orient: (self.my_color_var.set(o), self._refresh_ui_snapshot(), self.draw_board()))
+
+                self.is_first_analysis = False
+
+                fen_raw = rec.get_fen_from_board_image(
+                    board_img,
+                    player_color=player_color,
+                    active_player=self._ui_get("side", "side_var", "w"),
+                    castling='-',
+                    en_passant='-',
                 )
-                
                 if not fen_raw:
                     self.message_queue.put({"type": "error", "message": "無法辨識棋盤 (Recognition Failed)"})
-                    self.message_queue.put({"type": "analysis_finished"})
+                    self.message_queue.put({"type": "analysis_aborted", "search_id": search_id})
                     return
 
-                fen_final = fen_raw
+                # Synchronize `self.board` safely on the main thread
+                sync_done = threading.Event()
+                sync_result = {"wait_for_opponent": False}
 
-                if self.auto_detect_var.get():
+                def sync_board_main_thread():
                     try:
-                        board_screen = chess.Board(fen_raw)
-                        matched_move = self.find_matching_legal_move(board_screen)
-                        if matched_move:
-                            print(f"[INFO] 識別到走棋: {matched_move.uci()}")
-                            self.apply_move(matched_move)
+                        is_self_play = (self.auto_play_var.get() and self.autoplay_mode_var.get() == "self")
+                        if self.auto_detect_var.get():
+                            board_screen = chess.Board(fen_raw)
+
+                            # Special guard: at fresh starting board, White MUST move first!
+                            if (len(self.board.move_stack) == 0 and
+                                    board_screen.board_fen() == chess.STARTING_BOARD_FEN):
+                                self.init_game_from_board(chess.Board())
+                                if (not is_self_play and player_color == 'b' and
+                                        self.auto_detect_opponent_var.get()):
+                                    sync_result["wait_for_opponent"] = True
+                            else:
+                                seq = self.find_matching_move_sequence(board_screen, max_plies=2)
+                                if seq is not None:
+                                    for mv in seq:
+                                        self.apply_move(mv)
+                                else:
+                                    new_rights = self.infer_castling_rights(board_screen, self.castling_var.get())
+                                    parts = fen_raw.split()
+                                    parts[2] = new_rights
+                                    parts[3] = "-"
+                                    self.init_game_from_board(chess.Board(" ".join(parts)))
+
+                                # After syncing screen moves, if in Fixed mode + Auto-Detect Opponent
+                                # and it's actually opponent's turn (e.g. user already moved on screen!),
+                                # switch directly into opponent detection instead of analyzing opponent's turn!
+                                if (not is_self_play and self.auto_detect_opponent_var.get() and
+                                        self.side_var.get() != player_color):
+                                    sync_result["wait_for_opponent"] = True
                         else:
-                            if self.board.board_fen() != board_screen.board_fen():
-                                print("[INFO] 螢幕盤面不符合合法著法推進，同步為新局面根節點")
-                                new_rights = self.infer_castling_rights(board_screen, self.castling_var.get())
-                                parts = fen_raw.split()
-                                parts[2] = new_rights
-                                parts[3] = "-"
-                                self.init_game_from_board(chess.Board(" ".join(parts)))
+                            user_rights = sanitize_fen_input(self.castling_var.get(), 'castling')
+                            user_ep = sanitize_fen_input(self.ep_var.get(), 'ep')
+                            parts = fen_raw.split()
+                            parts[2] = user_rights
+                            parts[3] = user_ep
+                            self.init_game_from_board(chess.Board(" ".join(parts)))
 
-                        fen_final = self.board.fen()
-                        self.after(0, self.draw_board)
-                    except Exception as e:
-                        print(f"Auto-detect rights/move failed: {e}")
-                        fen_final = self.board.fen()
-                else:
-                    user_rights_raw = self.castling_var.get()
-                    user_ep_raw = self.ep_var.get()
-                    user_rights = sanitize_fen_input(user_rights_raw, 'castling')
-                    user_ep = sanitize_fen_input(user_ep_raw, 'ep')
+                        self._refresh_ui_snapshot()
+                        self.draw_board()
+                    except Exception as ex:
+                        print(f"[WARN] sync_board_main_thread exception: {ex}")
+                    finally:
+                        sync_done.set()
 
-                    parts = fen_raw.split()
-                    parts[2] = user_rights
-                    parts[3] = user_ep
-                    fen_final = " ".join(parts)
-                    try:
-                        self.board.set_fen(fen_final)
-                    except:
-                        pass
+                self._post_ui(sync_board_main_thread)
+                sync_done.wait(timeout=2.0)
 
-            self.message_queue.put({"type": "fen_update", "fen": fen_final})
-            
-            # Check for Game Over before sending to engine
-            temp_board = chess.Board(fen_final)
-            if temp_board.is_game_over():
-                outcome = temp_board.outcome()
-                reason = "將殺 (Checkmate)" if temp_board.is_checkmate() else "平局/逼和 (Draw/Stalemate)"
-                msg = f"偵測到遊戲已結束 ({reason}): {outcome.result()}"
-                self.message_queue.put({"type": "log", "message": msg})
-                
-                def stop_on_over():
-                    self.lbl_status.config(text=f"狀態 (Status): 遊戲結束 - {outcome.result()}", foreground="purple")
-                    self.auto_play_var.set(False)
-                    self.auto_detect_opponent_var.set(False)
-                    self.analyzing = False
-                    self.btn_analyze.config(state="normal")
-                    self.btn_stop.config(state="disabled")
-                
-                self.after(0, stop_on_over)
+                if sync_result["wait_for_opponent"]:
+                    def switch_to_opp_wait():
+                        if search_id == self.current_search_id:
+                            self.analyzing = False
+                            self.btn_analyze.config(state="normal")
+                        threading.Thread(target=self._auto_detect_loop, daemon=True).start()
+                    self._post_ui(switch_to_opp_wait)
+                    return
+
+                position_cmd = self.build_uci_position_cmd(self.board)
+                fen_final = self.board.fen()
+
+            if search_id != self.current_search_id:
                 return
 
-            # Ensure engine OwnBook option matches UI setting
-            self.engine.send_command(f"setoption name OwnBook value {'true' if self.use_book_var.get() else 'false'}")
+            self.message_queue.put({"type": "fen_update", "fen": fen_final, "search_id": search_id})
 
-            # Send to Engine
-            self.engine.send_command(f"position fen {fen_final}")
-            
-            if hasattr(self, 'limit_by_nodes_var') and self.limit_by_nodes_var.get():
-                try:
-                    nodes_limit = int(self.nodes_limit_var.get())
-                except:
-                    nodes_limit = 100000
-                self.engine.send_command(f"go nodes {nodes_limit}")
-            else:
-                try:
-                    time_limit = int(float(self.time_var.get()) * 1000)
-                except:
-                    time_limit = 10000
-                self.engine.send_command(f"go movetime {time_limit}")
+            # Check for Game Over before sending to engine
+            temp_board = chess.Board(fen_final)
+            if temp_board.is_game_over(claim_draw=True):
+                self._post_ui(self._check_and_handle_game_over, temp_board)
+                return
+
+            go_cmd = self.__dict__.get("_ui_state", {}).get("go_cmd") or "go movetime 10000"
+            if threading.current_thread() is threading.main_thread():
+                go_cmd = self._build_go_cmd()
+            self.engine.start_search(
+                position_cmd=position_cmd,
+                go_cmd=go_cmd,
+                search_id=search_id,
+                own_book=bool(self._ui_get("use_book", "use_book_var", True)),
+            )
 
         except Exception as e:
             traceback.print_exc()
             self.message_queue.put({"type": "error", "message": f"Analysis Error: {e}"})
-            self.message_queue.put({"type": "analysis_finished"})
+            self.message_queue.put({"type": "analysis_aborted", "search_id": search_id})
 
     def _process_queue(self):
+        self._refresh_ui_snapshot()
         try:
             while True:
                 msg = self.message_queue.get_nowait()
-                
-                if msg["type"] == "raw_log":
+                mtype = msg.get("type")
+
+                if mtype == "ui_call":
+                    fn = msg.get("fn")
+                    args = msg.get("args", ())
+                    if fn is not None:
+                        fn(*args)
+
+                elif mtype == "raw_log":
                     self.write_to_console(msg["message"])
 
-                elif msg["type"] == "info":
-                    if self.warming_up: continue
+                elif mtype == "readyok":
+                    if self.warming_up:
+                        self.warming_up = False
+                        self.lbl_status.config(text="狀態 (Status): 準備就緒 (Ready)", foreground="green")
+                        self.engine.send_command("ucinewgame")
+                        self.engine.send_command(
+                            f"setoption name OwnBook value {'true' if self.use_book_var.get() else 'false'}"
+                        )
+                        print("[INFO] Engine JIT readyok complete.")
 
-                    # Update Info
-                    if "string" in msg:
-                        s_msg = msg["string"]
-                        if "Playing from book" in s_msg:
-                            self.lbl_score.config(text="評分 (Score): 開局庫 (Book)")
-                            self.lbl_pv.config(text="變例 (PV): [Book Move]")
+                elif mtype == "info":
+                    if self.warming_up:
+                        continue
+                    if msg.get("search_id") != self.current_search_id:
+                        continue
+
+                    if "string" in msg and "Playing from book" in msg["string"]:
+                        self.lbl_score.config(text="評分 (Score): 開局庫 (Book)")
+                        self.lbl_pv.config(text="變例 (PV): [Book Move]")
 
                     if "score_type" in msg:
                         s_type = msg["score_type"]
                         s_val = msg["score_val"]
                         display_score = f"{s_val} cp" if s_type == "cp" else f"Mate in {s_val}"
                         self.lbl_score.config(text=f"評分 (Score): {display_score}")
-                    
+
                     if "pv" in msg:
                         self.lbl_pv.config(text=f"變例 (PV): {msg['pv']}")
 
-                    # Performance Logging: Log info depth diagnostics
                     if "depth" in msg and "score_type" in msg:
                         depth = msg["depth"]
                         seldepth = msg.get("seldepth", "--")
@@ -1421,173 +1770,167 @@ class ChessVisionApp(tk.Tk):
                         nps = msg.get("nps", "--")
                         pv = msg.get("pv", "")
                         first_move = pv.split()[0] if pv else "--"
-                        
-                        log_line = f"Depth: {depth:<3} | SelDepth: {seldepth:<3} | Score: {display_score:<10} | Time: {time_ms:<6} ms | Nodes: {nodes:<10} | NPS: {nps:<10} | Best Move: {first_move}"
+
+                        log_line = (
+                            f"Depth: {depth:<3} | SelDepth: {seldepth:<3} | Score: {display_score:<10} | "
+                            f"Time: {time_ms:<6} ms | Nodes: {nodes:<10} | NPS: {nps:<10} | Best Move: {first_move}"
+                        )
                         self.log_search_info(log_line)
 
-                elif msg["type"] == "bestmove":
-                    if self.warming_up:
-                        self.warming_up = False
-                        self.lbl_status.config(text="狀態 (Status): 準備就緒 (Ready)", foreground="green")
-                        self.engine.send_command("ucinewgame")
-                        # Restore user OwnBook preference
-                        self.engine.send_command(f"setoption name OwnBook value {'true' if self.use_book_var.get() else 'false'}")
-                        print("[INFO] Warmup complete.")
+                elif mtype == "bestmove":
+                    # Ignore stale bestmoves from earlier interrupted searches
+                    if msg.get("search_id") != self.current_search_id or not self.analyzing:
                         continue
-                        
-                    # If user pressed stop, analyzing is False, so we should discard this bestmove
-                    if not self.analyzing:
-                         print("[INFO] Muted bestmove because analysis was stopped.")
-                         self.btn_analyze.config(state="normal")
-                         self.btn_stop.config(state="disabled")
-                         continue
+
+                    # Mark search completed IMMEDIATELY (prevents any queue race when chaining next turn!)
+                    self.analyzing = False
+                    self.btn_analyze.config(state="normal")
+                    self.btn_stop.config(state="disabled")
 
                     move_uci = msg["move"]
-                    
-                    # Display proper castling move
                     castling_map = {"e1h1": "e1g1", "e1a1": "e1c1", "e8h8": "e8g8", "e8a8": "e8c8"}
-                    if move_uci in castling_map and self.board.piece_at(chess.parse_square(move_uci[:2])) == chess.Piece(chess.KING, self.board.turn):
+                    if (move_uci in castling_map and
+                            self.board.piece_at(chess.parse_square(move_uci[:2])) == chess.Piece(chess.KING, self.board.turn)):
                         display_move = castling_map[move_uci]
                     else:
                         display_move = move_uci
-                        
+
                     self.lbl_bestmove.config(text=f"最佳著法 (Best Move): {display_move}")
-                    
-                    # Log best move chosen
                     self.log_search_info(f"[Best Move Chosen]: {display_move}")
                     self.log_search_info("=" * 110)
 
-                    # Determine if this move was played by our side BEFORE apply_move pushes and alters turn
-                    was_our_turn = (self.side_var.get() == self.my_color_var.get())
+                    try:
+                        current_tab = self.notebook.index("current")
+                    except Exception:
+                        current_tab = 0
 
-                    # Highlight move on board
+                    was_our_turn = (self.side_var.get() == self.my_color_var.get())
+                    is_auto_play = self.auto_play_var.get()
+                    is_self_play = (is_auto_play and self.autoplay_mode_var.get() == "self")
+
                     try:
                         move = chess.Move.from_uci(display_move)
                         self.best_move_arrow = move
-                        
-                        # Only push move automatically in screen-capturing auto mode (not in manual tab)
-                        current_tab = 0
-                        try:
-                            current_tab = self.notebook.index("current")
-                        except:
-                            pass
-                            
-                        if current_tab != 1: # If not in manual mode
+                        # ONLY push `move` onto `self.board` immediately if Auto-Play is going to click it right now!
+                        # When Auto-Play is OFF, keep `self.board` at the current screen state so the arrow points
+                        # cleanly on the un-moved board and `_auto_detect_manual_play_loop` can detect whatever move
+                        # the human actually plays!
+                        if current_tab == 0 and (is_self_play or (is_auto_play and was_our_turn)):
                             if move in self.board.legal_moves:
                                 self.apply_move(move)
-                        
                         self.draw_board()
-                    except:
+                    except Exception:
                         pass
-                    
-                    # Signal that analysis is done
-                    self.message_queue.put({"type": "analysis_finished"})
-                    
-                    # --- Automation Logic ---
-                    if was_our_turn:
-                        if self.auto_play_var.get():
-                            # Auto-play Scenario: execute click on screen
-                            threading.Thread(target=self.execute_auto_play, args=(display_move,), daemon=True).start()
+
+                    if current_tab == 1:
+                        self.lbl_status.config(text="狀態 (Status): 手動分析完成 (Ready)", foreground="green")
+                        continue
+
+                    # --- Tab 0 Automation State Machine ---
+                    p_color = self.my_color_var.get()
+                    self._refresh_ui_snapshot()
+                    if is_self_play:
+                        # Self-Play plays BOTH White and Black turns continuously!
+                        self.lbl_status.config(text=f"狀態 (Status): 自我對弈落子 {display_move}...", foreground="blue")
+                        threading.Thread(
+                            target=self.execute_auto_play,
+                            args=(display_move, p_color, True),
+                            daemon=True,
+                        ).start()
+                    elif was_our_turn:
+                        if is_auto_play:
+                            self.lbl_status.config(text=f"狀態 (Status): 自動落子 {display_move}...", foreground="blue")
+                            threading.Thread(
+                                target=self.execute_auto_play,
+                                args=(display_move, p_color, False),
+                                daemon=True,
+                            ).start()
                         elif self.auto_detect_opponent_var.get():
-                            # Manual play with auto-detect Scenario: wait for our move, then opponent's move
                             threading.Thread(target=self._auto_detect_manual_play_loop, daemon=True).start()
                         else:
                             self.lbl_status.config(text="狀態 (Status): 準備就緒 (Ready)", foreground="green")
                     else:
-                        # Opponent's turn
+                        # Analyzed opponent's turn (e.g. Auto-Detect was off)
                         if self.auto_detect_opponent_var.get():
-                            if self.autoplay_mode_var.get() == "self":
-                                # Self play mode: immediately trigger next turn analysis
-                                self.start_analysis_thread()
-                            else:
-                                # Standard play: start fast opponent detection
-                                threading.Thread(target=self._auto_detect_loop, daemon=True).start()
+                            threading.Thread(target=self._auto_detect_loop, daemon=True).start()
                         else:
                             self.lbl_status.config(text="狀態 (Status): 準備就緒 (Ready)", foreground="green")
 
-                elif msg["type"] == "fen_update":
+                elif mtype == "fen_update":
+                    if msg.get("search_id") != self.current_search_id:
+                        continue
                     fen = msg["fen"]
-                    try:
-                        if self.board.fen() != fen:
-                            self.board.set_fen(fen)
-                        self.draw_board()
-                    except:
-                        pass
-                    
-                    # Log the FEN header
+                    self.draw_board()
                     self.log_search_info(f"\n[{time.strftime('%Y-%m-%d %H:%M:%S')}] === 分析盤面 ===")
                     self.log_search_info(f"FEN: {fen}")
                     self.log_search_info("-" * 110)
 
-                elif msg["type"] == "error":
+                elif mtype == "analysis_aborted":
+                    if msg.get("search_id") == self.current_search_id:
+                        self.analyzing = False
+                        self.btn_analyze.config(state="normal")
+                        self.btn_stop.config(state="disabled")
+
+                elif mtype == "error":
                     messagebox.showerror("Error", msg["message"])
                     self.lbl_status.config(text="狀態 (Status): 發生錯誤 (Error)", foreground="red")
 
-                elif msg["type"] == "analysis_finished":
-                    self.analyzing = False
-                    self.btn_analyze.config(state="normal")
-                    self.btn_stop.config(state="disabled")
-                    # Note: we update label inside bestmove now if auto-detecting
-                
-                elif msg["type"] == "log":
+                elif mtype == "log":
                     print(f"[LOG] {msg['message']}")
 
         except queue.Empty:
             pass
-        
-        self.after(30, self._process_queue)
+
+        self.after(20, self._process_queue)
 
     def draw_board(self):
         self.canvas.delete("all")
-        
+
         is_flipped = (self.my_color_var.get() == 'b')
-        
+
         canvas_w = self.canvas.winfo_width()
         canvas_h = self.canvas.winfo_height()
         if canvas_w < 10 or canvas_h < 10:
             canvas_w = self.canvas_size
             canvas_h = self.canvas_size
-            
+
         offset_x = max(0, (canvas_w - (self.square_size * 8)) // 2)
         offset_y = max(0, (canvas_h - (self.square_size * 8)) // 2)
-        
+
+        last_move = self.board.peek() if self.board.move_stack else None
+
         for rank in range(8):
             for file in range(8):
-                # Calculate coordinates
                 display_rank = rank if is_flipped else (7 - rank)
                 display_file = (7 - file) if is_flipped else file
-                
+
                 x1 = offset_x + display_file * self.square_size
                 y1 = offset_y + display_rank * self.square_size
                 x2 = x1 + self.square_size
                 y2 = y1 + self.square_size
-                
-                # Color
+
                 square_idx = chess.square(file, rank)
                 color = BOARD_COLORS[(rank + file) % 2]
-                
-                # Highlight selected square in manual mode
+
+                if last_move and square_idx in (last_move.from_square, last_move.to_square):
+                    color = LAST_MOVE_COLOR
+
                 if hasattr(self, 'selected_square') and self.selected_square == square_idx:
-                    color = "#E0E68C" # light khaki for selected square
-                
+                    color = "#E0E68C"
+
                 self.canvas.create_rectangle(x1, y1, x2, y2, fill=color, outline="")
-                
-                # Labels (Coordinates)
+
                 label_color = "#B58863" if (rank + file) % 2 == 1 else "#F0D9B5"
-                if display_file == 0: # Left edge
+                if display_file == 0:
                     self.canvas.create_text(x1 + 2, y1 + 2, text=str(rank + 1), anchor="nw", font=("Arial", 8), fill=label_color)
-                if display_rank == 7: # Bottom edge
+                if display_rank == 7:
                     self.canvas.create_text(x2 - 2, y2 - 2, text=chr(ord('a') + file), anchor="se", font=("Arial", 8), fill=label_color)
 
-                # Piece
                 piece = self.board.piece_at(square_idx)
-                
                 if piece:
-                    # If dragging, skip drawing the piece on its original square
-                    if hasattr(self, 'dragging') and self.dragging and hasattr(self, 'selected_square') and self.selected_square == square_idx:
+                    if hasattr(self, 'dragging') and self.dragging and self.selected_square == square_idx:
                         continue
-                        
-                    # Try to draw image first
+
                     drawn_image = False
                     if hasattr(self, 'piece_images') and self.piece_images:
                         piece_key = f"{'w' if piece.color else 'b'}{piece.symbol().upper()}"
@@ -1599,8 +1942,7 @@ class ChessVisionApp(tk.Tk):
                                 anchor="center"
                             )
                             drawn_image = True
-                    
-                    # Fallback to Unicode text
+
                     if not drawn_image:
                         symbol = UNICODE_PIECES.get(piece.symbol())
                         self.canvas.create_text(
@@ -1611,49 +1953,38 @@ class ChessVisionApp(tk.Tk):
                         )
 
         # Draw dragging piece at cursor
-        if hasattr(self, 'dragging') and self.dragging and hasattr(self, 'selected_square') and self.selected_square is not None:
+        if hasattr(self, 'dragging') and self.dragging and self.selected_square is not None:
             piece = self.board.piece_at(self.selected_square)
             if piece:
                 drawn_image = False
                 if hasattr(self, 'piece_images') and self.piece_images:
                     piece_key = f"{'w' if piece.color else 'b'}{piece.symbol().upper()}"
                     if piece_key in self.piece_images:
-                        self.canvas.create_image(
-                            self.drag_x,
-                            self.drag_y,
-                            image=self.piece_images[piece_key],
-                            anchor="center"
-                        )
+                        self.canvas.create_image(self.drag_x, self.drag_y, image=self.piece_images[piece_key], anchor="center")
                         drawn_image = True
                 if not drawn_image:
                     symbol = UNICODE_PIECES.get(piece.symbol())
-                    self.canvas.create_text(
-                        self.drag_x,
-                        self.drag_y,
-                        text=symbol,
-                        font=("Segoe UI Symbol", 32)
-                    )
+                    self.canvas.create_text(self.drag_x, self.drag_y, text=symbol, font=("Segoe UI Symbol", 32))
 
         # Draw recommended move blue arrow
         if hasattr(self, 'best_move_arrow') and self.best_move_arrow:
             move = self.best_move_arrow
-            
+
             def get_square_center(square):
                 file_idx = chess.square_file(square)
                 rank_idx = chess.square_rank(square)
                 display_file = 7 - file_idx if is_flipped else file_idx
                 display_rank = rank_idx if is_flipped else 7 - rank_idx
-                
                 x = offset_x + display_file * self.square_size + self.square_size // 2
                 y = offset_y + display_rank * self.square_size + self.square_size // 2
                 return x, y
-            
+
             try:
                 x1, y1 = get_square_center(move.from_square)
                 x2, y2 = get_square_center(move.to_square)
                 self.canvas.create_line(
                     x1, y1, x2, y2,
-                    fill="#1E90FF", # Dodger Blue
+                    fill="#1E90FF",
                     width=5,
                     arrow=tk.LAST,
                     arrowshape=(16, 20, 6)
@@ -1663,54 +1994,56 @@ class ChessVisionApp(tk.Tk):
 
     def on_tab_changed(self, event):
         current_tab = self.notebook.index("current")
-        if self.analyzing:
+        if self.analyzing or self.auto_detecting_opponent:
             self.stop_analysis()
 
-        if current_tab == 1: # Manual Tab
-            # Disable auto play and auto opponent detect to avoid conflicts
+        if current_tab == 1:  # Manual Tab
             self.auto_play_var.set(False)
             self.auto_detect_opponent_var.set(False)
             self.auto_detecting_opponent = False
-            
-            # Bind manual interactions
+
             self.canvas.bind("<Button-1>", self.on_board_click)
             self.canvas.bind("<B1-Motion>", self.on_board_drag)
             self.canvas.bind("<ButtonRelease-1>", self.on_board_release)
-            
-            # Bind shortcuts
-            self.bind("<Left>", lambda e: self.manual_undo())
-            self.bind("<Right>", lambda e: self.manual_redo())
-            self.bind("<space>", lambda e: self.toggle_manual_eval())
-            
-            # Synchronize manual_fen_var with current board FEN
+
+            self.bind("<Left>", self._on_manual_left_key)
+            self.bind("<Right>", self._on_manual_right_key)
+            self.bind("<space>", self._on_manual_space_key)
+
             self.manual_fen_var.set(self.board.fen())
             self.redo_stack = []
             self.selected_square = None
             self.best_move_arrow = None
             self.draw_board()
         else:
-            # Unbind manual interactions
             self.canvas.unbind("<Button-1>")
             self.canvas.unbind("<B1-Motion>")
             self.canvas.unbind("<ButtonRelease-1>")
-            
-            # Unbind shortcuts
+
             self.unbind("<Left>")
             self.unbind("<Right>")
             self.unbind("<space>")
-            
-            # Sync castling_var and ep_var from manual board state
+
             try:
-                board_castling = self.board.fen().split()[2]
-                self.castling_var.set(board_castling)
-                ep = chess.square_name(self.board.ep_square) if self.board.ep_square else "-"
-                self.ep_var.set(ep)
-            except:
+                self._sync_ui_vars_from_board()
+            except Exception:
                 pass
 
             self.selected_square = None
             self.best_move_arrow = None
             self.draw_board()
+
+    def _on_manual_left_key(self, event=None):
+        if not self._is_text_input_focused():
+            self.manual_undo()
+
+    def _on_manual_right_key(self, event=None):
+        if not self._is_text_input_focused():
+            self.manual_redo()
+
+    def _on_manual_space_key(self, event=None):
+        if not self._is_text_input_focused():
+            self.toggle_manual_eval()
 
     def get_square_from_coords(self, x, y):
         is_flipped = (self.my_color_var.get() == 'b')
@@ -1718,25 +2051,24 @@ class ChessVisionApp(tk.Tk):
         canvas_h = self.canvas.winfo_height()
         offset_x = max(0, (canvas_w - (self.square_size * 8)) // 2)
         offset_y = max(0, (canvas_h - (self.square_size * 8)) // 2)
-        
+
         file_x = (x - offset_x) // self.square_size
         rank_y = (y - offset_y) // self.square_size
-        
+
         if file_x < 0 or file_x >= 8 or rank_y < 0 or rank_y >= 8:
             return None
-            
+
         display_file = 7 - file_x if is_flipped else file_x
         display_rank = rank_y if is_flipped else 7 - rank_y
-        
+
         return chess.square(display_file, display_rank)
 
     def on_board_click(self, event):
+        self.canvas.focus_set()
         sq = self.get_square_from_coords(event.x, event.y)
         if sq is not None:
             piece = self.board.piece_at(sq)
-            # Click-to-Move logic
-            if hasattr(self, 'selected_square') and self.selected_square is not None:
-                # If click target is different, check move
+            if self.selected_square is not None:
                 if sq != self.selected_square:
                     promotion = None
                     p_piece = self.board.piece_at(self.selected_square)
@@ -1744,7 +2076,7 @@ class ChessVisionApp(tk.Tk):
                         target_rank = chess.square_rank(sq)
                         if (p_piece.color == chess.WHITE and target_rank == 7) or (p_piece.color == chess.BLACK and target_rank == 0):
                             promotion = chess.QUEEN
-                    
+
                     move = chess.Move(self.selected_square, sq, promotion=promotion)
                     if move in self.board.legal_moves:
                         self.apply_move(move)
@@ -1752,12 +2084,12 @@ class ChessVisionApp(tk.Tk):
                         self.manual_fen_var.set(self.board.fen())
                         self.selected_square = None
                         self.dragging = False
+                        self.best_move_arrow = None
                         self.draw_board()
                         if self.live_eval_var.get():
                             self.start_manual_analysis()
                         return
                     else:
-                        # Move is illegal. If target has our turn piece, switch selection to it
                         if piece and piece.color == self.board.turn:
                             self.selected_square = sq
                             self.dragging = True
@@ -1771,14 +2103,12 @@ class ChessVisionApp(tk.Tk):
                             self.draw_board()
                             return
                 else:
-                    # Clicked same square, prepare for potential drag
                     self.dragging = True
                     self.drag_x = event.x
                     self.drag_y = event.y
                     self.draw_board()
                     return
-            
-            # Fresh click
+
             if piece and piece.color == self.board.turn:
                 self.selected_square = sq
                 self.dragging = True
@@ -1787,13 +2117,13 @@ class ChessVisionApp(tk.Tk):
                 self.draw_board()
 
     def on_board_drag(self, event):
-        if hasattr(self, 'dragging') and self.dragging and hasattr(self, 'selected_square') and self.selected_square is not None:
+        if self.dragging and self.selected_square is not None:
             self.drag_x = event.x
             self.drag_y = event.y
             self.draw_board()
 
     def on_board_release(self, event):
-        if hasattr(self, 'dragging') and self.dragging:
+        if self.dragging:
             self.dragging = False
             target_sq = self.get_square_from_coords(event.x, event.y)
             if target_sq is not None and target_sq != self.selected_square:
@@ -1803,13 +2133,14 @@ class ChessVisionApp(tk.Tk):
                     target_rank = chess.square_rank(target_sq)
                     if (piece.color == chess.WHITE and target_rank == 7) or (piece.color == chess.BLACK and target_rank == 0):
                         promotion = chess.QUEEN
-                
+
                 move = chess.Move(self.selected_square, target_sq, promotion=promotion)
                 if move in self.board.legal_moves:
                     self.apply_move(move)
                     self.redo_stack = []
                     self.manual_fen_var.set(self.board.fen())
                     self.selected_square = None
+                    self.best_move_arrow = None
                     self.draw_board()
                     if self.live_eval_var.get():
                         self.start_manual_analysis()
@@ -1824,6 +2155,7 @@ class ChessVisionApp(tk.Tk):
             self.redo_stack = []
             self.selected_square = None
             self.best_move_arrow = None
+            self.canvas.focus_set()
             self.draw_board()
             if self.live_eval_var.get():
                 self.start_manual_analysis()
@@ -1831,6 +2163,8 @@ class ChessVisionApp(tk.Tk):
             messagebox.showerror("Error", f"無效的 FEN (Invalid FEN): {e}")
 
     def clear_manual_board(self):
+        if self.analyzing:
+            self.stop_analysis()
         self.board.clear()
         self.game_pgn = chess.pgn.Game.from_board(self.board)
         self.game_node = self.game_pgn
@@ -1839,8 +2173,6 @@ class ChessVisionApp(tk.Tk):
         self.selected_square = None
         self.best_move_arrow = None
         self.draw_board()
-        if self.analyzing:
-            self.stop_analysis()
 
     def reset_manual_board(self):
         self.init_game_from_board(chess.Board())
@@ -1859,61 +2191,48 @@ class ChessVisionApp(tk.Tk):
 
     def start_manual_analysis(self):
         if self.warming_up:
-             return
+            return
         if self.analyzing:
-             self.engine.stop_calculation()
-             self.analyzing = False
-             self.after(50, self.start_manual_analysis)
-             return
-             
+            self.engine.stop_calculation()
+
+        if self._check_and_handle_game_over(self.board):
+            return
+
         self.analyzing = True
+        self.current_search_id += 1
+        search_id = self.current_search_id
+
         self.btn_analyze.config(state="disabled")
         self.btn_stop.config(state="normal")
+        self.lbl_status.config(text="狀態 (Status): 手動分析計算中... (Analyzing...)", foreground="orange")
         self.lbl_score.config(text="評分 (Score): 計算中...")
         self.lbl_bestmove.config(text="最佳著法 (Best Move): ...")
         self.lbl_pv.config(text="變例 (PV): ...")
         self.best_move_arrow = None
-        
-        # Log FEN header to Performance Log
+
         self.log_search_info(f"\n[{time.strftime('%Y-%m-%d %H:%M:%S')}] === 手動分析盤面 ===")
         self.log_search_info(f"FEN: {self.board.fen()}")
         self.log_search_info("-" * 110)
 
-        # Ensure engine OwnBook option matches UI setting
-        self.engine.send_command(f"setoption name OwnBook value {'true' if self.use_book_var.get() else 'false'}")
-
-        # Send FEN to engine
-        fen = self.board.fen()
-        self.engine.send_command(f"position fen {fen}")
-        if hasattr(self, 'limit_by_nodes_var') and self.limit_by_nodes_var.get():
-            try:
-                nodes_limit = int(self.nodes_limit_var.get())
-            except:
-                nodes_limit = 100000
-            self.engine.send_command(f"go nodes {nodes_limit}")
-        else:
-            try:
-                time_limit = int(float(self.time_var.get()) * 1000)
-            except:
-                time_limit = 10000
-            self.engine.send_command(f"go movetime {time_limit}")
+        position_cmd = self.build_uci_position_cmd(self.board)
+        go_cmd = self._build_go_cmd()
+        self.engine.start_search(
+            position_cmd=position_cmd,
+            go_cmd=go_cmd,
+            search_id=search_id,
+            own_book=self.use_book_var.get(),
+        )
 
     def manual_undo(self):
-        current_tab = self.notebook.index("current")
-        if current_tab != 1:
+        if self.notebook.index("current") != 1:
             return
         if self.board.move_stack:
             move = self.board.pop()
-            if not hasattr(self, 'redo_stack'):
-                self.redo_stack = []
             self.redo_stack.append(move)
             if self.game_node is not None and self.game_node.parent is not None:
                 self.game_node = self.game_node.parent
             self.manual_fen_var.set(self.board.fen())
-            ep = chess.square_name(self.board.ep_square) if self.board.has_legal_en_passant() else "-"
-            self.ep_var.set(ep)
-            self.castling_var.set(self.board.fen().split()[2])
-            self.side_var.set("w" if self.board.turn == chess.WHITE else "b")
+            self._sync_ui_vars_from_board()
             self.selected_square = None
             self.best_move_arrow = None
             self.draw_board()
@@ -1921,10 +2240,9 @@ class ChessVisionApp(tk.Tk):
                 self.start_manual_analysis()
 
     def manual_redo(self):
-        current_tab = self.notebook.index("current")
-        if current_tab != 1:
+        if self.notebook.index("current") != 1:
             return
-        if hasattr(self, 'redo_stack') and self.redo_stack:
+        if self.redo_stack:
             move = self.redo_stack.pop()
             self.apply_move(move)
             self.manual_fen_var.set(self.board.fen())
@@ -1935,8 +2253,7 @@ class ChessVisionApp(tk.Tk):
                 self.start_manual_analysis()
 
     def toggle_manual_eval(self):
-        current_tab = self.notebook.index("current")
-        if current_tab != 1:
+        if self.notebook.index("current") != 1:
             return
         if self.analyzing:
             self.stop_analysis()
@@ -1963,59 +2280,62 @@ class ChessVisionApp(tk.Tk):
         except Exception as e:
             messagebox.showerror("Error", f"無法開啟日誌資料夾 (Cannot open log folder): {e}")
 
-
-
-    def on_piece_style_selected(self, event):
+    def on_piece_style_selected(self, event=None):
         style = self.piece_style_var.get()
         script_dir = os.path.dirname(os.path.abspath(__file__))
-        
-        if style == "Custom":
-            custom_dir = os.path.abspath(os.path.join(script_dir, "data", "templates", "custom"))
-            if not os.path.exists(custom_dir) or not os.listdir(custom_dir):
-                messagebox.showwarning("Warning", "尚未學習自訂風格！請先點擊「學習」按鈕學習風格。")
-                self.piece_style_var.set("Default")
-                return
-            self.recognizer.piece_templates = self.recognizer._load_templates(custom_dir)
-        else:
-            default_dir = os.path.abspath(os.path.join(script_dir, "data", "templates"))
-            self.recognizer.piece_templates = self.recognizer._load_templates(default_dir)
-            
+        try:
+            rec = self._ensure_recognizer()
+            if style == "Custom":
+                custom_dir = os.path.abspath(os.path.join(script_dir, "data", "templates", "custom"))
+                if not os.path.exists(custom_dir) or not os.listdir(custom_dir):
+                    messagebox.showwarning("Warning", "尚未學習自訂風格！請先點擊「學習」按鈕學習風格。")
+                    self.piece_style_var.set("Universal (AI)" if rec.dnn_net is not None else "Default")
+                    return
+                rec.set_recognition_mode("custom")
+            elif style == "Default":
+                rec.set_recognition_mode("default")
+            else:
+                rec.set_recognition_mode("universal")
+        except Exception as e:
+            messagebox.showerror("Error", f"切換辨識模式失敗: {e}")
+            self.piece_style_var.set("Default")
+
         self.load_piece_images()
         self.draw_board()
 
     def learn_piece_style(self):
         """
-        引導使用者一鍵學習自訂棋格內的棋子圖示風格。
+        一鍵從當前螢幕起始盤面學習 12 種自訂棋子圖示風格。
         """
         if self.warming_up:
             messagebox.showwarning("Warning", "引擎正在熱機中，請稍候... (Engine Warming Up)")
             return
-            
-        confirm = messagebox.askyesno("學習自訂棋子風格", 
-            "請確認：\n1. 網頁棋盤已重置為「新遊戲 (Starting Position)」位置。\n2. 白方棋子在下方，黑方在上方。\n\n確認已就緒並開始學習？")
+
+        color_desc = "白方在下方、黑方在上方" if self.my_color_var.get() == 'w' else "黑方在下方、白方在上方"
+        confirm = messagebox.askyesno(
+            "學習自訂棋子風格",
+            f"請確認：\n1. 網頁棋盤已重置為「新遊戲 (Starting Position)」位置。\n2. 視角為：{color_desc}。\n\n確認已就緒並開始學習？"
+        )
         if not confirm:
             return
-            
+
         try:
-            # 抓取目前畫面
-            screenshot = self.recognizer.capture_screen()
-            # 偵測棋盤（這會自動更新 M 與 inv_M，支援無色彩形狀偵測）
-            board_img = self.recognizer.find_board(screenshot, exclude_rect=self.get_exclude_rect())
-            
+            rec = self._ensure_recognizer()
+            screenshot = rec.capture_screen()
+            board_img = rec.get_warped_board(screenshot) if rec.manual_calibrated else None
             if board_img is None:
-                messagebox.showerror("Error", "找不到棋盤！請先確認網頁棋盤是否完整顯示於螢幕上，或者先使用「手動校正」對齊。")
+                board_img = rec.find_board(screenshot, exclude_rect=self.get_exclude_rect())
+
+            if board_img is None:
+                messagebox.showerror("Error", "找不到棋盤！請確認網頁棋盤完整顯示於螢幕上，或先使用「預覽與手動校正」對齊。")
                 return
-                
-            # 一鍵學習
-            self.recognizer.learn_pieces_from_board(board_img, player_color=self.my_color_var.get())
-            
-            # 更新為 Custom 風格
+
+            rec.learn_pieces_from_board(board_img, player_color=self.my_color_var.get())
             self.piece_style_var.set("Custom")
             self.load_piece_images()
             self.draw_board()
-            
-            messagebox.showinfo("Success", "自訂棋子風格學習成功！\n模板已自動儲存至 data/templates/custom/ 並成功啟用。")
-            
+
+            messagebox.showinfo("Success", "自訂棋子風格學習成功！\n模板已自動儲存至 data/templates/custom/ 並啟用。")
         except Exception as e:
             traceback.print_exc()
             messagebox.showerror("Error", f"學習棋子風格失敗: {e}")
@@ -2027,155 +2347,132 @@ class ChessVisionApp(tk.Tk):
         if self.warming_up:
             messagebox.showwarning("Warning", "引擎正在熱機中，請稍候... (Engine Warming Up)")
             return
-            
-        # 1. 抓取目前螢幕截圖
+
         try:
-            screenshot = self.recognizer.capture_screen()
+            rec = self._ensure_recognizer()
+            screenshot = rec.capture_screen()
+            # If not yet detected, run auto-detection once so the 4 handles snap onto the board automatically!
+            if rec.inv_M is None:
+                rec.find_board(screenshot, exclude_rect=self.get_exclude_rect(), verbose=False)
         except Exception as e:
             messagebox.showerror("Error", f"無法擷取螢幕 (Capture Failed): {e}")
             return
-            
-        # 建立子視窗
+
         calib_win = tk.Toplevel(self)
         calib_win.title("螢幕辨識預覽與手動校正 (Screen Preview & Board Calibration)")
         calib_win.geometry("980x640")
         calib_win.attributes('-topmost', True)
-        
-        # 顯示說明 Label
-        lbl_desc = ttk.Label(calib_win, 
-                             text="說明：拖曳四個紅色控制點，使其精準對齊網頁棋盤的四個外框角點。對齊完成後點選「套用校正」。", 
-                             foreground="#1E90FF", font=("Segoe UI", 10, "bold"))
+
+        lbl_desc = ttk.Label(
+            calib_win,
+            text="說明：紅色外框為目前偵測到的棋盤範圍。可拖曳四個紅點微調對齊網頁棋盤四角，完成後點選「套用校正」。",
+            foreground="#1E90FF", font=("Segoe UI", 10, "bold")
+        )
         lbl_desc.pack(fill="x", padx=10, pady=5)
-        
-        # 縮放截圖以適應 Canvas (最大 960x500)
+
         import cv2
         import numpy as np
         screen_h, screen_w, _ = screenshot.shape
         scale = min(960 / screen_w, 500 / screen_h)
         preview_w = int(screen_w * scale)
         preview_h = int(screen_h * scale)
-        
+
         preview_img = cv2.resize(screenshot, (preview_w, preview_h))
-        # 轉成 PIL 格式
         preview_pil = Image.fromarray(cv2.cvtColor(preview_img, cv2.COLOR_BGR2RGB))
         preview_tk = ImageTk.PhotoImage(preview_pil)
-        
-        # Canvas
+
         canvas = tk.Canvas(calib_win, width=preview_w, height=preview_h, bg="#1E1E1E")
         canvas.pack(padx=10, pady=5)
-        
-        # Keep reference to avoid garbage collection
         canvas.image = preview_tk
         canvas.create_image(0, 0, image=preview_tk, anchor="nw")
-        
-        # 初始化 4 個控制點的位置 (頂點)
-        # 如果 recognizer.inv_M 已經存在，我們將棋盤的 4 個角點 (0,0), (W,0), (W,H), (0,H) 映射回螢幕，再乘以 scale
+
         points = []
-        if self.recognizer.inv_M is not None:
-            # warp corners back to screen space
-            w_val = self.recognizer.board_side_length
+        if rec.inv_M is not None:
+            w_val = rec.board_side_length
             corners_warped = np.array([[[0, 0]], [[w_val, 0]], [[w_val, w_val]], [[0, w_val]]], dtype="float32")
-            corners_screen = cv2.perspectiveTransform(corners_warped, self.recognizer.inv_M)
+            corners_screen = cv2.perspectiveTransform(corners_warped, rec.inv_M)
             for i in range(4):
-                px = int(corners_screen[i][0][0] * scale)
-                py = int(corners_screen[i][0][1] * scale)
-                # Keep within bounds
-                px = max(0, min(preview_w, px))
-                py = max(0, min(preview_h, py))
+                px = max(0, min(preview_w, int(corners_screen[i][0][0] * scale)))
+                py = max(0, min(preview_h, int(corners_screen[i][0][1] * scale)))
                 points.append([px, py])
         else:
-            # 預設居中正方形
             cx, cy = preview_w // 2, preview_h // 2
             size = min(preview_w, preview_h) // 4
             points = [
-                [cx - size, cy - size], # TL
-                [cx + size, cy - size], # TR
-                [cx + size, cy + size], # BR
-                [cx - size, cy + size]  # BL
+                [cx - size, cy - size],
+                [cx + size, cy - size],
+                [cx + size, cy + size],
+                [cx - size, cy + size],
             ]
-            
+
         active_handle = None
         handle_radius = 8
-        
+
         def draw_calibration():
             canvas.delete("overlay")
-            # 畫多邊形連線
             coords = []
             for p in points:
                 coords.extend(p)
             canvas.create_polygon(coords, fill="", outline="red", width=2, tags="overlay")
-            # 畫四個紅色圓形控制點與序號
             for idx, p in enumerate(points):
-                canvas.create_oval(p[0] - handle_radius, p[1] - handle_radius, 
-                                  p[0] + handle_radius, p[1] + handle_radius, 
-                                  fill="red", outline="white", width=1, tags="overlay")
-                canvas.create_text(p[0], p[1], text=str(idx+1), fill="white", font=("Segoe UI", 9, "bold"), tags="overlay")
-                
-        # 綁定拖曳事件
+                canvas.create_oval(
+                    p[0] - handle_radius, p[1] - handle_radius,
+                    p[0] + handle_radius, p[1] + handle_radius,
+                    fill="red", outline="white", width=1, tags="overlay"
+                )
+                canvas.create_text(p[0], p[1], text=str(idx + 1), fill="white", font=("Segoe UI", 9, "bold"), tags="overlay")
+
         def get_nearest_handle(event):
             nonlocal active_handle
             for idx, p in enumerate(points):
-                dist = np.sqrt((p[0] - event.x)**2 + (p[1] - event.y)**2)
-                if dist < 15:
+                if np.hypot(p[0] - event.x, p[1] - event.y) < 15:
                     active_handle = idx
                     return
             active_handle = None
-            
+
         def drag_handle(event):
             if active_handle is not None:
-                # Keep within canvas limits
                 x = max(0, min(preview_w, event.x))
                 y = max(0, min(preview_h, event.y))
                 points[active_handle] = [x, y]
                 draw_calibration()
-                
+
         def release_handle(event):
             nonlocal active_handle
             active_handle = None
-            
+
         canvas.bind("<Button-1>", get_nearest_handle)
         canvas.bind("<B1-Motion>", drag_handle)
         canvas.bind("<ButtonRelease-1>", release_handle)
-        
+
         draw_calibration()
-        
-        # 按鈕 Frame
+
         btn_frame = ttk.Frame(calib_win)
         btn_frame.pack(fill="x", padx=10, pady=10)
-        
+
         def apply_calibration():
-            # 將 4 個角點縮放回原始解析度
-            orig_points = []
-            for p in points:
-                orig_points.append([p[0] / scale, p[1] / scale])
-            orig_points = np.array(orig_points, dtype="float32")
-            
-            # 極角排序確保順序為: tl, tr, br, bl
-            center_pt = orig_points.mean(axis=0)
-            angles = np.arctan2(orig_points[:, 1] - center_pt[1], orig_points[:, 0] - center_pt[0])
-            sorted_indices = np.argsort(angles)
-            sorted_points = orig_points[sorted_indices]
-            
-            tl_idx = np.argmin(np.sum(sorted_points, axis=1))
-            sorted_rect = np.roll(sorted_points, -tl_idx, axis=0)
-            
-            # 計算新的 M 與 inv_M
-            side_length = self.recognizer.board_side_length
-            dst = np.array([[0,0], [side_length-1,0], [side_length-1,side_length-1], [0,side_length-1]], dtype="float32")
-            self.recognizer.M = cv2.getPerspectiveTransform(sorted_rect, dst)
-            self.recognizer.inv_M = cv2.getPerspectiveTransform(dst, sorted_rect)
-            
+            orig_points = np.array([[p[0] / scale, p[1] / scale] for p in points], dtype="float32")
+            sorted_rect = rec._sort_quad_points(orig_points)
+
+            side_length = rec.board_side_length
+            dst = np.array([[0, 0], [side_length - 1, 0], [side_length - 1, side_length - 1], [0, side_length - 1]], dtype="float32")
+            rec.M = cv2.getPerspectiveTransform(sorted_rect, dst)
+            rec.inv_M = cv2.getPerspectiveTransform(dst, sorted_rect)
+            rec.manual_calibrated = True
+
             self.lbl_status.config(text="狀態 (Status): 手動校正棋盤完成 (Calibration complete)", foreground="green")
             self.draw_board()
             calib_win.destroy()
-            messagebox.showinfo("Success", "棋盤校正成功！\n棋盤邊界已重新校正完成。")
-            
+            messagebox.showinfo("Success", "棋盤校正成功！\n棋盤邊界已鎖定完成。")
+
         ttk.Button(btn_frame, text="套用校正 (Apply)", command=apply_calibration).pack(side="right", padx=5)
         ttk.Button(btn_frame, text="取消 (Cancel)", command=calib_win.destroy).pack(side="right", padx=5)
 
     def on_closing(self):
+        self.auto_detecting_opponent = False
         self.engine.quit_engine()
         self.destroy()
+
 
 if __name__ == "__main__":
     app = ChessVisionApp()
