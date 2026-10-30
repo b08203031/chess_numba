@@ -794,7 +794,7 @@ CAPTURE_HISTORY_VICTIM_TYPES = 6
 
 # History prune threshold. More negative = harder to prune.
 # E3: -4000→-4500 kept; E12/H5: -4500→-5000 kept (2026-07-17).
-PRUNING_HISTORY_THRESHOLD = -6500  # E23 keep; E25B −7000 aborted ~negative @n10k
+PRUNING_HISTORY_THRESHOLD = -7000  # E110B adopted: -7000 vs -6500 (+4.86 Elo, 50.7% @1000g)
 
 # Continuation history prune threshold (SF19 Step 14: -4136 * depth, tuned from -1800 to -1500)
 ENABLE_CONTINUATION_HISTORY_PRUNING = True
@@ -1056,8 +1056,8 @@ TT_PENALIZE_MIN_DEPTH = 5        # penalize mismatched bound when depth > this
 
 # --- History bonus / malus on cutoffs (Phase-1a linear) ---
 HISTORY_BONUS_SCALE = 137        # SPSA P6 (was 136)
-HISTORY_BONUS_CAP = 2026         # SPSA P6 (was 2025; SPSA L1 12k + L2 600@300k +6.9 Elo)
-HISTORY_MALUS_CAP = 1600         # Plan A rollback (was 1788; prevents over-penalization in 300k search)
+HISTORY_BONUS_CAP = 2100         # SPSA P6 (was 2025; SPSA L1 12k + L2 600@300k +6.9 Elo)
+HISTORY_MALUS_CAP = 1500         # Plan A rollback (was 1788; prevents over-penalization in 300k search)
 HISTORY_NODE_WIDTH_DIV = 256     # non-PV: bonus += bonus * (q+c) // div
 CAPTURE_MALUS_SCALE_NUM = 1126
 CAPTURE_MALUS_SCALE_DEN = 1024

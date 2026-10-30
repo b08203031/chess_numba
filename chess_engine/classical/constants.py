@@ -1111,7 +1111,7 @@ LMR_R_FLOOR = -10                # clamp r before ply conversion
 LMR_D_MAX_EXTRA = 2              # d <= search_depth + this
 LMR_CAPTURE_VICTIM_SCALE = 809   # SF18: 809 * PieceValue / 128 + captHist
 LMR_CAPTURE_VICTIM_DIV = 128
-LMR_STAT_SCORE_DIV = 4096        # r -= stat * hist_scale // DIV
+LMR_STAT_SCORE_DIV = 3900        # r -= stat * hist_scale // DIV
 # SF19 Dynamic Depth Protection: scale up divisor at deeper plies to mitigate over-reduction
 LMR_DIVISOR_MIN_DEPTH = 10       # Depth threshold where dynamic divisor kicks in (<=10 maintains SPSA agility)
 LMR_DIVISOR_DEPTH_STEP = 128     # Divisor increment per depth ply above threshold (+25% at d=18, matching SF19)
