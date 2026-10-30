@@ -1056,7 +1056,7 @@ TT_PENALIZE_MIN_DEPTH = 5        # penalize mismatched bound when depth > this
 
 # --- History bonus / malus on cutoffs (Phase-1a linear) ---
 HISTORY_BONUS_SCALE = 137        # SPSA P6 (was 136)
-HISTORY_BONUS_CAP = 2100         # SPSA P6 (was 2025; SPSA L1 12k + L2 600@300k +6.9 Elo)
+HISTORY_BONUS_CAP = 2026         # SPSA P6 (was 2025; SPSA L1 12k + L2 600@300k +6.9 Elo)
 HISTORY_MALUS_CAP = 1500         # Plan A rollback (was 1788; prevents over-penalization in 300k search)
 HISTORY_NODE_WIDTH_DIV = 256     # non-PV: bonus += bonus * (q+c) // div
 CAPTURE_MALUS_SCALE_NUM = 1126
@@ -1111,7 +1111,7 @@ LMR_R_FLOOR = -10                # clamp r before ply conversion
 LMR_D_MAX_EXTRA = 2              # d <= search_depth + this
 LMR_CAPTURE_VICTIM_SCALE = 809   # SF18: 809 * PieceValue / 128 + captHist
 LMR_CAPTURE_VICTIM_DIV = 128
-LMR_STAT_SCORE_DIV = 4096        # r -= stat * hist_scale // DIV
+LMR_STAT_SCORE_DIV = 3900        # r -= stat * hist_scale // DIV
 # SF19 Dynamic Depth Protection: scale up divisor at deeper plies to mitigate over-reduction
 LMR_DIVISOR_MIN_DEPTH = 10       # Depth threshold where dynamic divisor kicks in (<=10 maintains SPSA agility)
 LMR_DIVISOR_DEPTH_STEP = 128     # Divisor increment per depth ply above threshold (+25% at d=18, matching SF19)

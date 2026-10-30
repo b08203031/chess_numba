@@ -51,9 +51,10 @@ class TestSearchCoreContracts(unittest.TestCase):
 
     def test_assistant_discards_warmup_search_state(self):
         assistant = (ROOT / 'assistant.py').read_text(encoding='utf-8')
-        warmup_bestmove = assistant.index('if self.warming_up:', assistant.index('elif msg["type"] == "bestmove":'))
-        restore_book = assistant.index('# Restore user OwnBook preference', warmup_bestmove)
-        reset = assistant.index('self.engine.send_command("ucinewgame")', warmup_bestmove)
+        marker = 'elif mtype == "readyok":' if 'elif mtype == "readyok":' in assistant else 'elif msg["type"] == "bestmove":'
+        warmup_block = assistant.index('if self.warming_up:', assistant.index(marker))
+        reset = assistant.index('self.engine.send_command("ucinewgame")', warmup_block)
+        restore_book = assistant.index('OwnBook', reset)
 
         self.assertLess(reset, restore_book)
 
