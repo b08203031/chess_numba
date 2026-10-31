@@ -75,17 +75,21 @@
 
 ---
 
-### 🔴 BUG-2：純王兵殘局方形法則漏判「疊兵／己方王自阻擋」與測試假陽性
+### 🔴 BUG-2：純王兵殘局方形法則漏判「疊兵／己方王自阻擋」與測試假陽性【✅ 已修復驗證】
 
-* **位置**：[`evaluation.py:1319-1331`](evaluation.py#L1319-L1331)（白兵）、[`evaluation.py:1339-1351`](evaluation.py#L1339-L1351)（黑兵）
-* **現行程式碼**：
+* **位置**：[`evaluation.py:1294-1335`](evaluation.py#L1294-L1335)（`_evaluate_king_pawn_endgame` 白兵與黑兵迴圈）
+* **現行程式碼（修復後）**：
   ```python
-  if not (WHITE_PASSED_PAWN_MASKS[sq] & black_pawns):
-      rank = sq // 8
+  # 白方方形法則（黑方鏡像同理）：
+  forward_mask = WHITE_FORWARD_FILE_MASKS[sq]
+  if not (WHITE_PASSED_PAWN_MASKS[sq] & black_pawns) and not (forward_mask & white_pawns):
+      rank = sq >> 3
       steps_to_promote = 7 - rank
-      if rank == 1:
+      if rank == 1 and not (all_occ & (BB_SQUARES[sq + 8] | BB_SQUARES[sq + 16])):
           steps_to_promote = 5  # double-push correction
-      promotion_sq = (sq % 8) + 56
+      if forward_mask & piece_bbs[5]:
+          steps_to_promote += 1  # own king blocks advance on promotion path
+      promotion_sq = (sq & 7) + 56
       king_dist = CHEBYSHEV_DISTANCE[black_king_sq, promotion_sq]
       adjusted_pawn_steps = steps_to_promote
       if side_to_move == 1:
@@ -93,6 +97,10 @@
       if king_dist > adjusted_pawn_steps:
           score += UNSTOPPABLE_PAWN_BONUS
   ```
+* **驗證結果**：
+  * **消除疊兵重疊領賞**：修復前 `7k/7p/8/8/8/P7/P7/7K w` 得分為 `1699`（比單兵多 `+902 cp`，重疊領取了兩次 800 cp 獎勵）；修復後得分為 `899`（比單兵多 `+102 cp`，正確反映單兵物質與 PST 差額，`diff` 由 `902 cp` 縮減為合理的 `102 cp`）。
+  * **修正測試假陽性與擴充覆蓋**：修正 [`tests/test_endgame_conformance.py`](../../tests/test_endgame_conformance.py) 假陽性（原單兵 FEN 觸發 10,119 KPK 位元庫），並新增黑方疊兵鏡像測試與王擋路測試，全部 35 項單元測試 100% 通過。
+  * **Parity 100% 吻合**：重新生成 `tuner/tunable_eval.py` 後通過 7 項 Tunable Parity 測試。
 * **問題根因與具體反例**：
   1. **疊通路兵雙重領賞 + 穿牆雙步**：在局面 `7k/7p/8/8/8/P7/P7/7K w - - 0 1`（白 `Pa3` + `Pa2` 疊兵）中，`a3` 與 `a2` 的 `WHITE_PASSED_PAWN_MASKS[sq] & black_pawns` 皆為 `0`。結果兩兵**同時領取 `+800 cp`（合計 `+1600 cp`）**，且 `a2`（`rank == 1`）無視正前方 `a3` 的阻擋，直接套用雙步推進 `steps_to_promote = 5`！
   2. **己方王位於升變路徑上的自阻擋**：例如白 `Pa4`、白王在 `a5`、黑王在 `e5`（輪黑走），白方必須先花 1 步移開 `Ka5` 才能推兵，真實升變需 5 步而非 4 步，黑王完全來得及進入方形區攔截，但現行公式未對路徑上的己方王加計繞行步數（亦未檢查 `rank == 1` 時 `sq + 8` 與 `sq + 16` 是否被己方王佔據）。
@@ -364,8 +372,8 @@ flowchart TD
 ### Phase 2：高確定性幾何錯誤、殘局自阻擋與 `eval_weights` 接線修復
 * **實施範圍**：
   * [x] **`BUG-1`（Pinned Queen `LINE_BB`）**：✅ 已完成。象／車／后 6 個迴圈牽制過濾統一改為 `att &= LINE_BB[king_sq, sq]`，同步更新 `generate_tunable_eval.py` Header，重新生成 `tunable_eval.py`，通過專屬幾何單元測試與 Parity 測試。
-  * [ ] **`BUG-2`（王兵方形法則疊兵／王自阻擋）**：待進行（下一步）。
-  * [ ] **`BUG-4`（補齊特化殘局、王兵殘局、空間評估之 `ew` 傳遞；`EG_SAFETY_SCALE` 確認對齊策略）**：待進行。
+  * [x] **`BUG-2`（王兵方形法則疊兵／王自阻擋）**：✅ 已完成。`_evaluate_king_pawn_endgame` 排除同線前兵、起點雙步淨空檢驗、己方王擋路 `+1` 修正；修正既有測試假陽性並新增黑方疊兵與王阻擋測試；通過所有殘局規範與 Parity 測試。
+  * [ ] **`BUG-4`（補齊特化殘局、王兵殘局、空間評估之 `ew` 傳遞；`EG_SAFETY_SCALE` 確認對齊策略）**：待進行（下一步）。
 * **實作重點**：
   1. 象／車／后 6 個迴圈牽制過濾統一改為 `att &= LINE_BB[king_sq, sq]`，同步更新 `generate_tunable_eval.py` Header。
   2. `_evaluate_king_pawn_endgame` 補上同線前兵排除、起點雙步淨空檢查與己方王擋路 `+1` 步修正。

@@ -519,6 +519,14 @@ def evaluate_special_endgame_with_material(
     Handles: KBNK, KPK, KRKP, KQKP, KXK, KNNK, KRKB, KRKN, KQKR, KNNKP.
     Returns (hit, score_from_white) — caller converts to side-to-move perspective.
     """
+    w_non_king = piece_bbs[0] | piece_bbs[1] | piece_bbs[2] | piece_bbs[3] | piece_bbs[4]
+    b_non_king = piece_bbs[6] | piece_bbs[7] | piece_bbs[8] | piece_bbs[9] | piece_bbs[10]
+    # All 10 specialized endgames require at least one side to have <= 1 non-king piece.
+    if (w_non_king & (w_non_king - np.uint64(1))) != np.uint64(0) and (
+        b_non_king & (b_non_king - np.uint64(1))
+    ) != np.uint64(0):
+        return False, np.int32(0)
+
     wp = count_bits(piece_bbs[0])
     wn = count_bits(piece_bbs[1])
     wb = count_bits(piece_bbs[2])
@@ -640,34 +648,12 @@ def is_pawn_passed_on_the_fly(sq, side, enemy_pawns_bb):
                     mask |= np.uint64(1) << np.uint64(rank_idx * 8 + file_idx)
     return (mask & enemy_pawns_bb) == np.uint64(0)
 
-@numba.njit(cache=True, boundscheck=False, fastmath=True)
-def get_endgame_scale_factor(piece_bbs, occupancy_bbs, game_state, phase, eg_score):
-    wp = count_bits(piece_bbs[0])
-    wn = count_bits(piece_bbs[1])
-    wb = count_bits(piece_bbs[2])
-    wr = count_bits(piece_bbs[3])
-    wq = count_bits(piece_bbs[4])
-    
-    bp = count_bits(piece_bbs[6])
-    bn = count_bits(piece_bbs[7])
-    bb = count_bits(piece_bbs[8])
-    br = count_bits(piece_bbs[9])
-    bq = count_bits(piece_bbs[10])
-    
-    w_minor_major = wn + wb + wr + wq
-    b_minor_major = bn + bb + br + bq
-    
-    wk_sq = get_lsb_index(piece_bbs[5])
-    bk_sq = get_lsb_index(piece_bbs[11])
-    
-    # Pre-determine strong side for later generic scaling
-    # White is strong side (0) if eg_score >= 0, otherwise Black is strong side (1)
-    # SF11 uses WHITE only for a strictly positive EG score; a zero score
-    # selects BLACK. More importantly, material-table scale functions belong
-    # only to their registered strong side.
-    strong_side = 0 if eg_score > 0 else 1
-    pawn_count_strong = wp if strong_side == 0 else bp
-
+@numba.njit(cache=True, boundscheck=False, fastmath=True, inline='always')
+def _get_specialized_scale_factor(
+    piece_bbs, occupancy_bbs, game_state, strong_side,
+    wp, wn, wb, wr, wq, bp, bn, bb, br, bq,
+    w_minor_major, b_minor_major, wk_sq, bk_sq,
+):
     # 1. KBPsK (King + Bishop + Pawns vs King)
     # SF11 endgame.cpp lines 334-394
     if strong_side == 0 and w_minor_major == 1 and wb == 1 and b_minor_major == 0 and wp > 0:
@@ -721,7 +707,7 @@ def get_endgame_scale_factor(piece_bbs, occupancy_bbs, game_state, phase, eg_sco
         # SF11 endgame.cpp lines 359-392
         all_on_b = (piece_bbs[0] & ~FILE_MASKS[1]) == np.uint64(0)
         all_on_g = (piece_bbs[0] & ~FILE_MASKS[6]) == np.uint64(0)
-        if (all_on_b or all_on_g) and count_bits(piece_bbs[6]) >= 1:
+        if (all_on_b or all_on_g) and bp >= 1:
             # Find black's frontmost pawn (highest rank = most advanced from white's view)
             pb_temp = piece_bbs[6]
             front_rank = -1
@@ -738,7 +724,7 @@ def get_endgame_scale_factor(piece_bbs, occupancy_bbs, game_state, phase, eg_sco
                 has_block = (piece_bbs[0] & (np.uint64(1) << np.uint64(block_sq))) != np.uint64(0)
                 if has_block:
                     bishop_wrong = opposite_colors(wb_sq, front_sq)
-                    if bishop_wrong or count_bits(piece_bbs[0]) == 1:
+                    if bishop_wrong or wp == 1:
                         strong_king_dist = CHEBYSHEV_DISTANCE[front_sq, wk_sq]
                         weak_king_dist = CHEBYSHEV_DISTANCE[front_sq, bk_sq]
                         # Weak king on 7th/8th rank, close to blockade, not further than strong king
@@ -794,7 +780,7 @@ def get_endgame_scale_factor(piece_bbs, occupancy_bbs, game_state, phase, eg_sco
         # B/G file case (mirror of white's case)
         all_on_b = (piece_bbs[6] & ~FILE_MASKS[1]) == np.uint64(0)
         all_on_g = (piece_bbs[6] & ~FILE_MASKS[6]) == np.uint64(0)
-        if (all_on_b or all_on_g) and count_bits(piece_bbs[0]) >= 1:
+        if (all_on_b or all_on_g) and wp >= 1:
             # Find white's frontmost pawn (lowest rank = most advanced from black's view)
             pw_temp = piece_bbs[0]
             front_rank = 8
@@ -811,7 +797,7 @@ def get_endgame_scale_factor(piece_bbs, occupancy_bbs, game_state, phase, eg_sco
                 has_block = (piece_bbs[6] & (np.uint64(1) << np.uint64(block_sq))) != np.uint64(0)
                 if has_block:
                     bishop_wrong = opposite_colors(bb_sq, front_sq)
-                    if bishop_wrong or count_bits(piece_bbs[6]) == 1:
+                    if bishop_wrong or bp == 1:
                         strong_king_dist = CHEBYSHEV_DISTANCE[front_sq, bk_sq]
                         weak_king_dist = CHEBYSHEV_DISTANCE[front_sq, wk_sq]
                         if wk_sq // 8 <= 1 and weak_king_dist <= 2 and weak_king_dist <= strong_king_dist:
@@ -1232,6 +1218,32 @@ def get_endgame_scale_factor(piece_bbs, occupancy_bbs, game_state, phase, eg_sco
                 if p_sq // 8 == wr_sq // 8 - 1 and abs(p_sq % 8 - wr_sq % 8) == 1:
                     return SCALE_FACTOR_DRAW
 
+    return np.int32(-1)
+
+
+@numba.njit(cache=True, boundscheck=False, fastmath=True)
+def get_endgame_scale_factor_with_counts(
+    piece_bbs, occupancy_bbs, game_state, phase, eg_score,
+    wp, wn, wb, wr, wq, bp, bn, bb, br, bq, wk_sq, bk_sq,
+):
+    w_minor_major = wn + wb + wr + wq
+    b_minor_major = bn + bb + br + bq
+
+    # Pre-determine strong side for later generic scaling
+    # SF11 uses WHITE only for a strictly positive EG score; a zero score selects BLACK.
+    strong_side = 0 if eg_score > 0 else 1
+    pawn_count_strong = wp if strong_side == 0 else bp
+
+    # All specialized scale-factor cases (1-7) require w_minor_major <= 1 and b_minor_major <= 1
+    if w_minor_major <= 1 and b_minor_major <= 1:
+        spec_sf = _get_specialized_scale_factor(
+            piece_bbs, occupancy_bbs, game_state, strong_side,
+            wp, wn, wb, wr, wq, bp, bn, bb, br, bq,
+            w_minor_major, b_minor_major, wk_sq, bk_sq,
+        )
+        if spec_sf >= 0:
+            return spec_sf
+
     # 8. material.cpp GENERAL NO-PAWN SCALING
     # SF11 material.cpp: when stronger side has no pawns and advantage <= bishop value.
     # P3b MG-threshold rewrite was reverted after match regression in long games;
@@ -1275,3 +1287,15 @@ def get_endgame_scale_factor(piece_bbs, occupancy_bbs, game_state, phase, eg_sco
         sf = max(0, sf - (rule50 - 12) // 4)
 
     return sf
+
+
+@numba.njit(cache=True, boundscheck=False, fastmath=True)
+def get_endgame_scale_factor(piece_bbs, occupancy_bbs, game_state, phase, eg_score):
+    return get_endgame_scale_factor_with_counts(
+        piece_bbs, occupancy_bbs, game_state, phase, eg_score,
+        count_bits(piece_bbs[0]), count_bits(piece_bbs[1]), count_bits(piece_bbs[2]),
+        count_bits(piece_bbs[3]), count_bits(piece_bbs[4]),
+        count_bits(piece_bbs[6]), count_bits(piece_bbs[7]), count_bits(piece_bbs[8]),
+        count_bits(piece_bbs[9]), count_bits(piece_bbs[10]),
+        get_lsb_index(piece_bbs[5]), get_lsb_index(piece_bbs[11]),
+    )

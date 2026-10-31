@@ -1283,6 +1283,7 @@ def _evaluate_king_pawn_endgame(piece_bbs, occupancy_bbs, game_state, castling_r
 
     wp_cnt = 0
     bp_cnt = 0
+    all_occ = occupancy_bbs[2]
 
     # 1. 基礎兵價和位置
     temp_wp = white_pawns
@@ -1292,12 +1293,15 @@ def _evaluate_king_pawn_endgame(piece_bbs, occupancy_bbs, game_state, castling_r
         score += EG_MATERIAL_VALUES[0] + PST_EG[0, sq]
 
         # Unstoppable Pawn Logic (White) — per passed pawn (pre-P3b)
-        if not (WHITE_PASSED_PAWN_MASKS[sq] & black_pawns):
-            rank = sq // 8
+        forward_mask = WHITE_FORWARD_FILE_MASKS[sq]
+        if not (WHITE_PASSED_PAWN_MASKS[sq] & black_pawns) and not (forward_mask & white_pawns):
+            rank = sq >> 3
             steps_to_promote = 7 - rank
-            if rank == 1:
+            if rank == 1 and not (all_occ & (BB_SQUARES[sq + 8] | BB_SQUARES[sq + 16])):
                 steps_to_promote = 5  # double-push correction
-            promotion_sq = (sq % 8) + 56
+            if forward_mask & piece_bbs[5]:
+                steps_to_promote += 1  # own king blocks advance on promotion path
+            promotion_sq = (sq & 7) + 56
             king_dist = CHEBYSHEV_DISTANCE[black_king_sq, promotion_sq]
             adjusted_pawn_steps = steps_to_promote
             if side_to_move == 1:
@@ -1313,12 +1317,15 @@ def _evaluate_king_pawn_endgame(piece_bbs, occupancy_bbs, game_state, castling_r
         bp_cnt += 1
         score -= (EG_MATERIAL_VALUES[0] + PST_EG[0, sq ^ 56])
 
-        if not (BLACK_PASSED_PAWN_MASKS[sq] & white_pawns):
-            rank = sq // 8
+        forward_mask = BLACK_FORWARD_FILE_MASKS[sq]
+        if not (BLACK_PASSED_PAWN_MASKS[sq] & white_pawns) and not (forward_mask & black_pawns):
+            rank = sq >> 3
             steps_to_promote = rank
-            if rank == 6:
-                steps_to_promote = 5
-            promotion_sq = (sq % 8)
+            if rank == 6 and not (all_occ & (BB_SQUARES[sq - 8] | BB_SQUARES[sq - 16])):
+                steps_to_promote = 5  # double-push correction
+            if forward_mask & piece_bbs[11]:
+                steps_to_promote += 1  # own king blocks advance on promotion path
+            promotion_sq = (sq & 7)
             king_dist = CHEBYSHEV_DISTANCE[white_king_sq, promotion_sq]
             adjusted_pawn_steps = steps_to_promote
             if side_to_move == 0:

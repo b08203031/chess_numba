@@ -231,16 +231,39 @@ class TestEndgameConformance(unittest.TestCase):
         self.assertEqual(val, 0)
 
     def test_doubled_pawns_front_blocks_rear_unstoppable(self):
-        # White has doubled pawns on a2 and a3, black king far away on h8.
+        # White has doubled pawns on a2 and a3, black king far away on h8 with irrelevant h7 pawn.
         # Rear pawn on a2 cannot be unstoppable because a3 blocks its path.
-        fen_doubled = "7k/8/8/8/8/P7/P7/7K w - - 0 1"
-        fen_single = "7k/8/8/8/8/P7/8/7K w - - 0 1"
+        fen_doubled = "7k/7p/8/8/8/P7/P7/7K w - - 0 1"
+        fen_single = "7k/7p/8/8/8/P7/8/7K w - - 0 1"
         p1, o1, g1 = parse_fen(fen_doubled)
         p2, o2, g2 = parse_fen(fen_single)
         v1, _, _ = evaluate_position(p1, o1, g1)
         v2, _, _ = evaluate_position(p2, o2, g2)
         diff = v1 - v2
         self.assertLess(diff, 500, f"Doubled pawn scored extra {diff} cp, likely double-counting unstoppable bonus!")
+        self.assertGreater(diff, 0, f"Doubled pawn should still be slightly better due to extra material ({diff} cp)")
+
+    def test_black_doubled_pawns_front_blocks_rear_unstoppable(self):
+        # Mirror test for Black: rear pawn on a7 blocked by front pawn on a6
+        fen_doubled = "7k/p7/p7/8/8/8/7P/7K b - - 0 1"
+        fen_single = "7k/8/p7/8/8/8/7P/7K b - - 0 1"
+        p1, o1, g1 = parse_fen(fen_doubled)
+        p2, o2, g2 = parse_fen(fen_single)
+        v1, _, _ = evaluate_position(p1, o1, g1)
+        v2, _, _ = evaluate_position(p2, o2, g2)
+        # evaluate_position is side-to-move relative (Black's turn, so positive is better for Black)
+        diff_black = v1 - v2
+        self.assertLess(diff_black, 500, f"Black doubled pawn scored extra {diff_black} cp, likely double-counting unstoppable bonus!")
+        self.assertGreater(diff_black, 0, f"Black doubled pawn should still be slightly better due to extra material ({diff_black} cp)")
+
+    def test_king_on_path_blocks_unstoppable_pawn(self):
+        # White Ka5 directly blocks pawn a4 promotion path; Black Ke5 is in square
+        # Pa4 must not receive unstoppable bonus when Ka5 blocks its forward path
+        fen_blocked = "8/7p/8/K3k3/P7/8/8/8 b - - 0 1"
+        p, o, g = parse_fen(fen_blocked)
+        v, _, _ = evaluate_position(p, o, g)
+        # Score without unstoppable bonus is moderate (~800 cp, not ~1600+ cp)
+        self.assertLess(v, 1200, f"King on promotion path incorrectly granted unstoppable bonus: eval={v}")
 
     def test_kbpsk_wrong_bishop_distance_2_draw(self):
         # White dark-squared bishop + a3 pawn vs Black king on c7 (distance 2 from a8 light square)
