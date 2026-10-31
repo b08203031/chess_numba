@@ -745,1761 +745,3539 @@ def evaluate_piece_coordination(piece_bbs, piece_counts, theta):
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 # Runtime HCE weight indices (must match tune_eval_match.eval_weights)
+
 _EW_TEMPO = 0
+
 _EW_SC_Q = 1
+
 _EW_SC_R = 2
+
 _EW_SC_B = 3
+
 _EW_SC_N = 4
+
 _EW_KD_WEAK = 5
+
 _EW_KD_UNSAFE = 6
+
 _EW_KD_BLOCK = 7
+
 _EW_KD_ATT = 8
+
 _EW_KD_NOQ = 9
+
 _EW_KD_NDEF = 10
+
 _EW_KD_OFF = 11
+
 _EW_KD_THR = 12
+
 # A1+A2
+
 _EW_FLANK_ATT_NUM = 13
+
 _EW_FLANK_DEF_MULT = 14
+
 _EW_SHELTER_FB_NUM = 15
+
 _EW_PAWNLESS_MG = 16
+
 _EW_PAWNLESS_EG = 17
+
 _EW_FLANK_ATT_MG = 18
+
 _EW_OUT_MG_NUM = 19
+
 _EW_OUT_EG_NUM = 20
+
 _EW_EG_SAFE_SCALE = 21  # 100 == 1.0
+
 # A3 shelter indices (also used in pawns.py)
+
 _EW_SHELTER_BASE_MG = 22
+
 _EW_SHELTER_BASE_EG = 23
+
 _EW_BLOCKED_STORM = 24
+
 _EW_BLOCKED_STORM_EG = 25
+
 # Passed (26..35)
+
 _EW_PASS_SAFE_NONE = 26
+
 _EW_PASS_SAFE_EDGE = 27
+
 _EW_PASS_SAFE_BLOCK = 28
+
 _EW_PASS_SUPPORT = 29
+
 _EW_PASS_DYN_MULT = 30
+
 _EW_PASS_DYN_OFF = 31
+
 _EW_PASS_PROX_ENEMY = 32
+
 _EW_PASS_PROX_FRIEND = 33
+
 _EW_PASS_FILE_MG = 34
+
 _EW_PASS_FILE_EG = 35
+
 # Material N/B/R/Q (36..43)
+
 _EW_MAT_N_MG = 36
+
 _EW_MAT_N_EG = 37
+
 _EW_MAT_B_MG = 38
+
 _EW_MAT_B_EG = 39
+
 _EW_MAT_R_MG = 40
+
 _EW_MAT_R_EG = 41
+
 _EW_MAT_Q_MG = 42
+
 _EW_MAT_Q_EG = 43
+
 # Imbalance scales (44..45)
+
 _EW_IMB_SCALE_MG = 44
+
 _EW_IMB_SCALE_EG = 45
+
 # Passed rank 3..6 MG/EG
+
 _EW_PASS_R3_MG = 46
+
 _EW_PASS_R3_EG = 47
+
 _EW_PASS_R4_MG = 48
+
 _EW_PASS_R4_EG = 49
+
 _EW_PASS_R5_MG = 50
+
 _EW_PASS_R5_EG = 51
+
 _EW_PASS_R6_MG = 52
+
 _EW_PASS_R6_EG = 53
 
 
+
+
+
 # Dummy weights when search_context is None (use_ew=False ignores values)
+
 _DUMMY_EW = np.zeros(64, dtype=np.int32)
 
 
+
+
+
 @numba.njit(cache=True, inline="always")
+
 def _phase_limits_from_material(mat_n_mg, mat_b_mg, mat_r_mg, mat_q_mg):
+
     """Derive SF11 npm taper limits from the active MG material scale."""
+
     midgame_limit = np.int32(2 * (
+
         2 * mat_n_mg + 2 * mat_b_mg + 2 * mat_r_mg + mat_q_mg
+
     ))
+
     endgame_limit = np.int32(
+
         (midgame_limit * PHASE_ENDGAME_RATIO_NUM + PHASE_ENDGAME_RATIO_DEN // 2)
+
         // PHASE_ENDGAME_RATIO_DEN
+
     )
+
     return midgame_limit, endgame_limit
 
 
+
+
+
 @numba.njit(cache=True, inline="always")
+
 def _passed_rank_bonus(rel_rank, ew, use_ew, theta):
+
     """MG/EG base bonus for relative rank; ranks 3-6 runtime-tunable."""
+
     if rel_rank == 3:
+
         return (
+
             _ew_get(ew, use_ew, _EW_PASS_R3_MG, get_2d_val(theta, IDX_PASSED_PAWN_BONUS, 3, 2, 0)),
+
             _ew_get(ew, use_ew, _EW_PASS_R3_EG, get_2d_val(theta, IDX_PASSED_PAWN_BONUS, 3, 2, 1)),
+
         )
+
     if rel_rank == 4:
+
         return (
+
             _ew_get(ew, use_ew, _EW_PASS_R4_MG, get_2d_val(theta, IDX_PASSED_PAWN_BONUS, 4, 2, 0)),
+
             _ew_get(ew, use_ew, _EW_PASS_R4_EG, get_2d_val(theta, IDX_PASSED_PAWN_BONUS, 4, 2, 1)),
+
         )
+
     if rel_rank == 5:
+
         return (
+
             _ew_get(ew, use_ew, _EW_PASS_R5_MG, get_2d_val(theta, IDX_PASSED_PAWN_BONUS, 5, 2, 0)),
+
             _ew_get(ew, use_ew, _EW_PASS_R5_EG, get_2d_val(theta, IDX_PASSED_PAWN_BONUS, 5, 2, 1)),
+
         )
+
     if rel_rank == 6:
+
         return (
+
             _ew_get(ew, use_ew, _EW_PASS_R6_MG, get_2d_val(theta, IDX_PASSED_PAWN_BONUS, 6, 2, 0)),
+
             _ew_get(ew, use_ew, _EW_PASS_R6_EG, get_2d_val(theta, IDX_PASSED_PAWN_BONUS, 6, 2, 1)),
+
         )
+
     return get_2d_val(theta, IDX_PASSED_PAWN_BONUS, rel_rank, 2, 0), get_2d_val(theta, IDX_PASSED_PAWN_BONUS, rel_rank, 2, 1)
 
 
+
+
+
 @numba.njit(cache=True, inline="always")
+
 def _ew_get(ew, use_ew, idx, default):
+
     if use_ew:
+
         return ew[idx]
+
     return np.int32(default)
 
 
+
+
+
 @numba.njit(cache=True, boundscheck=False, fastmath=True)
+
 def evaluate_passed_pawns(piece_bbs, occupancy_bbs, white_attacks, black_attacks,
+
                           w_passed, b_passed,
+
                           white_king_sq, black_king_sq, ew, use_ew, theta):
+
     """
+
     Evaluates passed pawns and candidate passed pawns dynamically.
+
     Path/dynamics/king-prox scalars are runtime-tunable via ew (match-SPSA).
+
     """
+
     mg_score = np.int32(0)
+
     eg_score = np.int32(0)
+
     passed_count = count_bits(w_passed) + count_bits(b_passed)
 
+
+
     path_none = _ew_get(ew, use_ew, _EW_PASS_SAFE_NONE, get_int(theta, IDX_PASSED_PATH_SAFE_NONE_ATTACK))
+
     path_edge = _ew_get(ew, use_ew, _EW_PASS_SAFE_EDGE, get_int(theta, IDX_PASSED_PATH_SAFE_EDGE_ATTACK))
+
     path_block = _ew_get(ew, use_ew, _EW_PASS_SAFE_BLOCK, get_int(theta, IDX_PASSED_PATH_SAFE_BLOCK_ONLY))
+
     path_sup = _ew_get(ew, use_ew, _EW_PASS_SUPPORT, get_int(theta, IDX_PASSED_PATH_SUPPORT_BONUS))
+
     dyn_mult = _ew_get(ew, use_ew, _EW_PASS_DYN_MULT, get_int(theta, IDX_PASSED_DYNAMICS_MULT))
+
     dyn_off = _ew_get(ew, use_ew, _EW_PASS_DYN_OFF, get_int(theta, IDX_PASSED_DYNAMICS_OFFSET))
+
     prox_en = _ew_get(ew, use_ew, _EW_PASS_PROX_ENEMY, get_int(theta, IDX_KING_PROX_ENEMY_MULT))
+
     prox_fr = _ew_get(ew, use_ew, _EW_PASS_PROX_FRIEND, get_int(theta, IDX_KING_PROX_FRIENDLY_MULT))
+
     file_mg = _ew_get(ew, use_ew, _EW_PASS_FILE_MG, get_array_val(theta, IDX_PASSED_FILE_BONUS, 0))
+
     file_eg = _ew_get(ew, use_ew, _EW_PASS_FILE_EG, get_array_val(theta, IDX_PASSED_FILE_BONUS, 1))
+
     # DEN fixed (not SPSA)
+
     prox_en_div = get_int(theta, IDX_KING_PROX_ENEMY_DIV)
+
     cand_div = get_int(theta, IDX_CANDIDATE_PASSER_DIVISOR)
 
+
+
     all_pieces = occupancy_bbs[2]
+
     white_pawns = piece_bbs[0]
+
     black_pawns = piece_bbs[6]
+
     all_pawns = white_pawns | black_pawns
 
+
+
     # --- 1. Iterate White Passed Pawns ---
+
     temp_wp = w_passed
+
     while temp_wp:
+
         sq = get_lsb_index(temp_wp)
+
         rank = sq >> 3
+
         file_idx = sq & 7
+
+
 
         p_bonus_mg, p_bonus_eg = _passed_rank_bonus(rank, ew, use_ew, theta)
 
+
+
         edge_dist = np.int32(min(file_idx, 7 - file_idx))
+
         p_bonus_mg -= file_mg * edge_dist
+
         p_bonus_eg -= file_eg * edge_dist
 
+
+
         block_sq = sq + 8
+
         block_mask = BB_SQUARES[block_sq]
+
         is_blocked = (all_pieces & block_mask) != 0
+
         w = np.int32(dyn_mult * rank + dyn_off) if rank > 2 else np.int32(0)
 
+
+
         if not is_blocked and rank > 2:
+
             enemy_rq_behind = ((piece_bbs[9] | piece_bbs[10]) & BLACK_FORWARD_FILE_MASKS[sq]) != 0
+
             unsafe_squares = WHITE_PASSED_PAWN_MASKS[sq]
+
             if not enemy_rq_behind:
+
                 unsafe_squares &= black_attacks
 
+
+
             squares_to_queen = WHITE_FORWARD_FILE_MASKS[sq]
+
             if unsafe_squares == np.uint64(0):
+
                 k = path_none
+
             elif (unsafe_squares & squares_to_queen) == np.uint64(0):
+
                 k = path_edge
+
             elif (unsafe_squares & block_mask) == np.uint64(0):
+
                 k = path_block
+
             else:
+
                 k = np.int32(0)
 
+
+
             our_rq_behind = ((piece_bbs[3] | piece_bbs[4]) & BLACK_FORWARD_FILE_MASKS[sq]) != 0
+
             block_defended = (white_attacks & block_mask) != 0
+
             if our_rq_behind or block_defended:
+
                 k += path_sup
 
+
+
             dynamic_bonus = k * w
+
             p_bonus_mg += dynamic_bonus
+
             p_bonus_eg += dynamic_bonus
 
+
+
         # Connected & Phalanx rank bonuses for passed pawns
+
         if (white_pawns & PHALANX_MASK[sq]) != np.uint64(0):
+
             p_bonus_mg += get_array_val(theta, IDX_PASSED_PHALANX_BONUS, rank)
+
             p_bonus_eg += get_array_val(theta, IDX_PASSED_PHALANX_BONUS, rank)
+
         elif (white_pawns & WHITE_SUPPORT_MASK[sq]) != np.uint64(0):
+
             p_bonus_mg += get_array_val(theta, IDX_PASSED_CONNECTED_BONUS, rank)
+
             p_bonus_eg += get_array_val(theta, IDX_PASSED_CONNECTED_BONUS, rank)
 
+
+
         if rank < 7:
+
             next_sq = sq + 8
+
             next_passed = (black_pawns & WHITE_PASSED_PAWN_MASKS[next_sq]) == np.uint64(0)
+
             any_pawn_ahead = (all_pawns & BB_SQUARES[next_sq]) != np.uint64(0)
+
             if not next_passed or any_pawn_ahead:
+
                 p_bonus_mg //= cand_div
+
                 p_bonus_eg //= cand_div
 
+
+
         mg_score += p_bonus_mg
+
         eg_score += p_bonus_eg
 
+
+
         if rank > 3:
+
             dist_friendly = min(CHEBYSHEV_DISTANCE[white_king_sq, block_sq], get_int(theta, IDX_KING_PROXIMITY_MAX_DIST))
+
             dist_enemy = min(CHEBYSHEV_DISTANCE[black_king_sq, block_sq], get_int(theta, IDX_KING_PROXIMITY_MAX_DIST))
 
+
+
             proximity_bonus = ((dist_enemy * prox_en) // prox_en_div - dist_friendly * prox_fr) * w
+
             if (block_sq >> 3) != 7:
+
                 dist_friendly_2nd = min(CHEBYSHEV_DISTANCE[white_king_sq, block_sq + 8], get_int(theta, IDX_KING_PROXIMITY_MAX_DIST))
+
                 proximity_bonus -= dist_friendly_2nd * w
 
+
+
             proximity_bonus = max(get_int(theta, IDX_KING_PROX_MIN_BONUS), min(get_int(theta, IDX_KING_PROX_MAX_BONUS), proximity_bonus))
+
             eg_score += proximity_bonus
+
+
 
         temp_wp &= temp_wp - np.uint64(1)
 
+
+
     # --- 2. Iterate Black Passed Pawns ---
+
     temp_bp = b_passed
+
     while temp_bp:
+
         sq = get_lsb_index(temp_bp)
+
         rank = sq >> 3
+
         relative_rank = 7 - rank
+
         file_idx = sq & 7
+
+
 
         p_bonus_mg, p_bonus_eg = _passed_rank_bonus(relative_rank, ew, use_ew, theta)
 
+
+
         edge_dist = np.int32(min(file_idx, 7 - file_idx))
+
         p_bonus_mg -= file_mg * edge_dist
+
         p_bonus_eg -= file_eg * edge_dist
 
+
+
         block_sq = sq - 8
+
         block_mask = BB_SQUARES[block_sq]
+
         is_blocked = (all_pieces & block_mask) != 0
+
         w = np.int32(dyn_mult * relative_rank + dyn_off) if relative_rank > 2 else np.int32(0)
 
+
+
         if not is_blocked and relative_rank > 2:
+
             enemy_rq_behind = ((piece_bbs[3] | piece_bbs[4]) & WHITE_FORWARD_FILE_MASKS[sq]) != 0
+
             unsafe_squares = BLACK_PASSED_PAWN_MASKS[sq]
+
             if not enemy_rq_behind:
+
                 unsafe_squares &= white_attacks
 
+
+
             squares_to_queen = BLACK_FORWARD_FILE_MASKS[sq]
+
             if unsafe_squares == np.uint64(0):
+
                 k = path_none
+
             elif (unsafe_squares & squares_to_queen) == np.uint64(0):
+
                 k = path_edge
+
             elif (unsafe_squares & block_mask) == np.uint64(0):
+
                 k = path_block
+
             else:
+
                 k = np.int32(0)
 
+
+
             our_rq_behind = ((piece_bbs[9] | piece_bbs[10]) & WHITE_FORWARD_FILE_MASKS[sq]) != 0
+
             block_defended = (black_attacks & block_mask) != 0
+
             if our_rq_behind or block_defended:
+
                 k += path_sup
 
+
+
             dynamic_bonus = k * w
+
             p_bonus_mg += dynamic_bonus
+
             p_bonus_eg += dynamic_bonus
 
+
+
         # Connected & Phalanx rank bonuses for passed pawns
+
         if (black_pawns & PHALANX_MASK[sq]) != np.uint64(0):
+
             p_bonus_mg += get_array_val(theta, IDX_PASSED_PHALANX_BONUS, relative_rank)
+
             p_bonus_eg += get_array_val(theta, IDX_PASSED_PHALANX_BONUS, relative_rank)
+
         elif (black_pawns & BLACK_SUPPORT_MASK[sq]) != np.uint64(0):
+
             p_bonus_mg += get_array_val(theta, IDX_PASSED_CONNECTED_BONUS, relative_rank)
+
             p_bonus_eg += get_array_val(theta, IDX_PASSED_CONNECTED_BONUS, relative_rank)
 
+
+
         if rank > 0:
+
             next_sq = sq - 8
+
             next_passed = (white_pawns & BLACK_PASSED_PAWN_MASKS[next_sq]) == np.uint64(0)
+
             any_pawn_ahead = (all_pawns & BB_SQUARES[next_sq]) != np.uint64(0)
+
             if not next_passed or any_pawn_ahead:
+
                 p_bonus_mg //= cand_div
+
                 p_bonus_eg //= cand_div
 
+
+
         mg_score -= p_bonus_mg
+
         eg_score -= p_bonus_eg
 
+
+
         if relative_rank > 3:
+
             dist_friendly = min(CHEBYSHEV_DISTANCE[black_king_sq, block_sq], get_int(theta, IDX_KING_PROXIMITY_MAX_DIST))
+
             dist_enemy = min(CHEBYSHEV_DISTANCE[white_king_sq, block_sq], get_int(theta, IDX_KING_PROXIMITY_MAX_DIST))
 
+
+
             proximity_bonus = ((dist_enemy * prox_en) // prox_en_div - dist_friendly * prox_fr) * w
+
             if (block_sq >> 3) != 0:
+
                 dist_friendly_2nd = min(CHEBYSHEV_DISTANCE[black_king_sq, block_sq - 8], get_int(theta, IDX_KING_PROXIMITY_MAX_DIST))
+
                 proximity_bonus -= dist_friendly_2nd * w
 
+
+
             proximity_bonus = max(get_int(theta, IDX_KING_PROX_MIN_BONUS), min(get_int(theta, IDX_KING_PROX_MAX_BONUS), proximity_bonus))
+
             eg_score -= proximity_bonus
 
+
+
         temp_bp &= temp_bp - np.uint64(1)
+
+
 
     return mg_score, eg_score, passed_count
 
 
+
+
+
 @numba.njit(cache=True, boundscheck=False, fastmath=True)
+
 def _evaluate_king_attackers(king_sq, color, piece_bbs, occupancy_bbs, enemy_attacks_bb, friendly_attacks_bb, king_zone,
+
                              attacker_weight, attacker_count, king_attacks_count,
+
                              en_n_attacks_all, en_b_attacks_all, en_r_attacks_all, en_q_attacks_all,
+
                              friendly_attacks2, enemy_attacks2, friendly_queen_attacks,
+
                              pinned_count,
+
                              flank_attack, flank_defense, mg_mobility_diff, mg_shield,
+
                              knight_defends, ew, use_ew, theta):
+
     """
+
     SF11 kingDanger structure in OUR ~100cp-consistent danger space.
+
     Pure attack coeffs are pre-scaled by 100/128; mobility_diff and mg_shield
+
     must already be pure mobility / shelter scores in our MG units.
+
     ew/use_ew: optional runtime HCE weights (match-SPSA).
+
     """
+
     friendly_start_idx = 0 if color == 0 else 6
+
     all_pieces_occupancy = occupancy_bbs[2]
+
     friendly_queen = piece_bbs[friendly_start_idx + 4]
+
     occ_xray = all_pieces_occupancy ^ friendly_queen
 
+
+
     rook_check_rays = get_rook_attacks(king_sq, occ_xray)
+
     bishop_check_rays = get_bishop_attacks(king_sq, occ_xray)
 
+
+
     # weak: Attacked by enemy, not defended twice by us, and either undefended or defended by King/Queen
+
     weak = enemy_attacks_bb & ~friendly_attacks2 & (~friendly_attacks_bb | KING_ATTACKS[king_sq] | friendly_queen_attacks)
 
+
+
     # safe: Not occupied by enemy, and either undefended by us or defended twice by enemy on a weak square
+
     enemy_occupancy = occupancy_bbs[1] if color == 0 else occupancy_bbs[0]
+
     safe = ~enemy_occupancy & (~friendly_attacks_bb | (weak & enemy_attacks2))
 
+
+
     safe_check_units = np.int32(0)
+
     unsafe_checks = np.uint64(0)
 
+
+
     sc_r = _ew_get(ew, use_ew, _EW_SC_R, get_int(theta, IDX_SAFE_CHECK_ROOK))
+
     sc_q = _ew_get(ew, use_ew, _EW_SC_Q, get_int(theta, IDX_SAFE_CHECK_QUEEN))
+
     sc_b = _ew_get(ew, use_ew, _EW_SC_B, get_int(theta, IDX_SAFE_CHECK_BISHOP))
+
     sc_n = _ew_get(ew, use_ew, _EW_SC_N, get_int(theta, IDX_SAFE_CHECK_KNIGHT))
+
     kd_weak = _ew_get(ew, use_ew, _EW_KD_WEAK, get_int(theta, IDX_KING_DANGER_WEAK_SQ))
+
     kd_unsafe = _ew_get(ew, use_ew, _EW_KD_UNSAFE, get_int(theta, IDX_KING_DANGER_UNSAFE_CHECK))
+
     kd_att = _ew_get(ew, use_ew, _EW_KD_ATT, get_int(theta, IDX_KING_DANGER_ATTACK_ON_KING_SQ))
+
     kd_block = _ew_get(ew, use_ew, _EW_KD_BLOCK, get_int(theta, IDX_KING_DANGER_BLOCKERS))
+
     kd_off = _ew_get(ew, use_ew, _EW_KD_OFF, get_int(theta, IDX_KING_DANGER_OFFSET))
+
     kd_ndef = _ew_get(ew, use_ew, _EW_KD_NDEF, get_int(theta, IDX_KING_DANGER_KNIGHT_DEF))
+
     kd_noq = _ew_get(ew, use_ew, _EW_KD_NOQ, get_int(theta, IDX_KING_DANGER_NO_QUEEN))
 
+
+
     rook_safe_checks = rook_check_rays & safe & en_r_attacks_all
+
     if rook_safe_checks != np.uint64(0):
+
         safe_check_units += sc_r
+
     else:
+
         unsafe_checks |= rook_check_rays & en_r_attacks_all
 
+
+
     queen_safe_checks = (rook_check_rays | bishop_check_rays) & safe & en_q_attacks_all & ~friendly_queen_attacks & ~rook_safe_checks
+
     if queen_safe_checks != np.uint64(0):
+
         safe_check_units += sc_q
 
+
+
     bishop_safe_checks = bishop_check_rays & safe & en_b_attacks_all & ~queen_safe_checks
+
     if bishop_safe_checks != np.uint64(0):
+
         safe_check_units += sc_b
+
     else:
+
         unsafe_checks |= bishop_check_rays & en_b_attacks_all
 
+
+
     knight_check_squares = KNIGHT_ATTACKS[king_sq] & en_n_attacks_all
+
     if (knight_check_squares & safe) != np.uint64(0):
+
         safe_check_units += sc_n
+
     else:
+
         unsafe_checks |= knight_check_squares
 
+
+
     weak_sq_count = count_bits(king_zone & weak)
+
     unsafe_check_count = count_bits(unsafe_checks)
 
+
+
     flank_att_num = _ew_get(ew, use_ew, _EW_FLANK_ATT_NUM, KING_FLANK_ATTACK_NUM)
+
     flank_def_mult = _ew_get(ew, use_ew, _EW_FLANK_DEF_MULT, KING_FLANK_DEFENSE_MULT)
+
     shelter_fb_num = _ew_get(ew, use_ew, _EW_SHELTER_FB_NUM, KING_SHELTER_FEEDBACK_NUM)
 
+
+
     # Popcount-only flank terms: scale into same space as other coeffs (100/128)
+
     # DEN kept fixed; SPSA tunes NUM / MULT only.
+
     flank_term = (flank_att_num * flank_attack * flank_attack) // KING_FLANK_ATTACK_DEN
+
     flank_term = (flank_term * np.int32(100)) // np.int32(128)
+
     flank_def_term = (flank_def_mult * flank_defense * np.int32(100)) // np.int32(128)
 
+
+
     # Product model + linear terms (all in our-scaled danger / score space)
+
     kingDanger = (
+
           attacker_count * attacker_weight
+
         + safe_check_units
+
         + kd_weak * weak_sq_count
+
         + kd_unsafe * unsafe_check_count
+
         + kd_att * king_attacks_count
+
         + kd_block * pinned_count
+
         + flank_term
+
         + mg_mobility_diff
+
         - (shelter_fb_num * mg_shield) // KING_SHELTER_FEEDBACK_DEN
+
         - flank_def_term
+
         + kd_off
+
     )
 
+
+
     if knight_defends:
+
         kingDanger -= kd_ndef
 
+
+
     enemy_start_idx = 6 if color == 0 else 0
+
     if not piece_bbs[enemy_start_idx + 4]:
+
         # SF11 uses one no-queen suppression for every material class.  Our
+
         # mixed dataset shows opposite gradients for rook endings and
+
         # minor-only endings, so retain the SF term but allow the rookless
+
         # case one independent scalar.
+
         if piece_bbs[enemy_start_idx + 3]:
+
             kingDanger -= kd_noq
+
         else:
+
             kingDanger -= get_int(theta, IDX_KING_DANGER_NO_QUEEN_ROOKLESS)
+
+
 
     return kingDanger
 
 
+
+
+
 @numba.njit(cache=True, boundscheck=False, fastmath=True)
+
 def evaluate_king_safety(piece_bbs, occupancy_bbs, white_attacks, black_attacks,
+
                          white_attacks2, black_attacks2, pinned_white, pinned_black,
+
                          white_mg_shield, white_eg_shield, black_mg_shield, black_eg_shield,
+
                          white_king_sq, black_king_sq,
+
                          w_attacker_weight, w_attacker_count, w_king_attacks_count,
+
                          b_attacker_weight, b_attacker_count, b_king_attacks_count,
+
                          white_knight_attacks, white_bishop_attacks, white_rook_attacks, white_queen_attacks,
+
                          black_knight_attacks, black_bishop_attacks, black_rook_attacks, black_queen_attacks,
+
                          mg_mobility_pure,
+
                          white_king_zone, black_king_zone,
+
                          ew, use_ew, theta):
+
     """
+
     King Safety (SF11 structure, our score space):
+
     shelter/storm + scale-consistent kingDanger + flank extras.
+
     mg_mobility_pure = only MobilityBonus tables (W-B), not protector/extra piece features.
+
     ew/use_ew: runtime HCE weights (match-SPSA via SearchContext.eval_weights).
+
     """
+
     (wp_bb, wn_bb, wb_bb, wr_bb, wq_bb, wk_bb,
+
     bp_bb, bn_bb, bb_bb, br_bb, bq_bb, bk_bb) = piece_bbs
 
+
+
     # Flank Attack & Flank Defense
+
     CAMP_WHITE = np.uint64(0x000000FFFFFFFFFF)
+
     CAMP_BLACK = np.uint64(0xFFFFFFFFFF000000)
 
+
+
     white_king_file = white_king_sq % 8
+
     white_flank_bb = KING_FLANKS[white_king_file]
+
     w_b1 = black_attacks & white_flank_bb & CAMP_WHITE
+
     w_b2 = w_b1 & black_attacks2
+
     w_flank_attack = count_bits(w_b1) + count_bits(w_b2)
+
     w_flank_defense = count_bits(white_attacks & white_flank_bb & CAMP_WHITE)
 
+
+
     black_king_file = black_king_sq % 8
+
     black_flank_bb = KING_FLANKS[black_king_file]
+
     b_b1 = white_attacks & black_flank_bb & CAMP_BLACK
+
     b_b2 = b_b1 & white_attacks2
+
     b_flank_attack = count_bits(b_b1) + count_bits(b_b2)
+
     b_flank_defense = count_bits(black_attacks & black_flank_bb & CAMP_BLACK)
 
+
+
     w_knight_def = (white_knight_attacks & KING_ATTACKS[white_king_sq]) != np.uint64(0)
+
     b_knight_def = (black_knight_attacks & KING_ATTACKS[black_king_sq]) != np.uint64(0)
 
+
+
     kd_thr = _ew_get(ew, use_ew, _EW_KD_THR, get_int(theta, IDX_KING_DANGER_THRESHOLD))
+
     out_mg_num = _ew_get(ew, use_ew, _EW_OUT_MG_NUM, KING_DANGER_OUT_MG_NUM)
+
     out_eg_num = _ew_get(ew, use_ew, _EW_OUT_EG_NUM, KING_DANGER_OUT_EG_NUM)
+
     pawnless_mg = _ew_get(ew, use_ew, _EW_PAWNLESS_MG, get_array_val(theta, IDX_PAWNLESS_FLANK, 0))
+
     pawnless_eg = _ew_get(ew, use_ew, _EW_PAWNLESS_EG, get_array_val(theta, IDX_PAWNLESS_FLANK, 1))
+
     flank_att_mg = _ew_get(ew, use_ew, _EW_FLANK_ATT_MG, get_array_val(theta, IDX_FLANK_ATTACKS, 0))
-    # EG_SAFETY_SCALE: fixed-point 100 == 1.0 (constants.EG_SAFETY_SCALE is float)
-    eg_safe_scale = _ew_get(ew, use_ew, _EW_EG_SAFE_SCALE, np.int32(100))
+
+    # EG_SAFETY_SCALE: fixed-point 100 == 1.0 (constants.EG_SAFETY_SCALE is 100)
+
+    eg_safe_scale = _ew_get(ew, use_ew, _EW_EG_SAFE_SCALE, np.int32(EG_SAFETY_SCALE))
+
+
 
     # Pure mobility them-us (W-B): white king sees black-white = -mg_mobility_pure
+
     w_danger = _evaluate_king_attackers(
+
         white_king_sq, 0, piece_bbs, occupancy_bbs, black_attacks, white_attacks, white_king_zone,
+
         w_attacker_weight, w_attacker_count, w_king_attacks_count,
+
         black_knight_attacks, black_bishop_attacks, black_rook_attacks, black_queen_attacks,
+
         white_attacks2, black_attacks2, white_queen_attacks,
+
         np.int32(count_bits(pinned_white)),
+
         np.int32(w_flank_attack), np.int32(w_flank_defense),
+
         np.int32(-mg_mobility_pure), np.int32(white_mg_shield),
+
         w_knight_def, ew, use_ew,
+
      theta)
+
     b_danger = _evaluate_king_attackers(
+
         black_king_sq, 1, piece_bbs, occupancy_bbs, white_attacks, black_attacks, black_king_zone,
+
         b_attacker_weight, b_attacker_count, b_king_attacks_count,
+
         white_knight_attacks, white_bishop_attacks, white_rook_attacks, white_queen_attacks,
+
         black_attacks2, white_attacks2, black_queen_attacks,
+
         np.int32(count_bits(pinned_black)),
+
         np.int32(b_flank_attack), np.int32(b_flank_defense),
+
         np.int32(mg_mobility_pure), np.int32(black_mg_shield),
+
         b_knight_def, ew, use_ew,
+
      theta)
+
+
 
     # kd in our-scaled space: pen_mg = kd²*NUM/DEN, pen_eg = kd*NUM/DEN (DEN fixed)
+
     w_penalty_mg = np.int32(0)
+
     w_penalty_eg = np.int32(0)
+
     if w_danger > kd_thr:
+
         w_penalty_mg = (w_danger * w_danger * out_mg_num) // KING_DANGER_OUT_MG_DEN
+
         w_penalty_eg = (w_danger * out_eg_num) // KING_DANGER_OUT_EG_DEN
 
+
+
     b_penalty_mg = np.int32(0)
+
     b_penalty_eg = np.int32(0)
+
     if b_danger > kd_thr:
+
         b_penalty_mg = (b_danger * b_danger * out_mg_num) // KING_DANGER_OUT_MG_DEN
+
         b_penalty_eg = (b_danger * out_eg_num) // KING_DANGER_OUT_EG_DEN
 
+
+
     # PawnlessFlank + FlankAttacks (score terms, already in our scale)
+
     # FLANK_ATTACKS EG kept at constant (0); only MG is A1-tuned.
+
     w_extra_mg = np.int32(0)
+
     w_extra_eg = np.int32(0)
+
     if ((wp_bb | bp_bb) & white_flank_bb) == np.uint64(0):
+
         w_extra_mg += pawnless_mg
+
         w_extra_eg += pawnless_eg
+
     w_extra_mg += flank_att_mg * w_flank_attack
+
     w_extra_eg += get_array_val(theta, IDX_FLANK_ATTACKS, 1) * w_flank_attack
 
+
+
     b_extra_mg = np.int32(0)
+
     b_extra_eg = np.int32(0)
+
     if ((wp_bb | bp_bb) & black_flank_bb) == np.uint64(0):
+
         b_extra_mg += pawnless_mg
+
         b_extra_eg += pawnless_eg
+
     b_extra_mg += flank_att_mg * b_flank_attack
+
     b_extra_eg += get_array_val(theta, IDX_FLANK_ATTACKS, 1) * b_flank_attack
 
+
+
     white_mg_score = white_mg_shield + w_extra_mg - w_penalty_mg
+
     white_eg_score = white_eg_shield + w_extra_eg - w_penalty_eg
+
     black_mg_score = black_mg_shield + b_extra_mg - b_penalty_mg
+
     black_eg_score = black_eg_shield + b_extra_eg - b_penalty_eg
 
+
+
     mg_safety_score = white_mg_score - black_mg_score
+
     eg_safety_score = ((white_eg_score - black_eg_score) * eg_safe_scale) // np.int32(100)
 
+
+
     # --- 6. Endgame King Proximity to Own Pawns ---
+
     # White King Proximity
+
     white_pawn_dist_penalty = np.int32(0)
+
     if wp_bb != 0:
+
         min_dist = 8
+
         if (wp_bb & KING_ATTACKS[white_king_sq]) != 0:
+
             min_dist = 1
+
         else:
+
             temp_pawns = wp_bb
+
             while temp_pawns:
+
                 p_sq = get_lsb_index(temp_pawns)
+
                 dist = CHEBYSHEV_DISTANCE[white_king_sq, p_sq]
+
                 if dist < min_dist:
+
                     min_dist = dist
+
                 temp_pawns &= temp_pawns - np.uint64(1)
+
         white_pawn_dist_penalty = get_int(theta, IDX_KING_PAWN_DIST_PENALTY_EG) * min_dist
 
+
+
     # Black King Proximity
+
     black_pawn_dist_penalty = np.int32(0)
+
     if bp_bb != 0:
+
         min_dist = 8
+
         if (bp_bb & KING_ATTACKS[black_king_sq]) != 0:
+
             min_dist = 1
+
         else:
+
             temp_pawns = bp_bb
+
             while temp_pawns:
+
                 p_sq = get_lsb_index(temp_pawns)
+
                 dist = CHEBYSHEV_DISTANCE[black_king_sq, p_sq]
+
                 if dist < min_dist:
+
                     min_dist = dist
+
                 temp_pawns &= temp_pawns - np.uint64(1)
+
         black_pawn_dist_penalty = get_int(theta, IDX_KING_PAWN_DIST_PENALTY_EG) * min_dist
 
+
+
     eg_safety_score += white_pawn_dist_penalty - black_pawn_dist_penalty
+
+
 
     return mg_safety_score, eg_safety_score
 
 
+
+
+
 @numba.njit(cache=True, boundscheck=False, fastmath=True)
+
 def evaluate_attacks_mobility_threats(piece_bbs, occupancy_bbs, white_king_sq, black_king_sq, white_pawn_attacks_span, black_pawn_attacks_span, castling_rights, theta):
+
     (wp_bb, wn_bb, wb_bb, wr_bb, wq_bb, wk_bb,
+
      bp_bb, bn_bb, bb_bb, br_bb, bq_bb, bk_bb) = piece_bbs
 
+
+
     white_occupancy = occupancy_bbs[0]
+
     black_occupancy = occupancy_bbs[1]
+
     all_occupancy = occupancy_bbs[2]
 
+
+
     # --- Pawn Attacks ---
+
     white_pawn_attacks = ((wp_bb & NOT_A_FILE) << np.uint64(7)) | ((wp_bb & NOT_H_FILE) << np.uint64(9))
+
     black_pawn_attacks = ((bp_bb & NOT_H_FILE) >> np.uint64(7)) | ((bp_bb & NOT_A_FILE) >> np.uint64(9))
 
+
+
     # --- Outpost ranks (SF11: relative ranks 4-6 only) ---
+
     # White: ranks 4-6 (indices 3-5); Black: absolute ranks 3-5 (indices 2-4)
+
     WHITE_OUTPOST_RANKS = np.uint64(0x0000FFFFFF000000)
+
     BLACK_OUTPOST_RANKS = np.uint64(0x000000FFFFFF0000)
+
     white_outposts = WHITE_OUTPOST_RANKS & white_pawn_attacks & ~black_pawn_attacks_span
+
     black_outposts = BLACK_OUTPOST_RANKS & black_pawn_attacks & ~white_pawn_attacks_span
 
+
+
     # X-Ray occupancy mask precalculations (Loop invariant optimizations)
+
     bishop_xray_occ = all_occupancy ^ wq_bb ^ bq_bb
+
     white_rook_xray_occ = bishop_xray_occ ^ wr_bb
+
     black_rook_xray_occ = bishop_xray_occ ^ br_bb
 
+
+
     white_attacks = white_pawn_attacks | KING_ATTACKS[white_king_sq]
+
     black_attacks = black_pawn_attacks | KING_ATTACKS[black_king_sq]
 
+
+
     # --- Mobility Area (SF11-inspired) ---
+
     # Exclude: enemy pawn attacks, blocked low pawns, friendly queen, friendly king
+
     LOW_RANKS_WHITE = np.uint64(0x0000000000FFFF00)  # rank2 | rank3
+
     LOW_RANKS_BLACK = np.uint64(0x00FFFF0000000000)  # rank6 | rank7
+
     # Blocked low rank pawns: friendly pawns that are blocked or on the first two ranks (SF11-aligned)
+
     all_occ_shr8 = all_occupancy >> np.uint64(8)
+
     all_occ_shl8 = all_occupancy << np.uint64(8)
+
     white_blocked_low = wp_bb & (all_occ_shr8 | LOW_RANKS_WHITE)
+
     black_blocked_low = bp_bb & (all_occ_shl8 | LOW_RANKS_BLACK)
 
+
+
     # --- Pin Calculation (must precede mobility area) ---
+
     pinned_white = get_pinned_pieces(piece_bbs, occupancy_bbs, np.uint64(0))  # WHITE
+
     pinned_black = get_pinned_pieces(piece_bbs, occupancy_bbs, np.uint64(1))  # BLACK
 
+
+
     white_mobility_area = ~(black_pawn_attacks | white_blocked_low | wq_bb | wk_bb | pinned_white)
+
     black_mobility_area = ~(white_pawn_attacks | black_blocked_low | bq_bb | bk_bb | pinned_black)
 
+
+
     # --- Accumulators ---
+
     # mg_mobility / eg_mobility: full piece-feature bag (used in total eval)
+
     # mg_mobility_pure: ONLY MobilityBonus tables (W-B) for kingDanger (SF-compatible)
+
     mg_mobility = np.int32(0)
+
     eg_mobility = np.int32(0)
+
     mg_mobility_pure = np.int32(0)
+
     
+
     white_knight_attacks = np.uint64(0)
+
     white_bishop_attacks = np.uint64(0)
+
     white_rook_attacks = np.uint64(0)
+
     white_queen_attacks = np.uint64(0)
 
+
+
     # Initialize attackedBy2 with double pawn attacks and king-pawn overlaps
+
     white_double_pawn = ((wp_bb & NOT_A_FILE) << np.uint64(7)) & ((wp_bb & NOT_H_FILE) << np.uint64(9))
+
     white_attacks2 = white_double_pawn | (KING_ATTACKS[white_king_sq] & white_pawn_attacks)
 
+
+
     black_knight_attacks = np.uint64(0)
+
     black_bishop_attacks = np.uint64(0)
+
     black_rook_attacks = np.uint64(0)
+
     black_queen_attacks = np.uint64(0)
+
     
+
     black_double_pawn = ((bp_bb & NOT_H_FILE) >> np.uint64(7)) & ((bp_bb & NOT_A_FILE) >> np.uint64(9))
+
     black_attacks2 = black_double_pawn | (KING_ATTACKS[black_king_sq] & black_pawn_attacks)
 
+
+
     # King safety: SF11 kingRing strips squares doubly defended by our pawns
+
     white_king_adjacent = KING_ATTACKS[white_king_sq]
+
     black_king_adjacent = KING_ATTACKS[black_king_sq]
+
     white_king_zone = WHITE_KING_ZONES[white_king_sq] & ~white_double_pawn
+
     black_king_zone = BLACK_KING_ZONES[black_king_sq] & ~black_double_pawn
 
+
+
     # Pawn hits seed attackersCount (weight remains 0 until non-pawn attackers)
+
     w_attacker_count = np.int32(count_bits(white_king_zone & black_pawn_attacks))
+
     b_attacker_count = np.int32(count_bits(black_king_zone & white_pawn_attacks))
+
     w_attacker_weight = np.int32(0)
+
     b_attacker_weight = np.int32(0)
+
     w_king_attacks_count = np.int32(0)
+
     b_king_attacks_count = np.int32(0)
 
+
+
     # --- Outpost & Bishop Invariants ---
+
     mg_outpost = np.int32(0)
+
     eg_outpost = np.int32(0)
+
     pawn_only_occ = wp_bb | bp_bb
+
     CENTER_SQUARES = np.uint64(0x0000001818000000)  # d4, e4, d5, e5
+
     LONG_DIAGONALS_NON_CENTER = np.uint64(0x8142240000244281)
+
     has_king_protector = (get_array_val(theta, IDX_KING_PROTECTOR, 0) != 0) or (get_array_val(theta, IDX_KING_PROTECTOR, 1) != 0)
 
+
+
     temp_bb = wn_bb
+
     while temp_bb:
+
         sq = get_lsb_index(temp_bb)
+
         att = KNIGHT_ATTACKS[sq]
+
         if pinned_white & BB_SQUARES[sq]:
+
             att = np.uint64(0)
+
         white_attacks2 |= (white_attacks & att)
+
         white_attacks |= att
+
         white_knight_attacks |= att
+
         moves = count_bits(att & white_mobility_area)
+
         clamped = min(moves, 8)
+
         mg_mobility += get_2d_val(theta, IDX_KNIGHT_MOBILITY_BONUS, clamped, 2, 0)
+
         eg_mobility += get_2d_val(theta, IDX_KNIGHT_MOBILITY_BONUS, clamped, 2, 1)
+
         mg_mobility_pure += get_2d_val(theta, IDX_KNIGHT_MOBILITY_BONUS, clamped, 2, 0)
 
+
+
         # KingProtector: penalty per Chebyshev distance from own king
+
         if has_king_protector:
+
             kp_dist = CHEBYSHEV_DISTANCE[sq, white_king_sq]
+
             mg_mobility -= get_array_val(theta, IDX_KING_PROTECTOR, 0) * kp_dist
+
             eg_mobility -= get_array_val(theta, IDX_KING_PROTECTOR, 1) * kp_dist
 
+
+
         # MinorBehindPawn: bonus for knight behind friendly pawn
+
         if sq < 56 and (wp_bb & BB_SQUARES[sq + 8]) != np.uint64(0):
+
             mg_mobility += get_array_val(theta, IDX_MINOR_BEHIND_PAWN, 0)
+
             eg_mobility += get_array_val(theta, IDX_MINOR_BEHIND_PAWN, 1)
 
+
+
         
+
         # King safety: White Knight attacking Black King ring
+
         if att & black_king_zone:
+
             b_attacker_count += 1
+
             b_attacker_weight += get_array_val(theta, IDX_KING_ATTACK_WEIGHTS, 2)  # KNIGHT
+
         b_king_attacks_count += count_bits(att & black_king_adjacent)
 
+
+
         # Outpost Logic (White Knight) — SF11: OutpostRanks & pawn-supported & ~enemy span
+
         is_outpost = (BB_SQUARES[sq] & white_outposts) != np.uint64(0)
+
         if is_outpost:
+
             rank = sq // 8
+
             mg_outpost += get_2d_val(theta, IDX_OUTPOST_BONUS_KNIGHT, rank, 2, 0)
+
             eg_outpost += get_2d_val(theta, IDX_OUTPOST_BONUS_KNIGHT, rank, 2, 1)
+
         elif (att & white_outposts & ~white_occupancy) != np.uint64(0):
+
             mg_outpost += get_array_val(theta, IDX_REACHABLE_OUTPOST_BONUS, 0)
+
             eg_outpost += get_array_val(theta, IDX_REACHABLE_OUTPOST_BONUS, 1)
+
+
 
         temp_bb &= temp_bb - np.uint64(1)
 
+
+
     if wb_bb:
+
         w_bp_mult = np.int32(1) + get_int(theta, IDX_BISHOP_PAWNS_CENTER_BLOCKED_FACTOR) * count_bits(wp_bb & all_occ_shr8 & CENTER_FILES)
+
         temp_bb = wb_bb
+
         while temp_bb:
+
             sq = get_lsb_index(temp_bb)
+
             # X-Ray: bishop attacks through all queens
+
             att = get_bishop_attacks(sq, bishop_xray_occ)
+
             sq_bb = BB_SQUARES[sq]
+
             if pinned_white & sq_bb:
+
                 att &= LINE_BB[white_king_sq, sq]
+
             white_attacks2 |= (white_attacks & att)
+
             white_attacks |= att
+
             white_bishop_attacks |= att
+
             moves = count_bits(att & white_mobility_area)
+
             clamped = min(moves, 13)
+
             mg_mobility += get_2d_val(theta, IDX_BISHOP_MOBILITY_BONUS, clamped, 2, 0)
+
             eg_mobility += get_2d_val(theta, IDX_BISHOP_MOBILITY_BONUS, clamped, 2, 1)
+
             mg_mobility_pure += get_2d_val(theta, IDX_BISHOP_MOBILITY_BONUS, clamped, 2, 0)
 
+
+
             # KingProtector: penalty per Chebyshev distance from own king
+
             if has_king_protector:
+
                 kp_dist = CHEBYSHEV_DISTANCE[sq, white_king_sq]
+
                 mg_mobility -= get_array_val(theta, IDX_KING_PROTECTOR, 0) * kp_dist
+
                 eg_mobility -= get_array_val(theta, IDX_KING_PROTECTOR, 1) * kp_dist
 
+
+
             # MinorBehindPawn: bonus for bishop behind friendly pawn
+
             if sq < 56 and (wp_bb & BB_SQUARES[sq + 8]) != np.uint64(0):
+
                 mg_mobility += get_array_val(theta, IDX_MINOR_BEHIND_PAWN, 0)
+
                 eg_mobility += get_array_val(theta, IDX_MINOR_BEHIND_PAWN, 1)
 
+
+
             # BishopPawns: penalty per own pawn on same color square as bishop
+
             bishop_color_mask = DARK_SQUARES if (sq_bb & DARK_SQUARES) != np.uint64(0) else LIGHT_SQUARES
+
             same_color_pawns = count_bits(wp_bb & bishop_color_mask)
+
             mg_mobility -= get_array_val(theta, IDX_BISHOP_PAWNS_PENALTY, 0) * same_color_pawns * w_bp_mult
+
             eg_mobility -= get_array_val(theta, IDX_BISHOP_PAWNS_PENALTY, 1) * same_color_pawns * w_bp_mult
 
+
+
             # King safety calculation (White Bishop attacking Black King)
+
             if att & black_king_zone:
+
                 b_attacker_count += 1
+
                 b_attacker_weight += get_array_val(theta, IDX_KING_ATTACK_WEIGHTS, 3)  # BISHOP
+
             b_king_attacks_count += count_bits(att & black_king_adjacent)
 
+
+
             # Outpost Logic (White Bishop) — SF11: same mask as knight, no separate hole bonus
+
             if (sq_bb & white_outposts) != np.uint64(0):
+
                 rank = sq >> 3
+
                 mg_outpost += get_2d_val(theta, IDX_OUTPOST_BONUS_BISHOP, rank, 2, 0)
+
                 eg_outpost += get_2d_val(theta, IDX_OUTPOST_BONUS_BISHOP, rank, 2, 1)
 
+
+
             # LongDiagonalBishop: only non-central long-diagonal squares can see 2 center squares
+
             if (sq_bb & LONG_DIAGONALS_NON_CENTER) != np.uint64(0):
+
                 bishop_center_attacks = get_bishop_attacks(sq, pawn_only_occ) & CENTER_SQUARES
+
                 if (bishop_center_attacks & (bishop_center_attacks - np.uint64(1))) != np.uint64(0):
+
                     mg_mobility += get_array_val(theta, IDX_LONG_DIAGONAL_BISHOP, 0)
+
                     eg_mobility += get_array_val(theta, IDX_LONG_DIAGONAL_BISHOP, 1)
+
+
 
             temp_bb &= temp_bb - np.uint64(1)
 
+
+
     temp_bb = wr_bb
+
     while temp_bb:
+
         sq = get_lsb_index(temp_bb)
+
         # X-Ray: rook attacks through all queens + own rooks
+
         att = get_rook_attacks(sq, white_rook_xray_occ)
+
         sq_bb = BB_SQUARES[sq]
+
         if pinned_white & sq_bb:
+
             att &= LINE_BB[white_king_sq, sq]
+
         white_attacks2 |= (white_attacks & att)
+
         white_attacks |= att
+
         white_rook_attacks |= att
+
         moves = count_bits(att & white_mobility_area)
+
         clamped = min(moves, 14)
+
         mg_mobility += get_2d_val(theta, IDX_ROOK_MOBILITY_BONUS, clamped, 2, 0)
+
         eg_mobility += get_2d_val(theta, IDX_ROOK_MOBILITY_BONUS, clamped, 2, 1)
+
         mg_mobility_pure += get_2d_val(theta, IDX_ROOK_MOBILITY_BONUS, clamped, 2, 0)
+
         
+
         # TrappedRook: SF11 only when NOT on semi-open file (friendly pawn on file)
+
         rook_file = sq % 8
+
         if moves <= 3 and (wp_bb & FILE_MASKS[rook_file]) != np.uint64(0):
+
             king_file = white_king_sq % 8
+
             if (king_file < 4) == (rook_file < king_file):
+
                 trap_factor = np.int32(1) if (castling_rights & np.uint8(3)) != np.uint8(0) else np.int32(2)
+
                 mg_mobility -= get_array_val(theta, IDX_TRAPPED_ROOK, 0) * trap_factor
+
                 eg_mobility -= get_array_val(theta, IDX_TRAPPED_ROOK, 1) * trap_factor
 
+
+
         # RookOnQueenFile: bonus for rook on same file as any queen
+
         if (wq_bb | bq_bb) & FILE_MASKS[rook_file]:
+
             mg_mobility += get_array_val(theta, IDX_ROOK_ON_QUEEN_FILE, 0)
+
             eg_mobility += get_array_val(theta, IDX_ROOK_ON_QUEEN_FILE, 1)
+
         
+
+
 
         # King safety calculation (White Rook attacking Black King)
+
         if att & black_king_zone:
+
             b_attacker_count += 1
+
             b_attacker_weight += get_array_val(theta, IDX_KING_ATTACK_WEIGHTS, 4)  # ROOK
+
         b_king_attacks_count += count_bits(att & black_king_adjacent)
 
+
+
         temp_bb &= temp_bb - np.uint64(1)
+
+
 
     temp_bb = wq_bb
+
     while temp_bb:
+
         sq = get_lsb_index(temp_bb)
+
         att = get_queen_attacks(sq, all_occupancy)
+
         sq_bb = BB_SQUARES[sq]
+
         if pinned_white & sq_bb:
+
             att &= LINE_BB[white_king_sq, sq]
+
         white_attacks2 |= (white_attacks & att)
+
         white_attacks |= att
+
         white_queen_attacks |= att
+
         moves = count_bits(att & white_mobility_area)
+
         clamped = min(moves, 27)
+
         mg_mobility += get_2d_val(theta, IDX_QUEEN_MOBILITY_BONUS, clamped, 2, 0)
+
         eg_mobility += get_2d_val(theta, IDX_QUEEN_MOBILITY_BONUS, clamped, 2, 1)
+
         mg_mobility_pure += get_2d_val(theta, IDX_QUEEN_MOBILITY_BONUS, clamped, 2, 0)
+
         
 
+
+
         # King safety calculation (White Queen attacking Black King)
+
         if att & black_king_zone:
+
             b_attacker_count += 1
+
             b_attacker_weight += get_array_val(theta, IDX_KING_ATTACK_WEIGHTS, 5)  # QUEEN
+
         b_king_attacks_count += count_bits(att & black_king_adjacent)
 
+
+
         # WeakQueen: penalty if queen is in a relative pin / discovered attack line
+
         rook_pinners = ROOK_RAYS[sq] & br_bb
+
         temp_pinners = rook_pinners
+
         is_weak = False
+
         while temp_pinners and not is_weak:
+
             pinner_sq = get_lsb_index(temp_pinners)
+
             between = SQUARES_BETWEEN[sq, pinner_sq]
+
             blockers_between = between & all_occupancy
+
             if count_bits(blockers_between) == 1:
+
                 is_weak = True
+
             temp_pinners &= temp_pinners - np.uint64(1)
+
         if not is_weak:
+
             bishop_pinners = BISHOP_RAYS[sq] & bb_bb
+
             temp_pinners = bishop_pinners
+
             while temp_pinners and not is_weak:
+
                 pinner_sq = get_lsb_index(temp_pinners)
+
                 between = SQUARES_BETWEEN[sq, pinner_sq]
+
                 blockers_between = between & all_occupancy
+
                 if count_bits(blockers_between) == 1:
+
                     is_weak = True
+
                 temp_pinners &= temp_pinners - np.uint64(1)
+
         if is_weak:
+
             mg_mobility -= get_array_val(theta, IDX_WEAK_QUEEN, 0)
+
             eg_mobility -= get_array_val(theta, IDX_WEAK_QUEEN, 1)
+
+
 
         temp_bb &= temp_bb - np.uint64(1)
 
+
+
     # --- Black Pieces ---
+
     temp_bb = bn_bb
+
     while temp_bb:
+
         sq = get_lsb_index(temp_bb)
+
         att = KNIGHT_ATTACKS[sq]
+
         if pinned_black & BB_SQUARES[sq]:
+
             att = np.uint64(0)
+
         black_attacks2 |= (black_attacks & att)
+
         black_attacks |= att
+
         black_knight_attacks |= att
+
         moves = count_bits(att & black_mobility_area)
+
         clamped = min(moves, 8)
+
         mg_mobility -= get_2d_val(theta, IDX_KNIGHT_MOBILITY_BONUS, clamped, 2, 0)
+
         eg_mobility -= get_2d_val(theta, IDX_KNIGHT_MOBILITY_BONUS, clamped, 2, 1)
+
         mg_mobility_pure -= get_2d_val(theta, IDX_KNIGHT_MOBILITY_BONUS, clamped, 2, 0)
 
+
+
         # KingProtector: penalty per Chebyshev distance from own king
+
         if has_king_protector:
+
             kp_dist = CHEBYSHEV_DISTANCE[sq, black_king_sq]
+
             mg_mobility += get_array_val(theta, IDX_KING_PROTECTOR, 0) * kp_dist
+
             eg_mobility += get_array_val(theta, IDX_KING_PROTECTOR, 1) * kp_dist
 
+
+
         # MinorBehindPawn: bonus for knight behind friendly pawn
+
         if sq >= 8 and (bp_bb & BB_SQUARES[sq - 8]) != np.uint64(0):
+
             mg_mobility -= get_array_val(theta, IDX_MINOR_BEHIND_PAWN, 0)
+
             eg_mobility -= get_array_val(theta, IDX_MINOR_BEHIND_PAWN, 1)
 
 
+
+
+
         # King safety calculation (Black Knight attacking White King)
+
         if att & white_king_zone:
+
             w_attacker_count += 1
+
             w_attacker_weight += get_array_val(theta, IDX_KING_ATTACK_WEIGHTS, 2)  # KNIGHT
+
         w_king_attacks_count += count_bits(att & white_king_adjacent)
 
+
+
         # Outpost Logic (Black Knight)
+
         is_outpost = (BB_SQUARES[sq] & black_outposts) != np.uint64(0)
+
         if is_outpost:
+
             rank = sq // 8
+
             rel_rank = 7 - rank
+
             mg_outpost -= get_2d_val(theta, IDX_OUTPOST_BONUS_KNIGHT, rel_rank, 2, 0)
+
             eg_outpost -= get_2d_val(theta, IDX_OUTPOST_BONUS_KNIGHT, rel_rank, 2, 1)
+
         elif (att & black_outposts & ~black_occupancy) != np.uint64(0):
+
             mg_outpost -= get_array_val(theta, IDX_REACHABLE_OUTPOST_BONUS, 0)
+
             eg_outpost -= get_array_val(theta, IDX_REACHABLE_OUTPOST_BONUS, 1)
+
+
 
         temp_bb &= temp_bb - np.uint64(1)
 
+
+
     if bb_bb:
+
         b_bp_mult = np.int32(1) + get_int(theta, IDX_BISHOP_PAWNS_CENTER_BLOCKED_FACTOR) * count_bits(bp_bb & all_occ_shl8 & CENTER_FILES)
+
         temp_bb = bb_bb
+
         while temp_bb:
+
             sq = get_lsb_index(temp_bb)
+
             # X-Ray: bishop attacks through all queens
+
             att = get_bishop_attacks(sq, bishop_xray_occ)
+
             sq_bb = BB_SQUARES[sq]
+
             if pinned_black & sq_bb:
+
                 att &= LINE_BB[black_king_sq, sq]
+
             black_attacks2 |= (black_attacks & att)
+
             black_attacks |= att
+
             black_bishop_attacks |= att
+
             moves = count_bits(att & black_mobility_area)
+
             clamped = min(moves, 13)
+
             mg_mobility -= get_2d_val(theta, IDX_BISHOP_MOBILITY_BONUS, clamped, 2, 0)
+
             eg_mobility -= get_2d_val(theta, IDX_BISHOP_MOBILITY_BONUS, clamped, 2, 1)
+
             mg_mobility_pure -= get_2d_val(theta, IDX_BISHOP_MOBILITY_BONUS, clamped, 2, 0)
 
+
+
             # KingProtector: penalty per Chebyshev distance from own king
+
             if has_king_protector:
+
                 kp_dist = CHEBYSHEV_DISTANCE[sq, black_king_sq]
+
                 mg_mobility += get_array_val(theta, IDX_KING_PROTECTOR, 0) * kp_dist
+
                 eg_mobility += get_array_val(theta, IDX_KING_PROTECTOR, 1) * kp_dist
 
+
+
             # MinorBehindPawn: bonus for bishop behind friendly pawn
+
             if sq >= 8 and (bp_bb & BB_SQUARES[sq - 8]) != np.uint64(0):
+
                 mg_mobility -= get_array_val(theta, IDX_MINOR_BEHIND_PAWN, 0)
+
                 eg_mobility -= get_array_val(theta, IDX_MINOR_BEHIND_PAWN, 1)
 
+
+
             # BishopPawns: penalty per own pawn on same color square as bishop
+
             bishop_color_mask = DARK_SQUARES if (sq_bb & DARK_SQUARES) != np.uint64(0) else LIGHT_SQUARES
+
             same_color_pawns = count_bits(bp_bb & bishop_color_mask)
+
             mg_mobility += get_array_val(theta, IDX_BISHOP_PAWNS_PENALTY, 0) * same_color_pawns * b_bp_mult
+
             eg_mobility += get_array_val(theta, IDX_BISHOP_PAWNS_PENALTY, 1) * same_color_pawns * b_bp_mult
 
+
+
             # King safety calculation (Black Bishop attacking White King)
+
             if att & white_king_zone:
+
                 w_attacker_count += 1
+
                 w_attacker_weight += get_array_val(theta, IDX_KING_ATTACK_WEIGHTS, 3)  # BISHOP
+
             w_king_attacks_count += count_bits(att & white_king_adjacent)
 
+
+
             # Outpost Logic (Black Bishop) — SF11: no separate hole bonus
+
             if (sq_bb & black_outposts) != np.uint64(0):
+
                 rel_rank = 7 - (sq >> 3)
+
                 mg_outpost -= get_2d_val(theta, IDX_OUTPOST_BONUS_BISHOP, rel_rank, 2, 0)
+
                 eg_outpost -= get_2d_val(theta, IDX_OUTPOST_BONUS_BISHOP, rel_rank, 2, 1)
 
+
+
             # LongDiagonalBishop: only non-central long-diagonal squares can see 2 center squares
+
             if (sq_bb & LONG_DIAGONALS_NON_CENTER) != np.uint64(0):
+
                 bishop_center_attacks = get_bishop_attacks(sq, pawn_only_occ) & CENTER_SQUARES
+
                 if (bishop_center_attacks & (bishop_center_attacks - np.uint64(1))) != np.uint64(0):
+
                     mg_mobility -= get_array_val(theta, IDX_LONG_DIAGONAL_BISHOP, 0)
+
                     eg_mobility -= get_array_val(theta, IDX_LONG_DIAGONAL_BISHOP, 1)
+
+
 
             temp_bb &= temp_bb - np.uint64(1)
 
+
+
     temp_bb = br_bb
+
     while temp_bb:
+
         sq = get_lsb_index(temp_bb)
+
         # X-Ray: rook attacks through all queens + own rooks
+
         att = get_rook_attacks(sq, black_rook_xray_occ)
+
         sq_bb = BB_SQUARES[sq]
+
         if pinned_black & sq_bb:
+
             att &= LINE_BB[black_king_sq, sq]
+
         black_attacks2 |= (black_attacks & att)
+
         black_attacks |= att
+
         black_rook_attacks |= att
+
         moves = count_bits(att & black_mobility_area)
+
         clamped = min(moves, 14)
+
         mg_mobility -= get_2d_val(theta, IDX_ROOK_MOBILITY_BONUS, clamped, 2, 0)
+
         eg_mobility -= get_2d_val(theta, IDX_ROOK_MOBILITY_BONUS, clamped, 2, 1)
+
         mg_mobility_pure -= get_2d_val(theta, IDX_ROOK_MOBILITY_BONUS, clamped, 2, 0)
+
         
+
         # TrappedRook: SF11 only when NOT on semi-open file (friendly pawn on file)
+
         rook_file = sq % 8
+
         if moves <= 3 and (bp_bb & FILE_MASKS[rook_file]) != np.uint64(0):
+
             king_file = black_king_sq % 8
+
             if (king_file < 4) == (rook_file < king_file):
+
                 trap_factor = np.int32(1) if (castling_rights & np.uint8(12)) != np.uint8(0) else np.int32(2)
+
                 mg_mobility += get_array_val(theta, IDX_TRAPPED_ROOK, 0) * trap_factor
+
                 eg_mobility += get_array_val(theta, IDX_TRAPPED_ROOK, 1) * trap_factor
 
+
+
         # RookOnQueenFile: bonus for rook on same file as any queen
+
         if (wq_bb | bq_bb) & FILE_MASKS[rook_file]:
+
             mg_mobility -= get_array_val(theta, IDX_ROOK_ON_QUEEN_FILE, 0)
+
             eg_mobility -= get_array_val(theta, IDX_ROOK_ON_QUEEN_FILE, 1)
+
         
+
+
 
         # King safety calculation (Black Rook attacking White King)
+
         if att & white_king_zone:
+
             w_attacker_count += 1
+
             w_attacker_weight += get_array_val(theta, IDX_KING_ATTACK_WEIGHTS, 4)  # ROOK
+
         w_king_attacks_count += count_bits(att & white_king_adjacent)
 
+
+
         temp_bb &= temp_bb - np.uint64(1)
+
+
 
     temp_bb = bq_bb
+
     while temp_bb:
+
         sq = get_lsb_index(temp_bb)
+
         att = get_queen_attacks(sq, all_occupancy)
+
         sq_bb = BB_SQUARES[sq]
+
         if pinned_black & sq_bb:
+
             att &= LINE_BB[black_king_sq, sq]
+
         black_attacks2 |= (black_attacks & att)
+
         black_attacks |= att
+
         black_queen_attacks |= att
+
         moves = count_bits(att & black_mobility_area)
+
         clamped = min(moves, 27)
+
         mg_mobility -= get_2d_val(theta, IDX_QUEEN_MOBILITY_BONUS, clamped, 2, 0)
+
         eg_mobility -= get_2d_val(theta, IDX_QUEEN_MOBILITY_BONUS, clamped, 2, 1)
+
         mg_mobility_pure -= get_2d_val(theta, IDX_QUEEN_MOBILITY_BONUS, clamped, 2, 0)
+
         
 
+
+
         # King safety calculation (Black Queen attacking White King)
+
         if att & white_king_zone:
+
             w_attacker_count += 1
+
             w_attacker_weight += get_array_val(theta, IDX_KING_ATTACK_WEIGHTS, 5)  # QUEEN
+
         w_king_attacks_count += count_bits(att & white_king_adjacent)
 
+
+
         # WeakQueen: penalty if queen is in a relative pin / discovered attack line
+
         rook_pinners = ROOK_RAYS[sq] & wr_bb
+
         temp_pinners = rook_pinners
+
         is_weak = False
+
         while temp_pinners and not is_weak:
+
             pinner_sq = get_lsb_index(temp_pinners)
+
             between = SQUARES_BETWEEN[sq, pinner_sq]
+
             blockers_between = between & all_occupancy
+
             if count_bits(blockers_between) == 1:
+
                 is_weak = True
+
             temp_pinners &= temp_pinners - np.uint64(1)
+
         if not is_weak:
+
             bishop_pinners = BISHOP_RAYS[sq] & wb_bb
+
             temp_pinners = bishop_pinners
+
             while temp_pinners and not is_weak:
+
                 pinner_sq = get_lsb_index(temp_pinners)
+
                 between = SQUARES_BETWEEN[sq, pinner_sq]
+
                 blockers_between = between & all_occupancy
+
                 if count_bits(blockers_between) == 1:
+
                     is_weak = True
+
                 temp_pinners &= temp_pinners - np.uint64(1)
+
         if is_weak:
+
             mg_mobility += get_array_val(theta, IDX_WEAK_QUEEN, 0)
+
             eg_mobility += get_array_val(theta, IDX_WEAK_QUEEN, 1)
+
+
 
         temp_bb &= temp_bb - np.uint64(1)
 
+
+
     # --- Threats Evaluation (SF11-inspired, per-type) ---
+
     mg_threats = np.int32(0)
+
     eg_threats = np.int32(0)
 
+
+
     # Pre-compute piece sets
+
     white_non_pawns = wn_bb | wb_bb | wr_bb | wq_bb
+
     black_non_pawns = bn_bb | bb_bb | br_bb | bq_bb
+
     all_white_pieces = wp_bb | white_non_pawns
+
     all_black_pieces = bp_bb | black_non_pawns
 
+
+
     # stronglyProtected: defended by pawn OR doubly attacked (and not doubly attacked by us)
+
     white_strongly_protected = white_pawn_attacks | (white_attacks2 & ~black_attacks2)
+
     black_strongly_protected = black_pawn_attacks | (black_attacks2 & ~white_attacks2)
 
+
+
     # weakly attacked enemy pieces (attacked by us, not strongly defended)
+
     white_weak = all_white_pieces & black_attacks & ~white_strongly_protected
+
     black_weak = all_black_pieces & white_attacks & ~black_strongly_protected
 
+
+
     # --- 1. ThreatBySafePawn: safe pawn attacks enemy non-pawn ---
+
     # In SF11, only pawns on safe squares (not attacked by Them, or defended by Us) can threaten enemy pieces.
+
     # safe = ~attackedBy[Them][ALL_PIECES] | attackedBy[Us][ALL_PIECES]
+
     white_safe = ~black_attacks | white_attacks
+
     white_safe_pawns = wp_bb & white_safe
+
     white_safe_pawn_attacks = ((white_safe_pawns & NOT_A_FILE) << np.uint64(7)) | ((white_safe_pawns & NOT_H_FILE) << np.uint64(9))
+
     white_safe_pawn_sq = white_safe_pawn_attacks & black_non_pawns
+
     if white_safe_pawn_sq:
+
         count = count_bits(white_safe_pawn_sq)
+
         mg_threats += get_array_val(theta, IDX_THREAT_SAFE_PAWN, 0) * count
+
         eg_threats += get_array_val(theta, IDX_THREAT_SAFE_PAWN, 1) * count
 
+
+
     black_safe = ~white_attacks | black_attacks
+
     black_safe_pawns = bp_bb & black_safe
+
     black_safe_pawn_attacks = ((black_safe_pawns & NOT_H_FILE) >> np.uint64(7)) | ((black_safe_pawns & NOT_A_FILE) >> np.uint64(9))
+
     black_safe_pawn_sq = black_safe_pawn_attacks & white_non_pawns
+
     if black_safe_pawn_sq:
+
         count = count_bits(black_safe_pawn_sq)
+
         mg_threats -= get_array_val(theta, IDX_THREAT_SAFE_PAWN, 0) * count
+
         eg_threats -= get_array_val(theta, IDX_THREAT_SAFE_PAWN, 1) * count
 
+
+
     # --- 2. ThreatByMinor: SF11 uses (defended | weak) for minors ---
+
     # defended = strongly-protected non-pawn enemies; weak = not strongly protected & under attack
+
     black_defended = black_non_pawns & black_strongly_protected
+
     white_defended = white_non_pawns & white_strongly_protected
+
     w_minor_threatens = (white_knight_attacks | white_bishop_attacks) & (black_defended | black_weak)
+
     if w_minor_threatens:
+
         for pt in range(5):
+
             intersection = w_minor_threatens & piece_bbs[6 + pt]
+
             if intersection:
+
                 count = count_bits(intersection)
+
                 mg_threats += get_2d_val(theta, IDX_THREAT_BY_MINOR, pt, 2, 0) * count
+
                 eg_threats += get_2d_val(theta, IDX_THREAT_BY_MINOR, pt, 2, 1) * count
 
+
+
     b_minor_threatens = (black_knight_attacks | black_bishop_attacks) & (white_defended | white_weak)
+
     if b_minor_threatens:
+
         for pt in range(5):
+
             intersection = b_minor_threatens & piece_bbs[pt]
+
             if intersection:
+
                 count = count_bits(intersection)
+
                 mg_threats -= get_2d_val(theta, IDX_THREAT_BY_MINOR, pt, 2, 0) * count
+
                 eg_threats -= get_2d_val(theta, IDX_THREAT_BY_MINOR, pt, 2, 1) * count
 
+
+
     # --- 3. ThreatByRook: rook attacks weak enemy pieces, per type ---
+
     w_rook_threatens = white_rook_attacks & black_weak
+
     if w_rook_threatens:
+
         for pt in range(5):
+
             intersection = w_rook_threatens & piece_bbs[6 + pt]
+
             if intersection:
+
                 count = count_bits(intersection)
+
                 mg_threats += get_2d_val(theta, IDX_THREAT_BY_ROOK, pt, 2, 0) * count
+
                 eg_threats += get_2d_val(theta, IDX_THREAT_BY_ROOK, pt, 2, 1) * count
 
+
+
     b_rook_threatens = black_rook_attacks & white_weak
+
     if b_rook_threatens:
+
         for pt in range(5):
+
             intersection = b_rook_threatens & piece_bbs[pt]
+
             if intersection:
+
                 count = count_bits(intersection)
+
                 mg_threats -= get_2d_val(theta, IDX_THREAT_BY_ROOK, pt, 2, 0) * count
+
                 eg_threats -= get_2d_val(theta, IDX_THREAT_BY_ROOK, pt, 2, 1) * count
 
+
+
     # --- 4. ThreatByKing: king attacks weak enemy pieces ---
+
     w_king_threatens = KING_ATTACKS[white_king_sq] & black_weak
+
     if w_king_threatens:
+
         count = count_bits(w_king_threatens)
+
         mg_threats += get_array_val(theta, IDX_THREAT_BY_KING, 0) * count
+
         eg_threats += get_array_val(theta, IDX_THREAT_BY_KING, 1) * count
 
+
+
     b_king_threatens = KING_ATTACKS[black_king_sq] & white_weak
+
     if b_king_threatens:
+
         count = count_bits(b_king_threatens)
+
         mg_threats -= get_array_val(theta, IDX_THREAT_BY_KING, 0) * count
+
         eg_threats -= get_array_val(theta, IDX_THREAT_BY_KING, 1) * count
 
+
+
     # --- 5. Hanging: weak pieces with no defenders at all OR doubly attacked ---
+
     black_hanging = black_weak & (~black_attacks | (black_non_pawns & white_attacks2))
+
     if black_hanging:
+
         count = count_bits(black_hanging)
+
         mg_threats += get_array_val(theta, IDX_THREAT_HANGING, 0) * count
+
         eg_threats += get_array_val(theta, IDX_THREAT_HANGING, 1) * count
 
+
+
     white_hanging = white_weak & (~white_attacks | (white_non_pawns & black_attacks2))
+
     if white_hanging:
+
         count = count_bits(white_hanging)
+
         mg_threats -= get_array_val(theta, IDX_THREAT_HANGING, 0) * count
+
         eg_threats -= get_array_val(theta, IDX_THREAT_HANGING, 1) * count
 
+
+
     # Restricted piece threat (RestrictedPiece * popcount(b))
+
     w_restricted = black_attacks & ~black_strongly_protected & white_attacks
+
     if w_restricted:
+
         count = count_bits(w_restricted)
+
         mg_threats += get_array_val(theta, IDX_THREAT_RESTRICTED_PIECE, 0) * count
+
         eg_threats += get_array_val(theta, IDX_THREAT_RESTRICTED_PIECE, 1) * count
 
+
+
     b_restricted = white_attacks & ~white_strongly_protected & black_attacks
+
     if b_restricted:
+
         count = count_bits(b_restricted)
+
         mg_threats -= get_array_val(theta, IDX_THREAT_RESTRICTED_PIECE, 0) * count
+
         eg_threats -= get_array_val(theta, IDX_THREAT_RESTRICTED_PIECE, 1) * count
 
+
+
     # --- 7. ThreatByPawnPush ---
+
     # In SF11, pawn pushes are only evaluated if the landing square is unoccupied and safe.
+
     # b &= ~attackedBy[Them][PAWN] & safe (where safe = ~attackedBy[Them][ALL_PIECES] | attackedBy[Us][ALL_PIECES])
+
     w_push1 = (wp_bb << np.uint64(8)) & ~all_occupancy & ~np.uint64(0xFF00000000000000)
+
     w_push2 = ((w_push1 & np.uint64(0xFF0000)) << np.uint64(8)) & ~all_occupancy  # double push from rank 2
+
     w_push_landings = (w_push1 | w_push2) & ~black_pawn_attacks & white_safe
+
     w_push_attacks = ((w_push_landings & NOT_A_FILE) << np.uint64(7)) | ((w_push_landings & NOT_H_FILE) << np.uint64(9))
+
     w_push_threat = w_push_attacks & black_non_pawns
+
     if w_push_threat:
+
         count = count_bits(w_push_threat)
+
         mg_threats += get_array_val(theta, IDX_THREAT_PAWN_PUSH, 0) * count
+
         eg_threats += get_array_val(theta, IDX_THREAT_PAWN_PUSH, 1) * count
 
+
+
     b_push1 = (bp_bb >> np.uint64(8)) & ~all_occupancy & ~np.uint64(0xFF)
+
     b_push2 = ((b_push1 & np.uint64(0xFF0000000000)) >> np.uint64(8)) & ~all_occupancy  # double push from rank 7
+
     b_push_landings = (b_push1 | b_push2) & ~white_pawn_attacks & black_safe
+
     b_push_attacks = ((b_push_landings & NOT_H_FILE) >> np.uint64(7)) | ((b_push_landings & NOT_A_FILE) >> np.uint64(9))
+
     b_push_threat = b_push_attacks & white_non_pawns
+
     if b_push_threat:
+
         count = count_bits(b_push_threat)
+
         mg_threats -= get_array_val(theta, IDX_THREAT_PAWN_PUSH, 0) * count
+
         eg_threats -= get_array_val(theta, IDX_THREAT_PAWN_PUSH, 1) * count
 
+
+
     # --- KnightOnQueen & SliderOnQueen threats ---
+
     # White threats against Black Queen
+
     if count_bits(bq_bb) == 1:
+
         bq_sq = get_lsb_index(bq_bb)
+
         w_safe_for_queen_threat = white_mobility_area & ~black_strongly_protected
 
+
+
         # KnightOnQueen: white knight attacks squares that also attack black queen
+
         bq_knight_attacks = KNIGHT_ATTACKS[bq_sq]
+
         w_koq = white_knight_attacks & bq_knight_attacks & w_safe_for_queen_threat
+
         if w_koq != np.uint64(0):
+
             count = count_bits(w_koq)
+
             mg_threats += get_array_val(theta, IDX_THREAT_KNIGHT_ON_QUEEN, 0) * count
+
             eg_threats += get_array_val(theta, IDX_THREAT_KNIGHT_ON_QUEEN, 1) * count
 
+
+
         # SliderOnQueen: white bishop/rook attacks squares that also attack black queen
+
         bq_rook_attacks = get_rook_attacks(bq_sq, all_occupancy)
+
         bq_bishop_attacks = get_bishop_attacks(bq_sq, all_occupancy)
+
         w_soq = ((white_bishop_attacks & bq_bishop_attacks) | (white_rook_attacks & bq_rook_attacks)) & w_safe_for_queen_threat & white_attacks2
+
         if w_soq != np.uint64(0):
+
             count = count_bits(w_soq)
+
             mg_threats += get_array_val(theta, IDX_THREAT_SLIDER_ON_QUEEN, 0) * count
+
             eg_threats += get_array_val(theta, IDX_THREAT_SLIDER_ON_QUEEN, 1) * count
 
+
+
     # Black threats against White Queen
+
     if count_bits(wq_bb) == 1:
+
         wq_sq = get_lsb_index(wq_bb)
+
         b_safe_for_queen_threat = black_mobility_area & ~white_strongly_protected
 
+
+
         # KnightOnQueen: black knight attacks squares that also attack white queen
+
         wq_knight_attacks = KNIGHT_ATTACKS[wq_sq]
+
         b_koq = black_knight_attacks & wq_knight_attacks & b_safe_for_queen_threat
+
         if b_koq != np.uint64(0):
+
             count = count_bits(b_koq)
+
             mg_threats -= get_array_val(theta, IDX_THREAT_KNIGHT_ON_QUEEN, 0) * count
+
             eg_threats -= get_array_val(theta, IDX_THREAT_KNIGHT_ON_QUEEN, 1) * count
 
+
+
         # SliderOnQueen: black bishop/rook attacks squares that also attack white queen
+
         wq_rook_attacks = get_rook_attacks(wq_sq, all_occupancy)
+
         wq_bishop_attacks = get_bishop_attacks(wq_sq, all_occupancy)
+
         b_soq = ((black_bishop_attacks & wq_bishop_attacks) | (black_rook_attacks & wq_rook_attacks)) & b_safe_for_queen_threat & black_attacks2
+
         if b_soq != np.uint64(0):
+
             count = count_bits(b_soq)
+
             mg_threats -= get_array_val(theta, IDX_THREAT_SLIDER_ON_QUEEN, 0) * count
+
             eg_threats -= get_array_val(theta, IDX_THREAT_SLIDER_ON_QUEEN, 1) * count
 
+
+
     return (white_attacks, black_attacks, white_pawn_attacks, black_pawn_attacks,
+
             white_attacks2, black_attacks2, pinned_white, pinned_black,
+
             mg_mobility, eg_mobility, mg_threats, eg_threats, mg_outpost, eg_outpost,
+
             white_knight_attacks, white_bishop_attacks, white_rook_attacks, white_queen_attacks,
+
             black_knight_attacks, black_bishop_attacks, black_rook_attacks, black_queen_attacks,
+
             w_attacker_weight, w_attacker_count, w_king_attacks_count,
+
             b_attacker_weight, b_attacker_count, b_king_attacks_count,
+
             white_king_zone, black_king_zone, mg_mobility_pure)
 
 
+
+
+
 @numba.njit(cache=True, boundscheck=False, fastmath=True)
-def _evaluate_king_pawn_endgame(piece_bbs, occupancy_bbs, game_state, castling_rights, search_context, theta):
+
+def _evaluate_king_pawn_endgame(piece_bbs, occupancy_bbs, game_state, castling_rights, search_context, ew, use_ew, theta):
+
     """
+
     專門為王兵殘局設計的評估函數。包含不可阻擋通路兵的檢測（方形法則）。
+
     P3b race-winner-only unstoppable was reverted (hurts long games in match testing).
+
     """
+
     score = np.int32(0)
+
     side_to_move = game_state[0]
 
+
+
     white_pawns = piece_bbs[0]
+
     white_king_sq = get_lsb_index(piece_bbs[5])
+
     black_pawns = piece_bbs[6]
+
     black_king_sq = get_lsb_index(piece_bbs[11])
 
+
+
     wp_cnt = 0
+
     bp_cnt = 0
+
     all_occ = occupancy_bbs[2]
 
+
+
     # 1. 基礎兵價和位置
+
     temp_wp = white_pawns
+
     while temp_wp:
+
         sq = get_lsb_index(temp_wp)
+
         wp_cnt += 1
+
         score += get_array_val(theta, IDX_EG_MATERIAL_VALUES, 0) + get_2d_val(theta, IDX_PST_EG, 0, 64, sq)
 
+
+
         # Unstoppable Pawn Logic (White) — per passed pawn (pre-P3b)
+
         forward_mask = WHITE_FORWARD_FILE_MASKS[sq]
+
         if not (WHITE_PASSED_PAWN_MASKS[sq] & black_pawns) and not (forward_mask & white_pawns):
+
             rank = sq >> 3
+
             steps_to_promote = 7 - rank
+
             if rank == 1 and not (all_occ & (BB_SQUARES[sq + 8] | BB_SQUARES[sq + 16])):
+
                 steps_to_promote = 5  # double-push correction
+
             if forward_mask & piece_bbs[5]:
+
                 steps_to_promote += 1  # own king blocks advance on promotion path
+
             promotion_sq = (sq & 7) + 56
+
             king_dist = CHEBYSHEV_DISTANCE[black_king_sq, promotion_sq]
+
             adjusted_pawn_steps = steps_to_promote
+
             if side_to_move == 1:
+
                 adjusted_pawn_steps += 1
+
             if king_dist > adjusted_pawn_steps:
+
                 score += get_int(theta, IDX_UNSTOPPABLE_PAWN_BONUS)
+
+
 
         temp_wp &= temp_wp - np.uint64(1)
 
+
+
     temp_bp = black_pawns
+
     while temp_bp:
+
         sq = get_lsb_index(temp_bp)
+
         bp_cnt += 1
+
         score -= (get_array_val(theta, IDX_EG_MATERIAL_VALUES, 0) + get_2d_val(theta, IDX_PST_EG, 0, 64, sq ^ 56))
 
+
+
         forward_mask = BLACK_FORWARD_FILE_MASKS[sq]
+
         if not (BLACK_PASSED_PAWN_MASKS[sq] & white_pawns) and not (forward_mask & black_pawns):
+
             rank = sq >> 3
+
             steps_to_promote = rank
+
             if rank == 6 and not (all_occ & (BB_SQUARES[sq - 8] | BB_SQUARES[sq - 16])):
+
                 steps_to_promote = 5  # double-push correction
+
             if forward_mask & piece_bbs[11]:
+
                 steps_to_promote += 1  # own king blocks advance on promotion path
+
             promotion_sq = (sq & 7)
+
             king_dist = CHEBYSHEV_DISTANCE[white_king_sq, promotion_sq]
+
             adjusted_pawn_steps = steps_to_promote
+
             if side_to_move == 0:
+
                 adjusted_pawn_steps += 1
+
             if king_dist > adjusted_pawn_steps:
+
                 score -= get_int(theta, IDX_UNSTOPPABLE_PAWN_BONUS)
+
+
 
         temp_bp &= temp_bp - np.uint64(1)
 
+
+
     # King position
+
     score += get_2d_val(theta, IDX_PST_EG, 5, 64, white_king_sq)
+
     score -= get_2d_val(theta, IDX_PST_EG, 5, 64, black_king_sq ^ 56)
 
+
+
     if search_context is not None:
+
         pawn_key = game_state[PAWN_KEY_INDEX]
+
         res = evaluate_pawn_structure_cached(piece_bbs, pawn_key, castling_rights, search_context, theta)
+
     else:
-        res = evaluate_pawn_structure(piece_bbs, castling_rights, _DUMMY_EW, False, theta)
+
+        res = evaluate_pawn_structure(piece_bbs, castling_rights, ew, use_ew, theta)
+
     eg_pawn_score = res[1]
+
     w_passed = res[6]
+
     b_passed = res[7]
+
     score += eg_pawn_score
 
+
+
     # 計算王與兵的動態攻擊 (王兵殘局)
+
     white_pawn_attacks = ((white_pawns & NOT_A_FILE) << np.uint64(7)) | ((white_pawns & NOT_H_FILE) << np.uint64(9))
+
     black_pawn_attacks = ((black_pawns & NOT_H_FILE) >> np.uint64(7)) | ((black_pawns & NOT_A_FILE) >> np.uint64(9))
+
     white_attacks = white_pawn_attacks | KING_ATTACKS[white_king_sq]
+
     black_attacks = black_pawn_attacks | KING_ATTACKS[black_king_sq]
 
+
+
     # 直接重用傳入之 occupancy_bbs，免除 NRT 堆分配
+
     _, eg_passed_score, _ = evaluate_passed_pawns(
+
         piece_bbs, occupancy_bbs, white_attacks, black_attacks,
-        w_passed, b_passed, white_king_sq, black_king_sq, _DUMMY_EW, False, theta)
+
+        w_passed, b_passed, white_king_sq, black_king_sq, ew, use_ew, theta)
+
     score += eg_passed_score
 
+
+
     # 3. 國王活動獎勵
+
     temp_pawns = white_pawns | black_pawns
+
     while temp_pawns:
+
         sq = get_lsb_index(temp_pawns)
+
         w_dist = MANHATTAN_DISTANCE[white_king_sq, sq]
+
         b_dist = MANHATTAN_DISTANCE[black_king_sq, sq]
+
         score += (b_dist - w_dist) * get_int(theta, IDX_KING_PAWN_PROXIMITY_FACTOR)
+
         temp_pawns &= temp_pawns - np.uint64(1)
+
+
 
     return score, wp_cnt, bp_cnt, white_king_sq, black_king_sq
 
 
+
+
+
 @numba.njit(cache=True, inline="always")
+
 def _material_mg_eg(piece_type, ew, use_ew, theta):
+
     """MG/EG unit value; pawn/king from constants; N/B/R/Q runtime-tunable."""
+
     if piece_type == 1:
+
         return (
+
             _ew_get(ew, use_ew, _EW_MAT_N_MG, get_array_val(theta, IDX_MG_MATERIAL_VALUES, 1)),
+
             _ew_get(ew, use_ew, _EW_MAT_N_EG, get_array_val(theta, IDX_EG_MATERIAL_VALUES, 1)),
+
         )
+
     if piece_type == 2:
+
         return (
+
             _ew_get(ew, use_ew, _EW_MAT_B_MG, get_array_val(theta, IDX_MG_MATERIAL_VALUES, 2)),
+
             _ew_get(ew, use_ew, _EW_MAT_B_EG, get_array_val(theta, IDX_EG_MATERIAL_VALUES, 2)),
+
         )
+
     if piece_type == 3:
+
         return (
+
             _ew_get(ew, use_ew, _EW_MAT_R_MG, get_array_val(theta, IDX_MG_MATERIAL_VALUES, 3)),
+
             _ew_get(ew, use_ew, _EW_MAT_R_EG, get_array_val(theta, IDX_EG_MATERIAL_VALUES, 3)),
+
         )
+
     if piece_type == 4:
+
         return (
+
             _ew_get(ew, use_ew, _EW_MAT_Q_MG, get_array_val(theta, IDX_MG_MATERIAL_VALUES, 4)),
+
             _ew_get(ew, use_ew, _EW_MAT_Q_EG, get_array_val(theta, IDX_EG_MATERIAL_VALUES, 4)),
+
         )
+
     return get_array_val(theta, IDX_MG_MATERIAL_VALUES, piece_type), get_array_val(theta, IDX_EG_MATERIAL_VALUES, piece_type)
 
 
+
+
+
 @numba.njit(cache=True, boundscheck=False, fastmath=True, inline="always")
+
 def _process_piece_score_and_count(piece_type, bb, is_white, ew, use_ew, theta):
+
     mg = 0
+
     eg = 0
+
     count = 0
+
     while bb:
+
         sq = get_lsb_index(bb)
+
         if is_white:
+
             mg += get_2d_val(theta, IDX_PST_MG, piece_type, 64, sq)
+
             eg += get_2d_val(theta, IDX_PST_EG, piece_type, 64, sq)
+
         else:
+
             mg -= get_2d_val(theta, IDX_PST_MG, piece_type, 64, sq ^ 56)
+
             eg -= get_2d_val(theta, IDX_PST_EG, piece_type, 64, sq ^ 56)
+
         count += 1
+
         bb &= bb - np.uint64(1)
 
+
+
     mat_mg, mat_eg = _material_mg_eg(piece_type, ew, use_ew, theta)
+
     if is_white:
+
         mg += count * mat_mg
+
         eg += count * mat_eg
+
     else:
+
         mg -= count * mat_mg
+
         eg -= count * mat_eg
+
+
 
     return mg, eg, count
 
 
+
+
+
 @numba.njit(cache=True, boundscheck=False, fastmath=True)
+
 def evaluate_space(piece_bbs, white_attacks, black_attacks, white_pawn_attacks, black_pawn_attacks, piece_counts, npm, theta):
+
     """
+
     評估雙方的空間控制優勢（僅影響中局）。
+
     """
+
     if npm < get_int(theta, IDX_SPACE_THRESHOLD):
+
         return np.int32(0)
 
+
+
     white_pawns = piece_bbs[0]
+
     black_pawns = piece_bbs[6]
 
+
+
     # Constant space masks: Files C-F on Ranks 2-4 (White) and Ranks 5-7 (Black)
+
     white_space_mask = np.uint64(0x000000003C3C3C00)
+
     black_space_mask = np.uint64(0x003C3C3C00000000)
 
+
+
     # Safe squares (not occupied by our pawns, not attacked by enemy pawns)
+
     white_safe = white_space_mask & ~white_pawns & ~black_pawn_attacks
+
     black_safe = black_space_mask & ~black_pawns & ~white_pawn_attacks
 
+
+
     # Behind pawns: up to 3 squares behind
+
     w_behind = white_pawns | (white_pawns >> np.uint64(8))
+
     w_behind |= (w_behind >> np.uint64(16))
 
+
+
     b_behind = black_pawns | (black_pawns << np.uint64(8))
+
     b_behind |= (b_behind << np.uint64(16))
 
+
+
     # Calculate bonuses
+
     w_bonus = count_bits(white_safe) + count_bits(w_behind & white_safe & ~black_attacks)
+
     b_bonus = count_bits(black_safe) + count_bits(b_behind & black_safe & ~white_attacks)
 
+
+
     # Weight = total friendly pieces - 1 (since piece_counts[5] == piece_counts[11] == 1, equals non-king count)
+
     w_weight = piece_counts[0] + piece_counts[1] + piece_counts[2] + piece_counts[3] + piece_counts[4]
+
     b_weight = piece_counts[6] + piece_counts[7] + piece_counts[8] + piece_counts[9] + piece_counts[10]
 
+
+
     space_div = get_int(theta, IDX_SPACE_BONUS_DIVISOR) * get_int(theta, IDX_SPACE_SCALE_DIVISOR)
+
     white_space_scaled = (w_bonus * w_weight * w_weight) // space_div
+
     black_space_scaled = (b_bonus * b_weight * b_weight) // space_div
+
+
 
     return np.int32(white_space_scaled - black_space_scaled)
 
 
+
+
+
 @numba.njit(cache=True, boundscheck=False, fastmath=True, inline='always')
+
 def _compute_initiative(mg, eg, piece_bbs, passed_count, white_king_sq, black_king_sq, theta):
+
     """
+
     Computes initiative correction based on complexity (SF11-style).
+
     """
+
     # 1. outflanking
+
     w_king_file = white_king_sq % 8
+
     b_king_file = black_king_sq % 8
+
     w_king_rank = white_king_sq // 8
+
     b_king_rank = black_king_sq // 8
+
     outflanking = abs(w_king_file - b_king_file) - abs(w_king_rank - b_king_rank)
 
+
+
     # 2. infiltration
+
     infiltration = (w_king_rank > 3) or (b_king_rank < 4)
 
+
+
     # 3. pawnsOnBothFlanks
+
     pawns = piece_bbs[0] | piece_bbs[6]
+
     pawns_on_both_flanks = ((pawns & QUEEN_SIDE_BB) != np.uint64(0)) and ((pawns & KING_SIDE_BB) != np.uint64(0))
 
+
+
     # 4. almostUnwinnable
+
     almost_unwinnable = (passed_count == 0) and (outflanking < 0) and not pawns_on_both_flanks
 
+
+
     # 5. pawn count
+
     pawn_count = count_bits(pawns)
 
+
+
     # Convert booleans to int32 to ensure static JIT typing
+
     # Note: Pure pawn endgame is intercepted at L1633 before full eval, so pure_pawn_endgame is always 0.
+
     infiltration_val = np.int32(1) if infiltration else np.int32(0)
+
     pawns_on_both_flanks_val = np.int32(1) if pawns_on_both_flanks else np.int32(0)
+
     almost_unwinnable_val = np.int32(1) if almost_unwinnable else np.int32(0)
 
+
+
     # Compute MG complexity (weights scaled by 0.78)
+
     mg_complexity = (
+
         get_int(theta, IDX_INITIATIVE_PASSED_WEIGHT_MG) * passed_count
+
         + get_int(theta, IDX_INITIATIVE_PAWN_WEIGHT_MG) * pawn_count
+
         + get_int(theta, IDX_INITIATIVE_OUTFLANKING_WEIGHT_MG) * outflanking
+
         + get_int(theta, IDX_INITIATIVE_INFILTRATION_WEIGHT_MG) * infiltration_val
+
         + get_int(theta, IDX_INITIATIVE_BOTH_FLANKS_WEIGHT_MG) * pawns_on_both_flanks_val
+
         - get_int(theta, IDX_INITIATIVE_ALMOST_UNWIN_WEIGHT_MG) * almost_unwinnable_val
+
         + get_int(theta, IDX_INITIATIVE_OFFSET_MG)
+
     )
+
+
 
     # Compute EG complexity (weights scaled by 0.563)
+
     eg_complexity = (
+
         get_int(theta, IDX_INITIATIVE_PASSED_WEIGHT_EG) * passed_count
+
         + get_int(theta, IDX_INITIATIVE_PAWN_WEIGHT_EG) * pawn_count
+
         + get_int(theta, IDX_INITIATIVE_OUTFLANKING_WEIGHT_EG) * outflanking
+
         + get_int(theta, IDX_INITIATIVE_INFILTRATION_WEIGHT_EG) * infiltration_val
+
         + get_int(theta, IDX_INITIATIVE_BOTH_FLANKS_WEIGHT_EG) * pawns_on_both_flanks_val
+
         - get_int(theta, IDX_INITIATIVE_ALMOST_UNWIN_WEIGHT_EG) * almost_unwinnable_val
+
         + get_int(theta, IDX_INITIATIVE_OFFSET_EG)
+
     )
 
+
+
     # Apply sign and caps (dampen only for MG, can amplify or dampen for EG)
+
     mg_sign = np.int32(1) if mg > 0 else (np.int32(-1) if mg < 0 else np.int32(0))
+
     eg_sign = np.int32(1) if eg > 0 else (np.int32(-1) if eg < 0 else np.int32(0))
 
+
+
     u = mg_sign * max(min(mg_complexity + get_int(theta, IDX_INITIATIVE_MG_OFFSET), np.int32(0)), -abs(mg))
+
     v = eg_sign * max(eg_complexity, -abs(eg))
+
+
 
     return u, v
 
 
+
+
+
 @numba.njit(cache=True, boundscheck=False, fastmath=True)
+
 def _evaluate_position_jit(piece_bbs, occupancy_bbs, game_state, lazy, search_context, theta):
+
     """
+
     使用 Tapered Evaluation (加權評估) 模型評估目前局面，並從當前執棋方的角度返回分數。
+
     評估包括：材質、PST、國王安全、兵形結構、棋子協同性和機動性。
+
     
+
     Args:
+
         piece_bbs (np.ndarray): 12 個棋子的位元棋盤。
+
         occupancy_bbs (np.ndarray): 佔用位元棋盤。
+
         game_state (np.ndarray): 遊戲狀態。
+
         lazy (bool): 是否使用懶惰評估（僅材質 and PST，用於 Razoring 等）。
+
         
+
     Returns:
+
         int: 從行棋方視角的評估分數。
+
     """
+
     side_to_move = game_state[0]
 
+
+
     # Runtime HCE weights early (material / imbalance / passed / king safety)
+
     if search_context is not None:
+
         ew = search_context.eval_weights
+
         use_ew = True
+
     else:
+
         ew = _DUMMY_EW
+
         use_ew = False
 
+
+
     # --- Specialized endgames (SF11): KBNK (enhanced), KPK, KRKP, KQKP, KXK,
+
     #     KNNK, KRKB, KRKN, KQKR, KNNKP ---
+
     # Score from the specialized evaluator is White's perspective. Pass the
+
     # active material scale explicitly so generated Texel candidates evaluate
+
     # KXK/KRKP/KQKP/KQKR/KNNKP with their candidate values too.
+
+    mat_0_mg = get_array_val(theta, IDX_MG_MATERIAL_VALUES, 0)
+
+    mat_1_mg, mat_1_eg = _material_mg_eg(1, ew, use_ew, theta)
+
+    mat_2_mg, mat_2_eg = _material_mg_eg(2, ew, use_ew, theta)
+
+    mat_3_mg, mat_3_eg = _material_mg_eg(3, ew, use_ew, theta)
+
+    mat_4_mg, mat_4_eg = _material_mg_eg(4, ew, use_ew, theta)
+
+    mat_0_eg = get_array_val(theta, IDX_EG_MATERIAL_VALUES, 0)
+
     hit_special, special_score = evaluate_special_endgame_with_material(
+
         piece_bbs, occupancy_bbs, game_state, np.int32(0),
-        get_array_val(theta, IDX_MG_MATERIAL_VALUES, 0), get_array_val(theta, IDX_MG_MATERIAL_VALUES, 1), get_array_val(theta, IDX_MG_MATERIAL_VALUES, 2),
-        get_array_val(theta, IDX_MG_MATERIAL_VALUES, 3), get_array_val(theta, IDX_MG_MATERIAL_VALUES, 4),
-        get_array_val(theta, IDX_EG_MATERIAL_VALUES, 0), get_array_val(theta, IDX_EG_MATERIAL_VALUES, 1), get_array_val(theta, IDX_EG_MATERIAL_VALUES, 2),
-        get_array_val(theta, IDX_EG_MATERIAL_VALUES, 3), get_array_val(theta, IDX_EG_MATERIAL_VALUES, 4),
+
+        mat_0_mg, mat_1_mg, mat_2_mg, mat_3_mg, mat_4_mg,
+
+        mat_0_eg, mat_1_eg, mat_2_eg, mat_3_eg, mat_4_eg,
+
     )
+
     if hit_special:
+
         val = np.int32(special_score) if side_to_move == 0 else np.int32(-special_score)
+
         return val, PINNED_UNCOMPUTED_SENTINEL, PINNED_UNCOMPUTED_SENTINEL
+
+
 
     # --- Multi-pawn pure king-and-pawn endgame (not covered by single-pawn KPK) ---
+
     all_pieces_except_pawns_and_kings = (
+
         piece_bbs[1] | piece_bbs[2] | piece_bbs[3] | piece_bbs[4] |
+
         piece_bbs[7] | piece_bbs[8] | piece_bbs[9] | piece_bbs[10]
+
     )
+
     if all_pieces_except_pawns_and_kings == 0:
+
         castling_rights = np.uint8(game_state[1])
+
         score, wp_cnt, bp_cnt, wk_sq, bk_sq = _evaluate_king_pawn_endgame(
-            piece_bbs, occupancy_bbs, game_state, castling_rights, search_context, theta
+
+            piece_bbs, occupancy_bbs, game_state, castling_rights, search_context, ew, use_ew, theta
+
         )
+
         sf = get_endgame_scale_factor_with_counts(
+
             piece_bbs, occupancy_bbs, game_state, np.int32(0), score,
+
             wp_cnt, 0, 0, 0, 0, bp_cnt, 0, 0, 0, 0, wk_sq, bk_sq,
+
         )
+
         if sf == SCALE_FACTOR_DRAW:
+
             score = np.int32(0)
+
         val = np.int32(score) if side_to_move == 0 else np.int32(-score)
+
         return val, PINNED_UNCOMPUTED_SENTINEL, PINNED_UNCOMPUTED_SENTINEL
 
+
+
     # Precompute King Squares for evaluation components
+
     white_king_sq = get_lsb_index(piece_bbs[5])
+
     black_king_sq = get_lsb_index(piece_bbs[11])
 
+
+
     # --- 1. & 2. Phase, Material, and PST (Unrolled & Fused; Kings evaluated directly) ---
+
     mg_0, eg_0, cnt_0 = _process_piece_score_and_count(0, piece_bbs[0], True, ew, use_ew, theta)
+
     mg_1, eg_1, cnt_1 = _process_piece_score_and_count(1, piece_bbs[1], True, ew, use_ew, theta)
+
     mg_2, eg_2, cnt_2 = _process_piece_score_and_count(2, piece_bbs[2], True, ew, use_ew, theta)
+
     mg_3, eg_3, cnt_3 = _process_piece_score_and_count(3, piece_bbs[3], True, ew, use_ew, theta)
+
     mg_4, eg_4, cnt_4 = _process_piece_score_and_count(4, piece_bbs[4], True, ew, use_ew, theta)
+
     mg_5 = get_2d_val(theta, IDX_PST_MG, 5, 64, white_king_sq) + get_array_val(theta, IDX_MG_MATERIAL_VALUES, 5)
+
     eg_5 = get_2d_val(theta, IDX_PST_EG, 5, 64, white_king_sq) + get_array_val(theta, IDX_EG_MATERIAL_VALUES, 5)
+
     cnt_5 = 1
 
+
+
     mg_6, eg_6, cnt_6 = _process_piece_score_and_count(0, piece_bbs[6], False, ew, use_ew, theta)
+
     mg_7, eg_7, cnt_7 = _process_piece_score_and_count(1, piece_bbs[7], False, ew, use_ew, theta)
+
     mg_8, eg_8, cnt_8 = _process_piece_score_and_count(2, piece_bbs[8], False, ew, use_ew, theta)
+
     mg_9, eg_9, cnt_9 = _process_piece_score_and_count(3, piece_bbs[9], False, ew, use_ew, theta)
+
     mg_10, eg_10, cnt_10 = _process_piece_score_and_count(4, piece_bbs[10], False, ew, use_ew, theta)
+
     mg_11 = -(get_2d_val(theta, IDX_PST_MG, 5, 64, black_king_sq ^ 56) + get_array_val(theta, IDX_MG_MATERIAL_VALUES, 5))
+
     eg_11 = -(get_2d_val(theta, IDX_PST_EG, 5, 64, black_king_sq ^ 56) + get_array_val(theta, IDX_EG_MATERIAL_VALUES, 5))
+
     cnt_11 = 1
 
+
+
     mg_score = np.int32(mg_0 + mg_1 + mg_2 + mg_3 + mg_4 + mg_5 + mg_6 + mg_7 + mg_8 + mg_9 + mg_10 + mg_11)
+
     eg_score = np.int32(eg_0 + eg_1 + eg_2 + eg_3 + eg_4 + eg_5 + eg_6 + eg_7 + eg_8 + eg_9 + eg_10 + eg_11)
+
+
 
     piece_counts = (cnt_0, cnt_1, cnt_2, cnt_3, cnt_4, cnt_5, cnt_6, cnt_7, cnt_8, cnt_9, cnt_10, cnt_11)
 
+
+
     # Game phase from non-pawn material (runtime N/B/R/Q MG values when use_ew)
+
     mat_n_mg, _ = _material_mg_eg(1, ew, use_ew, theta)
+
     mat_b_mg, _ = _material_mg_eg(2, ew, use_ew, theta)
+
     mat_r_mg, _ = _material_mg_eg(3, ew, use_ew, theta)
+
     mat_q_mg, _ = _material_mg_eg(4, ew, use_ew, theta)
+
     w_npm = (cnt_1 * mat_n_mg + cnt_2 * mat_b_mg + cnt_3 * mat_r_mg + cnt_4 * mat_q_mg)
+
     b_npm = (cnt_7 * mat_n_mg + cnt_8 * mat_b_mg + cnt_9 * mat_r_mg + cnt_10 * mat_q_mg)
+
     npm = w_npm + b_npm
+
     midgame_limit, endgame_limit = _phase_limits_from_material(
+
         mat_n_mg, mat_b_mg, mat_r_mg, mat_q_mg
+
     )
+
     npm_clamped = npm
+
     if npm_clamped < endgame_limit:
+
         npm_clamped = endgame_limit
+
     elif npm_clamped > midgame_limit:
+
         npm_clamped = midgame_limit
+
     phase_denominator = midgame_limit - endgame_limit
+
     if phase_denominator <= 0:
+
         phase = PHASE_MIDGAME
+
     else:
+
         phase = ((npm_clamped - endgame_limit) * PHASE_MIDGAME) // phase_denominator
 
+
+
     # --- Material Imbalance ---
+
     mg_imb, eg_imb = compute_imbalance(
+
         cnt_0, cnt_1, cnt_2, cnt_3, cnt_4,
+
         cnt_6, cnt_7, cnt_8, cnt_9, cnt_10, ew, use_ew, theta)
+
     mg_score += mg_imb
+
     eg_score += eg_imb
 
+
+
     # --- Lazy Evaluation Checkpoint ---
+
     if lazy:
+
         sf = get_endgame_scale_factor_with_counts(
+
             piece_bbs, occupancy_bbs, game_state, phase, eg_score,
+
             cnt_0, cnt_1, cnt_2, cnt_3, cnt_4, cnt_6, cnt_7, cnt_8, cnt_9, cnt_10,
+
             white_king_sq, black_king_sq,
+
         )
+
         if sf != SCALE_FACTOR_NORMAL:
+
             eg_scaled = eg_score * sf // SCALE_FACTOR_NORMAL
+
             final_score = (mg_score * phase + eg_scaled * (MAX_PHASE - phase)) // MAX_PHASE
+
         else:
+
             final_score = (mg_score * phase + eg_score * (MAX_PHASE - phase)) // MAX_PHASE
+
         val = np.int32(final_score) if side_to_move == 0 else np.int32(-final_score)
+
         return val, PINNED_UNCOMPUTED_SENTINEL, PINNED_UNCOMPUTED_SENTINEL
+
+
 
     # --- 4. Pawn Structure (Cached or Uncached) ---
+
     if search_context is not None:
+
         pawn_key = game_state[PAWN_KEY_INDEX]
+
         castling_rights = np.uint8(game_state[1])
+
         (mg_pawn_structure, eg_pawn_structure, 
+
          white_mg_shield, white_eg_shield, black_mg_shield, black_eg_shield,
+
          w_passed, b_passed,
+
          white_pawn_attacks_span, black_pawn_attacks_span) = evaluate_pawn_structure_cached(piece_bbs, pawn_key, castling_rights, search_context, theta)
+
     else:
+
         castling_rights = np.uint8(game_state[1])
+
         (mg_pawn_structure, eg_pawn_structure, 
+
          white_mg_shield, white_eg_shield, black_mg_shield, black_eg_shield,
+
          w_passed, b_passed,
+
          white_pawn_attacks_span, black_pawn_attacks_span) = evaluate_pawn_structure(
+
              piece_bbs, castling_rights, _DUMMY_EW, False, theta)
+
     mg_score += mg_pawn_structure
+
     eg_score += eg_pawn_structure
 
+
+
     # --- Dynamic Lazy Evaluation Threshold Early Exit ---
+
     v = (mg_score + eg_score) // 2
+
     if abs(v) > LAZY_EVAL_THRESHOLD + npm // 64:
+
         sf = get_endgame_scale_factor_with_counts(
+
             piece_bbs, occupancy_bbs, game_state, phase, eg_score,
+
             cnt_0, cnt_1, cnt_2, cnt_3, cnt_4, cnt_6, cnt_7, cnt_8, cnt_9, cnt_10,
+
             white_king_sq, black_king_sq,
+
         )
+
         if sf != SCALE_FACTOR_NORMAL:
+
             eg_scaled = eg_score * sf // SCALE_FACTOR_NORMAL
+
             final_score = (mg_score * phase + eg_scaled * (MAX_PHASE - phase)) // MAX_PHASE
+
         else:
+
             final_score = (mg_score * phase + eg_score * (MAX_PHASE - phase)) // MAX_PHASE
+
         val = np.int32(final_score) if side_to_move == 0 else np.int32(-final_score)
+
         return val, PINNED_UNCOMPUTED_SENTINEL, PINNED_UNCOMPUTED_SENTINEL
 
+
+
     # --- Compute Attacks, Mobility, Threats (Optimized Single Pass) ---
+
     (white_attacks, black_attacks, white_pawn_attacks, black_pawn_attacks,
+
      white_attacks2, black_attacks2, pinned_white, pinned_black,
+
      mg_mobility, eg_mobility, mg_threats, eg_threats,
+
      mg_outpost, eg_outpost,
+
      white_knight_attacks, white_bishop_attacks, white_rook_attacks, white_queen_attacks,
+
      black_knight_attacks, black_bishop_attacks, black_rook_attacks, black_queen_attacks,
+
      w_attacker_weight, w_attacker_count, w_king_attacks_count,
+
      b_attacker_weight, b_attacker_count, b_king_attacks_count,
+
      white_king_zone, black_king_zone, mg_mobility_pure) = evaluate_attacks_mobility_threats(
+
          piece_bbs, occupancy_bbs, white_king_sq, black_king_sq, white_pawn_attacks_span, black_pawn_attacks_span, castling_rights, theta)
 
+
+
     # --- 4.5 Passed Pawns (Dynamic Evaluation) ---
+
     mg_passed, eg_passed, passed_count = evaluate_passed_pawns(
+
         piece_bbs, occupancy_bbs, white_attacks, black_attacks,
+
         w_passed, b_passed, white_king_sq, black_king_sq, ew, use_ew, theta)
+
     mg_score += mg_passed
+
     eg_score += eg_passed
 
+
+
     # --- 3. King Safety ---
+
     mg_king_safety, eg_king_safety = evaluate_king_safety(
+
         piece_bbs, occupancy_bbs, white_attacks, black_attacks,
+
         white_attacks2, black_attacks2, pinned_white, pinned_black,
+
         white_mg_shield, white_eg_shield, black_mg_shield, black_eg_shield,
+
         white_king_sq, black_king_sq,
+
         w_attacker_weight, w_attacker_count, w_king_attacks_count,
+
         b_attacker_weight, b_attacker_count, b_king_attacks_count,
+
         white_knight_attacks, white_bishop_attacks, white_rook_attacks, white_queen_attacks,
+
         black_knight_attacks, black_bishop_attacks, black_rook_attacks, black_queen_attacks,
+
         mg_mobility_pure,
+
         white_king_zone, black_king_zone,
+
         ew, use_ew,
+
      theta)
+
     mg_score += mg_king_safety
+
     eg_score += eg_king_safety
 
+
+
     # --- 5. Piece Coordination ---
+
     mg_coord, eg_coord = evaluate_piece_coordination(piece_bbs, piece_counts, theta)
+
     mg_score += mg_coord
+
     eg_score += eg_coord
 
+
+
     # --- 6. Piece Mobility ---
+
     mg_score += mg_mobility
+
     eg_score += eg_mobility
 
+
+
     # --- 7. Outpost Evaluation ---
+
     mg_score += mg_outpost
+
     eg_score += eg_outpost
 
+
+
     # --- 8. Threat Evaluation ---
+
     mg_score += mg_threats
+
     eg_score += eg_threats
 
+
+
     # --- 8.5 Space Evaluation ---
+
     mg_space = evaluate_space(
+
         piece_bbs, white_attacks, black_attacks,
+
         white_pawn_attacks, black_pawn_attacks, piece_counts, npm,
+
      theta)
+
     mg_score += mg_space
 
+
+
     # --- 8.75 Initiative (space evaluation is enabled above; stale "disabled" notes removed) ---
+
     mg_init, eg_init = _compute_initiative(mg_score, eg_score, piece_bbs, passed_count, white_king_sq, black_king_sq, theta)
+
     mg_score += mg_init
+
     eg_score += eg_init
 
+
+
     # --- 9. Endgame Scale Factor + Tapered Evaluation ---
+
     sf = get_endgame_scale_factor_with_counts(
+
         piece_bbs, occupancy_bbs, game_state, phase, eg_score,
+
         cnt_0, cnt_1, cnt_2, cnt_3, cnt_4, cnt_6, cnt_7, cnt_8, cnt_9, cnt_10,
+
         white_king_sq, black_king_sq,
+
     )
+
     if sf != SCALE_FACTOR_NORMAL:
+
         eg_scaled = eg_score * sf // SCALE_FACTOR_NORMAL
+
         final_score = (mg_score * phase + eg_scaled * (MAX_PHASE - phase)) // MAX_PHASE
+
     else:
+
         final_score = (mg_score * phase + eg_score * (MAX_PHASE - phase)) // MAX_PHASE
 
+
+
     # --- 10. Tempo Bonus (runtime-tunable) ---
+
     tempo = _ew_get(ew, use_ew, _EW_TEMPO, get_int(theta, IDX_TEMPO_BONUS))
 
+
+
     # --- 11. Return side-relative score ---
+
     if side_to_move == 0:  # White's turn
+
         return np.int32(final_score + tempo), pinned_white, pinned_black
+
     else:  # Black's turn
+
         return np.int32(-final_score + tempo), pinned_white, pinned_black
+
+
+
 
 
 @numba.njit(cache=True, boundscheck=False, fastmath=True)
 def evaluate_position_tunable(piece_bbs, occupancy_bbs, game_state, theta, lazy=False):
+
     """
+
     使用 Tapered Evaluation (加權評估) 模型評估目前局面，並從當前執棋方的角度返回分數。
+
     """
+
     score, _pw, _pb = _evaluate_position_jit(piece_bbs, occupancy_bbs, game_state, lazy, None, theta)
     return score
+

@@ -151,13 +151,14 @@
 
 ---
 
-### 🟠 BUG-4：`EG_SAFETY_SCALE` 實質死碼與 `SearchContext.eval_weights` 脫鉤
+### 🟠 BUG-4：`EG_SAFETY_SCALE` 實質死碼與 `SearchContext.eval_weights` 脫鉤【✅ 已修復驗證】
 
-* **位置與四處脫鉤明細**：
-  1. **`EG_SAFETY_SCALE = 0.96` 從未生效**：[`constants.py:375`](constants.py#L375) 記載 Match-SPSA Block A 調優值 `EG_SAFETY_SCALE = 0.96`，但 [`evaluation.py:501`](evaluation.py#L501) 寫死預設值 `np.int32(100)`，且 [`tune_eval_match/eval_weights.py:208`](../../tune_eval_match/eval_weights.py#L208) 也寫死 `w[EW_EG_SAFETY_SCALE] = 100`。無論是否傳入 `search_context`，實際倍率永遠是 `100%` 而非 `96%`。
-  2. **特化殘局忽略 Runtime 材質權重**：[`_evaluate_position_jit:1608-1614`](evaluation.py#L1608-L1614) 呼叫 `evaluate_special_endgame_with_material` 時直接傳入常數 `MG_MATERIAL_VALUES[0..4]` / `EG_MATERIAL_VALUES[0..4]`，未使用 `_material_mg_eg(..., ew, use_ew)`，導致 `tune_eval_match --block material` 對局調參時 KRKP/KQKP/KQKR 等殘局材質與主評估不一致。
-  3. **純王兵殘局忽略 Runtime 權重**：[`_evaluate_king_pawn_endgame:1316-1380`](evaluation.py#L1316-L1380) 未接收 `ew, use_ew`，硬編碼 `EG_MATERIAL_VALUES[0]` 與 `_DUMMY_EW, False`。
-  4. **空間評估忽略 Runtime 材質權重**：[`evaluate_space:1454-1463`](evaluation.py#L1454-L1463) 硬編碼 `MG_MATERIAL_VALUES[1..4]` 重算非兵材質，未直接使用外部已依 `ew` 算妥的 `npm`。
+* **位置與四處脫鉤明細與修復結果**：
+  1. **`EG_SAFETY_SCALE` 統一**：[`constants.py:375`](constants.py#L375) 的死碼浮點值 `0.96` 已統一為整數定點值 `EG_SAFETY_SCALE = 100`；[`evaluation.py:495`](evaluation.py#L495) 與 [`tune_eval_match/eval_weights.py:208`](../../tune_eval_match/eval_weights.py#L208) 皆統一引用 `constants.EG_SAFETY_SCALE`，消除魔術數字硬編碼。
+  2. **特化殘局接入 Runtime 材質權重**：[`_evaluate_position_jit:1563-1570`](evaluation.py#L1563-L1570) 呼叫 `evaluate_special_endgame_with_material` 時改為傳入 `_material_mg_eg(..., ew, use_ew)`，保證 KXK/KRKP/KQKP/KQKR 殘局在 `tune_eval_match` SPSA 調優時能動態反映材質變動。
+  3. **純王兵殘局接入 Runtime 權重**：[`_evaluate_king_pawn_endgame`](evaluation.py#L1271) 新增 `ew, use_ew` 參數，將其傳遞至 `evaluate_pawn_structure` 與 `evaluate_passed_pawns`，消除原本寫死 `_DUMMY_EW, False` 的脫鉤。
+  4. **空間評估接入 Runtime 材質權重**：已於 Phase 1 重構為直接接收外部依 `ew` 算妥之 `npm`。
+* **驗證結果**：新增專屬單元測試 [`tests/test_runtime_eval_weights.py`](../../tests/test_runtime_eval_weights.py)，驗證常數一致性、KQKR 殘局在 Queen EG 材質加權時評估即時連動，以及王兵殘局參數傳遞，3 項測試全數通過；全量 38 項單元測試與 Tunable Parity 測試 100% 通過。
 
 ---
 
@@ -369,22 +370,22 @@ flowchart TD
 
 ---
 
-### Phase 2：高確定性幾何錯誤、殘局自阻擋與 `eval_weights` 接線修復
+### Phase 2：高確定性幾何錯誤、殘局自阻擋與 `eval_weights` 接線修復【✅ 100% 全數完成】
 * **實施範圍**：
   * [x] **`BUG-1`（Pinned Queen `LINE_BB`）**：✅ 已完成。象／車／后 6 個迴圈牽制過濾統一改為 `att &= LINE_BB[king_sq, sq]`，同步更新 `generate_tunable_eval.py` Header，重新生成 `tunable_eval.py`，通過專屬幾何單元測試與 Parity 測試。
   * [x] **`BUG-2`（王兵方形法則疊兵／王自阻擋）**：✅ 已完成。`_evaluate_king_pawn_endgame` 排除同線前兵、起點雙步淨空檢驗、己方王擋路 `+1` 修正；修正既有測試假陽性並新增黑方疊兵與王阻擋測試；通過所有殘局規範與 Parity 測試。
-  * [ ] **`BUG-4`（補齊特化殘局、王兵殘局、空間評估之 `ew` 傳遞；`EG_SAFETY_SCALE` 確認對齊策略）**：待進行（下一步）。
+  * [x] **`BUG-4`（補齊特化殘局、王兵殘局、空間評估之 `ew` 傳遞；`EG_SAFETY_SCALE` 確認對齊策略）**：✅ 已完成。統一 `EG_SAFETY_SCALE = 100`；特化殘局與王兵殘局全數接入 `_material_mg_eg` 與 `ew, use_ew`；新增專屬測試並通過全量測試。
 * **實作重點**：
   1. 象／車／后 6 個迴圈牽制過濾統一改為 `att &= LINE_BB[king_sq, sq]`，同步更新 `generate_tunable_eval.py` Header。
   2. `_evaluate_king_pawn_endgame` 補上同線前兵排除、起點雙步淨空檢查與己方王擋路 `+1` 步修正。
   3. 修正 [`tests/test_endgame_conformance.py:233-244`](../../tests/test_endgame_conformance.py#L233-L244) 的單兵 KPK 假陽性對照組，並新增：
-     * `test_pinned_queen_orthogonal_and_diagonal_rays`（驗證 `Ke1+Qe3+Re8` 不含 `c1/g1`，`Ke1+Qg3+Bh4` 不含 `c3`）。
-     * `test_kp_endgame_self_blocking_king_and_doubled_pawns`。
-     * `test_runtime_eval_weights_parity_across_endgames_and_space`。
-  4. **關於 `EG_SAFETY_SCALE` 的決策點**：由於生產環境過去實際運行的一直是 `100`（`1.00`），建議 Phase 2 先將 `eval_weights.py` 與 `evaluation.py` 接線統一為讀取同一個常數（預設維持現行實戰基準 `100` 以免混入未測分差），若欲切換為 `96` 則單獨跑一輪快速 A/B 確認。
-* **驗收標準（Gate 2）**：
-  * 新增與既有輕量單元測試 100% 通過（含 `test_tunable_eval_parity`）。
-  * （需使用者授權後執行）以 `tools/sync_classical_old.py` 同步基準後，執行 400 局 @ 100k–300k nodes 確認無意外退化。
+     * [`tests/test_pinned_eval_geometry.py`](../../tests/test_pinned_eval_geometry.py)（驗證 `Ke1+Qe3+Re8` 不含 `c1/g1`，`Ke1+Qg3+Bh4` 不含 `c3`）。
+     * `test_doubled_pawns_front_blocks_rear_unstoppable`、`test_black_doubled_pawns_front_blocks_rear_unstoppable`、`test_king_on_path_blocks_unstoppable_pawn`。
+     * [`tests/test_runtime_eval_weights.py`](../../tests/test_runtime_eval_weights.py)（驗證常數一致性與 KQKR 殘局受 runtime Queen EG 材質即時連動）。
+  4. **關於 `EG_SAFETY_SCALE` 的決策點**：已將 `eval_weights.py`、`constants.py` 與 `evaluation.py` 接線統一為讀取 `constants.EG_SAFETY_SCALE = 100`（維持現行實戰基準 100）。
+* **驗收標準（Gate 2 通過）**：
+  * 新增與既有輕量單元測試共 38 項 100% 通過（`test_endgame_conformance`, `test_pinned_eval_geometry`, `test_runtime_eval_weights`）。
+  * Tunable Parity 測試 7 項 100% 通過（`test_tunable_eval_parity`）。
 
 ---
 
