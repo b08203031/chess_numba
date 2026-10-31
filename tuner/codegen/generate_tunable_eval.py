@@ -246,10 +246,14 @@ import numba
 import numpy as np
 
 from chess_engine.classical.constants import *  # non-tuned constants + bitboards
-from chess_engine.classical.endgame import get_endgame_scale_factor, evaluate_special_endgame_with_material
+from chess_engine.classical.endgame import (
+    get_endgame_scale_factor,
+    get_endgame_scale_factor_with_counts,
+    evaluate_special_endgame_with_material,
+)
 from chess_engine.classical.bitboard_utils import (
     get_lsb_index, get_msb_index, count_bits, WHITE_KING_ZONES, BLACK_KING_ZONES,
-    FILE_MASKS, SQUARES_BETWEEN, ROOK_RAYS, BISHOP_RAYS,
+    FILE_MASKS, SQUARES_BETWEEN, ROOK_RAYS, BISHOP_RAYS, LINE_BB,
 )
 from chess_engine.classical.engine_types import (
     piece_bbs_signature, occupancy_bbs_signature, game_state_signature, piece_counts_signature

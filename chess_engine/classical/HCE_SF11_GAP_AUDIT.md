@@ -455,6 +455,7 @@ SF 係數在「pawn MG=128」空間與 SF mobility/shelter 共調。我們材質
 | 文件 | 用途 |
 | :--- | :--- |
 | **本文** `HCE_SF11_GAP_AUDIT.md` | HCE ↔ SF11 對齊主文件 |
+| [EVAL_AUDIT_AND_FIX_PLAN_20261031.md](EVAL_AUDIT_AND_FIX_PLAN_20261031.md) | 2026-10-31 `evaluation.py` 全檔 Bug、計算順序與熱路徑效能審計報告暨 Phase 1–4 修復計畫書 |
 | `ENDGAME_SF_VERIFICATION.md` | 專用殘局 vs SF 搜尋 oracle；KPK golden 入口 |
 | `tests/test_kpk_golden.py` / `tools/verify_kpk_golden.py` | KPK bitbase 全表 + 理論 FEN |
 | `tournament_analysis/game_stats_report.txt` | 當期對戰局級統計（含 PR-B+C 122 局） |
