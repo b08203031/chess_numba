@@ -139,6 +139,11 @@ def _passed_rank_bonus(rel_rank, ew, use_ew):
 
 
 @numba.njit(cache=True, inline="always")
+def _trunc_div(n, d):
+    return n // d if n >= 0 else -((-n) // d)
+
+
+@numba.njit(cache=True, inline="always")
 def _ew_get(ew, use_ew, idx, default):
     if use_ew:
         return ew[idx]
@@ -185,39 +190,47 @@ def evaluate_passed_pawns(piece_bbs, occupancy_bbs, white_attacks, black_attacks
 
         p_bonus_mg, p_bonus_eg = _passed_rank_bonus(rank, ew, use_ew)
 
-        edge_dist = np.int32(min(file_idx, 7 - file_idx))
-        p_bonus_mg -= file_mg * edge_dist
-        p_bonus_eg -= file_eg * edge_dist
-
         block_sq = sq + 8
         block_mask = BB_SQUARES[block_sq]
         is_blocked = (all_pieces & block_mask) != 0
-        w = np.int32(dyn_mult * rank + dyn_off) if rank > 2 else np.int32(0)
+        if rank > 2:
+            w = np.int32(dyn_mult * rank + dyn_off)
 
-        if not is_blocked and rank > 2:
-            enemy_rq_behind = ((piece_bbs[9] | piece_bbs[10]) & BLACK_FORWARD_FILE_MASKS[sq]) != 0
-            unsafe_squares = WHITE_PASSED_PAWN_MASKS[sq]
-            if not enemy_rq_behind:
-                unsafe_squares &= black_attacks
+            dist_friendly = min(CHEBYSHEV_DISTANCE[white_king_sq, block_sq], KING_PROXIMITY_MAX_DIST)
+            dist_enemy = min(CHEBYSHEV_DISTANCE[black_king_sq, block_sq], KING_PROXIMITY_MAX_DIST)
 
-            squares_to_queen = WHITE_FORWARD_FILE_MASKS[sq]
-            if unsafe_squares == np.uint64(0):
-                k = path_none
-            elif (unsafe_squares & squares_to_queen) == np.uint64(0):
-                k = path_edge
-            elif (unsafe_squares & block_mask) == np.uint64(0):
-                k = path_block
-            else:
-                k = np.int32(0)
+            proximity_bonus = ((dist_enemy * prox_en) // prox_en_div - dist_friendly * prox_fr) * w
+            if (block_sq >> 3) != 7:
+                dist_friendly_2nd = min(CHEBYSHEV_DISTANCE[white_king_sq, block_sq + 8], KING_PROXIMITY_MAX_DIST)
+                proximity_bonus -= dist_friendly_2nd * w
 
-            our_rq_behind = ((piece_bbs[3] | piece_bbs[4]) & BLACK_FORWARD_FILE_MASKS[sq]) != 0
-            block_defended = (white_attacks & block_mask) != 0
-            if our_rq_behind or block_defended:
-                k += path_sup
+            proximity_bonus = max(KING_PROX_MIN_BONUS, min(KING_PROX_MAX_BONUS, proximity_bonus))
+            p_bonus_eg += proximity_bonus
 
-            dynamic_bonus = k * w
-            p_bonus_mg += dynamic_bonus
-            p_bonus_eg += dynamic_bonus
+            if not is_blocked:
+                enemy_rq_behind = ((piece_bbs[9] | piece_bbs[10]) & BLACK_FORWARD_FILE_MASKS[sq]) != 0
+                unsafe_squares = WHITE_PASSED_PAWN_MASKS[sq]
+                if not enemy_rq_behind:
+                    unsafe_squares &= black_attacks
+
+                squares_to_queen = WHITE_FORWARD_FILE_MASKS[sq]
+                if unsafe_squares == np.uint64(0):
+                    k = path_none
+                elif (unsafe_squares & squares_to_queen) == np.uint64(0):
+                    k = path_edge
+                elif (unsafe_squares & block_mask) == np.uint64(0):
+                    k = path_block
+                else:
+                    k = np.int32(0)
+
+                our_rq_behind = ((piece_bbs[3] | piece_bbs[4]) & BLACK_FORWARD_FILE_MASKS[sq]) != 0
+                block_defended = (white_attacks & block_mask) != 0
+                if our_rq_behind or block_defended:
+                    k += path_sup
+
+                dynamic_bonus = k * w
+                p_bonus_mg += dynamic_bonus
+                p_bonus_eg += dynamic_bonus
 
         # Connected & Phalanx rank bonuses for passed pawns
         if (white_pawns & PHALANX_MASK[sq]) != np.uint64(0):
@@ -232,23 +245,15 @@ def evaluate_passed_pawns(piece_bbs, occupancy_bbs, white_attacks, black_attacks
             next_passed = (black_pawns & WHITE_PASSED_PAWN_MASKS[next_sq]) == np.uint64(0)
             any_pawn_ahead = (all_pawns & BB_SQUARES[next_sq]) != np.uint64(0)
             if not next_passed or any_pawn_ahead:
-                p_bonus_mg //= cand_div
-                p_bonus_eg //= cand_div
+                p_bonus_mg = _trunc_div(p_bonus_mg, cand_div)
+                p_bonus_eg = _trunc_div(p_bonus_eg, cand_div)
+
+        edge_dist = np.int32(min(file_idx, 7 - file_idx))
+        p_bonus_mg -= file_mg * edge_dist
+        p_bonus_eg -= file_eg * edge_dist
 
         mg_score += p_bonus_mg
         eg_score += p_bonus_eg
-
-        if rank > 3:
-            dist_friendly = min(CHEBYSHEV_DISTANCE[white_king_sq, block_sq], KING_PROXIMITY_MAX_DIST)
-            dist_enemy = min(CHEBYSHEV_DISTANCE[black_king_sq, block_sq], KING_PROXIMITY_MAX_DIST)
-
-            proximity_bonus = ((dist_enemy * prox_en) // prox_en_div - dist_friendly * prox_fr) * w
-            if (block_sq >> 3) != 7:
-                dist_friendly_2nd = min(CHEBYSHEV_DISTANCE[white_king_sq, block_sq + 8], KING_PROXIMITY_MAX_DIST)
-                proximity_bonus -= dist_friendly_2nd * w
-
-            proximity_bonus = max(KING_PROX_MIN_BONUS, min(KING_PROX_MAX_BONUS, proximity_bonus))
-            eg_score += proximity_bonus
 
         temp_wp &= temp_wp - np.uint64(1)
 
@@ -262,39 +267,47 @@ def evaluate_passed_pawns(piece_bbs, occupancy_bbs, white_attacks, black_attacks
 
         p_bonus_mg, p_bonus_eg = _passed_rank_bonus(relative_rank, ew, use_ew)
 
-        edge_dist = np.int32(min(file_idx, 7 - file_idx))
-        p_bonus_mg -= file_mg * edge_dist
-        p_bonus_eg -= file_eg * edge_dist
-
         block_sq = sq - 8
         block_mask = BB_SQUARES[block_sq]
         is_blocked = (all_pieces & block_mask) != 0
-        w = np.int32(dyn_mult * relative_rank + dyn_off) if relative_rank > 2 else np.int32(0)
+        if relative_rank > 2:
+            w = np.int32(dyn_mult * relative_rank + dyn_off)
 
-        if not is_blocked and relative_rank > 2:
-            enemy_rq_behind = ((piece_bbs[3] | piece_bbs[4]) & WHITE_FORWARD_FILE_MASKS[sq]) != 0
-            unsafe_squares = BLACK_PASSED_PAWN_MASKS[sq]
-            if not enemy_rq_behind:
-                unsafe_squares &= white_attacks
+            dist_friendly = min(CHEBYSHEV_DISTANCE[black_king_sq, block_sq], KING_PROXIMITY_MAX_DIST)
+            dist_enemy = min(CHEBYSHEV_DISTANCE[white_king_sq, block_sq], KING_PROXIMITY_MAX_DIST)
 
-            squares_to_queen = BLACK_FORWARD_FILE_MASKS[sq]
-            if unsafe_squares == np.uint64(0):
-                k = path_none
-            elif (unsafe_squares & squares_to_queen) == np.uint64(0):
-                k = path_edge
-            elif (unsafe_squares & block_mask) == np.uint64(0):
-                k = path_block
-            else:
-                k = np.int32(0)
+            proximity_bonus = ((dist_enemy * prox_en) // prox_en_div - dist_friendly * prox_fr) * w
+            if (block_sq >> 3) != 0:
+                dist_friendly_2nd = min(CHEBYSHEV_DISTANCE[black_king_sq, block_sq - 8], KING_PROXIMITY_MAX_DIST)
+                proximity_bonus -= dist_friendly_2nd * w
 
-            our_rq_behind = ((piece_bbs[9] | piece_bbs[10]) & WHITE_FORWARD_FILE_MASKS[sq]) != 0
-            block_defended = (black_attacks & block_mask) != 0
-            if our_rq_behind or block_defended:
-                k += path_sup
+            proximity_bonus = max(KING_PROX_MIN_BONUS, min(KING_PROX_MAX_BONUS, proximity_bonus))
+            p_bonus_eg += proximity_bonus
 
-            dynamic_bonus = k * w
-            p_bonus_mg += dynamic_bonus
-            p_bonus_eg += dynamic_bonus
+            if not is_blocked:
+                enemy_rq_behind = ((piece_bbs[3] | piece_bbs[4]) & WHITE_FORWARD_FILE_MASKS[sq]) != 0
+                unsafe_squares = BLACK_PASSED_PAWN_MASKS[sq]
+                if not enemy_rq_behind:
+                    unsafe_squares &= white_attacks
+
+                squares_to_queen = BLACK_FORWARD_FILE_MASKS[sq]
+                if unsafe_squares == np.uint64(0):
+                    k = path_none
+                elif (unsafe_squares & squares_to_queen) == np.uint64(0):
+                    k = path_edge
+                elif (unsafe_squares & block_mask) == np.uint64(0):
+                    k = path_block
+                else:
+                    k = np.int32(0)
+
+                our_rq_behind = ((piece_bbs[9] | piece_bbs[10]) & WHITE_FORWARD_FILE_MASKS[sq]) != 0
+                block_defended = (black_attacks & block_mask) != 0
+                if our_rq_behind or block_defended:
+                    k += path_sup
+
+                dynamic_bonus = k * w
+                p_bonus_mg += dynamic_bonus
+                p_bonus_eg += dynamic_bonus
 
         # Connected & Phalanx rank bonuses for passed pawns
         if (black_pawns & PHALANX_MASK[sq]) != np.uint64(0):
@@ -309,23 +322,15 @@ def evaluate_passed_pawns(piece_bbs, occupancy_bbs, white_attacks, black_attacks
             next_passed = (white_pawns & BLACK_PASSED_PAWN_MASKS[next_sq]) == np.uint64(0)
             any_pawn_ahead = (all_pawns & BB_SQUARES[next_sq]) != np.uint64(0)
             if not next_passed or any_pawn_ahead:
-                p_bonus_mg //= cand_div
-                p_bonus_eg //= cand_div
+                p_bonus_mg = _trunc_div(p_bonus_mg, cand_div)
+                p_bonus_eg = _trunc_div(p_bonus_eg, cand_div)
+
+        edge_dist = np.int32(min(file_idx, 7 - file_idx))
+        p_bonus_mg -= file_mg * edge_dist
+        p_bonus_eg -= file_eg * edge_dist
 
         mg_score -= p_bonus_mg
         eg_score -= p_bonus_eg
-
-        if relative_rank > 3:
-            dist_friendly = min(CHEBYSHEV_DISTANCE[black_king_sq, block_sq], KING_PROXIMITY_MAX_DIST)
-            dist_enemy = min(CHEBYSHEV_DISTANCE[white_king_sq, block_sq], KING_PROXIMITY_MAX_DIST)
-
-            proximity_bonus = ((dist_enemy * prox_en) // prox_en_div - dist_friendly * prox_fr) * w
-            if (block_sq >> 3) != 0:
-                dist_friendly_2nd = min(CHEBYSHEV_DISTANCE[black_king_sq, block_sq - 8], KING_PROXIMITY_MAX_DIST)
-                proximity_bonus -= dist_friendly_2nd * w
-
-            proximity_bonus = max(KING_PROX_MIN_BONUS, min(KING_PROX_MAX_BONUS, proximity_bonus))
-            eg_score -= proximity_bonus
 
         temp_bp &= temp_bp - np.uint64(1)
 

@@ -450,6 +450,22 @@ SF 係數在「pawn MG=128」空間與 SF mobility/shelter 共調。我們材質
      * 專屬單元測試 [`tests/test_passed_pawn_order.py`](../../tests/test_passed_pawn_order.py) 7/7 項通過。
      * `tuner/tunable_eval.py` 同步生成，通過全量 51 項評估單元測試與 7 項 Tunable Parity 測試。
 
+### 2026-10-31 黑白鏡像對稱化 (BUG-3) 與 SF11 細節對齊 (BUG-5 ~ BUG-8)
+
+* **問題背景**：
+  1. **BUG-3（向負無窮向下取整偏差）**：Python `//` 在材質不平衡（`// 16`）、Tapered 混合（`// 128`）、Scale Factor 縮放（`// 64`）與 Lazy 門檻（`// 2`）中非向零截斷，導致正負對稱時出現 1~2 cp 系統性偏差，破壞黑白翻轉鏡像不變性。
+  2. **BUG-5（ThreatByKing 乘上 popcount）**：SF11 `evaluate.cpp:514-515` 為布林單次判定，而舊代碼誤乘 `popcount(king_threats)`。
+  3. **BUG-6（MinorBehindPawn 僅限己兵）**：SF11 `evaluate.cpp:302` 檢查所有兵（包含敵兵），漏計騎士／主教躲在敵兵正後方的天然掩體（Nimzowitsch 封鎖格）。
+  4. **BUG-7（WeakQueen 未排除同線狙擊子）**：SF11 `position.cpp:458` `slider_blockers` 排除同線狙擊子（`occupied ^ snipers`），否則敵方雙車／雙象疊線會被誤算為單一阻擋子而誤扣 `WEAK_QUEEN`。
+  5. **BUG-8（kingAttacksCount 條件外累加）**：SF11 `evaluate.cpp:280-285` 僅在進犯敵王警戒區（`att & king_zone`）時累加 `kingAttacksCount`，舊代碼置於條件外多做無謂計算並誤計雙兵保護剔除格。
+* **修復與驗證**：
+  1. **BUG-3**：在 `material.py` 與 `evaluation.py` 全面引入 `_trunc_div`。500 盤真實對局開局 FEN（`hist_diag_openings_500.epd`）黑白翻轉對稱評估達到 **100% Bit-Exact 零誤差（500/500 通過）**。
+  2. **BUG-5**：改為 `if (KING_ATTACKS[king_sq] & enemy_weak) != np.uint64(0): mg_threats += THREAT_BY_KING[0]` 布林單次累加。
+  3. **BUG-6**：以 `all_pawns = wp_bb | bp_bb` 檢查白黑輕子後方兵掩體。
+  4. **BUG-7**：預先排除同線 `snipers = (ROOK_RAYS & rooks) | (BISHOP_RAYS & bishops)` 遮罩。
+  5. **BUG-8**：白黑雙方共 8 個棋子迴圈將 `king_attacks_count` 嚴格移入 `if att & king_zone:` 內。
+  6. **驗證結果**：新增專屬單元測試 [`tests/test_phase4_sf11_alignment.py`](../../tests/test_phase4_sf11_alignment.py) 5/5 項通過；`tuner/tunable_eval.py` 同步生成並通過 Parity 測試。
+
 ---
 
 ## 13. 版本對照速查

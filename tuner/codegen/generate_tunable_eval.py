@@ -231,7 +231,7 @@ def build() -> str:
         evaluation,
     )
     evaluation = re.sub(
-        r"from chess_engine\.classical\.material import compute_imbalance\r?\n",
+        r"from chess_engine\.classical\.material import compute_imbalance.*?\r?\n",
         "",
         evaluation,
     )

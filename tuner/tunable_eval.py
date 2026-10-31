@@ -163,6 +163,11 @@ def _ew_get_mat(ew, use_ew, idx, default):
     return np.int32(default)
 
 
+@numba.njit(cache=True, inline="always")
+def _trunc_div(n, d):
+    return n // d if n >= 0 else -((-n) // d)
+
+
 @numba.njit(cache=True, boundscheck=False, fastmath=True)
 def compute_imbalance(cnt_0, cnt_1, cnt_2, cnt_3, cnt_4, cnt_6, cnt_7, cnt_8, cnt_9, cnt_10,
                       ew, use_ew, theta):
@@ -204,9 +209,9 @@ def compute_imbalance(cnt_0, cnt_1, cnt_2, cnt_3, cnt_4, cnt_6, cnt_7, cnt_8, cn
             v += get_2d_val(theta, IDX_IMBALANCE_QUADRATIC_THEIRS, pt1, 6, pt2) * w[pt2]
         b_bonus += b[pt1] * v
 
-    raw = (w_bonus - b_bonus) // get_int(theta, IDX_IMBALANCE_DIVISOR)
-    mg_imbalance = raw * scale_mg // np.int32(100)
-    eg_imbalance = raw * scale_eg // np.int32(100)
+    raw = _trunc_div(w_bonus - b_bonus, get_int(theta, IDX_IMBALANCE_DIVISOR))
+    mg_imbalance = _trunc_div(raw * scale_mg, np.int32(100))
+    eg_imbalance = _trunc_div(raw * scale_eg, np.int32(100))
     return mg_imbalance, eg_imbalance
 
 
@@ -852,11 +857,6 @@ def _passed_rank_bonus(rel_rank, ew, use_ew, theta):
 
 
 @numba.njit(cache=True, inline="always")
-def _trunc_div(n, d):
-    return n // d if n >= 0 else -((-n) // d)
-
-
-@numba.njit(cache=True, inline="always")
 def _ew_get(ew, use_ew, idx, default):
     if use_ew:
         return ew[idx]
@@ -1271,7 +1271,7 @@ def evaluate_king_safety(piece_bbs, occupancy_bbs, white_attacks, black_attacks,
     black_eg_score = black_eg_shield + b_extra_eg - b_penalty_eg
 
     mg_safety_score = white_mg_score - black_mg_score
-    eg_safety_score = ((white_eg_score - black_eg_score) * eg_safe_scale) // np.int32(100)
+    eg_safety_score = _trunc_div((white_eg_score - black_eg_score) * eg_safe_scale, np.int32(100))
 
     # --- 6. Endgame King Proximity to Own Pawns ---
     # White King Proximity
@@ -1336,6 +1336,7 @@ def evaluate_attacks_mobility_threats(piece_bbs, occupancy_bbs, white_king_sq, b
     white_rook_xray_occ = bishop_xray_occ ^ wr_bb
     black_rook_xray_occ = bishop_xray_occ ^ br_bb
 
+    all_pawns = wp_bb | bp_bb
     white_attacks = white_pawn_attacks | KING_ATTACKS[white_king_sq]
     black_attacks = black_pawn_attacks | KING_ATTACKS[black_king_sq]
 
@@ -1423,17 +1424,16 @@ def evaluate_attacks_mobility_threats(piece_bbs, occupancy_bbs, white_king_sq, b
             mg_mobility -= get_array_val(theta, IDX_KING_PROTECTOR, 0) * kp_dist
             eg_mobility -= get_array_val(theta, IDX_KING_PROTECTOR, 1) * kp_dist
 
-        # MinorBehindPawn: bonus for knight behind friendly pawn
-        if sq < 56 and (wp_bb & BB_SQUARES[sq + 8]) != np.uint64(0):
+        # MinorBehindPawn: bonus for knight behind pawn (SF11: friendly or enemy pawn)
+        if sq < 56 and (all_pawns & BB_SQUARES[sq + 8]) != np.uint64(0):
             mg_mobility += get_array_val(theta, IDX_MINOR_BEHIND_PAWN, 0)
             eg_mobility += get_array_val(theta, IDX_MINOR_BEHIND_PAWN, 1)
 
-        
         # King safety: White Knight attacking Black King ring
         if att & black_king_zone:
             b_attacker_count += 1
             b_attacker_weight += get_array_val(theta, IDX_KING_ATTACK_WEIGHTS, 2)  # KNIGHT
-        b_king_attacks_count += count_bits(att & black_king_adjacent)
+            b_king_attacks_count += count_bits(att & black_king_adjacent)
 
         # Outpost Logic (White Knight) — SF11: OutpostRanks & pawn-supported & ~enemy span
         is_outpost = (BB_SQUARES[sq] & white_outposts) != np.uint64(0)
@@ -1472,8 +1472,8 @@ def evaluate_attacks_mobility_threats(piece_bbs, occupancy_bbs, white_king_sq, b
                 mg_mobility -= get_array_val(theta, IDX_KING_PROTECTOR, 0) * kp_dist
                 eg_mobility -= get_array_val(theta, IDX_KING_PROTECTOR, 1) * kp_dist
 
-            # MinorBehindPawn: bonus for bishop behind friendly pawn
-            if sq < 56 and (wp_bb & BB_SQUARES[sq + 8]) != np.uint64(0):
+            # MinorBehindPawn: bonus for bishop behind pawn (SF11: friendly or enemy pawn)
+            if sq < 56 and (all_pawns & BB_SQUARES[sq + 8]) != np.uint64(0):
                 mg_mobility += get_array_val(theta, IDX_MINOR_BEHIND_PAWN, 0)
                 eg_mobility += get_array_val(theta, IDX_MINOR_BEHIND_PAWN, 1)
 
@@ -1487,7 +1487,7 @@ def evaluate_attacks_mobility_threats(piece_bbs, occupancy_bbs, white_king_sq, b
             if att & black_king_zone:
                 b_attacker_count += 1
                 b_attacker_weight += get_array_val(theta, IDX_KING_ATTACK_WEIGHTS, 3)  # BISHOP
-            b_king_attacks_count += count_bits(att & black_king_adjacent)
+                b_king_attacks_count += count_bits(att & black_king_adjacent)
 
             # Outpost Logic (White Bishop) — SF11: same mask as knight, no separate hole bonus
             if (sq_bb & white_outposts) != np.uint64(0):
@@ -1540,7 +1540,7 @@ def evaluate_attacks_mobility_threats(piece_bbs, occupancy_bbs, white_king_sq, b
         if att & black_king_zone:
             b_attacker_count += 1
             b_attacker_weight += get_array_val(theta, IDX_KING_ATTACK_WEIGHTS, 4)  # ROOK
-        b_king_attacks_count += count_bits(att & black_king_adjacent)
+            b_king_attacks_count += count_bits(att & black_king_adjacent)
 
         temp_bb &= temp_bb - np.uint64(1)
 
@@ -1565,32 +1565,23 @@ def evaluate_attacks_mobility_threats(piece_bbs, occupancy_bbs, white_king_sq, b
         if att & black_king_zone:
             b_attacker_count += 1
             b_attacker_weight += get_array_val(theta, IDX_KING_ATTACK_WEIGHTS, 5)  # QUEEN
-        b_king_attacks_count += count_bits(att & black_king_adjacent)
+            b_king_attacks_count += count_bits(att & black_king_adjacent)
 
-        # WeakQueen: penalty if queen is in a relative pin / discovered attack line
-        rook_pinners = ROOK_RAYS[sq] & br_bb
-        temp_pinners = rook_pinners
-        is_weak = False
-        while temp_pinners and not is_weak:
-            pinner_sq = get_lsb_index(temp_pinners)
-            between = SQUARES_BETWEEN[sq, pinner_sq]
-            blockers_between = between & all_occupancy
-            if count_bits(blockers_between) == 1:
-                is_weak = True
-            temp_pinners &= temp_pinners - np.uint64(1)
-        if not is_weak:
-            bishop_pinners = BISHOP_RAYS[sq] & bb_bb
-            temp_pinners = bishop_pinners
-            while temp_pinners and not is_weak:
-                pinner_sq = get_lsb_index(temp_pinners)
-                between = SQUARES_BETWEEN[sq, pinner_sq]
-                blockers_between = between & all_occupancy
-                if count_bits(blockers_between) == 1:
+        # WeakQueen: penalty if queen is in a relative pin / discovered attack line (SF11 Position::slider_blockers)
+        snipers = (ROOK_RAYS[sq] & br_bb) | (BISHOP_RAYS[sq] & bb_bb)
+        if snipers:
+            occ_snipers = all_occupancy ^ snipers
+            temp_snipers = snipers
+            is_weak = False
+            while temp_snipers and not is_weak:
+                sniper_sq = get_lsb_index(temp_snipers)
+                blockers_between = SQUARES_BETWEEN[sq, sniper_sq] & occ_snipers
+                if blockers_between != np.uint64(0) and (blockers_between & (blockers_between - np.uint64(1))) == np.uint64(0):
                     is_weak = True
-                temp_pinners &= temp_pinners - np.uint64(1)
-        if is_weak:
-            mg_mobility -= get_array_val(theta, IDX_WEAK_QUEEN, 0)
-            eg_mobility -= get_array_val(theta, IDX_WEAK_QUEEN, 1)
+                temp_snipers &= temp_snipers - np.uint64(1)
+            if is_weak:
+                mg_mobility -= get_array_val(theta, IDX_WEAK_QUEEN, 0)
+                eg_mobility -= get_array_val(theta, IDX_WEAK_QUEEN, 1)
 
         temp_bb &= temp_bb - np.uint64(1)
 
@@ -1616,17 +1607,16 @@ def evaluate_attacks_mobility_threats(piece_bbs, occupancy_bbs, white_king_sq, b
             mg_mobility += get_array_val(theta, IDX_KING_PROTECTOR, 0) * kp_dist
             eg_mobility += get_array_val(theta, IDX_KING_PROTECTOR, 1) * kp_dist
 
-        # MinorBehindPawn: bonus for knight behind friendly pawn
-        if sq >= 8 and (bp_bb & BB_SQUARES[sq - 8]) != np.uint64(0):
+        # MinorBehindPawn: bonus for knight behind pawn (SF11: friendly or enemy pawn)
+        if sq >= 8 and (all_pawns & BB_SQUARES[sq - 8]) != np.uint64(0):
             mg_mobility -= get_array_val(theta, IDX_MINOR_BEHIND_PAWN, 0)
             eg_mobility -= get_array_val(theta, IDX_MINOR_BEHIND_PAWN, 1)
-
 
         # King safety calculation (Black Knight attacking White King)
         if att & white_king_zone:
             w_attacker_count += 1
             w_attacker_weight += get_array_val(theta, IDX_KING_ATTACK_WEIGHTS, 2)  # KNIGHT
-        w_king_attacks_count += count_bits(att & white_king_adjacent)
+            w_king_attacks_count += count_bits(att & white_king_adjacent)
 
         # Outpost Logic (Black Knight)
         is_outpost = (BB_SQUARES[sq] & black_outposts) != np.uint64(0)
@@ -1666,8 +1656,8 @@ def evaluate_attacks_mobility_threats(piece_bbs, occupancy_bbs, white_king_sq, b
                 mg_mobility += get_array_val(theta, IDX_KING_PROTECTOR, 0) * kp_dist
                 eg_mobility += get_array_val(theta, IDX_KING_PROTECTOR, 1) * kp_dist
 
-            # MinorBehindPawn: bonus for bishop behind friendly pawn
-            if sq >= 8 and (bp_bb & BB_SQUARES[sq - 8]) != np.uint64(0):
+            # MinorBehindPawn: bonus for bishop behind pawn (SF11: friendly or enemy pawn)
+            if sq >= 8 and (all_pawns & BB_SQUARES[sq - 8]) != np.uint64(0):
                 mg_mobility -= get_array_val(theta, IDX_MINOR_BEHIND_PAWN, 0)
                 eg_mobility -= get_array_val(theta, IDX_MINOR_BEHIND_PAWN, 1)
 
@@ -1681,7 +1671,7 @@ def evaluate_attacks_mobility_threats(piece_bbs, occupancy_bbs, white_king_sq, b
             if att & white_king_zone:
                 w_attacker_count += 1
                 w_attacker_weight += get_array_val(theta, IDX_KING_ATTACK_WEIGHTS, 3)  # BISHOP
-            w_king_attacks_count += count_bits(att & white_king_adjacent)
+                w_king_attacks_count += count_bits(att & white_king_adjacent)
 
             # Outpost Logic (Black Bishop) — SF11: no separate hole bonus
             if (sq_bb & black_outposts) != np.uint64(0):
@@ -1734,7 +1724,7 @@ def evaluate_attacks_mobility_threats(piece_bbs, occupancy_bbs, white_king_sq, b
         if att & white_king_zone:
             w_attacker_count += 1
             w_attacker_weight += get_array_val(theta, IDX_KING_ATTACK_WEIGHTS, 4)  # ROOK
-        w_king_attacks_count += count_bits(att & white_king_adjacent)
+            w_king_attacks_count += count_bits(att & white_king_adjacent)
 
         temp_bb &= temp_bb - np.uint64(1)
 
@@ -1759,32 +1749,23 @@ def evaluate_attacks_mobility_threats(piece_bbs, occupancy_bbs, white_king_sq, b
         if att & white_king_zone:
             w_attacker_count += 1
             w_attacker_weight += get_array_val(theta, IDX_KING_ATTACK_WEIGHTS, 5)  # QUEEN
-        w_king_attacks_count += count_bits(att & white_king_adjacent)
+            w_king_attacks_count += count_bits(att & white_king_adjacent)
 
-        # WeakQueen: penalty if queen is in a relative pin / discovered attack line
-        rook_pinners = ROOK_RAYS[sq] & wr_bb
-        temp_pinners = rook_pinners
-        is_weak = False
-        while temp_pinners and not is_weak:
-            pinner_sq = get_lsb_index(temp_pinners)
-            between = SQUARES_BETWEEN[sq, pinner_sq]
-            blockers_between = between & all_occupancy
-            if count_bits(blockers_between) == 1:
-                is_weak = True
-            temp_pinners &= temp_pinners - np.uint64(1)
-        if not is_weak:
-            bishop_pinners = BISHOP_RAYS[sq] & wb_bb
-            temp_pinners = bishop_pinners
-            while temp_pinners and not is_weak:
-                pinner_sq = get_lsb_index(temp_pinners)
-                between = SQUARES_BETWEEN[sq, pinner_sq]
-                blockers_between = between & all_occupancy
-                if count_bits(blockers_between) == 1:
+        # WeakQueen: penalty if queen is in a relative pin / discovered attack line (SF11 Position::slider_blockers)
+        snipers = (ROOK_RAYS[sq] & wr_bb) | (BISHOP_RAYS[sq] & wb_bb)
+        if snipers:
+            occ_snipers = all_occupancy ^ snipers
+            temp_snipers = snipers
+            is_weak = False
+            while temp_snipers and not is_weak:
+                sniper_sq = get_lsb_index(temp_snipers)
+                blockers_between = SQUARES_BETWEEN[sq, sniper_sq] & occ_snipers
+                if blockers_between != np.uint64(0) and (blockers_between & (blockers_between - np.uint64(1))) == np.uint64(0):
                     is_weak = True
-                temp_pinners &= temp_pinners - np.uint64(1)
-        if is_weak:
-            mg_mobility += get_array_val(theta, IDX_WEAK_QUEEN, 0)
-            eg_mobility += get_array_val(theta, IDX_WEAK_QUEEN, 1)
+                temp_snipers &= temp_snipers - np.uint64(1)
+            if is_weak:
+                mg_mobility += get_array_val(theta, IDX_WEAK_QUEEN, 0)
+                eg_mobility += get_array_val(theta, IDX_WEAK_QUEEN, 1)
 
         temp_bb &= temp_bb - np.uint64(1)
 
@@ -1868,18 +1849,14 @@ def evaluate_attacks_mobility_threats(piece_bbs, occupancy_bbs, white_king_sq, b
                 mg_threats -= get_2d_val(theta, IDX_THREAT_BY_ROOK, pt, 2, 0) * count
                 eg_threats -= get_2d_val(theta, IDX_THREAT_BY_ROOK, pt, 2, 1) * count
 
-    # --- 4. ThreatByKing: king attacks weak enemy pieces ---
-    w_king_threatens = KING_ATTACKS[white_king_sq] & black_weak
-    if w_king_threatens:
-        count = count_bits(w_king_threatens)
-        mg_threats += get_array_val(theta, IDX_THREAT_BY_KING, 0) * count
-        eg_threats += get_array_val(theta, IDX_THREAT_BY_KING, 1) * count
+    # --- 4. ThreatByKing: king attacks weak enemy pieces (SF11 boolean check: triggers at most once) ---
+    if (KING_ATTACKS[white_king_sq] & black_weak) != np.uint64(0):
+        mg_threats += get_array_val(theta, IDX_THREAT_BY_KING, 0)
+        eg_threats += get_array_val(theta, IDX_THREAT_BY_KING, 1)
 
-    b_king_threatens = KING_ATTACKS[black_king_sq] & white_weak
-    if b_king_threatens:
-        count = count_bits(b_king_threatens)
-        mg_threats -= get_array_val(theta, IDX_THREAT_BY_KING, 0) * count
-        eg_threats -= get_array_val(theta, IDX_THREAT_BY_KING, 1) * count
+    if (KING_ATTACKS[black_king_sq] & white_weak) != np.uint64(0):
+        mg_threats -= get_array_val(theta, IDX_THREAT_BY_KING, 0)
+        eg_threats -= get_array_val(theta, IDX_THREAT_BY_KING, 1)
 
     # --- 5. Hanging: weak pieces with no defenders at all OR doubly attacked ---
     black_hanging = black_weak & (~black_attacks | (black_non_pawns & white_attacks2))
@@ -2377,10 +2354,10 @@ def _evaluate_position_jit(piece_bbs, occupancy_bbs, game_state, lazy, search_co
             white_king_sq, black_king_sq,
         )
         if sf != SCALE_FACTOR_NORMAL:
-            eg_scaled = eg_score * sf // SCALE_FACTOR_NORMAL
-            final_score = (mg_score * phase + eg_scaled * (MAX_PHASE - phase)) // MAX_PHASE
+            eg_scaled = _trunc_div(eg_score * sf, SCALE_FACTOR_NORMAL)
+            final_score = _trunc_div(mg_score * phase + eg_scaled * (MAX_PHASE - phase), MAX_PHASE)
         else:
-            final_score = (mg_score * phase + eg_score * (MAX_PHASE - phase)) // MAX_PHASE
+            final_score = _trunc_div(mg_score * phase + eg_score * (MAX_PHASE - phase), MAX_PHASE)
         val = np.int32(final_score) if side_to_move == 0 else np.int32(-final_score)
         return val, PINNED_UNCOMPUTED_SENTINEL, PINNED_UNCOMPUTED_SENTINEL
 
@@ -2403,7 +2380,7 @@ def _evaluate_position_jit(piece_bbs, occupancy_bbs, game_state, lazy, search_co
     eg_score += eg_pawn_structure
 
     # --- Dynamic Lazy Evaluation Threshold Early Exit ---
-    v = (mg_score + eg_score) // 2
+    v = _trunc_div(mg_score + eg_score, 2)
     if abs(v) > LAZY_EVAL_THRESHOLD + npm // 64:
         sf = get_endgame_scale_factor_with_counts(
             piece_bbs, occupancy_bbs, game_state, phase, eg_score,
@@ -2411,10 +2388,10 @@ def _evaluate_position_jit(piece_bbs, occupancy_bbs, game_state, lazy, search_co
             white_king_sq, black_king_sq,
         )
         if sf != SCALE_FACTOR_NORMAL:
-            eg_scaled = eg_score * sf // SCALE_FACTOR_NORMAL
-            final_score = (mg_score * phase + eg_scaled * (MAX_PHASE - phase)) // MAX_PHASE
+            eg_scaled = _trunc_div(eg_score * sf, SCALE_FACTOR_NORMAL)
+            final_score = _trunc_div(mg_score * phase + eg_scaled * (MAX_PHASE - phase), MAX_PHASE)
         else:
-            final_score = (mg_score * phase + eg_score * (MAX_PHASE - phase)) // MAX_PHASE
+            final_score = _trunc_div(mg_score * phase + eg_score * (MAX_PHASE - phase), MAX_PHASE)
         val = np.int32(final_score) if side_to_move == 0 else np.int32(-final_score)
         return val, PINNED_UNCOMPUTED_SENTINEL, PINNED_UNCOMPUTED_SENTINEL
 
@@ -2490,10 +2467,10 @@ def _evaluate_position_jit(piece_bbs, occupancy_bbs, game_state, lazy, search_co
         white_king_sq, black_king_sq,
     )
     if sf != SCALE_FACTOR_NORMAL:
-        eg_scaled = eg_score * sf // SCALE_FACTOR_NORMAL
-        final_score = (mg_score * phase + eg_scaled * (MAX_PHASE - phase)) // MAX_PHASE
+        eg_scaled = _trunc_div(eg_score * sf, SCALE_FACTOR_NORMAL)
+        final_score = _trunc_div(mg_score * phase + eg_scaled * (MAX_PHASE - phase), MAX_PHASE)
     else:
-        final_score = (mg_score * phase + eg_score * (MAX_PHASE - phase)) // MAX_PHASE
+        final_score = _trunc_div(mg_score * phase + eg_score * (MAX_PHASE - phase), MAX_PHASE)
 
     # --- 10. Tempo Bonus (runtime-tunable) ---
     tempo = _ew_get(ew, use_ew, _EW_TEMPO, get_int(theta, IDX_TEMPO_BONUS))
