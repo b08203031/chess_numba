@@ -371,8 +371,8 @@ KING_DANGER_EG_DEN = KING_DANGER_OUT_EG_DEN
 # --- Phase 4: Advanced & Dynamic / 進階與動態 ---
 SCALING_WEIGHTS = np.array([0, 4, 4, 6, 10], dtype=np.int32)  # legacy
 MAX_SCALING_MATERIAL = (2 * 4 + 2 * 4 + 2 * 6 + 1 * 10)
-# Match-SPSA A: weight 96/100 → float scale (was 1.0)
-EG_SAFETY_SCALE = 0.96
+# Match-SPSA A: fixed-point integer scale (100 == 1.0; aligned with evaluation.py & eval_weights.py)
+EG_SAFETY_SCALE = 100
 
 # --- SF11-aligned King Shelter & Storm Tables ---
 # ShelterStrength: friendly pawn shield defense values (MG)

@@ -491,8 +491,8 @@ def evaluate_king_safety(piece_bbs, occupancy_bbs, white_attacks, black_attacks,
     pawnless_mg = _ew_get(ew, use_ew, _EW_PAWNLESS_MG, PAWNLESS_FLANK[0])
     pawnless_eg = _ew_get(ew, use_ew, _EW_PAWNLESS_EG, PAWNLESS_FLANK[1])
     flank_att_mg = _ew_get(ew, use_ew, _EW_FLANK_ATT_MG, FLANK_ATTACKS[0])
-    # EG_SAFETY_SCALE: fixed-point 100 == 1.0 (constants.EG_SAFETY_SCALE is float)
-    eg_safe_scale = _ew_get(ew, use_ew, _EW_EG_SAFE_SCALE, np.int32(100))
+    # EG_SAFETY_SCALE: fixed-point 100 == 1.0 (constants.EG_SAFETY_SCALE is 100)
+    eg_safe_scale = _ew_get(ew, use_ew, _EW_EG_SAFE_SCALE, np.int32(EG_SAFETY_SCALE))
 
     # Pure mobility them-us (W-B): white king sees black-white = -mg_mobility_pure
     w_danger = _evaluate_king_attackers(
@@ -1268,7 +1268,7 @@ def evaluate_attacks_mobility_threats(piece_bbs, occupancy_bbs, white_king_sq, b
 
 
 @numba.njit(cache=True, boundscheck=False, fastmath=True)
-def _evaluate_king_pawn_endgame(piece_bbs, occupancy_bbs, game_state, castling_rights, search_context):
+def _evaluate_king_pawn_endgame(piece_bbs, occupancy_bbs, game_state, castling_rights, search_context, ew, use_ew):
     """
     專門為王兵殘局設計的評估函數。包含不可阻擋通路兵的檢測（方形法則）。
     P3b race-winner-only unstoppable was reverted (hurts long games in match testing).
@@ -1343,7 +1343,7 @@ def _evaluate_king_pawn_endgame(piece_bbs, occupancy_bbs, game_state, castling_r
         pawn_key = game_state[PAWN_KEY_INDEX]
         res = evaluate_pawn_structure_cached(piece_bbs, pawn_key, castling_rights, search_context)
     else:
-        res = evaluate_pawn_structure(piece_bbs, castling_rights, _DUMMY_EW, False)
+        res = evaluate_pawn_structure(piece_bbs, castling_rights, ew, use_ew)
     eg_pawn_score = res[1]
     w_passed = res[6]
     b_passed = res[7]
@@ -1358,7 +1358,7 @@ def _evaluate_king_pawn_endgame(piece_bbs, occupancy_bbs, game_state, castling_r
     # 直接重用傳入之 occupancy_bbs，免除 NRT 堆分配
     _, eg_passed_score, _ = evaluate_passed_pawns(
         piece_bbs, occupancy_bbs, white_attacks, black_attacks,
-        w_passed, b_passed, white_king_sq, black_king_sq, _DUMMY_EW, False)
+        w_passed, b_passed, white_king_sq, black_king_sq, ew, use_ew)
     score += eg_passed_score
 
     # 3. 國王活動獎勵
@@ -1560,12 +1560,16 @@ def _evaluate_position_jit(piece_bbs, occupancy_bbs, game_state, lazy: bool, sea
     # Score from the specialized evaluator is White's perspective. Pass the
     # active material scale explicitly so generated Texel candidates evaluate
     # KXK/KRKP/KQKP/KQKR/KNNKP with their candidate values too.
+    mat_0_mg = MG_MATERIAL_VALUES[0]
+    mat_1_mg, mat_1_eg = _material_mg_eg(1, ew, use_ew)
+    mat_2_mg, mat_2_eg = _material_mg_eg(2, ew, use_ew)
+    mat_3_mg, mat_3_eg = _material_mg_eg(3, ew, use_ew)
+    mat_4_mg, mat_4_eg = _material_mg_eg(4, ew, use_ew)
+    mat_0_eg = EG_MATERIAL_VALUES[0]
     hit_special, special_score = evaluate_special_endgame_with_material(
         piece_bbs, occupancy_bbs, game_state, np.int32(0),
-        MG_MATERIAL_VALUES[0], MG_MATERIAL_VALUES[1], MG_MATERIAL_VALUES[2],
-        MG_MATERIAL_VALUES[3], MG_MATERIAL_VALUES[4],
-        EG_MATERIAL_VALUES[0], EG_MATERIAL_VALUES[1], EG_MATERIAL_VALUES[2],
-        EG_MATERIAL_VALUES[3], EG_MATERIAL_VALUES[4],
+        mat_0_mg, mat_1_mg, mat_2_mg, mat_3_mg, mat_4_mg,
+        mat_0_eg, mat_1_eg, mat_2_eg, mat_3_eg, mat_4_eg,
     )
     if hit_special:
         val = np.int32(special_score) if side_to_move == 0 else np.int32(-special_score)
@@ -1579,7 +1583,7 @@ def _evaluate_position_jit(piece_bbs, occupancy_bbs, game_state, lazy: bool, sea
     if all_pieces_except_pawns_and_kings == 0:
         castling_rights = np.uint8(game_state[1])
         score, wp_cnt, bp_cnt, wk_sq, bk_sq = _evaluate_king_pawn_endgame(
-            piece_bbs, occupancy_bbs, game_state, castling_rights, search_context
+            piece_bbs, occupancy_bbs, game_state, castling_rights, search_context, ew, use_ew
         )
         sf = get_endgame_scale_factor_with_counts(
             piece_bbs, occupancy_bbs, game_state, np.int32(0), score,

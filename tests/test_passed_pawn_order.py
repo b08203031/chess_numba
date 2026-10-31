@@ -201,6 +201,23 @@ class TestPassedPawnOrder(unittest.TestCase):
         self.assertEqual(delta_cand, 20)
         self.assertEqual(delta_cand, delta_true // 2)
 
+    def test_trunc_div_semantics(self):
+        """
+        ORD-3: Verify _trunc_div truncates towards zero (C++ integer division semantics).
+        In Python default floor division:
+            -1 // 2 == -1  (floor towards -inf)
+        In C++ / Stockfish 11:
+            -1 / 2 == 0    (truncate towards zero)
+            -3 / 2 == -1
+            -4 / 2 == -2
+        """
+        self.assertEqual(ce._trunc_div(np.int32(5), np.int32(2)), 2)
+        self.assertEqual(ce._trunc_div(np.int32(-5), np.int32(2)), -2)
+        self.assertEqual(ce._trunc_div(np.int32(-1), np.int32(2)), 0)
+        self.assertEqual(ce._trunc_div(np.int32(1), np.int32(2)), 0)
+        self.assertEqual(ce._trunc_div(np.int32(-3), np.int32(2)), -1)
+        self.assertEqual(ce._trunc_div(np.int32(-4), np.int32(2)), -2)
+
 
 if __name__ == '__main__':
     unittest.main()

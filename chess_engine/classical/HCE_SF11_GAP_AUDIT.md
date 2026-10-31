@@ -434,15 +434,21 @@ SF 係數在「pawn MG=128」空間與 SF mobility/shelter 共調。我們材質
 
 
 
-### 2026-10-31 動態通路兵直線懲罰後移 (ORD-1) 與邊緣折半反超 BUG 修復
+### 2026-10-31 通路兵計算順序對齊 (ORD-1 ~ ORD-3) 與候選兵反超 BUG 修復
 
-* **問題**：`evaluation.py:evaluate_passed_pawns`（白黑雙迴圈）在迴圈開頭即提前扣除 `PassedFile * edge_dist`。對於第 2、3 橫排（`d3`/`e3`/`d4`/`e4`）中央兵（`edge_dist = 3`），基礎分為 0 或較小值，提前扣除後 `p_bonus_mg` 變成負數（如 `d3` 為 `-48`）。當該兵為前方受阻兵或候選兵時，觸發 `p_bonus //= cand_div`（`cand_div = 2`），導致 `-48 // 2 = -24`！
-  * **荒謬反例**：白方 `d3` 暢通無阻之真通路兵實得 `-48 cp`，而受敵兵牽制之候選兵反而獲得 `-24 cp`（倒貼 `+24 cp` 獎勵！）。引擎因此在開中局搜尋中產生扭曲偏好，抗拒挺成暢通真通路兵。
-* **修復**：完全對齊 Stockfish 11 `evaluate.cpp:644` 標準順序：
-  1. 白黑雙迴圈移除頂部提前扣除，改為在候選／受阻兵折半完成後、累加至全盤分數前，才扣除 `edge_dist = np.int32(min(file_idx, 7 - file_idx))` 與 `p_bonus -= file * edge_dist`。
-  2. 數值驗算：`d4` 真通路兵 `(-32, +21)` 嚴格高於候選兵 `(-40, +4)`（真通路兵全域領先 +8 MG, +17 EG），徹底消除了倒貼反超現象。
-  3. 新增專屬單元測試 `tests/test_passed_pawn_order.py`（4/4 項通過）。
-  4. 同步更新 `tuner/tunable_eval.py` 並通過 7/7 項 Parity 測試與 42 項全量單元測試。
+* **問題背景**：`evaluation.py:evaluate_passed_pawns`（白黑雙迴圈）存在三項嚴重的順序與語義偏差：
+  1. **ORD-1（直線懲罰提前）**：在迴圈開頭即扣除 `PassedFile * edge_dist`，導致中局 `d3` 真通路兵實得 `-48 cp`，而候選兵折半後反而得到 `-24 cp`（倒貼 `+24 cp` 反超真通路兵）。
+  2. **ORD-2（國王距離門檻錯位與未折半）**：門檻使用 `rank > 3` 漏計第 4 橫排（`d4` 兵），且在候選兵折半後才獨立累加，使受阻無根兵享受 100% 國王支持。
+  3. **ORD-3（向下取整不對稱）**：Python `//` 對負數向下取整（`-3 // 2 == -2` 而 C++ 為 `-1`），導致負分折半產生黑白不對稱偏差。
+* **修復（完全對齊 Stockfish 11 `evaluate.cpp:596-644` 標準流水線）**：
+  1. **ORD-1**：白黑雙迴圈移除頂部提前扣除，改為在候選／受阻兵折半完成後、累加至全盤分數前，才扣除 `edge_dist` 與 `p_bonus -= file * edge_dist`。
+  2. **ORD-2**：統一國王距離門檻為 `rank > 2`（`relative_rank > 2`），並將 `proximity_bonus` 提前累加至 `p_bonus_eg`，使其受後續候選兵／受阻兵折半約束。
+  3. **ORD-3**：引入 `_trunc_div(n, d)` 取代 `p_bonus //= cand_div`，完全實現向零截斷語義 `bonus = bonus / 2`。
+  4. **驗證結果**：
+     * `d4` 真通路兵 `(-32, +21)` 嚴格高於候選兵 `(-40, +4)`，倒貼反超徹底消除。
+     * 第 4 橫排（`d4`）己方王接近正確獲得 `+6 EG` 支持。
+     * 專屬單元測試 [`tests/test_passed_pawn_order.py`](../../tests/test_passed_pawn_order.py) 7/7 項通過。
+     * `tuner/tunable_eval.py` 同步生成，通過全量 51 項評估單元測試與 7 項 Tunable Parity 測試。
 
 ---
 

@@ -139,6 +139,11 @@ def _passed_rank_bonus(rel_rank, ew, use_ew):
 
 
 @numba.njit(cache=True, inline="always")
+def _trunc_div(n, d):
+    return n // d if n >= 0 else -((-n) // d)
+
+
+@numba.njit(cache=True, inline="always")
 def _ew_get(ew, use_ew, idx, default):
     if use_ew:
         return ew[idx]
@@ -240,8 +245,8 @@ def evaluate_passed_pawns(piece_bbs, occupancy_bbs, white_attacks, black_attacks
             next_passed = (black_pawns & WHITE_PASSED_PAWN_MASKS[next_sq]) == np.uint64(0)
             any_pawn_ahead = (all_pawns & BB_SQUARES[next_sq]) != np.uint64(0)
             if not next_passed or any_pawn_ahead:
-                p_bonus_mg //= cand_div
-                p_bonus_eg //= cand_div
+                p_bonus_mg = _trunc_div(p_bonus_mg, cand_div)
+                p_bonus_eg = _trunc_div(p_bonus_eg, cand_div)
 
         edge_dist = np.int32(min(file_idx, 7 - file_idx))
         p_bonus_mg -= file_mg * edge_dist
@@ -317,8 +322,8 @@ def evaluate_passed_pawns(piece_bbs, occupancy_bbs, white_attacks, black_attacks
             next_passed = (white_pawns & BLACK_PASSED_PAWN_MASKS[next_sq]) == np.uint64(0)
             any_pawn_ahead = (all_pawns & BB_SQUARES[next_sq]) != np.uint64(0)
             if not next_passed or any_pawn_ahead:
-                p_bonus_mg //= cand_div
-                p_bonus_eg //= cand_div
+                p_bonus_mg = _trunc_div(p_bonus_mg, cand_div)
+                p_bonus_eg = _trunc_div(p_bonus_eg, cand_div)
 
         edge_dist = np.int32(min(file_idx, 7 - file_idx))
         p_bonus_mg -= file_mg * edge_dist
