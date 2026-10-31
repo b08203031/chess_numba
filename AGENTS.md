@@ -21,7 +21,7 @@
 
 | 規則 | 內容 |
 | :--- | :--- |
-| [`.agents/rules/workflow.md`](.agents/rules/workflow.md) | 改前讀文件、改後同步導覽、輕/重測試、JIT 耐心、Stockfish 參考路徑 |
+| [`.agents/rules/workflow.md`](.agents/rules/workflow.md) | 改前讀文件、改後同步導覽、輕/重測試、JIT 耐心、換行衛生(防CRCRLF)、未經對戰驗證禁同步基準(classical_old)、Stockfish 參考路徑 |
 | [`.agents/rules/numba-jit.md`](.agents/rules/numba-jit.md) | nopython 禁令、棋盤陣列型別、1 MB 表/`cache` 預設、StructRef、遞迴與 NNUE 例外 |
 | [`chess_engine/classical/JIT_COMPILE_CACHE_REPORT.md`](chess_engine/classical/JIT_COMPILE_CACHE_REPORT.md) | **JIT 編譯與 disk cache 實驗主文件**（量測、根因、checklist；後續擴寫） |
 

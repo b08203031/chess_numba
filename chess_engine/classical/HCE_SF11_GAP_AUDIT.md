@@ -46,7 +46,7 @@ Classical HCE 是 **以 Stockfish 11 為藍本、維持 ~100cp 人類可讀尺�
 | 威脅 | ✅ | ThreatByMinor=`defended\|weak` + **B5 表按 SF 類型對齊**；SafePawn/PawnPush/Restricted 等 |
 | 國王安全 | ✅ 結構對齊 | SF11 `count×weight` + 安全將軍原係數 + 一次 100cp 縮放 |
 | 兵型結構 | ✅ 強 | stopper/lever/phalanx/connected 等 |
-| 通路兵 | ✅ | 路徑/王鄰近/候選半價；**已移除**非 SF 的材質 `PASSED_SCALE_*` |
+| 通路兵 | ✅ 強 | 路徑/王鄰近/候選半價；**已移除**非 SF 的材質 `PASSED_SCALE_*`；**ORD-1 直線懲罰後移已對齊 SF11** |
 | 空間 | ✅ 啟用 | SF 公式 + 刻意 `// SPACE_SCALE_DIVISOR(4)` |
 | 主動權 (initiative) | ✅ | 雙套 MG/EG 權重（SF 單一 complexity） |
 | 殘局縮放因子 | ✅ 強 | `get_endgame_scale_factor` 多種堡壘（含 SF11 KPKP、激活 KPsK 與 50 步衰減） |
@@ -434,6 +434,16 @@ SF 係數在「pawn MG=128」空間與 SF mobility/shelter 共調。我們材質
 
 
 
+### 2026-10-31 動態通路兵直線懲罰後移 (ORD-1) 與邊緣折半反超 BUG 修復
+
+* **問題**：`evaluation.py:evaluate_passed_pawns`（白黑雙迴圈）在迴圈開頭即提前扣除 `PassedFile * edge_dist`。對於第 2、3 橫排（`d3`/`e3`/`d4`/`e4`）中央兵（`edge_dist = 3`），基礎分為 0 或較小值，提前扣除後 `p_bonus_mg` 變成負數（如 `d3` 為 `-48`）。當該兵為前方受阻兵或候選兵時，觸發 `p_bonus //= cand_div`（`cand_div = 2`），導致 `-48 // 2 = -24`！
+  * **荒謬反例**：白方 `d3` 暢通無阻之真通路兵實得 `-48 cp`，而受敵兵牽制之候選兵反而獲得 `-24 cp`（倒貼 `+24 cp` 獎勵！）。引擎因此在開中局搜尋中產生扭曲偏好，抗拒挺成暢通真通路兵。
+* **修復**：完全對齊 Stockfish 11 `evaluate.cpp:644` 標準順序：
+  1. 白黑雙迴圈移除頂部提前扣除，改為在候選／受阻兵折半完成後、累加至全盤分數前，才扣除 `edge_dist = np.int32(min(file_idx, 7 - file_idx))` 與 `p_bonus -= file * edge_dist`。
+  2. 數值驗算：`d4` 真通路兵 `(-32, +21)` 嚴格高於候選兵 `(-40, +4)`（真通路兵全域領先 +8 MG, +17 EG），徹底消除了倒貼反超現象。
+  3. 新增專屬單元測試 `tests/test_passed_pawn_order.py`（4/4 項通過）。
+  4. 同步更新 `tuner/tunable_eval.py` 並通過 7/7 項 Parity 測試與 42 項全量單元測試。
+
 ---
 
 ## 13. 版本對照速查
@@ -441,6 +451,8 @@ SF 係數在「pawn MG=128」空間與 SF mobility/shelter 共調。我們材質
 | 版本標籤 | 內容 |
 | :--- | :--- |
 | `classical` / `classical_old`（目前） | 搜尋、`evaluation.py`、`endgame.py` 與全部相依程式一致；只保留 New/Old 評估常數差異作乾淨 A/B |
+| **Phase 1+BUG-1 對戰（`copy 8.ipynb`, 1,000 局）** | 513.5 - 486.5（217W 593D 190L，51.35%），**+9.38 ± 13.74 Elo**（+27 淨勝） |
+| **Phase 2 累積對戰（`copy.ipynb`, 686 局）** | 369.0 - 317.0（165W 408D 113L，53.79%），**+26.39 ± 16.53 Elo**（+52 淨勝），**SPRT H1 Accepted（顯著）** |
 | B4 對戰（**200 局**） | ~**+9 Elo**（CI 含 0） |
 | **B5+P2 對戰（**352 局**）** | ~**+30 Elo**（**顯著**）← HCE 定稿 |
 | **搜尋 PR-A（64 局）** | **50% / Elo 0** |

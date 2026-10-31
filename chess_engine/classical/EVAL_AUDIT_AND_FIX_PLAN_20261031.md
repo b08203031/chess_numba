@@ -180,24 +180,44 @@
 
 ### 🔴 ORD-1 ～ ORD-3：`evaluate_passed_pawns` 候選／受阻兵折半順序顛倒
 
-* **位置**：[`evaluation.py:182-253`](evaluation.py#L182-L253)（白方）、[`evaluation.py:264-335`](evaluation.py#L264-L335)（黑方），對照 SF11 [`evaluate.cpp:596-644`](../../stockfish_11/src/evaluate.cpp#L596-L644)
+* **位置**：[`evaluation.py:355-615`](evaluation.py#L355-L615)（白黑雙迴圈），對照 SF11 [`evaluate.cpp:596-644`](../../stockfish_11/src/evaluate.cpp#L596-L644)
+* **進度狀態**：
+  * **`ORD-1`（直線懲罰後移）**：【✅ 已修復驗證 (2026-10-31)】
+  * **`ORD-2`（國王距離門檻對齊與提前累加）**：【✅ 已修復驗證 (2026-10-31)】
+  * **`ORD-3`（候選／受阻向零截斷對齊）**：【待進行】
 * **三處順序與門檻錯位對照**：
 
-| 步驟 | 現行 `evaluation.py` 順序 | Stockfish 11 (`evaluate.cpp:596-644`) 標準順序 | 現行錯誤後果 |
+| 步驟 | 原先 `evaluation.py` 順序 | Stockfish 11 (`evaluate.cpp:596-644`) 標準順序 | 修復狀態與結果 |
 | :--- | :--- | :--- | :--- |
 | **1. 基礎分** | `p_bonus = PASSED_PAWN_BONUS[r]` | `bonus = PassedRank[r]` | 一致 |
-| **2. 直線懲罰** | ❌ **先執行** `p_bonus -= PassedFile * edge_dist` | （留到最後第 6 步執行，不參與折半） | 低橫排中央兵 `p_bonus_mg` 變成**負數**（`-48`） |
+| **2. 直線懲罰 (ORD-1)** | ❌ **先執行** `p_bonus -= PassedFile * edge_dist` | ✅ **留到最後第 6 步執行，不參與折半** | **【✅ 已修復】** 移至折半後扣除，消除倒貼 |
 | **3. 自由推進** | `if not is_blocked and r > 2: p_bonus += k * w` | `if (r > RANK_3 && !blocked) bonus += k * w` | 一致 |
-| **4. 國王距離** | ❌ 延後到第 6 步，且門檻寫成 **`r > 3`** | ✅ **在此處累加進 `bonus`**，門檻同為 **`r > RANK_3` (`r > 2`)** | 第 4 橫排漏算王距離；候選／受阻兵的王距離未被折半 |
-| **5. 候選／受阻折半** | `if not next_passed or any_pawn_ahead: p_bonus //= 2` | `if (!next_passed || pawn_ahead) bonus = bonus / 2` | ❌ **把第 2 步產生的負分減半，變成倒貼 `+24 cp` 獎賞！** |
-| **6. 收尾** | 累加 `proximity_bonus`（未折半） | ✅ **最後才扣** `bonus - PassedFile * edge_dist` | — |
+| **4. 國王距離 (ORD-2)** | ❌ 延後到第 6 步，且門檻寫成 **`r > 3`** | ✅ **在此處累加進 `bonus`**，門檻同為 **`r > RANK_3` (`r > 2`)** | **【✅ 已修復】** 第 4 橫排計入王距離且受折半約束 |
+| **5. 候選／受阻折半 (ORD-3)** | `if not next_passed or any_pawn_ahead: p_bonus //= 2` | `if (!next_passed || pawn_ahead) bonus = bonus / 2` | 待修復（向零截斷語義對齊） |
+| **6. 收尾 (ORD-1 對齊)** | 累加 `proximity_bonus`（未折半） | ✅ **最後才扣** `bonus - PassedFile * edge_dist` | **【✅ 已修復】** 與 SF11 一致最後扣除 |
 
-* **具體數值驗算反例（中局 d3 / d4 兵，`edge_dist = 3`，`file_mg = 16`）**：
-  * **案例 A：白方真通路兵在 `d3`（`rank = 2`），前方 `d4` 被黑馬封鎖，但無敵兵防守前格（`next_passed = True, any_pawn_ahead = False`）**：
-    * `p_bonus_mg = 0 - 16 * 3 = -48`（不觸發折半）→ **實得 `-48 cp`（MG）**。
-  * **案例 B：白方在 `d3` 只是受敵兵牽制的「候選通路兵」（例如黑兵在 `e5` 控制 `d4`，`next_passed = False`），或是 `d3+d4` 劣質疊兵的後兵（`any_pawn_ahead = True`）**：
-    * `p_bonus_mg = 0 - 16 * 3 = -48` → 觸發 `p_bonus_mg //= 2` → **實得 `-24 cp`（MG）**！
-  * **荒謬結論**：結構更差的「候選通路兵」或「疊兵後兵」，在中局反而比真正的暢通通路兵**高出 `+24 cp`**（在 `d4` 受阻時亦高出 `+21 cp`）！這會直接誘導搜尋在開中局刻意保留受阻候選兵或製造疊兵，抗拒走成真通路兵。
+* **`ORD-1` 實測數值驗算對比（中局 d3 / d4 兵，`edge_dist = 3`，`file_mg = 16`, `file_eg = 4`）**：
+
+| 局面與兵種 | 修復前實測分數 `(MG, EG)` | 修復後實測分數 `(MG, EG)` | 結論 |
+| :--- | :---: | :---: | :--- |
+| 白方 `d3` 真通路兵 | `(-48, -12)` | **`(-48, -12)`** | 基礎分 0，扣除邊緣懲罰 48 |
+| 白方 `d3` 候選兵（黑兵 `e5` 防守 `d4`） | `(-24, -6)` ❌ | **`(-48, -12)`** ✅ | 舊版倒貼 `+24 cp` BUG 徹底消除 |
+| 白方 `d4` 真通路兵 | `(-32, +21)` | **`(-32, +21)`** | 自由推進獎勵正常生效 |
+| 白方 `d4` 候選兵（黑兵 `e6` 防守 `d5`） | `(-40, +4)` | **`(-40, +4)`** | **真通路兵全域嚴格領先 (+8 MG, +17 EG)** ✅ |
+| 白方 `d4` 受阻兵（黑兵 `d5` 直線阻擋） | `(-40, +4)` | **`(-40, +4)`** | **真通路兵全域嚴格領先 (+8 MG, +17 EG)** ✅ |
+| 黑方 `d5` 真通路兵 vs 候選兵 | — | **`(-32, +21)` vs `(-40, +4)`** | **黑白鏡像完全對稱一致** ✅ |
+
+* **`ORD-2` 實測數值驗算對比（國王距離門檻對齊與折半約束）**：
+
+| 測試情境 | 舊版評估（Buggy） | 新版評估（`ORD-2` 修復後） | 判定依據 |
+| :--- | :---: | :---: | :--- |
+| 白方 `d4` 兵（`rank = 3`）：己方王在 `e4` vs 己方王在 `a1` | `(-32, 19)` vs `(-32, 19)`<br>（Delta = 0 cp，漏算王距離）❌ | **`(-32, 25)` vs `(-32, 19)`<br>（Delta = +6 cp）** ✅ | 第 4 橫排（`rank > 2`）正確計入王接近度支援 |
+| 白方 `d5` 兵（`rank = 4`）：真通路兵之己王接近度加分 | Delta EG = **+40 cp** | Delta EG = **+40 cp** | 暢通兵獲得全額國王保護支援 |
+| 白方 `d5` 兵（`rank = 4`）：候選兵（黑兵 `e7`）之己王接近度加分 | Delta EG = +40 cp ❌<br>（未受候選折半約束） | **Delta EG = +20 cp ✅<br>（`40 // 2 = 20` 嚴格折半）** | 候選兵王支援正確折半，無根受阻兵不再高估 |
+
+* **驗證依據**：
+  * 專屬測試：[`tests/test_passed_pawn_order.py`](../../tests/test_passed_pawn_order.py)（6/6 項通過）。
+  * 全量測試：44 項單元測試全數通過，`test_tunable_eval_parity` 7/7 項全數通過（共 51 項測試 100% 通過）。
 
 * **標準修復結構（白方示意，黑方完全對稱）**：
   ```python
@@ -386,11 +406,30 @@ flowchart TD
 * **驗收標準（Gate 2 通過）**：
   * 新增與既有輕量單元測試共 38 項 100% 通過（`test_endgame_conformance`, `test_pinned_eval_geometry`, `test_runtime_eval_weights`）。
   * Tunable Parity 測試 7 項 100% 通過（`test_tunable_eval_parity`）。
+  * **實戰對局驗收（Colab 長時控 400,000 nodes/move，成對換先開局對陣 `classical_old`）**：
+    * **`copy 8.ipynb`（Phase 1 + BUG-1，Commit `78e9286`，1,000 局完整跑滿）**：
+      * 總戰績：**513.5 - 486.5**（217 勝 593 和 190 負），勝率 **51.35%**，淨勝 **+27 場**。
+      * Elo 表現：**+9.38 ± 13.74 Elo**（SPRT LLR = 1.03）。
+      * 結論：千局大樣本確認 BUG-1 幾何修復具備實質正向收益（~+9.4 Elo）。
+    * **`copy.ipynb`（Phase 2 累積至 BUG-4，Commit `34a7ef0`，686 局提前達成）**：
+      * 總戰績：**369.0 - 317.0**（165 勝 408 和 113 負），勝率 **53.79%**，淨勝 **+52 場**。
+      * Elo 表現：**+26.39 ± 16.53 Elo**（95% CI：`[+9.64, +43.26]`，下界嚴格大於 0）。
+      * SPRT 狀態：**`LLR = 2.95 >= 2.94`**，**`H1 Accepted (Engine improved)` 正式通過晉級！**
+      * 結論：殘局安全性統一與 `eval_weights` 接通後，深層殘局推演品質飛躍，純決策 Elo 提升 +26.39！
 
 ---
 
-### Phase 3：動態通路兵計算順序與橫排門檻對齊
-* **實施範圍**：`ORD-1`、`ORD-2`、`ORD-3`。
+### Phase 3：動態通路兵計算順序與橫排門檻對齊【進行中】
+* **實施範圍**：
+  * [x] **`ORD-1`（邊緣直線懲罰 `PassedFile` 移至候選／受阻折半之後最後扣除）**：✅ 已完成 (2026-10-31)。
+    * 白黑雙迴圈移除頂部提前扣除 `PassedFile * edge_dist`，改為在 `if not next_passed or any_pawn_ahead: p_bonus //= cand_div` 折半完成後才扣除，徹底消除低橫排中央兵負分折半反而倒貼 `+24 cp` 導致候選／受阻劣勢兵估值反超暢通真通路兵的長期重大 BUG。
+    * 新增專屬單元測試 [`tests/test_passed_pawn_order.py`](../../tests/test_passed_pawn_order.py)（4/4 項通過），驗證 `d4` / `d5` 暢通通路兵評估分數在 MG 與 EG 均嚴格高於受阻兵與候選兵，且 `d3` 邊緣懲罰不被折半。
+    * 同步更新生成 [`tuner/tunable_eval.py`](../../tuner/tunable_eval.py)，通過全量 42 項單元測試與 7 項 Tunable Parity 測試。
+  * [x] **`ORD-2`（國王距離門檻對齊 `rank > 2` / `relative_rank > 2` 並納入候選／受阻折半前累加）**：✅ 已完成 (2026-10-31)。
+    * 統一白黑雙迴圈國王距離門檻為 `rank > 2`（原 `rank > 3` 漏算第 4 橫排所有王接近度支援，現 `d4` 兵己王接近正確獲得 +6 EG 支持）。
+    * 將 `proximity_bonus` 提前累加至 `p_bonus_eg`，使其受後續候選兵／受阻兵 `// cand_div` 縮放約束（實測 `d5` 候選兵王支持由 40 嚴格減半為 20 EG），消除了受阻無根兵享受 100% 國王支持的邏輯漏洞。
+    * 擴充 [`tests/test_passed_pawn_order.py`](../../tests/test_passed_pawn_order.py) 覆蓋第 4 橫排王支援與候選兵王支援折半（6/6 項通過），全量 51 項單元測試與 Parity 測試 100% 通過。
+  * [ ] **`ORD-3`（候選／受阻兵向零截斷 `_trunc_div` 語義對齊）**：待進行。
 * **實作重點**：
   1. 重排 `evaluate_passed_pawns` 白黑雙迴圈：將國王距離門檻統一為 `rank > 2`（`relative_rank > 2`）並併入 `p_bonus_eg` → 執行候選／受阻兵折半 → **最後才扣除 `PassedFile * edge_dist`**。
   2. 新增單元測試 `test_candidate_passer_never_outscores_true_passer`（驗證中局 `d3`/`e3`/`d4`/`e4` 暢通真通路兵分數嚴格高於受阻候選兵與疊兵後兵）。
