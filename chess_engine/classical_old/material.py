@@ -20,11 +20,6 @@ def _ew_get_mat(ew, use_ew, idx, default):
     return np.int32(default)
 
 
-@numba.njit(cache=True, inline="always")
-def _trunc_div(n, d):
-    return n // d if n >= 0 else -((-n) // d)
-
-
 @numba.njit(cache=True, boundscheck=False, fastmath=True)
 def compute_imbalance(cnt_0, cnt_1, cnt_2, cnt_3, cnt_4, cnt_6, cnt_7, cnt_8, cnt_9, cnt_10,
                       ew, use_ew):
@@ -66,7 +61,7 @@ def compute_imbalance(cnt_0, cnt_1, cnt_2, cnt_3, cnt_4, cnt_6, cnt_7, cnt_8, cn
             v += IMBALANCE_QUADRATIC_THEIRS[pt1, pt2] * w[pt2]
         b_bonus += b[pt1] * v
 
-    raw = _trunc_div(w_bonus - b_bonus, IMBALANCE_DIVISOR)
-    mg_imbalance = _trunc_div(raw * scale_mg, np.int32(100))
-    eg_imbalance = _trunc_div(raw * scale_eg, np.int32(100))
+    raw = (w_bonus - b_bonus) // IMBALANCE_DIVISOR
+    mg_imbalance = raw * scale_mg // np.int32(100)
+    eg_imbalance = raw * scale_eg // np.int32(100)
     return mg_imbalance, eg_imbalance
