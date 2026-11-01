@@ -351,10 +351,10 @@ class TestSearchCoreContracts(unittest.TestCase):
             self.assertEqual(sorted(full_moves), sorted(staged_moves), f"Staged vs full mismatch in {fen}")
 
     def test_see_review_fixes(self):
-        from chess_engine.classical.constants import WHITE, PAWN, KNIGHT, QUEEN
+        from chess_engine.classical.constants import WHITE, PAWN, KNIGHT, ROOK, QUEEN
         from chess_engine.classical.fen_parser import parse_fen
         from chess_engine.classical.move_generator import get_pinned_pieces
-        from chess_engine.classical.see import _see_jit, _see_ge_jit
+        from chess_engine.classical.see import _see_jit, _see_ge_jit, SEE_PIECE_VALUES
 
         # 1A. Initial move is the pinner leaving the pin ray (Qe2xc4 unpins Black Ne5)
         pb, ob, _ = parse_fen("4k3/8/8/4n3/2p5/8/4Q3/6K1 w - - 0 1")
@@ -372,13 +372,14 @@ class TestSearchCoreContracts(unittest.TestCase):
         self.assertTrue(bool(_see_ge_jit(pb, ob, WHITE, 5, 26, 0, pw, pb_pin)))
 
         # 2. Subsequent back-rank pawn promotion inside _see_ge_jit loop (1. Qxd8 Rxd8 2. cxd8=Q Kxd8)
-        # 2*Rook (1144) - Queen (1170) - Pawn (100) = -126 (vs -598 without promotion bonus)
+        # 2*Rook (1142) - Queen (1170) - Pawn (100) = -128 (vs -599 without promotion bonus)
         pb, ob, _ = parse_fen("r2rk3/2P5/8/8/8/8/8/3Q2K1 w - - 0 1")
         pw = get_pinned_pieces(pb, ob, 0)
         pb_pin = get_pinned_pieces(pb, ob, 1)
-        self.assertEqual(int(_see_jit(pb, ob, WHITE, 3, 59, pw, pb_pin)), -126)
-        self.assertTrue(bool(_see_ge_jit(pb, ob, WHITE, 3, 59, -126, pw, pb_pin)))
-        self.assertFalse(bool(_see_ge_jit(pb, ob, WHITE, 3, 59, -125, pw, pb_pin)))
+        expected_promo_see = int(2 * SEE_PIECE_VALUES[ROOK] - SEE_PIECE_VALUES[QUEEN] - SEE_PIECE_VALUES[PAWN])
+        self.assertEqual(int(_see_jit(pb, ob, WHITE, 3, 59, pw, pb_pin)), expected_promo_see)
+        self.assertTrue(bool(_see_ge_jit(pb, ob, WHITE, 3, 59, expected_promo_see, pw, pb_pin)))
+        self.assertFalse(bool(_see_ge_jit(pb, ob, WHITE, 3, 59, expected_promo_see + 1, pw, pb_pin)))
 
         # 3. Underpromotion uses actual promoted piece SEE value instead of Queen (b7b8=N vs b7b8=Q)
         pb, ob, _ = parse_fen("4k3/1P6/8/8/8/8/8/4K3 w - - 0 1")

@@ -120,6 +120,31 @@ def do_diff_code(src_dir, dest_dir):
     return has_diff
 
 
+def do_diff_constants(src_dir, dest_dir):
+    """Show differences specifically in constants.py between classical and classical_old."""
+    src_path = os.path.join(src_dir, 'constants.py')
+    dest_path = os.path.join(dest_dir, 'constants.py')
+    with open(src_path, 'r', encoding='utf-8') as sf:
+        src_lines = sf.read().splitlines()
+    with open(dest_path, 'r', encoding='utf-8') as df:
+        dest_lines = df.read().splitlines()
+
+    diff = list(difflib.unified_diff(
+        dest_lines, src_lines,
+        fromfile='classical_old/constants.py',
+        tofile='classical/constants.py',
+        lineterm='',
+    ))
+    if diff:
+        print("\n[!] Differences found in constants.py:")
+        for line in diff:
+            print(line)
+        return True
+    else:
+        print("[+] constants.py is identical between classical and classical_old!")
+        return False
+
+
 def do_sync(src_dir, dest_dir, preserve_constants=False):
     src_files = get_py_files(src_dir)
     print(f"[*] Syncing files from {src_dir} to {dest_dir}...")
@@ -168,6 +193,10 @@ if __name__ == '__main__':
         '--diff-code', action='store_true',
         help="Compare engine code while ignoring the intentional constants.py baseline",
     )
+    parser.add_argument(
+        '--diff-constants', action='store_true',
+        help="Compare only constants.py between classical and classical_old",
+    )
     parser.add_argument('--sync', action='store_true', help="Fully copy classical files to classical_old, updating import dependencies")
     parser.add_argument(
         '--sync-code', action='store_true',
@@ -181,9 +210,9 @@ if __name__ == '__main__':
     src_dir = os.path.join(base_dir, 'chess_engine', 'classical')
     dest_dir = os.path.join(base_dir, 'chess_engine', 'classical_old')
     
-    selected = sum(bool(value) for value in (args.diff, args.diff_code, args.sync, args.sync_code))
+    selected = sum(bool(value) for value in (args.diff, args.diff_code, args.diff_constants, args.sync, args.sync_code))
     if selected > 1:
-        parser.error('--diff, --diff-code, --sync and --sync-code are mutually exclusive')
+        parser.error('--diff, --diff-code, --diff-constants, --sync and --sync-code are mutually exclusive')
 
     if args.sync:
         do_sync(src_dir, dest_dir)
@@ -191,6 +220,8 @@ if __name__ == '__main__':
         do_sync(src_dir, dest_dir, preserve_constants=True)
     elif args.diff_code:
         do_diff_code(src_dir, dest_dir)
+    elif args.diff_constants:
+        do_diff_constants(src_dir, dest_dir)
     else:
         # Default to diff when --diff is specified or no options are provided
         do_diff(src_dir, dest_dir)
