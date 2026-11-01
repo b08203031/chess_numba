@@ -41,7 +41,7 @@ def _sync_search_constants(src_path, dest_path):
     if updated_content == dest_content:
         return False
 
-    with open(dest_path, 'w', encoding='utf-8') as df:
+    with open(dest_path, 'w', encoding='utf-8', newline='\n') as df:
         df.write(updated_content)
     return True
 
@@ -174,8 +174,8 @@ def do_sync(src_dir, dest_dir, preserve_constants=False):
                 if df.read() == updated_content:
                     continue
 
-        with open(dest_path, 'w', encoding='utf-8') as df:
-            df.write(updated_content)
+        with open(dest_path, 'w', encoding='utf-8', newline='\n') as df:
+            df.write(updated_content.replace('\r\n', '\n'))
         print(f"  [+] Synced and updated imports for {f}")
         updated += 1
     
