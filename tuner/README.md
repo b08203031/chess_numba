@@ -12,10 +12,11 @@
 
 | 用途 | 實際來源 | 本機路徑 | 現況 |
 | :--- | :--- | :--- | :--- |
-| **HCE SPSA（純 Texel）** | Bullet 對局勝負 | `tuner/data/hce/dataset.npz` | 已驗證：10M（註：與下方 20M 前 5M 重疊，勿互作驗證集） |
-| **HCE SPSA 主資料集（3-way 無洩漏切分）** | 70% 勝負 + 30% SF sigmoid | `tuner/data/hce/dataset_mix03_20m_s2.npz` | 20M 自動切為 **17M train / 1M dev / 2M unseen holdout** |
+| **HCE SPSA 主資料集（最新推薦）** | E12.33/41/52 + Lichess-big3 平靜 EPD 庫 | `tuner/data/hce/dataset_epd_wdl_20m.npz` | ~19.63M（**保留真實易位權 6.07%**、去重與戰術過濾、勝和負平衡 WDL） |
+| **獨立跨來源平靜驗證集** | Zurichess quiet-labeled EPD | `tuner/data/hce/val_zurichess.npz` | ~1.08M 唯一平靜局面（含 13.53% 易位權，專門交叉驗證） |
 | **獨立對戰驗證集（只作驗證）** | 本引擎高節點（≥150k）對戰 PGN | `tuner/data/hce/val_pgn.npz` | ~1.59M 唯一靜態局面（含真實易位權、EP、rule50 與平均 WDL） |
-| **來源 A（推薦、你已有）** | NNUE 的 **Bullet `.bin`**（棋盤 + SF 分 + **對局勝負**） | `tuner/data/nnue/official_data_farseerT75.bin` | 用 `--from-bullet` 轉換 |
+| **歷史來源（舊）** | Bullet 對局勝負 / mix03（無易位權） | `tuner/data/hce/dataset_mix03_20m_s2.npz` | 歷史存檔，新調參請優先使用上方 `dataset_epd_wdl_20m.npz` |
+| **來源轉換工具** | EPD Resolved Books 轉換器 | `tuner/data_pipeline/convert_epd_books.py` | 支援多檔平行解析、64-bit 去重與非法/被將軍過濾 |
 | 來源 B | 自備 PGN（TWIC）→ JSONL → NPZ | `tuner/data/pgn/` | `data --pgn ...` |
 | HCE 標籤 | `game` = 標準 Texel WDL；`sf` = SF 分蒸餾；`mix` = `(1-λ)·game+λ·sf`（預設 λ=0.3） | 寫進 `results` | `game` 與 `mix` 目標不同，不能只以 label 是否連續判優劣 |
 | **不能直接用** | HalfKA `.npz`（只有特徵索引，無完整棋盤） | `ultimate_halfka_*.npz` | 僅 NNUE |

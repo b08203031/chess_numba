@@ -369,17 +369,19 @@ flowchart LR
 
 ## 第五部分：分階段實施路線圖與驗收標準 (Phased Execution Plan)
 
-為確保每一步改動皆可獨立歸因（效能 vs 準確度 vs 棋力 Elo），採 **4 階段推進**：
+為確保每一步改動皆可獨立歸因（效能 vs 準確度 vs 棋力 Elo），採 **5 階段推進**：
 
 ```mermaid
 flowchart TD
     P1["Phase 1: 零分數變動熱路徑加速 (PERF-1 ~ PERF-7)"] --> G1{"Gate 1: 1000 FEN 0 分差\n& Depth 15 0-Node Delta"}
     G1 -->|通過| P2["Phase 2: 幾何與殘局契約修復 (BUG-1, BUG-2, BUG-4)"]
-    P2 --> G2{"Gate 2: 單元測試全綠\n& 非退化對局驗證"}
+    P2 --> G2{"Gate 2: 單元測試全綠\n& 非退化對局驗證 (+26.4 Elo)"}
     G2 -->|通過| P3["Phase 3: 通路兵計算順序對齊 (ORD-1 ~ ORD-3)"]
-    P3 --> G3{"Gate 3: 單進程 A/B 對局\n(400-600 局 @ 300k SPRT)"}
+    P3 --> G3{"Gate 3: 單元測試全綠\n& 候選兵向零截斷對齊"}
     G3 -->|通過| P4["Phase 4: 黑白鏡像對稱與 SF11 細節對齊 (BUG-3, BUG-5 ~ BUG-8)"]
-    P4 --> G4{"Gate 4: 500 FEN 鏡像 0 誤差\n& LTC 對局定錨 + 同步文件"}
+    P4 --> G4{"Gate 4: 500 FEN 鏡像 0 誤差\n& KP-DISCONT 修正"}
+    G4 -->|通過| P5["Phase 5: 全新乾淨 EPD 資料集全量 Texel SPSA 重調"]
+    P5 --> G5{"Gate 5: 1000 局 @ 400k nodes\n實戰大勝 +18.1 Elo"}
 ```
 
 ### Phase 1：零分數變動效能重構（Zero-Eval-Delta NPS Optimization） — ✅ 已完成 (2026-10-31)
@@ -482,4 +484,47 @@ flowchart TD
 * **驗收結果（Gate 4 通過）**：
   * 新增專屬單元測試 [`tests/test_phase4_sf11_alignment.py`](../../tests/test_phase4_sf11_alignment.py)（5/5 項 100% 通過，涵蓋 500-FEN 鏡像對稱、ThreatByKing 布林次數、敵兵後方哨站、WeakQueen 狙擊子、kingAttacksCount 範圍）。
   * 全量 Tuner Parity 測試 [`tests/test_tunable_eval_parity.py`](../../tests/test_tunable_eval_parity.py) 驗證 100% 一致。
+
+---
+
+### Phase 5：全新乾淨 EPD 數據集（保留真實易位權）全量 Texel SPSA 重調與千局對戰驗證【✅ 100% 全數完成】(2026-11-01 ~ 2026-11-02)
+
+#### 1. 根因診斷與數據集重構
+* **問題根因**：在完成 Phase 3/4 修正後，初步對局發現棋力微幅退步。審查發現舊調參資料源（Primer Bullet `.bin` 格式）在轉換時將所有局面的易位權（`castling_rights`）強制歸零，且缺乏合法吃過路兵（EP）與 50 步規則計數，導致王前兵盾（`SHELTER_*`）、受困車（`TRAPPED_ROOK`）與王 PST 被嚴重調偏；且舊參數與修正後的動態通路兵向零截斷順序脫鉤。
+* **全新數據管線建置**：
+  * 新增專用管線 [`tuner/data_pipeline/convert_epd_books.py`](../../tuner/data_pipeline/convert_epd_books.py)，直接讀取社群高品質平靜解決局面（Resolved EPD Books）。
+  * **主訓練集 (`dataset_epd_wdl_20m.npz`)**：匯集 E12.33 (5.31M) + E12.41 (5.30M) + E12.52 (5.29M) + lichess-big3 (3.74M)，完成跨檔 64-bit 雜湊去重與平均，過濾 37.2 萬筆被將軍與非法局面，抽出 **19,627,749 筆** 均勻局面（勝 29.5%、和 40.8%、負 29.5%，標籤均值 0.4998，**6.07% 完整保留真實易位權**）。
+  * **獨立跨來源平靜驗證集 (`val_zurichess.npz`)**：轉換 zurichess quiet-labeled（1,079,507 筆，含 13.53% 易位權）。
+  * **獨立引擎實戰驗證集 (`val_pgn.npz`)**：本引擎 $\ge 150\text{k}$ 高節點自對弈 1,593,187 局面（含 6.54% 易位權）。
+
+#### 2. 全量分區 Texel SPSA 重調（`tuner/texel_tuner_runner.ipynb`）
+將常數回滾至 `75c6cb6^`（保留所有 Phase 1~4 BUG 修復，排除受污染參數），依序完成 8 大區塊調優與雙重未見集嚴格 Gate 驗收：
+* **Block 1（通路兵系統 Passed Pawns）**：1a 查表、1b 動態倍率離散窮舉、1c 路徑安全與王距離。未見 holdout 總 MSE 下降 $z = -51.77$，實戰純王兵殘局下降 $z = -27.85$！
+* **Block 2（威脅與前哨 Threats & Outposts）**：2a 威脅表、2b 前哨、雙象加成與車佔開放線（+16 cp）。中局戰場大幅改善（$z = -25.30$）。
+* **Block 3（機動性查表 Mobility）**：四子機動性單調性約束調優。
+* **Block 4（兵型結構 Pawn Structure）**：4a 孤疊落弱兵與連兵等級表、4b 連兵支撐權重離散掃描。
+* **Block 5（王安全與王前兵盾 King Safety）**：5a King Danger、5a_grid 離散門檻（門檻維持 66，偏置 2）、5b 王兵盾、兵風暴與受困車。
+* **Block 6（材質與 PST 形狀耦合）**：6a~6d 依序調優 N/B/R/Q 形狀（6e Pawn 形狀出現回歸，精確及時觸發 `session.rollback()` 保護基線）。
+* **Block 7（不平衡、主動權與空間）**：7a 二次不平衡矩陣（全綠 PASS）、7b 主動權與複雜度係數（殘局 MSE 出現突破性下降 $z = -63.30$）、7c 空間與先手門檻。
+* **Block 8（NBRQ Material + PST 聯合收尾 Polish）**：消除跨模組殘餘交互作用（全綠 PASS，$z = -31.21$）。
+
+#### 3. 累積調參成績單（Cell 55 `session.cumulative_report()`）
+* **2,000,000 未見 Holdout**：總 MSE 暴跌 **$\Delta = -2.2265 \times 10^{-3}$ ($z = -109.28$)**，廣義殘局 `broad-EG` 暴跌 **$\Delta = -2.2606 \times 10^{-3}$ ($z = -92.36$)**。
+* **1,593,187 實戰 PGN（$K=1.000$ 物理尺度）**：總 MSE 下降 **$\Delta = -1.0626 \times 10^{-3}$ ($z = -57.66$)**。
+  * 純王兵殘局（`pure king+pawns`）：$\Delta = -2.6047 \times 10^{-3}$ ($z = -33.44$)
+  * 車殘局（`rook EG`）：$\Delta = -1.0853 \times 10^{-3}$ ($z = -42.58$)
+  * 無后殘局（`queenless`）：$\Delta = -8.2349 \times 10^{-4}$ ($z = -40.57$)
+  * 開局未易位局面（`castling!=0`）：$\Delta = -2.2267 \times 10^{-3}$ ($z = -18.79$)
+* 累計穩健更新 **89 個常數項目**，所有單元測試與 Parity 測試 100% 通過（55/55 OK）。
+
+#### 4. 實戰對局驗收（Colab 長時控 400,000 nodes/move，成對換先開局對陣 `classical_old` 基線）
+* **`copy 9.ipynb`（1,000 局完整跑滿，權威定錨）**：
+  * **總戰績**：**526.0 - 474.0**（272 勝 508 和 220 負），勝率 **52.60%**，淨勝 **+52 場**。
+  * **Elo 表現**：**+18.08 ± 15.10 Elo**（95% CI：`[+2.98, +33.18]`，下界嚴格大於 0）。
+  * **SPRT 狀態**：**`LLR = 2.17`**。
+* **`copy 3.ipynb`（前 260 局平行監控）**：
+  * **總戰績**：**143.5 - 116.5**（75 勝 137 和 48 負），勝率 **55.19%**，淨勝 **+27 場**。
+  * **Elo 表現**：**+36.19 ± 29.04 Elo**（SPRT LLR = 1.51）。
+* **結論**：徹底推翻了「修 BUG 會掉棋力」的假象。千局高節點對戰證實：先前的微幅退步 100% 來自「舊參數與新評估邏輯未對齊」以及「訓練集缺失易位權」；在換用乾淨 EPD 數據並完成全量重調後，新評估函數與新參數展現出壓倒性實戰統治力，對陣 Phase 3 前舊基線取得 **淨勝 +52 場、+18.1 Elo** 的重大勝利！
+
 

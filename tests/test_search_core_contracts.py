@@ -360,7 +360,8 @@ class TestSearchCoreContracts(unittest.TestCase):
         pb, ob, _ = parse_fen("4k3/8/8/4n3/2p5/8/4Q3/6K1 w - - 0 1")
         pw = get_pinned_pieces(pb, ob, 0)
         pb_pin = get_pinned_pieces(pb, ob, 1)
-        self.assertEqual(int(_see_jit(pb, ob, WHITE, 12, 26, pw, pb_pin)), -1070)
+        expected_unpin_see = int(SEE_PIECE_VALUES[PAWN] - SEE_PIECE_VALUES[QUEEN])
+        self.assertEqual(int(_see_jit(pb, ob, WHITE, 12, 26, pw, pb_pin)), expected_unpin_see)
         self.assertFalse(bool(_see_ge_jit(pb, ob, WHITE, 12, 26, 0, pw, pb_pin)))
 
         # 1B. Mid-exchange pinner captures into to_sq, unpinning piece for next turn
@@ -385,8 +386,10 @@ class TestSearchCoreContracts(unittest.TestCase):
         pb, ob, _ = parse_fen("4k3/1P6/8/8/8/8/8/4K3 w - - 0 1")
         pw = get_pinned_pieces(pb, ob, 0)
         pb_pin = get_pinned_pieces(pb, ob, 1)
-        self.assertEqual(int(_see_jit(pb, ob, WHITE, 49, 57, pw, pb_pin, PAWN, -1, KNIGHT)), 247)
-        self.assertEqual(int(_see_jit(pb, ob, WHITE, 49, 57, pw, pb_pin, PAWN, -1, QUEEN)), 1070)
+        expected_n_promo = int(SEE_PIECE_VALUES[KNIGHT] - SEE_PIECE_VALUES[PAWN])
+        expected_q_promo = int(SEE_PIECE_VALUES[QUEEN] - SEE_PIECE_VALUES[PAWN])
+        self.assertEqual(int(_see_jit(pb, ob, WHITE, 49, 57, pw, pb_pin, PAWN, -1, KNIGHT)), expected_n_promo)
+        self.assertEqual(int(_see_jit(pb, ob, WHITE, 49, 57, pw, pb_pin, PAWN, -1, QUEEN)), expected_q_promo)
         self.assertFalse(bool(_see_ge_jit(pb, ob, WHITE, 49, 57, 500, pw, pb_pin, PAWN, -1, KNIGHT)))
         self.assertTrue(bool(_see_ge_jit(pb, ob, WHITE, 49, 57, 500, pw, pb_pin, PAWN, -1, QUEEN)))
 

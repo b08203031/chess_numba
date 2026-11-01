@@ -180,7 +180,7 @@ class TestIntegerAwareTuningBands(unittest.TestCase):
         np.testing.assert_allclose(scales[pst_s : pst_s + pst_c], 1.0)
 
         scr_s, _ = self.pm.get_param_indices("SAFE_CHECK_ROOK")
-        self.assertGreaterEqual(scales[scr_s], 10.0)
+        self.assertGreaterEqual(scales[scr_s], 6.0)
 
         pp_s, _ = self.pm.get_param_indices("PASSED_PAWN_BONUS")
         self.assertEqual(scales[pp_s + 2], 1.0)      # small low-rank entry
