@@ -73,16 +73,119 @@ def compute_squared_errors(
 
     return errors
 
+
+@numba.njit(parallel=True, fastmath=True)
+def compute_white_scores(piece_bbs, occupancy_bbs, game_states, theta):
+    """Evaluate positions and return White-POV centipawn scores (int32)."""
+    n = len(piece_bbs)
+    scores = np.empty(n, dtype=np.int32)
+
+    for i in numba.prange(n):
+        score = evaluate_position_tunable(
+            piece_bbs[i],
+            occupancy_bbs[i],
+            game_states[i],
+            theta,
+            False,
+        )
+        if game_states[i][0] == 1:
+            score = -score
+        scores[i] = score
+
+    return scores
+
+
+def squared_errors_from_scores(scores, results, K_factor=1.0):
+    """Vectorized per-position squared errors from precomputed White-POV scores."""
+    scale = 0.00575646273 * float(K_factor)
+    clipped = np.clip(scores.astype(np.float64) * scale, -40.0, 40.0)
+    sigmoid = 1.0 / (1.0 + np.exp(-clipped))
+    diff = results.astype(np.float64) - sigmoid
+    return diff * diff
+
+
+def fit_best_k(scores, results, lo=0.25, hi=2.50, iters=36):
+    """Golden-section search for MSE-minimizing K_factor on precomputed scores."""
+    phi = (5.0 ** 0.5 - 1.0) / 2.0
+    a, b = float(lo), float(hi)
+    c = b - phi * (b - a)
+    d = a + phi * (b - a)
+    fc = float(np.mean(squared_errors_from_scores(scores, results, c)))
+    fd = float(np.mean(squared_errors_from_scores(scores, results, d)))
+    for _ in range(iters):
+        if fc < fd:
+            b, d, fd = d, c, fc
+            c = b - phi * (b - a)
+            fc = float(np.mean(squared_errors_from_scores(scores, results, c)))
+        else:
+            a, c, fc = c, d, fd
+            d = a + phi * (b - a)
+            fd = float(np.mean(squared_errors_from_scores(scores, results, d)))
+    best_k = 0.5 * (a + b)
+    best_mse = float(np.mean(squared_errors_from_scores(scores, results, best_k)))
+    return best_k, best_mse
+
+
+def split_dataset_indices(
+    n_total, eval_sample=1_000_000, holdout_sample=2_000_000
+):
+    """Deterministic leak-free 3-way split: (train_indices, eval_indices, holdout_indices).
+
+    - ``eval_indices`` (in-run dev / early stopping): picked with ``default_rng(0)``
+      so existing 1M fixed-validation indices stay identical.
+    - ``holdout_indices`` (unseen post-run test set): picked with ``default_rng(42)``
+      from non-eval rows when ``eval_sample + holdout_sample < n_total``; otherwise
+      ``None`` so tiny smoke datasets continue to work without failing.
+    - ``train_indices``: strict complement ``all \\ (eval ∪ holdout)``.
+    """
+    n = int(n_total)
+    n_eval = int(eval_sample) if eval_sample is not None else 0
+    n_hold = int(holdout_sample) if holdout_sample is not None else 0
+
+    if n_eval <= 0 or n_eval >= n:
+        eval_indices = None
+        is_eval = np.zeros(n, dtype=bool)
+    else:
+        eval_indices = np.sort(
+            np.random.default_rng(0).choice(n, size=n_eval, replace=False)
+        ).astype(np.int64)
+        is_eval = np.zeros(n, dtype=bool)
+        is_eval[eval_indices] = True
+
+    used_eval = int(np.count_nonzero(is_eval))
+    if n_hold <= 0 or used_eval + n_hold >= n:
+        holdout_indices = None
+        is_hold = np.zeros(n, dtype=bool)
+    else:
+        rem_pool = np.flatnonzero(~is_eval)
+        holdout_indices = np.sort(
+            np.random.default_rng(42).choice(rem_pool, size=n_hold, replace=False)
+        ).astype(np.int64)
+        is_hold = np.zeros(n, dtype=bool)
+        is_hold[holdout_indices] = True
+
+    train_indices = np.flatnonzero(~(is_eval | is_hold)).astype(np.int64)
+    return train_indices, eval_indices, holdout_indices
+
+
 # --- SPSA Optimizer ---
 
 class SPSAOptimizer:
     def __init__(self, data_path, param_manager):
-        print(f"Loading data from {data_path}...")
-        data = np.load(data_path)
-        self.piece_bbs = data['piece_bbs']
-        self.occupancy_bbs = data['occupancy_bbs']
-        self.game_states = data['game_states']
-        self.results = data['results']
+        if isinstance(data_path, dict):
+            label = data_path.get("label", "<in-memory dataset>")
+            print(f"Using preloaded data from {label}...")
+            self.piece_bbs = data_path["piece_bbs"]
+            self.occupancy_bbs = data_path["occupancy_bbs"]
+            self.game_states = data_path["game_states"]
+            self.results = data_path["results"]
+        else:
+            print(f"Loading data from {data_path}...")
+            with np.load(data_path) as data:
+                self.piece_bbs = data["piece_bbs"]
+                self.occupancy_bbs = data["occupancy_bbs"]
+                self.game_states = data["game_states"]
+                self.results = data["results"]
         self.param_manager = param_manager
         
         # Initialize ConstraintManager
@@ -403,13 +506,16 @@ class SPSAOptimizer:
 
         # Initiative complexity weights/offsets — soft ±10% (was hard-pin),
         # with at least ±1 because the evaluator consumes integer constants.
+        # Note: INITIATIVE_PAWN_ENDGAME_WEIGHT_MG/EG are currently unreferenced
+        # by evaluation.py, so hard-pin them to theta0 to prevent SPSA drift.
+        pin_to_theta0("INITIATIVE_PAWN_ENDGAME_WEIGHT_MG")
+        pin_to_theta0("INITIATIVE_PAWN_ENDGAME_WEIGHT_EG")
         for name in (
             "INITIATIVE_PASSED_WEIGHT_MG",
             "INITIATIVE_PAWN_WEIGHT_MG",
             "INITIATIVE_OUTFLANKING_WEIGHT_MG",
             "INITIATIVE_INFILTRATION_WEIGHT_MG",
             "INITIATIVE_BOTH_FLANKS_WEIGHT_MG",
-            "INITIATIVE_PAWN_ENDGAME_WEIGHT_MG",
             "INITIATIVE_ALMOST_UNWIN_WEIGHT_MG",
             "INITIATIVE_OFFSET_MG",
             "INITIATIVE_MG_OFFSET",
@@ -418,7 +524,6 @@ class SPSAOptimizer:
             "INITIATIVE_OUTFLANKING_WEIGHT_EG",
             "INITIATIVE_INFILTRATION_WEIGHT_EG",
             "INITIATIVE_BOTH_FLANKS_WEIGHT_EG",
-            "INITIATIVE_PAWN_ENDGAME_WEIGHT_EG",
             "INITIATIVE_ALMOST_UNWIN_WEIGHT_EG",
             "INITIATIVE_OFFSET_EG",
         ):
@@ -567,26 +672,28 @@ class SPSAOptimizer:
 
         print(f"Constraints configured: {len(cm.constraints)} constraints active.")
 
-    def _cost(self, theta, indices=None):
+    def _cost(self, theta, indices=None, k_factor=1.0):
         # Support batching via indices slicing
         if indices is None:
             # Full dataset
             return compute_mse(
-                self.piece_bbs, 
-                self.occupancy_bbs, 
-                self.game_states, 
-                self.results, 
-                theta
+                self.piece_bbs,
+                self.occupancy_bbs,
+                self.game_states,
+                self.results,
+                theta,
+                k_factor,
             )
         else:
             # Subset
             # Numpy slicing with integer array returns a copy. This is acceptable for mini-batches.
             return compute_mse(
-                self.piece_bbs[indices], 
-                self.occupancy_bbs[indices], 
-                self.game_states[indices], 
-                self.results[indices], 
-                theta
+                self.piece_bbs[indices],
+                self.occupancy_bbs[indices],
+                self.game_states[indices],
+                self.results[indices],
+                theta,
+                k_factor,
             )
 
     def _build_validation_buckets(self, indices, reference_theta):
@@ -662,7 +769,7 @@ class SPSAOptimizer:
             ),
         ]
 
-    def _report_validation_buckets(self, theta, indices, buckets):
+    def _report_validation_buckets(self, theta, indices, buckets, k_factor=1.0):
         if indices is None or not buckets:
             return
         errors = compute_squared_errors(
@@ -671,6 +778,7 @@ class SPSAOptimizer:
             self.game_states[indices],
             self.results[indices],
             theta,
+            k_factor,
         )
         print("  Fixed-theta0 validation buckets (MSE, n):")
         for name, mask in buckets:
@@ -878,36 +986,131 @@ class SPSAOptimizer:
             if count >= 6 and np.any(mask[start : start + count] > 0):
                 mask[start + 5] = 0.0
                 print("EG_MATERIAL_VALUES: keep King frozen (index 5)")
-        
+
+        # Dead / unreferenced knobs in evaluation.py: never perturb under SPSA.
+        for dead_name in (
+            "INITIATIVE_PAWN_ENDGAME_WEIGHT_MG",
+            "INITIATIVE_PAWN_ENDGAME_WEIGHT_EG",
+        ):
+            if dead_name in name_to_indices:
+                d_start, d_count = name_to_indices[dead_name]
+                mask[d_start : d_start + d_count] = 0.0
+
+        # Exclude any hard-pinned entries (lower >= upper) so SPSA only perturbs
+        # real degrees of freedom (skips unused rank/col padding, mobility 0-bins, etc.).
+        cm = getattr(self, "constraint_manager", None)
+        if cm is not None:
+            for p in self.param_manager.param_map:
+                start, count = p["start"], p["count"]
+                if not np.any(mask[start : start + count] > 0):
+                    continue
+                abs_idx = np.arange(start, start + count, dtype=np.int64)
+                lower, upper = cm._absolute_bounds(p["name"], abs_idx)
+                pinned = lower >= upper
+                if np.any(pinned):
+                    mask[start : start + count][pinned] = 0.0
+
         active_params = np.sum(mask)
         total_params = len(mask)
         print(f"Active parameters: {int(active_params)} / {total_params}")
-        
+
         return mask
+
+    def _build_param_scales(self, reference_theta, mask, c=2.0):
+        """Build coordinate perturbation/step scales s_i >= 1.0 for active params.
+
+        In classical HCE, some constants are centipawns while others are SF danger
+        units (~12 units/cp) or quadratic imbalance units (~35 units/cp), and
+        high-rank passer/shelter entries reach 70..220. Transforming SPSA to
+        u_i = theta_i / s_i equalizes finite-difference signal and convergence
+        speed while keeping Material + PST strictly at 1.0 cp scale.
+        """
+        scales = np.ones_like(reference_theta, dtype=np.float64)
+        unit_cp_groups = {
+            "MG_MATERIAL_VALUES",
+            "EG_MATERIAL_VALUES",
+            "PST_MG",
+            "PST_EG",
+        }
+        danger_large_groups = {
+            "SAFE_CHECK_QUEEN",
+            "SAFE_CHECK_ROOK",
+            "SAFE_CHECK_BISHOP",
+            "SAFE_CHECK_KNIGHT",
+            "KING_DANGER_NO_QUEEN",
+            "KING_DANGER_NO_QUEEN_ROOKLESS",
+        }
+        danger_medium_groups = {
+            "KING_DANGER_WEAK_SQ",
+            "KING_DANGER_UNSAFE_CHECK",
+            "KING_DANGER_BLOCKERS",
+            "KING_DANGER_KNIGHT_DEF",
+            "KING_DANGER_ATTACK_ON_KING_SQ",
+            "KING_ATTACK_WEIGHTS",
+        }
+        imbalance_quad_groups = {
+            "IMBALANCE_QUADRATIC_OURS",
+            "IMBALANCE_QUADRATIC_THEIRS",
+        }
+
+        cm = getattr(self, "constraint_manager", None)
+        eff_c = max(float(c), 2.0)
+
+        for p in self.param_manager.param_map:
+            name = p["name"]
+            start, count = p["start"], p["count"]
+            sl = slice(start, start + count)
+            if not np.any(mask[sl] > 0):
+                continue
+
+            vals = np.abs(np.asarray(reference_theta[sl], dtype=np.float64))
+            if name in unit_cp_groups:
+                local_s = np.ones(count, dtype=np.float64)
+            elif name in danger_large_groups:
+                local_s = np.clip(vals / 60.0, 6.0, 15.0)
+            elif name in danger_medium_groups:
+                local_s = np.clip(vals / 30.0, 1.0, 5.0)
+            elif name in imbalance_quad_groups:
+                local_s = np.clip(vals / 25.0, 1.5, 20.0)
+            else:
+                local_s = np.clip(vals / 30.0, 1.0, 4.0)
+
+            if cm is not None:
+                abs_idx = np.arange(start, start + count, dtype=np.int64)
+                lower, upper = cm._absolute_bounds(name, abs_idx)
+                span = upper - lower
+                finite_box = np.isfinite(span) & (span > 0.0)
+                if np.any(finite_box):
+                    box_cap = np.maximum(1.0, span[finite_box] / (2.0 * eff_c))
+                    local_s[finite_box] = np.minimum(local_s[finite_box], box_cap)
+
+            scales[sl] = local_s
+
+        return scales
 
     def optimize(self, iterations=1000, alpha=0.1, gamma=0.101, c=2.0, A=100,
                  save_path="tuner/tuned_constants.py", include_list=None, exclude_list=None,
-                 batch_size=None, eval_sample=1_000_000, report_every=50, patience=30,
-                 metrics_sample=500_000, seed=0, king_pst_only=False,
-                 non_king_pst_only=False, pst_pieces=None):
+                 batch_size=None, eval_sample=1_000_000, holdout_sample=2_000_000,
+                 report_every=50, patience=30, metrics_sample=500_000, seed=0,
+                 king_pst_only=False, non_king_pst_only=False, pst_pieces=None,
+                 k_factor=1.0, train_indices_override=None, eval_indices_override=None,
+                 c_floor=1.25, auto_scale=True, verbose_buckets="endpoints"):
         """
-        Standard SPSA with constraints, parameter mask, mini-batch gradients.
+        Scale-aware SPSA with integer quantization floor, EMA candidate tracking,
+        integer-memoized dev evaluation, parameter mask, and mini-batch gradients.
 
-        eval_sample: size of a **held-out validation set** used only for MSE
-        reporting / best tracking (default 1M). Those indices are never used
-        in gradient mini-batches. Set <= 0 to disable hold-out (train+eval = full data).
-
-        patience: stop after this many consecutive *report* steps without a new best
-        (default 30). Set to 0 to disable early stopping.
-
-        metrics_sample: fixed subset of the hold-out used for phase/material bucket
-        MSE reporting (default 500k). Membership is computed once from theta0 so
-        different candidates are directly comparable. Set <= 0 to disable.
-
-        seed: SPSA perturbation / training mini-batch seed. Validation and bucket
-        membership stay fixed across seeds for directly comparable runs.
-
-        king_pst_only / non_king_pst_only / pst_pieces: restrict which PST rows move.
+        eval_sample: size of the **in-run dev validation set** used only for MSE
+        reporting / early-stop best tracking (default 1M).
+        holdout_sample: size of the **strictly unseen test holdout** reserved for
+        post-run paired validation (default 2M on 20M dataset; auto-disabled on
+        small datasets). Neither eval_indices nor holdout_indices ever enters
+        gradient mini-batches.
+        c_floor: minimum perturbation c_k (default 1.25 > 1.0) so np.rint(theta ± c_k)
+        always crosses at least ±1 integer in opposite directions for every fractional
+        offset in [-0.5, +0.5], preventing SPSA quantization deadlock.
+        auto_scale: scale perturbation & update step per parameter unit scale.
+        verbose_buckets: 'endpoints' (default: print 12-bucket table at start & end
+        only) or 'all' (print on every report_every).
         """
         theta = self.best_theta.copy()
         run_baseline_theta = theta.copy()
@@ -917,25 +1120,47 @@ class SPSAOptimizer:
             non_king_pst_only=non_king_pst_only,
             pst_pieces=pst_pieces,
         )
+        active_bool = mask != 0
+        scales = (
+            self._build_param_scales(run_baseline_theta, mask, c=c)
+            if auto_scale
+            else np.ones_like(theta, dtype=np.float64)
+        )
+        if auto_scale and np.any(active_bool):
+            act_s = scales[active_bool]
+            if float(np.max(act_s)) > 1.01:
+                print(
+                    f"Coordinate auto-scale active: min={float(np.min(act_s)):.2f}, "
+                    f"median={float(np.median(act_s)):.2f}, max={float(np.max(act_s)):.2f}"
+                )
 
-        split_rng = np.random.default_rng(0)
         train_rng = np.random.default_rng(seed)
         n = self.n_samples
 
-        # Held-out validation split (never used for gradient steps)
-        if eval_sample is None or eval_sample <= 0 or eval_sample >= n:
-            eval_indices = None
-            train_indices = np.arange(n, dtype=np.int64)
+        if train_indices_override is not None:
+            train_indices = np.asarray(train_indices_override, dtype=np.int64)
+            eval_indices = (
+                np.asarray(eval_indices_override, dtype=np.int64)
+                if eval_indices_override is not None
+                else None
+            )
+            holdout_indices = None
+        else:
+            train_indices, eval_indices, holdout_indices = split_dataset_indices(
+                n, eval_sample=eval_sample, holdout_sample=holdout_sample
+            )
+        if eval_indices is None:
             print(f"No hold-out: train+eval on full dataset ({n:,})")
         else:
-            n_val = int(eval_sample)
-            eval_indices = np.sort(split_rng.choice(n, size=n_val, replace=False))
-            is_val = np.zeros(n, dtype=bool)
-            is_val[eval_indices] = True
-            train_indices = np.flatnonzero(~is_val).astype(np.int64)
+            hold_msg = (
+                f"unseen test holdout: {len(holdout_indices):,}  |  "
+                if holdout_indices is not None
+                else ""
+            )
             print(
-                f"Hold-out val: {len(eval_indices):,}  |  train pool: {len(train_indices):,}  "
-                f"(val never enters mini-batches)"
+                f"Dev val: {len(eval_indices):,}  |  {hold_msg}"
+                f"train pool: {len(train_indices):,}  "
+                f"(dev/holdout never enter mini-batches)"
             )
 
         n_train = len(train_indices)
@@ -960,14 +1185,35 @@ class SPSAOptimizer:
                 "(membership from initial theta0)"
             )
 
+        # Memoize dev validation MSE by quantized int32 vector because
+        # evaluate_position_tunable depends exclusively on np.rint(theta).
+        val_loss_cache: dict[bytes, float] = {}
+
+        def _eval_dev_cached(vec: np.ndarray) -> tuple[float, bool]:
+            q_key = np.rint(vec).astype(np.int32).tobytes()
+            if q_key in val_loss_cache:
+                return val_loss_cache[q_key], True
+            val = float(self._cost(vec, indices=eval_indices, k_factor=k_factor))
+            val_loss_cache[q_key] = val
+            return val, False
+
         # Initial best on validation (or full set if no hold-out)
-        self.best_loss = self._cost(self.best_theta, indices=eval_indices)
-        print(f"Initial val MSE: {self.best_loss:.6f}")
+        self.best_loss, _ = _eval_dev_cached(self.best_theta)
+        initial_loss = self.best_loss
+        print(f"Initial val MSE (K={k_factor:.3f}): {self.best_loss:.7f}")
         self._report_validation_buckets(
-            self.best_theta, metric_indices, validation_buckets
+            self.best_theta, metric_indices, validation_buckets, k_factor=k_factor
         )
 
-        print(f"Starting SPSA optimization for up to {iterations} iterations...")
+        eff_c_floor = (
+            min(float(c), float(c_floor))
+            if (c_floor is not None and c_floor > 0.0 and c >= 1.0)
+            else 0.0
+        )
+        print(
+            f"Starting SPSA optimization for up to {iterations} iterations "
+            f"(c={c}, c_floor={eff_c_floor:.2f}, alpha={alpha:g})..."
+        )
         if batch_size:
             print(f"Using mini-batch size: {batch_size} (from train pool only)")
         if patience and patience > 0:
@@ -981,6 +1227,8 @@ class SPSAOptimizer:
         start_time = time.time()
         stalled_reports = 0
         stopped_early = False
+        theta_ema = theta.copy()
+        ema_decay = 0.985
 
         for k in range(1, iterations + 1):
             # Mini-batch strictly from train_indices
@@ -992,42 +1240,79 @@ class SPSAOptimizer:
 
             ak = alpha / ((A + k) ** 0.602)
             ck = c / (k ** gamma)
+            if eff_c_floor > 0.0 and ck < eff_c_floor:
+                ck = eff_c_floor
 
             raw_delta = train_rng.integers(0, 2, size=theta.shape) * 2 - 1
             delta = raw_delta * mask
+            pert = ck * (scales * delta)
 
-            theta_plus = theta + ck * delta
+            theta_plus = theta + pert
             self.constraint_manager.apply(theta_plus, active_mask=mask)
 
-            theta_minus = theta - ck * delta
+            theta_minus = theta - pert
             self.constraint_manager.apply(theta_minus, active_mask=mask)
 
-            loss_plus = self._cost(theta_plus, indices=batch_indices)
-            loss_minus = self._cost(theta_minus, indices=batch_indices)
+            loss_plus = self._cost(theta_plus, indices=batch_indices, k_factor=k_factor)
+            loss_minus = self._cost(theta_minus, indices=batch_indices, k_factor=k_factor)
 
-            ghat = (loss_plus - loss_minus) / (2 * ck) * delta
-            theta = theta - ak * ghat
+            # Dimensionless gradient wrt u = theta / scales, mapped back to theta
+            ghat_u = (loss_plus - loss_minus) / (2.0 * ck) * delta
+            theta = theta - ak * (scales * ghat_u)
             self.constraint_manager.apply(theta, active_mask=mask)
 
+            theta_ema = ema_decay * theta_ema + (1.0 - ema_decay) * theta
+            self.constraint_manager.apply(theta_ema, active_mask=mask)
+
             if k % report_every == 0:
-                current_loss = self._cost(theta, indices=eval_indices)
-                self._report_validation_buckets(
-                    theta, metric_indices, validation_buckets
+                raw_loss, raw_cached = _eval_dev_cached(theta)
+                ema_loss, _ = _eval_dev_cached(theta_ema)
+                if ema_loss < raw_loss:
+                    cand_loss = ema_loss
+                    cand_theta = theta_ema
+                    cand_src = "EMA"
+                else:
+                    cand_loss = raw_loss
+                    cand_theta = theta
+                    cand_src = "raw"
+
+                if verbose_buckets == "all":
+                    self._report_validation_buckets(
+                        cand_theta, metric_indices, validation_buckets, k_factor=k_factor
+                    )
+
+                max_drift = (
+                    float(np.max(np.abs(theta[active_bool] - run_baseline_theta[active_bool])))
+                    if np.any(active_bool)
+                    else 0.0
                 )
-                if current_loss < self.best_loss:
-                    self.best_loss = current_loss
-                    self.best_theta = theta.copy()
+                changed_cnt = int(
+                    np.count_nonzero(
+                        np.rint(cand_theta[active_bool]).astype(np.int64)
+                        != np.rint(run_baseline_theta[active_bool]).astype(np.int64)
+                    )
+                )
+
+                if cand_loss < self.best_loss - 1e-12:
+                    self.best_loss = cand_loss
+                    self.best_theta = cand_theta.copy()
                     stalled_reports = 0
-                    print(f"Iter {k}: New Best val MSE = {self.best_loss:.7f}")
+                    print(
+                        f"Iter {k:5d}: New Best val MSE = {self.best_loss:.7f} "
+                        f"({self.best_loss - initial_loss:+.2e} vs start, src={cand_src}, "
+                        f"int_changed={changed_cnt}, max|d_theta|={max_drift:.2f}, ck={ck:.2f})"
+                    )
                     self._report_quantized_changes(
                         self.best_theta, run_baseline_theta, mask
                     )
                     self.save_results(save_path)
                 else:
                     stalled_reports += 1
+                    cache_tag = ", cached-int" if raw_cached else ""
                     print(
-                        f"Iter {k}: val MSE = {current_loss:.7f} "
-                        f"(Best: {self.best_loss:.7f}, stalled {stalled_reports}/{patience or '∞'})"
+                        f"Iter {k:5d}: val MSE = {cand_loss:.7f} "
+                        f"(Best: {self.best_loss:.7f}, stalled {stalled_reports}/{patience or 'inf'}, "
+                        f"int_changed={changed_cnt}, max|d_theta|={max_drift:.2f}{cache_tag})"
                     )
                     if patience and patience > 0 and stalled_reports >= patience:
                         print(
@@ -1038,12 +1323,18 @@ class SPSAOptimizer:
                         break
 
         total_time = time.time() - start_time
-        print(f"Optimization finished in {total_time:.2f}s"
-              f"{' (early stop)' if stopped_early else ''}.")
-        print(f"Final Best val MSE: {self.best_loss:.7f}")
+        cache_info = f", unique int evals={len(val_loss_cache)}"
+        print(
+            f"Optimization finished in {total_time:.2f}s"
+            f"{' (early stop)' if stopped_early else ''}{cache_info}."
+        )
+        print(
+            f"Final Best val MSE: {self.best_loss:.7f} "
+            f"({self.best_loss - initial_loss:+.2e} vs run start)"
+        )
         print("Final best bucket report:")
         self._report_validation_buckets(
-            self.best_theta, metric_indices, validation_buckets
+            self.best_theta, metric_indices, validation_buckets, k_factor=k_factor
         )
         self._report_quantized_changes(
             self.best_theta, run_baseline_theta, mask
@@ -1052,7 +1343,10 @@ class SPSAOptimizer:
 
     def save_results(self, path):
         content = self.param_manager.update_constants_string(self.best_theta)
-        with open(path, 'w', encoding='utf-8') as f:
+        out_dir = os.path.dirname(str(path))
+        if out_dir:
+            os.makedirs(out_dir, exist_ok=True)
+        with open(path, "w", encoding="utf-8", newline="\n") as f:
             f.write(content)
 
 if __name__ == "__main__":
@@ -1060,23 +1354,52 @@ if __name__ == "__main__":
     parser.add_argument("--iter", type=int, default=20000, help="Number of SPSA iterations")
     parser.add_argument("--alpha", type=float, default=30000.0, help="Learning rate scaling (a)")
     parser.add_argument(
-        "--c", type=float, default=3.0,
-        help="Perturbation scaling (c); integer HCE parameters normally need c >= 1",
+        "--c", type=float, default=2.5,
+        help="Perturbation scaling (c); integer HCE parameters normally need c >= 1.5",
+    )
+    parser.add_argument(
+        "--c-floor",
+        type=float,
+        default=1.25,
+        help="Minimum c_k floor (>1.0 prevents np.rint quantization deadlock; 0 = disable)",
+    )
+    parser.add_argument(
+        "--no-auto-scale",
+        action="store_true",
+        help="Disable per-parameter unit scaling (use raw 1.0 perturbation scale)",
+    )
+    parser.add_argument(
+        "--verbose-buckets",
+        choices=("endpoints", "all"),
+        default="endpoints",
+        help="Print 12-bucket validation table only at start/end ('endpoints') or every report ('all')",
     )
     parser.add_argument(
         "--seed", type=int, default=0,
         help="SPSA perturbation/mini-batch seed (validation split remains fixed)",
     )
-    
+    parser.add_argument(
+        "--k-factor",
+        type=float,
+        default=1.0,
+        help="Sigmoid scaling multiplier K (scale = ln(10)/400 * K; default 1.0)",
+    )
+
     # New arguments
-    parser.add_argument("--tune", nargs='+', help="List of parameter names to tune (others will be frozen)")
-    parser.add_argument("--exclude", nargs='+', help="List of parameter names to exclude/freeze")
+    parser.add_argument("--tune", nargs="+", help="List of parameter names to tune (others will be frozen)")
+    parser.add_argument("--exclude", nargs="+", help="List of parameter names to exclude/freeze")
     parser.add_argument("--batch-size", type=int, default=65536, help="Mini-batch size for gradient estimation")
     parser.add_argument(
         "--eval-sample",
         type=int,
         default=1_000_000,
-        help="Held-out validation size for MSE/best (never used in train batches; 0 = no hold-out)",
+        help="In-run dev validation size for MSE/early-stop (never used in train batches; 0 = no hold-out)",
+    )
+    parser.add_argument(
+        "--holdout-sample",
+        type=int,
+        default=2_000_000,
+        help="Unseen post-run test holdout size reserved outside both train and dev (default 2,000,000; 0 = disable)",
     )
     parser.add_argument("--report-every", type=int, default=50, help="Log MSE every N iterations")
     parser.add_argument(
@@ -1148,6 +1471,7 @@ if __name__ == "__main__":
             exclude_list=args.exclude,
             batch_size=args.batch_size,
             eval_sample=args.eval_sample,
+            holdout_sample=args.holdout_sample,
             metrics_sample=args.metrics_sample,
             seed=args.seed,
             report_every=args.report_every,
@@ -1156,4 +1480,8 @@ if __name__ == "__main__":
             non_king_pst_only=args.non_king_pst_only,
             pst_pieces=args.pst_pieces,
             save_path=args.output,
+            k_factor=args.k_factor,
+            c_floor=args.c_floor,
+            auto_scale=not args.no_auto_scale,
+            verbose_buckets=args.verbose_buckets,
         )

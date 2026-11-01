@@ -358,8 +358,9 @@ def get_2d_val(theta, base_idx, row, col_size, col):
 
 
 def main() -> None:
-    text = build()
-    OUT_PATH.write_text(text, encoding="utf-8")
+    text = build().replace("\r\n", "\n")
+    with OUT_PATH.open("w", encoding="utf-8", newline="\n") as fh:
+        fh.write(text)
     print(f"Wrote {OUT_PATH} ({len(text)} bytes)")
 
 

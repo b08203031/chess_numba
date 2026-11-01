@@ -21,6 +21,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 DATA = ROOT / "tuner" / "data"
 HCE_NPZ = DATA / "hce" / "dataset.npz"
+HCE_MIX20M_NPZ = DATA / "hce" / "dataset_mix03_20m_s2.npz"
+HCE_VAL_PGN_NPZ = DATA / "hce" / "val_pgn.npz"
 JSONL_MG = DATA / "jsonl" / "training_data_middlegame_cleaned.jsonl"
 JSONL_EG = DATA / "jsonl" / "training_data_endgame_cleaned.jsonl"
 NNUE_NPZ = DATA / "nnue" / "ultimate_halfka_farseerT75.npz"
@@ -34,9 +36,11 @@ def _run(args: list[str]) -> int:
 
 def cmd_status(_args: argparse.Namespace) -> int:
     print("=== HCE tuning data (used by python -m tuner.tuner) ===")
-    print(f"  dataset.npz : {'OK ' if HCE_NPZ.exists() else 'MISSING'}  {HCE_NPZ}")
-    print(f"  jsonl MG    : {'OK ' if JSONL_MG.exists() else 'MISSING'}  {JSONL_MG}")
-    print(f"  jsonl EG    : {'OK ' if JSONL_EG.exists() else 'MISSING'}  {JSONL_EG}")
+    print(f"  dataset.npz        : {'OK ' if HCE_NPZ.exists() else 'MISSING'}  {HCE_NPZ}")
+    print(f"  mix03_20m_s2.npz   : {'OK ' if HCE_MIX20M_NPZ.exists() else 'MISSING'}  {HCE_MIX20M_NPZ}")
+    print(f"  val_pgn.npz (val)  : {'OK ' if HCE_VAL_PGN_NPZ.exists() else 'MISSING'}  {HCE_VAL_PGN_NPZ}")
+    print(f"  jsonl MG           : {'OK ' if JSONL_MG.exists() else 'MISSING'}  {JSONL_MG}")
+    print(f"  jsonl EG           : {'OK ' if JSONL_EG.exists() else 'MISSING'}  {JSONL_EG}")
     pgns = list((DATA / "pgn").glob("*.pgn")) if (DATA / "pgn").exists() else []
     print(f"  pgn files   : {len(pgns)} under {DATA / 'pgn'}")
     for p in pgns[:8]:
@@ -147,7 +151,10 @@ def cmd_tune(args: argparse.Namespace) -> int:
         "--patience", str(args.patience),
         "--alpha", str(args.alpha),
         "--c", str(args.c),
+        "--c-floor", str(args.c_floor),
     ]
+    if getattr(args, "no_auto_scale", False):
+        cmd.append("--no-auto-scale")
     if args.tune:
         cmd += ["--tune", *args.tune]
     if args.exclude:
@@ -259,8 +266,10 @@ def main() -> int:
             default=30,
             help="Stop after N consecutive reports without new best (0=off)",
         )
-        p.add_argument("--alpha", type=float, default=30000.0)
-        p.add_argument("--c", type=float, default=3.0)
+        p.add_argument("--alpha", type=float, default=50000.0)
+        p.add_argument("--c", type=float, default=2.5)
+        p.add_argument("--c-floor", type=float, default=1.25)
+        p.add_argument("--no-auto-scale", action="store_true")
 
     p_tune = sub.add_parser("tune", help="Run SPSA on existing dataset.npz")
     add_tune_args(p_tune)

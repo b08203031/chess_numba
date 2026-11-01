@@ -36,8 +36,11 @@ stockfish*/
 # Archive & historical dumps
 *.zip
 archive/
+scratch/
 tuner/archive/
 tuner/data/
+tuner/runs/
+tuner/tuned_*.py
 
 # IDE & third-party tools
 .vscode/
@@ -46,4 +49,5 @@ tuner/data/
 *.ipynb
 !tune_colab_runner*.ipynb
 !tournament_colab_runner*.ipynb
+!texel_tuner_runner.ipynb
 ag-*.json

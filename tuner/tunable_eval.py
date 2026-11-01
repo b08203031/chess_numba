@@ -1979,6 +1979,8 @@ def _evaluate_king_pawn_endgame(piece_bbs, occupancy_bbs, game_state, castling_r
     wp_cnt = 0
     bp_cnt = 0
     all_occ = occupancy_bbs[2]
+    other_occ_w = all_occ ^ piece_bbs[5]
+    other_occ_b = all_occ ^ piece_bbs[11]
 
     # 1. 基礎兵價和位置
     temp_wp = white_pawns
@@ -1992,7 +1994,7 @@ def _evaluate_king_pawn_endgame(piece_bbs, occupancy_bbs, game_state, castling_r
         if not (WHITE_PASSED_PAWN_MASKS[sq] & black_pawns) and not (forward_mask & white_pawns):
             rank = sq >> 3
             steps_to_promote = 7 - rank
-            if rank == 1 and not (all_occ & (BB_SQUARES[sq + 8] | BB_SQUARES[sq + 16])):
+            if rank == 1 and not (other_occ_w & (BB_SQUARES[sq + 8] | BB_SQUARES[sq + 16])):
                 steps_to_promote = 5  # double-push correction
             if forward_mask & piece_bbs[5]:
                 steps_to_promote += 1  # own king blocks advance on promotion path
@@ -2016,7 +2018,7 @@ def _evaluate_king_pawn_endgame(piece_bbs, occupancy_bbs, game_state, castling_r
         if not (BLACK_PASSED_PAWN_MASKS[sq] & white_pawns) and not (forward_mask & black_pawns):
             rank = sq >> 3
             steps_to_promote = rank
-            if rank == 6 and not (all_occ & (BB_SQUARES[sq - 8] | BB_SQUARES[sq - 16])):
+            if rank == 6 and not (other_occ_b & (BB_SQUARES[sq - 8] | BB_SQUARES[sq - 16])):
                 steps_to_promote = 5  # double-push correction
             if forward_mask & piece_bbs[11]:
                 steps_to_promote += 1  # own king blocks advance on promotion path
@@ -2285,9 +2287,13 @@ def _evaluate_position_jit(piece_bbs, occupancy_bbs, game_state, lazy, search_co
             wp_cnt, 0, 0, 0, 0, bp_cnt, 0, 0, 0, 0, wk_sq, bk_sq,
         )
         if sf == SCALE_FACTOR_DRAW:
-            score = np.int32(0)
-        val = np.int32(score) if side_to_move == 0 else np.int32(-score)
-        return val, PINNED_UNCOMPUTED_SENTINEL, PINNED_UNCOMPUTED_SENTINEL
+            return np.int32(0), PINNED_UNCOMPUTED_SENTINEL, PINNED_UNCOMPUTED_SENTINEL
+
+        if sf != SCALE_FACTOR_NORMAL:
+            score = _trunc_div(score * sf, SCALE_FACTOR_NORMAL)
+        tempo = _ew_get(ew, use_ew, _EW_TEMPO, get_int(theta, IDX_TEMPO_BONUS))
+        final_score = np.int32(score + tempo) if side_to_move == 0 else np.int32(-score + tempo)
+        return final_score, PINNED_UNCOMPUTED_SENTINEL, PINNED_UNCOMPUTED_SENTINEL
 
     # Precompute King Squares for evaluation components
     white_king_sq = get_lsb_index(piece_bbs[5])

@@ -12,8 +12,9 @@
 
 | 用途 | 實際來源 | 本機路徑 | 現況 |
 | :--- | :--- | :--- | :--- |
-| **HCE SPSA（純 Texel）** | Bullet 對局勝負 | `tuner/data/hce/dataset.npz` | 已驗證：10M、3 種 WDL labels |
-| **HCE SPSA（目前廣義殘局 run）** | 70% 勝負 + 30% SF sigmoid | `tuner/data/hce/dataset_mix03_20m_s2.npz` | 已驗證：20M、mix labels |
+| **HCE SPSA（純 Texel）** | Bullet 對局勝負 | `tuner/data/hce/dataset.npz` | 已驗證：10M（註：與下方 20M 前 5M 重疊，勿互作驗證集） |
+| **HCE SPSA 主資料集（3-way 無洩漏切分）** | 70% 勝負 + 30% SF sigmoid | `tuner/data/hce/dataset_mix03_20m_s2.npz` | 20M 自動切為 **17M train / 1M dev / 2M unseen holdout** |
+| **獨立對戰驗證集（只作驗證）** | 本引擎高節點（≥150k）對戰 PGN | `tuner/data/hce/val_pgn.npz` | ~1.59M 唯一靜態局面（含真實易位權、EP、rule50 與平均 WDL） |
 | **來源 A（推薦、你已有）** | NNUE 的 **Bullet `.bin`**（棋盤 + SF 分 + **對局勝負**） | `tuner/data/nnue/official_data_farseerT75.bin` | 用 `--from-bullet` 轉換 |
 | 來源 B | 自備 PGN（TWIC）→ JSONL → NPZ | `tuner/data/pgn/` | `data --pgn ...` |
 | HCE 標籤 | `game` = 標準 Texel WDL；`sf` = SF 分蒸餾；`mix` = `(1-λ)·game+λ·sf`（預設 λ=0.3） | 寫進 `results` | `game` 與 `mix` 目標不同，不能只以 label 是否連續判優劣 |
@@ -31,9 +32,12 @@ python -m tuner.run status
 
 ## 濃縮指令（推薦日常用法）
 
+> **互動式區塊調參（推薦）：** 根目錄 [`texel_tuner_runner.ipynb`](../texel_tuner_runner.ipynb) 透過 `tuner/notebook_session.py` 在單一 Kernel 載入一次 20M + PGN 驗證集（約 3.7 GB RAM，免重複載入與免重編譯 Numba），每個調參區塊皆為獨立 `[Run]` / `[Accept]` Cell，自動跑雙重無洩漏驗證（2M `mix03` holdout + 1.59M `val_pgn`）。
+
 ```bash
-# 0) 看資料是否齊
+# 0) 看資料是否齊 / 重建本引擎對戰 PGN 獨立驗證集
 python -m tuner.run status
+python -m tuner.data_pipeline.build_pgn_validation --min-median-nodes 150000 --workers 10
 
 # 1) classical 改過評估/常數後：同步 tunable
 python -m tuner.run sync
@@ -111,10 +115,13 @@ tuner/
 ├── sync_constants_snapshot.py
 ├── tunable_eval.py           # 接受 theta 的評估（codegen 產物）
 ├── tuned_constants.py        # SPSA 輸出（產物）
-├── apply_tuned.py            # 把輸出 merge 回 classical/constants.py
-├── validate_tuned.py         # 排除固定 validation 的 paired MSE / bucket z
-├── scan_scalar_grid.py       # 少量整數 scalar 的固定樣本離散窮舉
-├── data_pipeline/            # HCE 標籤資料
+├── apply_tuned.py            # AST 精確行段替換 merge 回 classical/constants.py（保留註解與空行）
+├── validate_tuned.py         # 3-way unseen holdout + 獨立 PGN paired MSE / bucket z / K* 校準
+├── scan_scalar_grid.py       # 少量整數 scalar 的離散窮舉
+├── notebook_session.py       # 互動式 Notebook 單次載入與雙重驗證 Session 控制器
+├── data_pipeline/            # HCE 標籤與驗證資料
+│   ├── build_pgn_validation.py
+│   ├── convert_bullet_to_hce.py
 │   ├── download_twic.py
 │   ├── generate_training_data.py
 │   ├── preprocess_data.py
@@ -229,32 +236,33 @@ python -m tuner.tuner --dataset tuner/data/hce/dataset_mix03_20m_s2.npz \
 - `MIDGAME_LIMIT` 由候選 MG `N/B/R/Q` 的完整開局非兵材質即時計算；`ENDGAME_LIMIT` 保持 SF11 的 `3915/15258` 比例。正式引擎、runtime match weights、Texel 的 `theta+ / theta-` 都走同一公式，因此 start position 永遠是 phase 128。
 - `PST_MG/PST_EG` 每個棋種列保留 θ₀ 平均值（兵只計 rank 2–7），只調格子間形狀；現有表不會被重新置中。
 - 每張 mobility table 的 0-mobility MG/EG bin 固定在 θ₀，material 負責棋種基準值。
-- tuner 候選與輸出檔都使用 `np.rint/np.round` 的同一整數量化；因此主調參 `c` 應至少為 1，預設／建議起點為 3。
+- tuner 候選與輸出檔都使用 `np.rint/np.round` 的同一整數量化；`SPSAOptimizer` 預設啟用 **整數擾動保底 `c_floor = 1.25`**（確保對任意分數殘差 `[-0.5, +0.5]`，`theta ± c_k` 皆雙向跨越整數格點，杜絕量化死鎖）、**依單位自動尺度化 `auto_scale=True`**（對 King Danger ~12 units/cp、二次 Imbalance ~35 units/cp 與高階表項自動放大擾動與步幅，Material + PST 則維持嚴格 1.0 cp），以及 **整數向量驗證快取 + EMA 平滑候選追蹤**（`--verbose-buckets endpoints` 僅於起訖輸出 12 分桶表，省去重複驗證與洗版）。
 - validation bucket 以初始 θ₀ 固定成員，候選 material 改變時不重分桶；這樣各次報告可直接比較。
 - 跨輪比較必須固定 dataset、`--eval-sample` 與 validation split。輸出 `tuned_*.py` 不會自動套回 production；接受後須先套用、執行 `python -m tuner.run sync` 清除 stale Numba cache，再啟動下一輪，否則下一輪不會承接前一輪 best。
-- 20M dataset 的目前預設為 batch 65,536、validation 1,000,000（5%）、bucket metrics 500,000、report every 50、patience 30。`validate_tuned.py` 預設排除這固定 1M，從 SPSA train pool 另抽 10M 做 secondary paired check；它能檢查 robustness，但因仍來自同一 dataset，不能冒充真正獨立資料源。
+- 20M dataset 的目前預設為 3-way 切分（`split_dataset_indices`）：**17,000,000 train**、`--eval-sample 1,000,000`（SPSA 過程報告與 early stop 專用）、`--holdout-sample 2,000,000`（完全不進梯度也不進 early stop 的獨立 holdout）。`validate_tuned.py` 預設（`--split holdout`）直接檢驗這 2M unseen holdout，並支援 `--pgn-val tuner/data/hce/val_pgn.npz` 同時驗證本引擎實戰 PGN（含 `castling!=0` 易位權桶與 baseline 校準 `K*`）。
 
-接受一組參數時，除了總 `val MSE`，至少同時查看 `phase=0`、`phase=1..31`、`phase=32..63` 與 `broad-EG phase<=64`。若總 MSE 下降但 broad-EG 持續變差，該組不應進入對局閘門。
+接受一組參數時，除了總 `val MSE`，至少同時查看 `phase=0`、`phase=1..31`、`phase=32..63`、`broad-EG phase<=64` 以及 `val_pgn.npz`（若動到 shelter / storm / trapped rook / 王 PST，額外盯緊 `castling!=0`）。若總 MSE 下降但 broad-EG 或實戰 PGN 顯著退步，該組不應進入對局閘門。
 
-### 5. Secondary paired validation 與離散 scalar
+### 5. Unseen Holdout + 獨立 PGN Paired Validation 與離散 scalar
 
 ```bash
-# 候選檔相對目前 constants snapshot 的 10M paired MSE、SE、z；預設排除固定 1M validation
+# 同時驗證 2M unseen holdout + 1.59M 實戰 PGN 獨立驗證集（含 K=1.0 與校準 K*）
 python -m tuner.validate_tuned \
   --dataset tuner/data/hce/dataset_mix03_20m_s2.npz \
-  --tuned tuner/tuned_constants.py --sample 10000000 \
-  --exclude-fixed-val 1000000 --chunk-size 1000000
+  --pgn-val tuner/data/hce/val_pgn.npz \
+  --tuned tuner/tuned_constants.py --split holdout --fit-k
 
 # 可暫時覆寫 scalar 或陣列單格，不修改檔案
 python -m tuner.validate_tuned --dataset tuner/data/hce/dataset_mix03_20m_s2.npz \
+  --pgn-val tuner/data/hce/val_pgn.npz \
   --tuned tuner/constants_snapshot.py --override KING_DANGER_THRESHOLD=69 \
-  --override "EG_MATERIAL_VALUES[0]=119" --sample 2000000
+  --override "EG_MATERIAL_VALUES[0]=119" --split holdout
 
-# 少數整數候選優先窮舉；範圍可用 LO:HI 或 LO:HI:STEP，--top 只列最佳 N 行
+# 少數整數候選優先窮舉（先在 1M dev 找最佳點，再用 holdout + val_pgn 複驗）
 python -m tuner.scan_scalar_grid \
   --dataset tuner/data/hce/dataset_mix03_20m_s2.npz \
   --grid KING_DANGER_OFFSET=0:2 --grid KING_DANGER_THRESHOLD=68:74 \
-  --eval-sample 1000000 --top 10
+  --split dev --eval-sample 1000000 --top 10
 ```
 
 scalar grid 的 bucket 以 baseline θ₀ 固定，負 delta 較好。先用固定 1M 探索，再用 `--exclude-fixed-val 1000000 --eval-sample 10000000` 或 `validate_tuned.py` 複驗，避免只接受固定 validation 的局部最佳。

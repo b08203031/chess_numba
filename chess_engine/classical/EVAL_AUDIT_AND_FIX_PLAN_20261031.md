@@ -81,11 +81,12 @@
 * **現行程式碼（修復後）**：
   ```python
   # 白方方形法則（黑方鏡像同理）：
+  other_occ_w = all_occ ^ piece_bbs[5]  # 排除己方王，保留起點雙步潛力（避免王在第3/4橫排時產生「剝奪雙步+王讓路」雙重懲罰）
   forward_mask = WHITE_FORWARD_FILE_MASKS[sq]
   if not (WHITE_PASSED_PAWN_MASKS[sq] & black_pawns) and not (forward_mask & white_pawns):
       rank = sq >> 3
       steps_to_promote = 7 - rank
-      if rank == 1 and not (all_occ & (BB_SQUARES[sq + 8] | BB_SQUARES[sq + 16])):
+      if rank == 1 and not (other_occ_w & (BB_SQUARES[sq + 8] | BB_SQUARES[sq + 16])):
           steps_to_promote = 5  # double-push correction
       if forward_mask & piece_bbs[5]:
           steps_to_promote += 1  # own king blocks advance on promotion path
@@ -115,8 +116,8 @@
         rank = sq >> 3
         king_on_path = (forward_mask & piece_bbs[5]) != 0
         steps_to_promote = 7 - rank
-        # 2. 起點雙步必須 a3 (sq+8) 與 a4 (sq+16) 皆無任何棋子阻擋
-        if rank == 1 and ((all_occ & (BB_SQUARES[sq + 8] | BB_SQUARES[sq + 16])) == 0):
+        # 2. 起點雙步排除己方王（因王移開僅花 1 步，兵仍可雙步；使用 other_occ_w 避免雙重加罰）
+        if rank == 1 and ((other_occ_w & (BB_SQUARES[sq + 8] | BB_SQUARES[sq + 16])) == 0):
             steps_to_promote = 5
         # 3. 己方王擋在升變直線上，至少需多花 1 步讓路
         if king_on_path:
@@ -472,6 +473,9 @@ flowchart TD
     * 對齊 SF11 `position.cpp:458` `Position::slider_blockers`：在計算雙方皇后被車／象串擊（pin / discovered attack）時，以 `snipers = (ROOK_RAYS & rooks) | (BISHOP_RAYS & bishops)` 預先從佔據位元盤剔除 `occ = all_occupancy ^ snipers`，消除了同一直線雙車或同斜線雙象重疊時被誤算為單一阻擋子而扣罰 `WEAK_QUEEN` 的誤判。
   * [x] **`BUG-8`（`kingAttacksCount` 嚴格移入 `king_zone` 內累加）**：✅ 已完成 (2026-10-31)。
     * 對齊 SF11 `evaluate.cpp:280-285`：白黑雙方共 8 個棋子迴圈（Knight, Bishop, Rook, Queen）將 `king_attacks_count += count_bits(att & king_adjacent)` 嚴格移入 `if att & king_zone:` 區塊內。當棋子未進犯敵王警戒區時，完全略過位元與 popcount 運算，兼具效能與語義精確對齊。
+  * [x] **`KP-DISCONT`（純王兵殘局分數連續性修復）**：✅ 已完成 (2026-11-01)。
+    * 修復 `all_pieces_except_pawns_and_kings == 0` 分支漏加 `tempo`、漏套用 `sf != 64` 縮放與 50 步衰減的重大斷層缺陷。
+    * 若 `sf == SCALE_FACTOR_DRAW` 直接回傳精確 0 分；否則套用 `_trunc_div(score * sf, 64)` 與 `tempo` 加成，徹底消除吃掉最後一顆輕子進入王兵殘局時的分數斷層與 50 步規則失效問題。
 * **工具鏈與 Tuner 同步**：
   * 更新 `tuner/codegen/generate_tunable_eval.py` 正則表達式，自動剝離 material 匯入並內嵌 `_trunc_div`。
   * 重新生成 `tuner/tunable_eval.py`（114,127 bytes）。

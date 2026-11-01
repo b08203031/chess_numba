@@ -16,9 +16,11 @@ from chess_engine.classical.constants import (
     QUEEN,
     ROOK,
 )
+from tuner.apply_tuned import _extract_assignments, apply_tuned_source
 from tuner.constraint_manager import ConstraintManager
+from tuner.data_pipeline.preprocess_data import parse_fen_to_arrays
 from tuner.parameters import ParameterManager
-from tuner.tuner import SPSAOptimizer
+from tuner.tuner import SPSAOptimizer, split_dataset_indices
 
 
 class _DummyParameterManager:
@@ -144,6 +146,149 @@ class TestIntegerAwareTuningBands(unittest.TestCase):
             mask[start:start + count],
             np.array([0.0, 0.0, 1.0, 1.0, 1.0, 1.0]),
         )
+
+    def test_dead_initiative_pawn_endgame_weights_are_pinned_and_frozen(self):
+        dead = [
+            "INITIATIVE_PAWN_ENDGAME_WEIGHT_MG",
+            "INITIATIVE_PAWN_ENDGAME_WEIGHT_EG",
+        ]
+        mask = self.optimizer._create_mask(include_list=dead)
+        for name in dead:
+            start, _ = self.pm.get_param_indices(name)
+            v0 = float(self.pm.theta[start])
+            lower, upper = self.cm._absolute_bounds(name, np.array([start]))
+            self.assertEqual((lower[0], upper[0]), (v0, v0))
+            self.assertEqual(mask[start], 0.0)
+
+    def test_param_scales_respect_unit_classes_and_tight_boxes(self):
+        theta0 = self.pm.get_initial_theta()
+        mask = self.optimizer._create_mask(
+            include_list=[
+                "MG_MATERIAL_VALUES",
+                "PST_MG",
+                "SAFE_CHECK_ROOK",
+                "PASSED_PAWN_BONUS",
+                "PASSED_PATH_SAFE_NONE_ATTACK",
+                "IMBALANCE_QUADRATIC_OURS",
+            ]
+        )
+        scales = self.optimizer._build_param_scales(theta0, mask, c=2.5)
+
+        mg_s, mg_c = self.pm.get_param_indices("MG_MATERIAL_VALUES")
+        pst_s, pst_c = self.pm.get_param_indices("PST_MG")
+        np.testing.assert_allclose(scales[mg_s : mg_s + mg_c], 1.0)
+        np.testing.assert_allclose(scales[pst_s : pst_s + pst_c], 1.0)
+
+        scr_s, _ = self.pm.get_param_indices("SAFE_CHECK_ROOK")
+        self.assertGreaterEqual(scales[scr_s], 10.0)
+
+        pp_s, _ = self.pm.get_param_indices("PASSED_PAWN_BONUS")
+        self.assertEqual(scales[pp_s + 2], 1.0)      # small low-rank entry
+        self.assertGreater(scales[pp_s + 12], 3.0)   # rank-6 132cp entry
+
+        path_s, _ = self.pm.get_param_indices("PASSED_PATH_SAFE_NONE_ATTACK")
+        self.assertEqual(scales[path_s], 1.0)        # ±1 box stays 1.0
+
+
+class TestSplitDatasetIndices(unittest.TestCase):
+    def test_three_way_split_is_disjoint_and_exhaustive(self):
+        train_idx, eval_idx, hold_idx = split_dataset_indices(
+            20_000, eval_sample=1_000, holdout_sample=2_000
+        )
+        self.assertIsNotNone(eval_idx)
+        self.assertIsNotNone(hold_idx)
+        self.assertEqual(len(train_idx), 17_000)
+        self.assertEqual(len(eval_idx), 1_000)
+        self.assertEqual(len(hold_idx), 2_000)
+
+        s_train = set(train_idx.tolist())
+        s_eval = set(eval_idx.tolist())
+        s_hold = set(hold_idx.tolist())
+        self.assertEqual(len(s_train & s_eval), 0)
+        self.assertEqual(len(s_train & s_hold), 0)
+        self.assertEqual(len(s_eval & s_hold), 0)
+        self.assertEqual(len(s_train | s_eval | s_hold), 20_000)
+
+    def test_small_smoke_dataset_disables_holdout_gracefully(self):
+        train_idx, eval_idx, hold_idx = split_dataset_indices(
+            500, eval_sample=1_000, holdout_sample=2_000
+        )
+        self.assertIsNone(eval_idx)
+        self.assertIsNone(hold_idx)
+        self.assertEqual(len(train_idx), 500)
+
+
+class TestApplyTunedPreservesComments(unittest.TestCase):
+    def test_ast_replacement_preserves_inline_and_following_comments(self):
+        target_src = (
+            "import numpy as np\n\n"
+            "INITIATIVE_MG_OFFSET = np.int32(39)  # keep inline comment\n\n"
+            "KING_DANGER_NO_QUEEN = 560\n"
+            "# Important explanation block line 1\n"
+            "# Important explanation block line 2\n"
+            "KING_DANGER_NO_QUEEN_ROOKLESS = 810\n"
+            "PASSED_FILE_BONUS = np.array([16, 4], dtype=np.int32)\n"
+        )
+        tuned_src = (
+            "import numpy as np\n"
+            "INITIATIVE_MG_OFFSET = 42\n"
+            "KING_DANGER_NO_QUEEN = 575\n"
+            "KING_DANGER_NO_QUEEN_ROOKLESS = 810\n"
+            "PASSED_FILE_BONUS = np.array([14, 5], dtype=np.int32)\n"
+        )
+        target_ns = {"np": np}
+        exec(target_src, target_ns)
+        tuned_ns = {"np": np}
+        exec(tuned_src, tuned_ns)
+        tuned_assigns = _extract_assignments(tuned_src)
+
+        new_src, changed, skipped = apply_tuned_source(
+            target_src=target_src,
+            tuned_ns=tuned_ns,
+            target_ns=target_ns,
+            tuned_assigns=tuned_assigns,
+            names=list(tuned_assigns.keys()),
+            verbose=False,
+        )
+        self.assertEqual(
+            changed,
+            ["INITIATIVE_MG_OFFSET", "KING_DANGER_NO_QUEEN", "PASSED_FILE_BONUS"],
+        )
+        self.assertEqual(skipped, 1)
+        self.assertIn(
+            "INITIATIVE_MG_OFFSET = np.int32(42)  # keep inline comment\n\n",
+            new_src,
+        )
+        self.assertIn(
+            "KING_DANGER_NO_QUEEN = 575\n"
+            "# Important explanation block line 1\n"
+            "# Important explanation block line 2\n"
+            "KING_DANGER_NO_QUEEN_ROOKLESS = 810\n",
+            new_src,
+        )
+        self.assertIn(
+            "PASSED_FILE_BONUS = np.array([14, 5], dtype=np.int32)\n",
+            new_src,
+        )
+
+
+class TestPreprocessCastlingAndEp(unittest.TestCase):
+    def test_castling_rights_and_legal_ep_encoding(self):
+        # Pseudo-EP (no adjacent black pawn on d4/f4) -> ep stored as 64
+        _, _, gs_pseudo = parse_fen_to_arrays(
+            "r3k2r/pppppppp/8/8/4P3/8/PPPP1PPP/R3K2R b KQkq e3 0 7"
+        )
+        self.assertEqual(int(gs_pseudo[0]), 1)
+        self.assertEqual(int(gs_pseudo[1]), 15)  # K=1 | Q=2 | k=4 | q=8
+        self.assertEqual(int(gs_pseudo[2]), 64)
+        self.assertEqual(int(gs_pseudo[3]), 0)
+
+        # Legal EP (black pawn on d4 can capture on e3 = sq 20)
+        _, _, gs_legal = parse_fen_to_arrays(
+            "r3k2r/ppp1pppp/8/8/3pP3/8/PPPP1PPP/R3K2R b KQk e3 0 7"
+        )
+        self.assertEqual(int(gs_legal[1]), 7)  # K=1 | Q=2 | k=4
+        self.assertEqual(int(gs_legal[2]), 20)
 
 
 if __name__ == "__main__":

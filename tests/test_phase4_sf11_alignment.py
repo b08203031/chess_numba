@@ -124,24 +124,40 @@ class TestPhase4SF11Alignment(unittest.TestCase):
         self.assertEqual(eg_mob1 - eg_mob2, MINOR_BEHIND_PAWN[1])
 
     def test_bug7_weak_queen_multiple_snipers_file(self):
-        # White Queen on e1, Black Rooks on e5 and e8, Intervening blocker on e3
-        # 4r3/8/8/4r3/8/4N3/8/4Q2k w - - 0 1
-        fen = "4r3/8/8/4r3/8/4N3/8/4Q2k w - - 0 1"
-        pb, occ, gs = parse_fen(fen)
-        res = evaluate_attacks_mobility_threats(
-            pb, occ, 55, 60, np.uint64(0), np.uint64(0), np.uint8(0))
-        mg_mob, eg_mob = res[8], res[9]
+        # 1. Multiple snipers without blocker must NOT trigger WeakQueen (SF11 Position::slider_blockers)
+        # Position with two black rooks stacked on e-file (Re5, Re8) against White Qe1 (White Kg1, Black Kh8).
+        # In the buggy code, Re5 was falsely treated as a blocker for Re8, penalizing Qe1 with WEAK_QUEEN.
+        # With snipers stripped from occupancy, Re5 is recognized as a sniper, not a blocker.
+        # Moving the rear rook from e8 to d8 (off the file) must yield the exact same queen mobility!
+        fen_stacked_snipers = "4r2k/8/8/4r3/8/8/8/4Q1K1 w - - 0 1"
+        fen_split_snipers = "3r3k/8/8/4r3/8/8/8/4Q1K1 w - - 0 1"
+        pb_stack, occ_stack, _ = parse_fen(fen_stacked_snipers)
+        pb_split, occ_split, _ = parse_fen(fen_split_snipers)
+        res_stack = evaluate_attacks_mobility_threats(
+            pb_stack, occ_stack, 6, 63, np.uint64(0), np.uint64(0), np.uint8(0))
+        res_split = evaluate_attacks_mobility_threats(
+            pb_split, occ_split, 6, 63, np.uint64(0), np.uint64(0), np.uint8(0))
+        self.assertEqual(
+            res_stack[8], res_split[8],
+            "Multiple stacked snipers without real blocker must NOT trigger false WeakQueen penalty"
+        )
 
-        # If weak queen wasn't detected, mobility would not include -WEAK_QUEEN
-        # Verify that weak queen penalty is triggered
-        # Contrast with blocker removed (queen directly under attack, not relative pin through 1 blocker)
-        fen_clear = "4r3/8/8/4r3/8/8/8/4Q2k w - - 0 1"
-        pb_clear, occ_clear, gs_clear = parse_fen(fen_clear)
-        res_clear = evaluate_attacks_mobility_threats(
-            pb_clear, occ_clear, 55, 60, np.uint64(0), np.uint64(0), np.uint8(0))
-        # With blocker present, WeakQueen penalty is applied
-        # Difference in mobility includes WEAK_QUEEN deduction
-        self.assertLess(mg_mob, res_clear[8])
+        # 2. Real blocker between queen and snipers MUST trigger WeakQueen
+        # White Ne3 blocks between Qe1 and Re5
+        fen_real_blocker = "4r2k/8/8/4r3/8/4N3/8/4Q1K1 w - - 0 1"
+        pb_b, occ_b, _ = parse_fen(fen_real_blocker)
+        res_b = evaluate_attacks_mobility_threats(
+            pb_b, occ_b, 6, 63, np.uint64(0), np.uint64(0), np.uint8(0))
+
+        # Contrast with Ne3 moved to d3 (not on the pin file, so queen is not under relative pin)
+        fen_unpinned = "4r2k/8/8/4r3/8/3N4/8/4Q1K1 w - - 0 1"
+        pb_u, occ_u, _ = parse_fen(fen_unpinned)
+        res_u = evaluate_attacks_mobility_threats(
+            pb_u, occ_u, 6, 63, np.uint64(0), np.uint64(0), np.uint8(0))
+        self.assertLess(
+            res_b[8], res_u[8],
+            "Real blocker (Ne3) on the sniper ray must trigger WeakQueen penalty on Qe1"
+        )
 
     def test_bug8_king_attacks_count_in_zone(self):
         # White Knight on f6 attacking Black King on h8 (king zone and adjacent squares)

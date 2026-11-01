@@ -44,7 +44,8 @@ def main() -> None:
     snapshot_changed = not DST.exists() or DST.read_text(encoding="utf-8") != snapshot
 
     if snapshot_changed:
-        DST.write_text(snapshot, encoding="utf-8")
+        with DST.open("w", encoding="utf-8", newline="\n") as fh:
+            fh.write(snapshot)
         removed = clear_classical_numba_cache()
         print(
             f"Wrote {DST.relative_to(ROOT)} from {SRC.relative_to(ROOT)}; "
@@ -54,7 +55,8 @@ def main() -> None:
         print(f"Unchanged {DST.relative_to(ROOT)}")
 
     if not SHIM.exists() or SHIM.read_text(encoding="utf-8") != SHIM_TEXT:
-        SHIM.write_text(SHIM_TEXT, encoding="utf-8")
+        with SHIM.open("w", encoding="utf-8", newline="\n") as fh:
+            fh.write(SHIM_TEXT)
 
 
 if __name__ == "__main__":

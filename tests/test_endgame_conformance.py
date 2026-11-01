@@ -18,7 +18,7 @@ from chess_engine.classical.endgame import (
     evaluate_special_endgame,
     get_endgame_scale_factor,
 )
-from chess_engine.classical.constants import SCALE_FACTOR_DRAW
+from chess_engine.classical.constants import SCALE_FACTOR_DRAW, TEMPO_BONUS
 from chess_engine.classical.evaluation import evaluate_position
 
 
@@ -225,10 +225,11 @@ class TestEndgameConformance(unittest.TestCase):
 
     def test_kpkp_scale_factor_draw(self):
         # Symmetrical blocked pawns (e4 vs e5, kings e2 vs e7) -> theoretical draw (SF11 KPKP)
+        # Position score is 0; with Tempo bonus added for side to move, eval is TEMPO_BONUS
         fen = "8/4k3/8/4p3/4P3/8/4K3/8 w - - 0 1"
         piece_bbs, occupancy_bbs, game_state = parse_fen(fen)
         val, _, _ = evaluate_position(piece_bbs, occupancy_bbs, game_state)
-        self.assertEqual(val, 0)
+        self.assertEqual(val, TEMPO_BONUS)
 
     def test_doubled_pawns_front_blocks_rear_unstoppable(self):
         # White has doubled pawns on a2 and a3, black king far away on h8 with irrelevant h7 pawn.
@@ -257,13 +258,29 @@ class TestEndgameConformance(unittest.TestCase):
         self.assertGreater(diff_black, 0, f"Black doubled pawn should still be slightly better due to extra material ({diff_black} cp)")
 
     def test_king_on_path_blocks_unstoppable_pawn(self):
-        # White Ka5 directly blocks pawn a4 promotion path; Black Ke5 is in square
-        # Pa4 must not receive unstoppable bonus when Ka5 blocks its forward path
-        fen_blocked = "8/7p/8/K3k3/P7/8/8/8 b - - 0 1"
-        p, o, g = parse_fen(fen_blocked)
-        v, _, _ = evaluate_position(p, o, g)
-        # Score without unstoppable bonus is moderate (~800 cp, not ~1600+ cp)
-        self.assertLess(v, 1200, f"King on promotion path incorrectly granted unstoppable bonus: eval={v}")
+        # 1. Advanced pawn: White Ka5 blocks Pa4. Black Kf4 is at distance 5 from a8.
+        # With Ka5 blocking, Pa4 needs (4 + 1) = 5 steps, so Black king (dist 5) can catch it -> no unstoppable bonus.
+        # If White king is moved away to b1, Pa4 needs 4 steps -> unstoppable bonus granted!
+        fen_blocked = "8/7p/8/K7/P4k2/8/8/8 w - - 0 1"
+        fen_free = "8/7p/8/8/P4k2/8/8/1K6 w - - 0 1"
+        v_blocked, _, _ = evaluate_position(*parse_fen(fen_blocked))
+        v_free, _, _ = evaluate_position(*parse_fen(fen_free))
+        self.assertGreater(v_free - v_blocked, 700, "Unblocked pawn must score unstoppable bonus (+800 cp) over blocked pawn")
+
+        # 2. Starting pawn: White Ka3 blocks Pa2.
+        # With Ka3 stepping aside, Pa2 can double push: 1 (king) + 5 (pawn) = 6 steps to queen.
+        # If Black king is at distance 6 (g4), Black can catch it -> no unstoppable bonus.
+        # If Black king is at distance 7 (h4), Black cannot catch it -> unstoppable bonus granted!
+        fen_start_catchable = "8/7p/8/8/6k1/K7/P7/8 w - - 0 1"
+        fen_start_unstoppable = "8/7p/8/8/7k/K7/P7/8 w - - 0 1"
+        v_catchable, _, _ = evaluate_position(*parse_fen(fen_start_catchable))
+        v_unstoppable, _, _ = evaluate_position(*parse_fen(fen_start_unstoppable))
+        self.assertGreater(v_unstoppable - v_catchable, 700, "Pa2 with Ka3 on path must queen in 6 steps and be unstoppable against dist 7 king")
+
+        # 3. Mirror test for Black: Black pawn a7 with Ka6 on path vs White king at distance 7 (h5).
+        fen_black_unstoppable = "8/p7/k7/7K/8/8/7P/8 b - - 0 1"
+        v_b, _, _ = evaluate_position(*parse_fen(fen_black_unstoppable))
+        self.assertGreater(v_b, 500, "Black a7 pawn with Ka6 on path must queen in 6 steps and be unstoppable against dist 7 king (scaled by sf)")
 
     def test_kbpsk_wrong_bishop_distance_2_draw(self):
         # White dark-squared bishop + a3 pawn vs Black king on c7 (distance 2 from a8 light square)

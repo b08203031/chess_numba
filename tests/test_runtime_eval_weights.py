@@ -13,6 +13,7 @@ from tune_eval_match.eval_weights import (
     default_eval_weights,
     EW_EG_SAFETY_SCALE,
     EW_MAT_Q_EG,
+    EW_PASS_R4_EG,
 )
 
 
@@ -66,14 +67,42 @@ class TestRuntimeEvalWeights(unittest.TestCase):
         )
 
     def test_king_pawn_endgame_respects_eval_weights_connection(self):
-        """Multi-pawn KP endgame must receive and use active runtime eval weights."""
-        # Multi-pawn KP endgame: White Ka1, Pa2, Pb2 vs Black Kh8, Pg7, Ph7
-        fen = "7k/6pp/8/8/8/8/PP6/K7 w - - 0 1"
-        p, o, g = parse_fen(fen)
+        """Multi-pawn KP endgame must receive runtime eval weights and apply KP scale factor."""
+        # 1) Unscaled KP (strong side has 4 pawns -> sf = min(64, 36 + 7*4) = 64):
+        # White Ka1, passed Pa5 (rank index 4) vs Black Kh8, Pe7, Pf7, Pg7, Ph7
+        fen_unscaled = "7k/4pppp/8/P7/8/8/8/K7 w - - 0 1"
+        p4, o4, g4 = parse_fen(fen_unscaled)
 
-        ctx = make_test_context()
-        score, _, _ = _evaluate_position_jit(p, o, g, False, ctx)
-        self.assertIsInstance(int(score), int)
+        ctx_base4 = make_test_context()
+        score_base4, _, _ = _evaluate_position_jit(p4, o4, g4, False, ctx_base4)
+
+        ctx_boosted4 = make_test_context()
+        ctx_boosted4.eval_weights[EW_PASS_R4_EG] += np.int32(100)
+        score_boosted4, _, _ = _evaluate_position_jit(p4, o4, g4, False, ctx_boosted4)
+
+        self.assertEqual(
+            int(score_boosted4 - score_base4),
+            100,
+            f"Unscaled KP (sf=64) must reflect full +100 EW_PASS_R4_EG delta: got {score_boosted4 - score_base4}",
+        )
+
+        # 2) Scaled KP (strong side has 2 pawns -> sf = min(64, 36 + 7*2) = 50; 100 * 50 // 64 = 78):
+        # White Ka1, Pd5 vs Black Kh8, Pg7, Ph7
+        fen_scaled = "7k/6pp/8/3P4/8/8/8/K7 w - - 0 1"
+        p2, o2, g2 = parse_fen(fen_scaled)
+
+        ctx_base2 = make_test_context()
+        score_base2, _, _ = _evaluate_position_jit(p2, o2, g2, False, ctx_base2)
+
+        ctx_boosted2 = make_test_context()
+        ctx_boosted2.eval_weights[EW_PASS_R4_EG] += np.int32(100)
+        score_boosted2, _, _ = _evaluate_position_jit(p2, o2, g2, False, ctx_boosted2)
+
+        self.assertEqual(
+            int(score_boosted2 - score_base2),
+            78,
+            f"Scaled KP (sf=50) must scale +100 EW_PASS_R4_EG delta to +78 cp: got {score_boosted2 - score_base2}",
+        )
 
 
 if __name__ == "__main__":
