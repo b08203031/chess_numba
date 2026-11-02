@@ -179,7 +179,7 @@ _COMPILE_SPECS = [
     # Pruning gates and margins
     _spec("PRUNING_HISTORY_THRESHOLD", "PRUNING_HISTORY_THRESHOLD", -10000, -3000, 250, "pruning", spsa_r_end=0.5),
     _spec("PRUNING_SHALLOW_DEPTH", "PRUNING_SHALLOW_DEPTH", 6, 16, 1, "pruning", kind="discrete", spsa_r_end=0.4),
-    _spec("RFP_MAX_DEPTH", "RFP_MAX_DEPTH", 3, 8, 1, "pruning", kind="discrete", spsa_r_end=0.4),
+    _spec("RFP_MAX_DEPTH", "RFP_MAX_DEPTH", 3, 10, 1, "pruning", kind="discrete", spsa_r_end=0.4),
     _spec("RFP_NO_TT_PENALTY", "RFP_NO_TT_PENALTY", 0, 80, 5, "pruning", spsa_r_end=0.5),
     _spec("FP_MAX_DEPTH", "FP_MAX_DEPTH", 3, 10, 1, "pruning", kind="discrete", spsa_r_end=0.4),
     _spec("LMP_MIN_LIMIT", "LMP_MIN_LIMIT", 0, 8, 1, "pruning", kind="discrete", spsa_r_end=0.4),
