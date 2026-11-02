@@ -945,7 +945,7 @@ MAX_QUIESCENCE_DEPTH = 5
 
 # Razoring — SF19 Step 8: eval < alpha - RAZORING_COEFF * depth * depth
 RAZORING_MAX_DEPTH = 3
-RAZORING_COEFF = 482
+RAZORING_COEFF = 506  # E128 (was 482; 1D tune 868@300k +9.2 Elo, net +23 games, +20 pairs)
 
 # Futility: larger mult → larger margin → harder to skip (softer FP).
 # E25A 130→140 failed 1000@n10k 49.0%/−7 Elo → keep 130.
