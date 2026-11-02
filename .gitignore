@@ -50,4 +50,5 @@ tuner/tuned_*.py
 !tune_colab_runner*.ipynb
 !tournament_colab_runner*.ipynb
 !texel_tuner_runner.ipynb
+!search_param_tuning_runner.ipynb
 ag-*.json

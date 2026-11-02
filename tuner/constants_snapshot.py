@@ -949,11 +949,11 @@ RAZORING_COEFF = 482
 
 # Futility: larger mult → larger margin → harder to skip (softer FP).
 # E25A 130→140 failed 1000@n10k 49.0%/−7 Elo → keep 130.
-FP_BASE = 174         # E64 (was 171; SPSA L1 13.8k + L2 1000@300k +8.7 Elo)
+FP_BASE = 165         # E126 (was 174; 1D tune 480@300k +9.4 Elo, net +13 games, +11 pairs)
 FP_MULTIPLIER = 96    # E64 (was 125; SPSA L1 13.8k + L2 1000@300k +8.7 Elo)
 
 RFP_MAX_DEPTH = 8
-RFP_BASE_MULT = 168   # E64 (was 171; SPSA L1 13.8k + L2 1000@300k +8.7 Elo)
+RFP_BASE_MULT = 185   # E64 (was 171; SPSA L1 13.8k + L2 1000@300k +8.7 Elo)
 RFP_NO_TT_PENALTY = 30
 RFP_SCORE_BETA_WEIGHT = 412  # E76 peak baseline: (412 * beta + 612 * eval) / 1024
 
@@ -983,7 +983,7 @@ for i in range(1, 256):
 
 # LMR_BASE: E7 kept 480 (was 512). E20 keep 460. E56 tuned to 463 (+9.6 Elo). E60 tuned to 437 (+15.6 Elo).
 # Phase 6 SPSA 60 iters: 449 / 29 / 200
-LMR_BASE_OFFSET = 455  # Alpha 0.40 candidate (was 470 in 0.50)
+LMR_BASE_OFFSET = 432  # E127 (was 455; 1D tune 1000@300k +10.4 Elo, net +30 games, +26 pairs)
 LMR_TTPV_INCREASE = 768
 LMR_TTPV_DECREASE_BASE = 2048
 LMR_TTPV_PV_BONUS = 768

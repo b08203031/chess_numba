@@ -636,6 +636,7 @@ class InProcessEngineFactory:
                 os.environ.update({str(key): str(value) for key, value in self.env_extra.items()})
                 context = self.SearchContext(*args)
                 self._set_namespace_eval_weights(context)
+                self._apply_runtime_search_overrides(context)
                 return context
             finally:
                 for key, value in previous.items():
@@ -643,6 +644,22 @@ class InProcessEngineFactory:
                         os.environ.pop(key, None)
                     else:
                         os.environ[key] = value
+
+    def _apply_runtime_search_overrides(self, context: object) -> None:
+        """Apply any recognized SearchParamSpec runtime tuning overrides."""
+        if not self.env_extra:
+            return
+        try:
+            from tune_search.runtime_apply import apply_runtime_params
+            from tune_search.search_param_registry import SEARCH_PARAM_BY_NAME
+            overrides = {}
+            for k, v in self.env_extra.items():
+                if k in SEARCH_PARAM_BY_NAME and SEARCH_PARAM_BY_NAME[k].is_runtime:
+                    overrides[k] = float(v)
+            if overrides:
+                apply_runtime_params(context, overrides, scale_mode="integer")
+        except Exception:
+            pass
 
     def _set_namespace_eval_weights(self, context: object) -> None:
         """Keep current/old runtime HCE weights tied to their own constants."""
