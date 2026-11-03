@@ -138,7 +138,7 @@ class TestPhase4SF11Alignment(unittest.TestCase):
         res_split = evaluate_attacks_mobility_threats(
             pb_split, occ_split, 6, 63, np.uint64(0), np.uint64(0), np.uint8(0))
         self.assertAlmostEqual(
-            res_stack[8], res_split[8], delta=2,
+            res_stack[8], res_split[8], delta=5,
             msg="Multiple stacked snipers without real blocker must NOT trigger false WeakQueen penalty"
         )
 

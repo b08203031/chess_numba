@@ -549,4 +549,38 @@ flowchart TD
 
 * **結論**：徹底推翻了「修 BUG 會掉棋力」的假象。先前的微幅退步 100% 來自「舊參數為補償 bug 產生的過擬合扭曲」以及「舊訓練集缺失易位權」。在新數據集與新參數到位後，演算法修復與參數重調相得益彰，在 400k 長時控下對舊引擎達成 **+35.4 Elo** 壓倒性勝率，SPRT 於 542 局即高信心提前通過（H1 Accepted）！
 
+---
+
+### Phase 6：第二輪全自動 Texel 微調、千局對抗接納與冠軍基線同步【✅ 100% 全數完成】(2026-11-03 ~ 2026-11-04)
+
+#### 1. 工作台自動化守衛增強 (`tuner/notebook_session.py` & `tuner/texel_tuner_runner.ipynb`)
+為支援無人值守之全流程重調（「Run All Cells」），引入 Gate 判定自動守衛機制：
+* **`session.accept_if_pass(block_id)`**：
+  * 在 `TexelTuningSession` 中擴充 `require_pass` 與 `accept_if_pass` 方法。
+  * **當 Gate 判定為 `PASS`**：自動執行 AST-safe 參數套用至 `constants.py`、於 `tuner/runs/backups/` 產生備份，並更新記憶體基準 `step_baseline_theta`。
+  * **當 Gate 判定為 `CAUTION`、`REJECT` 或 `NO-OP`**：印出 `[SKIP]` 提示，**完全不更動 `constants.py`**，下一個調參區塊自動沿用目前既有的有效基準。
+* **筆記本全量替換**：將全部 20 個 `[Accept]` 儲存格（Block 1a ～ Block 8）統一改寫為 `session.accept_if_pass(...)`，並修復 Block 7c 網格語法。
+
+#### 2. 第二輪分區 Texel SPSA 微調 (`c3718df 再次texel`)
+在 Phase 5 首輪基礎與搜尋剪枝參數（E126 FP/RFP/LMR、E128 Razoring、E129 Quiet SEE）的協同下，於 20M 乾淨 EPD 數據集上完成第二輪微調，重點精修：
+* **王安全與風暴**：`SHELTER_STRENGTH`、`UNBLOCKED_STORM`、`BLOCKED_STORM`、`KING_DANGER_*` 系列係數微調。
+* **材質與輕重子 PST**：N/B/R/Q/P PST 各格微調，使子力價值與動態位置更高度協調。
+* **不平衡與主動權**：二次不平衡矩陣 `IMBALANCE_QUADRATIC_*` 與殘局主動權權重精修。
+
+#### 3. 千局對戰驗證（`tournament_colab_runner_se_multicut copy 2.ipynb`）
+* **測試條件**：完整跑滿 **500 對成對換先開局（1,000 局）**，時控 300,000 nodes/move，64MB TT，7 Workers 並行。
+* **對戰雙方**：Candidate（新微調參數 `constants.py`） vs Baseline（Phase 5 冠軍基線 `classical_old`）。
+* **對局戰績**：
+  * **總戰績**：新引擎 **515.0 - 485.0**（**227 勝 / 576 和 / 197 負**），勝率 **51.50%**，淨勝 **+30 局**。
+  * **執白戰績**：55.90%（138 勝 / 283 和 / 79 負）。
+  * **執黑戰績**：47.10%（89 勝 / 293 和 / 118 負）。
+  * **Elo 表現**：**+10.43 ± 14.02 Elo**（95% 信心區間：`[-3.55, +24.44]`）。
+  * **SPRT 檢驗**：**`LLR = 1.07`**（朝正向穩定累積）。
+
+#### 4. 接納決策與冠軍基準同步 (Champion Synchronization)
+* 經千局實戰取得 **+30 局淨勝** 與 **+10.43 Elo 正向增益**，獲使用者授權執行正式接納。
+* 執行 `python tools/sync_classical_old.py --sync`，將包含第二輪 Texel 微調與最新搜尋常數的 `classical` 完整同步至 `classical_old`。
+* 舊基線 `classical_old` 正式更新為專案最新的最高 Elo 冠軍基準，驗收完成。
+
+
 
