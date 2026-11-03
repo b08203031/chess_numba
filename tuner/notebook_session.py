@@ -111,6 +111,9 @@ class TexelTuningSession:
         self.eval_sample = int(eval_sample)
         self.holdout_sample = int(holdout_sample)
         self.chunk_size = int(chunk_size)
+        self.history: dict[str, dict] = {}
+        self.backup_stack: list[tuple[str, Path]] = []
+        self.require_pass_to_accept: bool = False
 
         if not self.train_path.is_file():
             raise FileNotFoundError(f"Missing training dataset: {self.train_path}")
@@ -655,8 +658,37 @@ class TexelTuningSession:
                 cand[start] = float(raw_val)
         return self.validate_candidate_theta(p.stem, cand, out_path=p)
 
-    def accept(self, block_id: str, only: list[str] | None = None) -> list[str]:
-        """Backup constants.py, apply candidate via AST-safe merge, sync snapshot & caches."""
+    def accept(
+        self,
+        block_id: str,
+        only: list[str] | None = None,
+        *,
+        require_pass: bool | None = None,
+    ) -> list[str]:
+        """Backup constants.py, apply candidate via AST-safe merge, sync snapshot & caches.
+
+        If require_pass is True (or self.require_pass_to_accept is True),
+        only applies if the gate verdict for block_id in self.history was 'PASS'.
+        """
+        must_pass = (
+            require_pass
+            if require_pass is not None
+            else getattr(self, "require_pass_to_accept", False)
+        )
+        if must_pass:
+            rec = self.history.get(block_id)
+            if rec is None:
+                print(f"\n[WARN] [{block_id}] 查無驗證紀錄 (可能尚未執行) -> 略過套用。")
+                return []
+            verdict = rec.get("verdict")
+            if verdict != "PASS":
+                print(
+                    f"\n[SKIP] [{block_id}] Gate 判定為 '{verdict}' (非 PASS) -> "
+                    f"自動跳過，保持既有 constants.py 參數不變。"
+                )
+                return []
+            print(f"\n[PASS] [{block_id}] Gate 判定為 PASS -> 正在套用變更至 constants.py 並建立備份...")
+
         cand_path = self.runs_dir / f"{block_id}.py"
         if not cand_path.is_file():
             raise FileNotFoundError(f"Missing candidate dump {cand_path}. Run block first.")
@@ -683,6 +715,10 @@ class TexelTuningSession:
             f"Backup saved to {_display_path(backup_path)}."
         )
         return changed
+
+    def accept_if_pass(self, block_id: str, only: list[str] | None = None) -> list[str]:
+        """Accept candidate only if the gate verdict for block_id was PASS."""
+        return self.accept(block_id, only=only, require_pass=True)
 
     def rollback(self, block_id: str | None = None) -> Path:
         """Restore constants.py from backup and resync snapshot & in-memory baseline."""
