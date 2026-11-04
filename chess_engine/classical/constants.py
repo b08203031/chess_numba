@@ -882,7 +882,7 @@ TUNE_CHECK_SEE_THR = 42     # quiet check ordering SEE gate threshold (CHECK_SEE
 TUNE_CAP_SEE_HIST_NUM = 43  # capture SEE history relief numerator (CAP_SEE_CAPTHIST_NUM / 1024)
 TUNE_SIZE = 44
 # E59/E97 tuned: 113 confirmed optimal vs 108 and 118 (both regressed vs 113).
-LMR_TABLE_SCALE_PERCENT = 113  # Production baseline (113 > 108, 113 > 118)
+LMR_TABLE_SCALE_PERCENT = 115  # E134 (was 113; 1D tune 1000@300k +5.91 Elo, net +17 games, WW:LL=20:16)
 LMR_NOT_IMP_NUM = 205  # Alpha 0.40 candidate (was 208 in 0.50)
 ENABLE_IIR = True           # Internal Iterative Reduction (Replaces old IID)
 ENABLE_SINGULAR_EXTENSIONS = True # Singular Extensions
@@ -901,7 +901,7 @@ ENABLE_HISTORY_PRUNING = True      # Enable pruning based on History Score
 # (policy lifted 2026-07-19). Prefer Elo/pass gates over "must not exceed SF11".
 # SEE: SF11 capture ~-194 internal → ~-151 @0.78; current values stay until A/B.
 PRUNING_SHALLOW_DEPTH = 12
-PRUNING_CAPTURE_SEE_MARGIN = -87  # Rescaled x1.134 for MG_MATERIAL_VALUES SEE (was -102 in E64)
+PRUNING_CAPTURE_SEE_MARGIN = -95  # Rescaled x1.134 for MG_MATERIAL_VALUES SEE (was -102 in E64)
 PRUNING_QUIET_SEE_MARGIN = -36     # E129 (was -33; 1D tune 840@300k +9.9 Elo, net +24 games, beat -26 in decider)
 
 # Master switches for existing pruning techniques / 現有剪枝技術的總開關
@@ -1075,7 +1075,7 @@ NMP_BETA_FLOOR = -960
 NMP_BASE = 230
 NMP_DEPTH_COEF = 12
 NMP_IMP_COEF = 45
-NMP_EVAL_MARGIN_DIV = 155
+NMP_EVAL_MARGIN_DIV = 140  # E135 (was 155; 1D tune 1000@300k +12.17 Elo, net +35 games, pairs +29)
 NMP_EVAL_MARGIN_MAX = 4
 NMP_R_BASE = 7
 NMP_R_DIV = 3
