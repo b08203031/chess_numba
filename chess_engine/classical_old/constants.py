@@ -901,7 +901,7 @@ ENABLE_HISTORY_PRUNING = True      # Enable pruning based on History Score
 # (policy lifted 2026-07-19). Prefer Elo/pass gates over "must not exceed SF11".
 # SEE: SF11 capture ~-194 internal → ~-151 @0.78; current values stay until A/B.
 PRUNING_SHALLOW_DEPTH = 12
-PRUNING_CAPTURE_SEE_MARGIN = -87  # Rescaled x1.134 for MG_MATERIAL_VALUES SEE (was -102 in E64)
+PRUNING_CAPTURE_SEE_MARGIN = -97  # Rescaled x1.134 for MG_MATERIAL_VALUES SEE (was -102 in E64)
 PRUNING_QUIET_SEE_MARGIN = -36     # E129 (was -33; 1D tune 840@300k +9.9 Elo, net +24 games, beat -26 in decider)
 
 # Master switches for existing pruning techniques / 現有剪枝技術的總開關
