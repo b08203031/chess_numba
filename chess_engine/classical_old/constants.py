@@ -770,7 +770,7 @@ LOW_PLY_HISTORY_MAX = 7183
 # --- Quiet malus scales & geometric decay ---
 HISTORY_QUIET_MALUS_SCALE_NUM = 956     # was 1024; decoupled from DECAY (decay moved to bottom of loop)
 HISTORY_QUIET_MALUS_SCALE_DEN = 1024
-HISTORY_QUIET_MALUS_DECAY_NUM = 956
+HISTORY_QUIET_MALUS_DECAY_NUM = 964
 HISTORY_QUIET_MALUS_DECAY_DEN = 1024
 
 # Pawn history asymmetric gravity input (SF: 1038 if bonus > -7 else 525)
@@ -882,7 +882,7 @@ TUNE_CHECK_SEE_THR = 42     # quiet check ordering SEE gate threshold (CHECK_SEE
 TUNE_CAP_SEE_HIST_NUM = 43  # capture SEE history relief numerator (CAP_SEE_CAPTHIST_NUM / 1024)
 TUNE_SIZE = 44
 # E59/E97 tuned: 113 confirmed optimal vs 108 and 118 (both regressed vs 113).
-LMR_TABLE_SCALE_PERCENT = 113  # Production baseline (113 > 108, 113 > 118)
+LMR_TABLE_SCALE_PERCENT = 113  # Production baseline (113 confirmed optimal; E134 116 rejected -29.3 Elo at 400k)
 LMR_NOT_IMP_NUM = 205  # Alpha 0.40 candidate (was 208 in 0.50)
 ENABLE_IIR = True           # Internal Iterative Reduction (Replaces old IID)
 ENABLE_SINGULAR_EXTENSIONS = True # Singular Extensions
@@ -1075,7 +1075,7 @@ NMP_BETA_FLOOR = -960
 NMP_BASE = 230
 NMP_DEPTH_COEF = 12
 NMP_IMP_COEF = 45
-NMP_EVAL_MARGIN_DIV = 155
+NMP_EVAL_MARGIN_DIV = 155  # Production baseline (155 confirmed optimal; E135 132 rejected -5.0 Elo at 400k)
 NMP_EVAL_MARGIN_MAX = 4
 NMP_R_BASE = 7
 NMP_R_DIV = 3
@@ -1119,8 +1119,8 @@ LMR_RESEARCH_DEEPER_MARGIN = 26  # E99 tuned: 26 vs 32 (+5.56 Elo, 50.8% @1000 g
 LMR_RESEARCH_SHALLOWER_MARGIN = 15
 
 # --- QS fail-high / stand-pat smoothing (a*score + b*beta) // div ---
-QS_STANDPAT_SMOOTH_A = 467
-QS_STANDPAT_SMOOTH_B = 557
+QS_STANDPAT_SMOOTH_A = 560
+QS_STANDPAT_SMOOTH_B = 464
 QS_FAILHIGH_SMOOTH_A = 481
 QS_FAILHIGH_SMOOTH_B = 543
 QS_SMOOTH_DIV = 1024
