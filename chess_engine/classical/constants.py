@@ -882,7 +882,7 @@ TUNE_CHECK_SEE_THR = 42     # quiet check ordering SEE gate threshold (CHECK_SEE
 TUNE_CAP_SEE_HIST_NUM = 43  # capture SEE history relief numerator (CAP_SEE_CAPTHIST_NUM / 1024)
 TUNE_SIZE = 44
 # E59/E97 tuned: 113 confirmed optimal vs 108 and 118 (both regressed vs 113).
-LMR_TABLE_SCALE_PERCENT = 116  # E134 (was 113; 1D tune 1000@300k +5.91 Elo, net +17 games, WW:LL=20:16)
+LMR_TABLE_SCALE_PERCENT = 113  # Production baseline (113 confirmed optimal; E134 116 rejected -29.3 Elo at 400k)
 LMR_NOT_IMP_NUM = 205  # Alpha 0.40 candidate (was 208 in 0.50)
 ENABLE_IIR = True           # Internal Iterative Reduction (Replaces old IID)
 ENABLE_SINGULAR_EXTENSIONS = True # Singular Extensions
@@ -1075,7 +1075,7 @@ NMP_BETA_FLOOR = -960
 NMP_BASE = 230
 NMP_DEPTH_COEF = 12
 NMP_IMP_COEF = 45
-NMP_EVAL_MARGIN_DIV = 155  # E135 (was 155; 1D tune 1000@300k +12.17 Elo, net +35 games, pairs +29)
+NMP_EVAL_MARGIN_DIV = 155  # Production baseline (155 confirmed optimal; E135 132 rejected -5.0 Elo at 400k)
 NMP_EVAL_MARGIN_MAX = 4
 NMP_R_BASE = 7
 NMP_R_DIV = 3
