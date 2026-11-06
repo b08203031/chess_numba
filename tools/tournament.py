@@ -11,6 +11,7 @@ import math
 import os
 import random
 import sys
+import time
 from pathlib import Path
 from typing import Mapping, Optional, Sequence
 
@@ -362,7 +363,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--no-openings", action="store_true")
     parser.add_argument("--openings-pgn", metavar="PATH")
     parser.add_argument("--opening-moves", type=int, default=8)
-    parser.add_argument("--seed", type=int, default=0, help="deterministic opening shuffle seed")
+    parser.add_argument("--seed", type=int, default=time.time_ns(), help="deterministic opening shuffle seed")
     parser.add_argument("--no-sprt", action="store_true")
     parser.add_argument("--sprt-elo0", type=float, default=0.0)
     parser.add_argument("--sprt-elo1", type=float, default=10.0)
