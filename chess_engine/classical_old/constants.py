@@ -1109,7 +1109,7 @@ LMR_ADVANCED_PAWN_BLACK_RANK = 2 # black to_rank <= this
 LMR_TTMOVE_CUTNODE_EXTRA = 150   # tt-move LMR: +extra on cut nodes
 LMR_R_FLOOR = -10                # clamp r before ply conversion
 LMR_D_MAX_EXTRA = 2              # d <= search_depth + this
-LMR_CAPTURE_VICTIM_SCALE = 792   # SF18: 809 * PieceValue / 128 + captHist
+LMR_CAPTURE_VICTIM_SCALE = 796   # SF18: 809 * PieceValue / 128 + captHist
 LMR_CAPTURE_VICTIM_DIV = 128
 LMR_STAT_SCORE_DIV = 3900        # r -= stat * hist_scale // DIV
 # SF19 Dynamic Depth Protection: scale up divisor at deeper plies to mitigate over-reduction

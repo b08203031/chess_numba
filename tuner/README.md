@@ -33,12 +33,17 @@ python -m tuner.run status
 
 ## 濃縮指令（推薦日常用法）
 
-> **互動式區塊調參（推薦）：** 根目錄 [`texel_tuner_runner.ipynb`](../texel_tuner_runner.ipynb) 透過 `tuner/notebook_session.py` 在單一 Kernel 載入一次 20M + PGN 驗證集（約 3.7 GB RAM，免重複載入與免重編譯 Numba），每個調參區塊皆為獨立 `[Run]` / `[Accept]` Cell，自動跑雙重無洩漏驗證（2M `mix03` holdout + 1.59M `val_pgn`）。
+> **互動式區塊調參（推薦）：** [`tuner/texel_tuner_runner.ipynb`](texel_tuner_runner.ipynb) 透過 `tuner/notebook_session.py` 在單一 Kernel 載入一次 20M 主資料集 +（可選）PGN 驗證集（約 3.44~3.72 GB RAM，免重複載入與免重編譯 Numba），預設自動在 `1M dev` 上校準最佳尺度 `K*`（`k_factor="auto"`，防止固定 `K=1.0` 造成假性尺度膨脹）。Cell 1 支援實驗切換參數（重跑 Cell 1 可透過 `session.reconfigure(...)` 在 ~3 秒內免重載切換）：
+> - `USE_PGN_VAL`（`True` / `False`）：是否啟用 `val_pgn.npz` 雙重驗證閘門（`False` 時僅用 2M unseen holdout `@ K*` 驗收；另支援 `USE_ZURICHESS_VAL` 啟用 `val_zurichess.npz` 仲裁集）。
+> - `TARGET_ENGINE`（`"classical"` / `"classical_old"`）：指定 `accept()` 寫入 `chess_engine/classical/constants.py` 或 `chess_engine/classical_old/constants.py`（輸出與備份自動隔離於 `tuner/runs/<engine>_<mode>[_sfXX]/`）。
+> - `USE_SF_LABELS` & `SF_LAMBDA`（預設 `False`, `0.25`）：啟用後讀取側車檔 `<dataset>.sf19.npz`，自動校準無偏 $K_{\text{sf}}$ 並於記憶體動態合成 `(1-λ)·WDL + λ·sigmoid(K_sf·sf_cp)`（自動過濾 `|sf_cp - sf_d1_cp| > 180` 戰術跳分局面），同時保持 `2M unseen holdout` 與 `val_pgn` 為純 WDL 驗收。
 
 ```bash
-# 0) 看資料是否齊 / 重建本引擎對戰 PGN 獨立驗證集
+# 0) 看資料是否齊 / 重建本引擎對戰 PGN 獨立驗證集 / 產生 SF19 混合標籤側車檔
 python -m tuner.run status
 python -m tuner.data_pipeline.build_pgn_validation --min-median-nodes 150000 --workers 10
+# 產生 SF19 搜尋側車檔 dataset_epd_wdl_20m.sf19.npz（支援 Ctrl+C 續傳；可加 --limit 3000000 先跑子集測試）
+python -m tuner.data_pipeline.annotate_sf_labels --nodes 4000 --skip-holdout
 
 # 1) classical 改過評估/常數後：同步 tunable
 python -m tuner.run sync
@@ -121,7 +126,9 @@ tuner/
 ├── scan_scalar_grid.py       # 少量整數 scalar 的離散窮舉
 ├── notebook_session.py       # 互動式 Notebook 單次載入與雙重驗證 Session 控制器
 ├── data_pipeline/            # HCE 標籤與驗證資料
+│   ├── annotate_sf_labels.py # SF19 搜尋評估側車標註器（支援續傳、d1 戰術過濾、.sf19.npz）
 │   ├── build_pgn_validation.py
+│   ├── convert_epd_books.py
 │   ├── convert_bullet_to_hce.py
 │   ├── download_twic.py
 │   ├── generate_training_data.py

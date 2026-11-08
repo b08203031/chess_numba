@@ -613,7 +613,7 @@ S1a 證實 non-PV NMP 可略瘦樹，但戰術 pass 代價過大。
 保留 `tune[]`/diag 基礎設施（預設值=舊行為）。
 
 **LMR capture victim（正確值）：** `LMR_CAPTURE_VICTIM_SCALE * MG_MATERIAL_VALUES[victim] // LMR_CAPTURE_VICTIM_DIV + cap_hist`  
-（對齊 SF18 `PieceValue[captured]`；不再用舊硬編碼 100/320/330/500/900）。  
+（對齊 SF18 `PieceValue[captured]`；不再用舊硬編碼 100/320/330/500/900；2026-11-08 E147: `LMR_CAPTURE_VICTIM_SCALE` 由 809 調降至 792~796，校準 E85 子力價值膨脹後的寬免虛胖，實測斬獲 +16.67 Elo，觸發 SPRT H1 Accepted 採納）。  
 對應 MG：P100 / N345 / B376 / R578 / Q1178。
 
 **2026-07-16 參數集中：** search 內重要可調係數（NMP/LMR/QS smooth/history bonus/singular/…）  

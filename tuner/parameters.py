@@ -7,17 +7,33 @@ constants, scale-factor draw tables, and known-win thresholds are excluded.
 """
 from __future__ import annotations
 
+from pathlib import Path
+import types
+
 import numpy as np
 
-import tuner.constants_snapshot as constants
+from tuner.apply_tuned import _eval_const_module
+import tuner.constants_snapshot as default_constants
 
 # ---------------------------------------------------------------------------
 # Registration order defines theta layout. Keep in sync with codegen.
 # Each entry: (name, value_from_snapshot)
 # ---------------------------------------------------------------------------
 
-def _collect_param_specs():
-    c = constants
+
+def _resolve_constants_module(constants_source=None):
+    if constants_source is None:
+        return default_constants
+    if isinstance(constants_source, (str, Path)):
+        ns = _eval_const_module(Path(constants_source))
+        return types.SimpleNamespace(**ns)
+    if isinstance(constants_source, dict):
+        return types.SimpleNamespace(**constants_source)
+    return constants_source
+
+
+def _collect_param_specs(constants_source=None):
+    c = _resolve_constants_module(constants_source)
     return [
         # Material
         ("MG_MATERIAL_VALUES", c.MG_MATERIAL_VALUES),
@@ -146,7 +162,8 @@ def _collect_param_specs():
 class ParameterManager:
     """Maps flat theta <-> structured HCE constants."""
 
-    def __init__(self):
+    def __init__(self, constants_source=None):
+        self.constants_source = constants_source
         self.param_map = []
         self.theta = []
         self._initialize_mapping()
@@ -174,7 +191,7 @@ class ParameterManager:
             raise ValueError(f"Unsupported type for parameter {name}: {type(value)}")
 
     def _initialize_mapping(self):
-        for name, value in _collect_param_specs():
+        for name, value in _collect_param_specs(self.constants_source):
             self._add_param(name, value)
 
     def get_initial_theta(self):

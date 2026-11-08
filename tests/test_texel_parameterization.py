@@ -1,7 +1,12 @@
 """Lightweight invariants for the HCE Texel/SPSA parameterization."""
 from __future__ import annotations
 
+import io
+from pathlib import Path
+import shutil
+import tempfile
 import unittest
+from unittest.mock import patch
 
 import numpy as np
 
@@ -16,9 +21,19 @@ from chess_engine.classical.constants import (
     QUEEN,
     ROOK,
 )
-from tuner.apply_tuned import _extract_assignments, apply_tuned_source
+from tuner.apply_tuned import _eval_const_module, _extract_assignments, apply_tuned_source
 from tuner.constraint_manager import ConstraintManager
+from tuner.data_pipeline.annotate_sf_labels import (
+    UNANNOTATED_CP,
+    arrays_to_fen,
+    parse_sf_search_output,
+)
 from tuner.data_pipeline.preprocess_data import parse_fen_to_arrays
+from tuner.notebook_session import (
+    CONSTANTS_PATH,
+    TexelTuningSession,
+    build_blended_labels,
+)
 from tuner.parameters import ParameterManager
 from tuner.tuner import SPSAOptimizer, split_dataset_indices
 
@@ -289,6 +304,321 @@ class TestPreprocessCastlingAndEp(unittest.TestCase):
         )
         self.assertEqual(int(gs_legal[1]), 7)  # K=1 | Q=2 | k=4
         self.assertEqual(int(gs_legal[2]), 20)
+
+
+class TestCustomConstantsAndSessionModes(unittest.TestCase):
+    def test_parameter_manager_reads_custom_constants_path_without_side_effects(self):
+        default_pm = ParameterManager()
+        idx, _ = default_pm.get_param_indices("KING_DANGER_NO_QUEEN")
+        orig_val = int(default_pm.theta[idx])
+
+        with tempfile.TemporaryDirectory() as tmp:
+            custom_path = Path(tmp) / "custom_constants.py"
+            src = CONSTANTS_PATH.read_text(encoding="utf-8")
+            src = src.replace(
+                f"KING_DANGER_NO_QUEEN = {orig_val}",
+                f"KING_DANGER_NO_QUEEN = {orig_val + 17}",
+                1,
+            )
+            custom_path.write_text(src, encoding="utf-8", newline="\n")
+
+            custom_pm = ParameterManager(constants_source=custom_path)
+            self.assertEqual(int(custom_pm.theta[idx]), orig_val + 17)
+            self.assertEqual(int(ParameterManager().theta[idx]), orig_val)
+
+    def test_session_pgn_toggle_target_engine_reconfigure_and_accept_rollback(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_dir = Path(tmp)
+            train_npz = tmp_dir / "train_mini.npz"
+            pgn_npz = tmp_dir / "val_pgn_mini.npz"
+            classical_copy = tmp_dir / "classical_constants.py"
+            old_copy = tmp_dir / "classical_old_constants.py"
+            shutil.copyfile(CONSTANTS_PATH, classical_copy)
+            shutil.copyfile(CONSTANTS_PATH, old_copy)
+
+            pb0, ob0, gs0 = parse_fen_to_arrays(
+                "r3k2r/pppq1ppp/2npbn2/4p3/4P3/2NPBN2/PPPQ1PPP/R3K2R w KQkq - 4 8"
+            )
+            pb1, ob1, gs1 = parse_fen_to_arrays(
+                "8/5pk1/6p1/8/8/6P1/5PK1/8 w - - 0 40"
+            )
+            n_train = 60
+            piece_bbs = np.tile(np.stack([pb0, pb1]), (n_train // 2, 1))
+            occ_bbs = np.tile(np.stack([ob0, ob1]), (n_train // 2, 1))
+            game_states = np.tile(np.stack([gs0, gs1]), (n_train // 2, 1))
+            results_train = np.full(n_train, 0.80, dtype=np.float32)
+            np.savez(
+                train_npz,
+                piece_bbs=piece_bbs,
+                occupancy_bbs=occ_bbs,
+                game_states=game_states,
+                results=results_train,
+            )
+
+            # Give val_pgn opposite WDL (0.10) so a score increase improves holdout
+            # (PASS under use_pgn_val=False) but worsens val_pgn (REJECT under True).
+            n_pgn = 40
+            np.savez(
+                pgn_npz,
+                piece_bbs=piece_bbs[:n_pgn],
+                occupancy_bbs=occ_bbs[:n_pgn],
+                game_states=game_states[:n_pgn],
+                results=np.full(n_pgn, 0.10, dtype=np.float32),
+            )
+
+            init_idx, _ = ParameterManager().get_param_indices("INITIATIVE_MG_OFFSET")
+
+            def _fake_eval(pb, ob, gs, theta, lazy=False):
+                return np.int32(int(np.rint(theta[init_idx])))
+
+            def _fake_scores(pbs, obs, gss, theta):
+                jitter = (np.arange(len(pbs), dtype=np.int32) % 7) - 3
+                return np.int32(int(np.rint(theta[init_idx]))) + jitter
+
+            with (
+                patch("tuner.notebook_session.evaluate_position_tunable", side_effect=_fake_eval),
+                patch("tuner.notebook_session.compute_white_scores", side_effect=_fake_scores),
+                patch("tuner.validate_tuned.compute_white_scores", side_effect=_fake_scores),
+                patch("sys.stdout", new_callable=io.StringIO),
+            ):
+                with self.assertRaises(ValueError):
+                    TexelTuningSession(
+                        train_npz=train_npz,
+                        pgn_val_npz=pgn_npz,
+                        eval_sample=10,
+                        holdout_sample=20,
+                        use_pgn_val=False,
+                        target_engine="invalid_engine",
+                        target_constants_path=old_copy,
+                        runs_dir=tmp_dir / "runs_err",
+                    )
+
+                # Mode A: holdout-only targeting classical_old copy
+                session = TexelTuningSession(
+                    train_npz=train_npz,
+                    pgn_val_npz=pgn_npz,
+                    eval_sample=10,
+                    holdout_sample=20,
+                    use_pgn_val=False,
+                    target_engine="classical_old",
+                    target_constants_path=old_copy,
+                    runs_dir=tmp_dir / "runs_old",
+                )
+                self.assertFalse(session.use_pgn_val)
+                self.assertIsNone(session.pgn_data)
+                self.assertEqual(session.target_engine, "classical_old")
+
+                base_val = int(session.step_baseline_theta[init_idx])
+                cand_theta = session.step_baseline_theta.copy()
+                cand_theta[init_idx] = base_val + 40
+                cand_file = session.runs_dir / "block_test.py"
+                cand_file.write_text(
+                    session.pm.update_constants_string(cand_theta),
+                    encoding="utf-8",
+                    newline="\n",
+                )
+
+                rec_holdout = session.validate_candidate_theta(
+                    "block_test", cand_theta, out_path=cand_file
+                )
+                self.assertEqual(rec_holdout["verdict"], "PASS")
+                self.assertIsNone(rec_holdout["pgn_val"])
+
+                changed = session.accept_if_pass("block_test")
+                self.assertEqual(changed, ["INITIATIVE_MG_OFFSET"])
+                self.assertEqual(
+                    int(_eval_const_module(old_copy)["INITIATIVE_MG_OFFSET"]),
+                    base_val + 40,
+                )
+                # classical copy untouched
+                self.assertEqual(
+                    int(_eval_const_module(classical_copy)["INITIATIVE_MG_OFFSET"]),
+                    base_val,
+                )
+
+                # Rollback restores classical_old copy cleanly
+                session.rollback("block_test")
+                self.assertEqual(
+                    int(_eval_const_module(old_copy)["INITIATIVE_MG_OFFSET"]),
+                    base_val,
+                )
+
+                # Reconfigure in-place to use_pgn_val=True & classical copy without reloading train_data
+                prev_train_data_id = id(session.train_data)
+                session._custom_runs_dir = tmp_dir / "runs_classical"
+                session.reconfigure(
+                    use_pgn_val=True,
+                    target_engine="classical",
+                    pgn_val_npz=pgn_npz,
+                    target_constants_path=classical_copy,
+                )
+                self.assertEqual(id(session.train_data), prev_train_data_id)
+                self.assertTrue(session.use_pgn_val)
+                self.assertIsNotNone(session.pgn_data)
+                self.assertEqual(session.target_engine, "classical")
+
+                cand_file2 = session.runs_dir / "block_test.py"
+                cand_file2.write_text(
+                    session.pm.update_constants_string(cand_theta),
+                    encoding="utf-8",
+                    newline="\n",
+                )
+                rec_dual = session.validate_candidate_theta(
+                    "block_test", cand_theta, out_path=cand_file2
+                )
+                self.assertEqual(rec_dual["verdict"], "REJECT")
+                self.assertIsNotNone(rec_dual["pgn_val"])
+                self.assertEqual(session.accept_if_pass("block_test"), [])
+
+
+class TestSfMixedLabelsAndKStarGate(unittest.TestCase):
+    def test_arrays_to_fen_roundtrip_preserves_castling_ep_stm_and_rule50(self):
+        fens = [
+            "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
+            "r3k2r/ppp1pppp/8/8/3pP3/8/PPPP1PPP/R3K2R b KQk e3 12 1",
+            "8/2p5/3p4/KP5r/1R3p1k/8/4P1P1/8 b - - 37 1",
+        ]
+        for fen in fens:
+            pb, ob, gs = parse_fen_to_arrays(fen)
+            rebuilt = arrays_to_fen(pb, gs)
+            self.assertEqual(rebuilt, fen)
+            pb2, ob2, gs2 = parse_fen_to_arrays(rebuilt)
+            np.testing.assert_array_equal(pb, pb2)
+            np.testing.assert_array_equal(ob, ob2)
+            np.testing.assert_array_equal(gs, gs2)
+
+    def test_parse_sf_search_output_ignores_aspiration_bounds_and_handles_black_stm(self):
+        lines = [
+            "info depth 1 seldepth 4 multipv 1 score cp 22 nodes 35 pv e2e4",
+            "info depth 8 seldepth 11 multipv 1 score cp 48 nodes 3100 pv e2e4 e7e5",
+            "info depth 9 seldepth 14 multipv 1 score cp -140 upperbound nodes 4005 pv e2e4",
+        ]
+        # White to move: keeps exact depth 8 (+48) and depth 1 (+22), ignoring depth 9 upperbound
+        w_cp, w_d1 = parse_sf_search_output(lines, stm_is_black=False)
+        self.assertEqual((w_cp, w_d1), (48, 22))
+
+        # Black to move: negates both into White-POV
+        b_cp, b_d1 = parse_sf_search_output(lines, stm_is_black=True)
+        self.assertEqual((b_cp, b_d1), (-48, -22))
+
+    def test_build_blended_labels_calibrates_ksf_and_filters_tactical_spikes(self):
+        wdl = np.array([1.0, 0.5, 0.0, 1.0, 0.0], dtype=np.float32)
+        sf_cp = np.array([150, 0, -150, 20, -320], dtype=np.int16)
+        # Row 4 has |sf_cp - sf_d1_cp| = |-320 - 30| = 350 > 180 -> tactical spike!
+        sf_d1 = np.array([130, 10, -140, 15, 30], dtype=np.int16)
+
+        blended, stats = build_blended_labels(
+            wdl,
+            sf_cp,
+            0.25,
+            sf_d1_cp=sf_d1,
+            max_tactical_gap=180,
+            fit_indices=np.array([0, 1, 2, 3], dtype=np.int64),
+        )
+        self.assertEqual(stats["n_tactical_filtered"], 1)
+        self.assertFalse(bool(stats["quiet_annotated_mask"][4]))
+        # Row 4 falls back to pure WDL (0.0), while quiet rows 0 and 2 move smoothly inward
+        self.assertEqual(float(blended[4]), 0.0)
+        self.assertGreater(float(blended[2]), 0.0)
+        self.assertLess(float(blended[0]), 1.0)
+        self.assertAlmostEqual(float(blended[1]), 0.5, places=5)
+
+    def test_session_sf_labels_keep_holdout_pure_wdl_and_reject_kstar_scale_inflation(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_dir = Path(tmp)
+            train_npz = tmp_dir / "train_sf.npz"
+            sf_sidecar = tmp_dir / "train_sf.sf19.npz"
+            const_copy = tmp_dir / "constants_copy.py"
+            shutil.copyfile(CONSTANTS_PATH, const_copy)
+
+            pb0, ob0, gs0 = parse_fen_to_arrays(
+                "r3k2r/pppq1ppp/2npbn2/4p3/4P3/2NPBN2/PPPQ1PPP/R3K2R w KQkq - 4 8"
+            )
+            n_rows = 80
+            piece_bbs = np.tile(pb0, (n_rows, 1))
+            occ_bbs = np.tile(ob0, (n_rows, 1))
+            game_states = np.tile(gs0, (n_rows, 1))
+            rng = np.random.default_rng(7)
+            true_cp = rng.integers(-220, 221, size=n_rows, dtype=np.int16)
+            probs = 1.0 / (1.0 + np.exp(-true_cp.astype(np.float64) * 0.0066))
+            wdl = np.where(probs > 0.62, 1.0, np.where(probs < 0.38, 0.0, 0.5)).astype(np.float32)
+
+            np.savez(
+                train_npz,
+                piece_bbs=piece_bbs,
+                occupancy_bbs=occ_bbs,
+                game_states=game_states,
+                results=wdl,
+            )
+            # Leave one row unannotated and one row with a tactical jump > 180cp
+            sf_cp = true_cp.copy()
+            sf_d1 = true_cp.copy()
+            sf_cp[0] = UNANNOTATED_CP
+            sf_d1[0] = UNANNOTATED_CP
+            sf_d1[1] = np.int16(int(sf_cp[1]) + 300)
+            np.savez(sf_sidecar, sf_cp=sf_cp, sf_d1_cp=sf_d1)
+
+            init_idx, _ = ParameterManager().get_param_indices("INITIATIVE_MG_OFFSET")
+            base_init = int(ParameterManager().theta[init_idx])
+
+            def _fake_eval(pb, ob, gs, theta, lazy=False):
+                return np.int32(int(np.rint(theta[init_idx])))
+
+            def _fake_scores(pbs, obs, gss, theta):
+                delta = int(np.rint(theta[init_idx])) - base_init
+                # Base matches true_cp directionally on arbitrary slice length; large +delta adds pure bias
+                ramp = ((np.arange(len(pbs), dtype=np.int32) * 37) % 200) - 100
+                return ramp + delta * 15
+
+            with (
+                patch("tuner.notebook_session.evaluate_position_tunable", side_effect=_fake_eval),
+                patch("tuner.notebook_session.compute_white_scores", side_effect=_fake_scores),
+                patch("tuner.validate_tuned.compute_white_scores", side_effect=_fake_scores),
+                patch("sys.stdout", new_callable=io.StringIO),
+            ):
+                session = TexelTuningSession(
+                    train_npz=train_npz,
+                    use_pgn_val=False,
+                    eval_sample=15,
+                    holdout_sample=20,
+                    target_engine="classical",
+                    target_constants_path=const_copy,
+                    runs_dir=tmp_dir / "runs_sf",
+                    use_sf_labels=True,
+                    sf_lambda=0.25,
+                    sf_labels_path=sf_sidecar,
+                    sf_max_tactical_gap=180,
+                )
+                self.assertTrue(session.use_sf_labels)
+                self.assertIsNotNone(session.sf_blend_stats)
+                self.assertNotIn(0, set(session.train_idx.tolist()))
+                self.assertNotIn(1, set(session.train_idx.tolist()))
+
+                # Unseen holdout strictly preserves pure WDL {0.0, 0.5, 1.0}
+                np.testing.assert_array_equal(
+                    session.train_data["results"][session.holdout_idx],
+                    wdl[session.holdout_idx],
+                )
+                # Active train rows have fractional blended labels
+                self.assertTrue(
+                    np.any(
+                        ~np.isin(
+                            session.train_data["results"][session.train_idx],
+                            [0.0, 0.5, 1.0],
+                        )
+                    )
+                )
+
+                # Reconfigure sf_lambda dynamically in memory without reloading train_data
+                prev_id = id(session.train_data)
+                session.reconfigure(sf_lambda=0.30)
+                self.assertEqual(id(session.train_data), prev_id)
+                self.assertAlmostEqual(session.sf_lambda, 0.30)
+
+                # Switch back to pure WDL cleanly
+                session.reconfigure(use_sf_labels=False)
+                self.assertFalse(session.use_sf_labels)
+                np.testing.assert_array_equal(session.train_data["results"], wdl)
 
 
 if __name__ == "__main__":
