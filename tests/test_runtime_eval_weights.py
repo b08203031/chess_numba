@@ -1,6 +1,8 @@
+from types import SimpleNamespace
 import unittest
 import numpy as np
 
+from chess_engine.classical import constants as classical_constants
 from chess_engine.classical.constants import (
     EG_SAFETY_SCALE,
     MAX_PLY,
@@ -38,10 +40,21 @@ def make_test_context():
 
 class TestRuntimeEvalWeights(unittest.TestCase):
     def test_eg_safety_scale_unified_constant(self):
-        """EG_SAFETY_SCALE in constants.py and eval_weights.py must agree at 100."""
-        self.assertEqual(int(EG_SAFETY_SCALE), 100)
+        """EG_SAFETY_SCALE in constants.py and eval_weights.py must agree dynamically."""
+        self.assertGreater(int(EG_SAFETY_SCALE), 0)
         w = default_eval_weights()
-        self.assertEqual(int(w[EW_EG_SAFETY_SCALE]), 100)
+        self.assertEqual(int(w[EW_EG_SAFETY_SCALE]), int(EG_SAFETY_SCALE))
+
+        custom_consts = SimpleNamespace(
+            **{
+                k: getattr(classical_constants, k)
+                for k in dir(classical_constants)
+                if k.isupper()
+            }
+        )
+        custom_consts.EG_SAFETY_SCALE = 137
+        w_custom = default_eval_weights(custom_consts)
+        self.assertEqual(int(w_custom[EW_EG_SAFETY_SCALE]), 137)
 
     def test_specialized_endgame_respects_runtime_material_weights(self):
         """Specialized endgames (e.g., KQKR) must use active runtime material weights."""
