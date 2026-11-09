@@ -6,7 +6,7 @@ Why in-process:
 - Keeping a single preloaded copy inside the Jupyter kernel avoids spawning
   subprocesses that would allocate a second 3.44 GB copy (risking OOM/swap on
   16 GB machines) and avoids repeating Numba JIT warmups across blocks.
-- ``tuner/tunable_eval.py`` reads all 109 registered parameters dynamically from
+- ``tuner/tunable_eval.py`` reads all 115 registered parameters dynamically from
   ``theta: float64[:]``, so accepting a block into ``constants.py`` and reloading
   ``constants_snapshot`` updates ``theta0`` immediately with **zero** Numba
   recompilation of ``evaluate_position_tunable``.
@@ -16,6 +16,7 @@ from __future__ import annotations
 from datetime import datetime
 import gc
 import importlib
+import os
 from pathlib import Path
 import re
 import shutil
@@ -91,27 +92,49 @@ def _display_path(path: Path) -> str:
         return str(path)
 
 
+def _parse_proc_meminfo_gb(meminfo_text: str) -> tuple[float | None, float | None]:
+    vals_kib: dict[str, int] = {}
+    for line in meminfo_text.splitlines():
+        if ":" not in line:
+            continue
+        key, rest = line.split(":", 1)
+        parts = rest.strip().split()
+        if parts and parts[0].isdigit():
+            vals_kib[key.strip()] = int(parts[0])
+    total_kib = vals_kib.get("MemTotal")
+    avail_kib = vals_kib.get("MemAvailable", vals_kib.get("MemFree"))
+    if total_kib is None or avail_kib is None:
+        return None, None
+    return avail_kib / (1024 ** 2), total_kib / (1024 ** 2)
+
+
 def _avail_ram_gb() -> tuple[float | None, float | None]:
     try:
-        import ctypes
+        if os.name == "nt":
+            import ctypes
 
-        class MEMORYSTATUSEX(ctypes.Structure):
-            _fields_ = [
-                ("dwLength", ctypes.c_ulong),
-                ("dwMemoryLoad", ctypes.c_ulong),
-                ("ullTotalPhys", ctypes.c_ulonglong),
-                ("ullAvailPhys", ctypes.c_ulonglong),
-                ("ullTotalPageFile", ctypes.c_ulonglong),
-                ("ullAvailPageFile", ctypes.c_ulonglong),
-                ("ullTotalVirtual", ctypes.c_ulonglong),
-                ("ullAvailVirtual", ctypes.c_ulonglong),
-                ("sullAvailExtendedVirtual", ctypes.c_ulonglong),
-            ]
+            class MEMORYSTATUSEX(ctypes.Structure):
+                _fields_ = [
+                    ("dwLength", ctypes.c_ulong),
+                    ("dwMemoryLoad", ctypes.c_ulong),
+                    ("ullTotalPhys", ctypes.c_ulonglong),
+                    ("ullAvailPhys", ctypes.c_ulonglong),
+                    ("ullTotalPageFile", ctypes.c_ulonglong),
+                    ("ullAvailPageFile", ctypes.c_ulonglong),
+                    ("ullTotalVirtual", ctypes.c_ulonglong),
+                    ("ullAvailVirtual", ctypes.c_ulonglong),
+                    ("sullAvailExtendedVirtual", ctypes.c_ulonglong),
+                ]
 
-        stat = MEMORYSTATUSEX()
-        stat.dwLength = ctypes.sizeof(stat)
-        ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(stat))
-        return stat.ullAvailPhys / (1024 ** 3), stat.ullTotalPhys / (1024 ** 3)
+            stat = MEMORYSTATUSEX()
+            stat.dwLength = ctypes.sizeof(stat)
+            ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(stat))
+            return stat.ullAvailPhys / (1024 ** 3), stat.ullTotalPhys / (1024 ** 3)
+
+        meminfo_path = Path("/proc/meminfo")
+        if meminfo_path.is_file():
+            return _parse_proc_meminfo_gb(meminfo_path.read_text(encoding="utf-8"))
+        return None, None
     except Exception:
         return None, None
 
@@ -227,6 +250,7 @@ class TexelTuningSession:
         sf_lambda: float = 0.25,
         sf_labels_path: str | Path | None = None,
         sf_max_tactical_gap: int = 180,
+        drive_backup_dir: str | Path | None = None,
     ):
         self.train_path = Path(train_npz)
         self.pgn_val_path = Path(pgn_val_npz) if pgn_val_npz else None
@@ -243,6 +267,7 @@ class TexelTuningSession:
             else default_sidecar_path(self.train_path)
         )
         self.sf_max_tactical_gap = int(sf_max_tactical_gap)
+        self.drive_backup_dir = Path(drive_backup_dir) if drive_backup_dir else None
         (
             self.target_engine,
             self.target_constants_path,
@@ -467,6 +492,52 @@ class TexelTuningSession:
         self.runs_dir.mkdir(parents=True, exist_ok=True)
         self.backups_dir.mkdir(parents=True, exist_ok=True)
 
+    def sync_to_drive(self, tag: str | None = None) -> Path | None:
+        """Mirror active target constants.py, runs/, and backups/ to drive_backup_dir if set."""
+        backup_root = getattr(self, "drive_backup_dir", None)
+        if not backup_root:
+            return None
+        backup_root = Path(backup_root)
+        target_path = getattr(self, "target_constants_path", CONSTANTS_PATH)
+        target_engine = getattr(self, "target_engine", "classical")
+        dst_run_dir = backup_root / self.runs_dir.name
+        dst_backups_dir = dst_run_dir / "backups"
+        try:
+            backup_root.mkdir(parents=True, exist_ok=True)
+            dst_run_dir.mkdir(parents=True, exist_ok=True)
+            dst_backups_dir.mkdir(parents=True, exist_ok=True)
+
+            if target_path.is_file():
+                const_text = target_path.read_text(encoding="utf-8").replace("\r\n", "\n")
+                for const_dst in (
+                    backup_root / f"{target_engine}_constants.py",
+                    dst_run_dir / f"{target_engine}_constants.py",
+                ):
+                    with const_dst.open("w", encoding="utf-8", newline="\n") as fh:
+                        fh.write(const_text)
+
+            for src_dir, dst_dir in (
+                (self.runs_dir, dst_run_dir),
+                (self.backups_dir, dst_backups_dir),
+            ):
+                if not src_dir.is_dir():
+                    continue
+                for src_file in src_dir.glob("*.py"):
+                    dst_file = dst_dir / src_file.name
+                    if (
+                        not dst_file.is_file()
+                        or dst_file.stat().st_size != src_file.stat().st_size
+                        or src_file.stat().st_mtime > dst_file.stat().st_mtime + 0.5
+                    ):
+                        shutil.copy2(src_file, dst_file)
+
+            tag_msg = f" ({tag})" if tag else ""
+            print(f"[Drive Backup]{tag_msg} Synced -> {dst_run_dir}")
+            return dst_run_dir
+        except Exception as exc:
+            print(f"[WARN] Drive backup skipped ({exc})")
+            return None
+
     def _load_sf_sidecar_if_needed(self) -> None:
         if self._sf_cp is not None:
             return
@@ -632,9 +703,12 @@ class TexelTuningSession:
         sf_lambda: float | None = None,
         sf_labels_path: str | Path | None = None,
         sf_max_tactical_gap: int | None = None,
+        drive_backup_dir: str | Path | None = None,
     ) -> None:
         """Switch validation mode, SF19 label blend, or target engine in-place without reloading 20M rows."""
         t0 = time.time()
+        if drive_backup_dir is not None:
+            self.drive_backup_dir = Path(drive_backup_dir) if drive_backup_dir else None
         if pgn_val_npz is not None:
             new_pgn_path = Path(pgn_val_npz) if pgn_val_npz else None
             if new_pgn_path != self.pgn_val_path:
@@ -1002,6 +1076,12 @@ class TexelTuningSession:
                 "KING_DANGER_KNIGHT_DEF",
                 "KING_DANGER_OFFSET",
                 "KING_DANGER_THRESHOLD",
+                "KING_DANGER_OUT_MG_NUM",
+                "KING_DANGER_OUT_EG_NUM",
+                "EG_SAFETY_SCALE",
+                "KING_FLANK_ATTACK_NUM",
+                "KING_FLANK_DEFENSE_MULT",
+                "KING_SHELTER_FEEDBACK_NUM",
             }
             for ch in changes
         )
@@ -1226,9 +1306,11 @@ class TexelTuningSession:
             else "Unseen Holdout Validation"
         )
         print(f"\n--- {val_header} for [{block_id}] ---")
-        return self.validate_candidate_theta(
+        res = self.validate_candidate_theta(
             block_id, optimizer.best_theta.copy(), out_path=out_path
         )
+        self.sync_to_drive(tag=f"{block_id}_candidate")
+        return res
 
     def scan_grid(
         self,
@@ -1282,6 +1364,7 @@ class TexelTuningSession:
         print(f"--- {val_header} for [{block_id}] ---")
         res = self.validate_candidate_theta(block_id, best_theta, out_path=out_path)
         res["grid_best_values"] = scan["best_values"]
+        self.sync_to_drive(tag=f"{block_id}_candidate")
         return res
 
     def validate_file(
@@ -1377,6 +1460,7 @@ class TexelTuningSession:
             f"[{block_id}] Accepted {len(changed)} parameter group(s) into {target_rel}. "
             f"Backup saved to {_display_path(backup_path)}."
         )
+        self.sync_to_drive(tag=f"{block_id}_accept")
         return changed
 
     def accept_if_pass(self, block_id: str, only: list[str] | None = None) -> list[str]:
@@ -1412,6 +1496,7 @@ class TexelTuningSession:
         self._reload_parameter_manager(clear_target_cache=True)
         self._refresh_baseline_score_caches()
         print(f"Rolled back {target_rel} using {_display_path(chosen)} (tag={label}).")
+        self.sync_to_drive(tag=f"{label}_rollback")
         return chosen
 
     def cumulative_report(self) -> dict:

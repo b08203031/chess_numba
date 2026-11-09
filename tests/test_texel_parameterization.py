@@ -1,8 +1,11 @@
 """Lightweight invariants for the HCE Texel/SPSA parameterization."""
 from __future__ import annotations
 
+import ast
 import io
+import json
 from pathlib import Path
+import re
 import shutil
 import tempfile
 import unittest
@@ -32,6 +35,7 @@ from tuner.data_pipeline.preprocess_data import parse_fen_to_arrays
 from tuner.notebook_session import (
     CONSTANTS_PATH,
     TexelTuningSession,
+    _parse_proc_meminfo_gb,
     build_blended_labels,
 )
 from tuner.parameters import ParameterManager
@@ -203,6 +207,76 @@ class TestIntegerAwareTuningBands(unittest.TestCase):
 
         path_s, _ = self.pm.get_param_indices("PASSED_PATH_SAFE_NONE_ATTACK")
         self.assertEqual(scales[path_s], 1.0)        # ±1 box stays 1.0
+
+    def test_king_safety_output_and_flank_coeffs_are_registered_and_scaled(self):
+        new_ks_names = [
+            "KING_DANGER_OUT_MG_NUM",
+            "KING_DANGER_OUT_EG_NUM",
+            "EG_SAFETY_SCALE",
+            "KING_FLANK_ATTACK_NUM",
+            "KING_FLANK_DEFENSE_MULT",
+            "KING_SHELTER_FEEDBACK_NUM",
+        ]
+        registered = set(self.pm.list_param_names())
+        for name in new_ks_names:
+            self.assertIn(name, registered)
+            start, count = self.pm.get_param_indices(name)
+            self.assertEqual(count, 1)
+            lower, upper = self.cm._absolute_bounds(name, np.array([start]))
+            self.assertGreater(upper[0], lower[0], msg=f"{name} should not be pinned")
+
+        theta0 = self.pm.get_initial_theta()
+        mask = self.optimizer._create_mask(include_list=new_ks_names)
+        scales = self.optimizer._build_param_scales(theta0, mask, c=2.0)
+
+        eg_out_s, _ = self.pm.get_param_indices("KING_DANGER_OUT_EG_NUM")
+        mg_out_s, _ = self.pm.get_param_indices("KING_DANGER_OUT_MG_NUM")
+        eg_safe_s, _ = self.pm.get_param_indices("EG_SAFETY_SCALE")
+        self.assertGreaterEqual(scales[eg_out_s], 100.0)
+        self.assertGreater(scales[mg_out_s], 1.5)
+        self.assertGreater(scales[eg_safe_s], 1.5)
+
+    def test_discrete_factor_and_divisor_knobs_are_unlocked(self):
+        for name in (
+            "KING_PAWN_PROXIMITY_FACTOR",
+            "BISHOP_PAWNS_CENTER_BLOCKED_FACTOR",
+            "IMBALANCE_DIVISOR",
+        ):
+            start, count = self.pm.get_param_indices(name)
+            self.assertEqual(count, 1)
+            lower, upper = self.cm._absolute_bounds(name, np.array([start]))
+            self.assertGreaterEqual(
+                upper[0] - lower[0],
+                2.0,
+                msg=f"{name} should allow >= 3 discrete integers",
+            )
+
+    def test_notebook_covers_all_active_registered_parameters(self):
+        nb_path = Path(__file__).resolve().parents[1] / "tuner" / "texel_tuner_runner.ipynb"
+        nb = json.loads(nb_path.read_text(encoding="utf-8"))
+        code_cells = [
+            "".join(cell.get("source", []))
+            for cell in nb.get("cells", [])
+            if cell.get("cell_type") == "code"
+        ]
+        for idx, src in enumerate(code_cells):
+            cleaned = "\n".join(
+                line for line in src.splitlines()
+                if not line.lstrip().startswith(("!", "%"))
+            )
+            ast.parse(cleaned, filename=f"{nb_path.name}#code_cell_{idx}")
+        code_text = "\n".join(code_cells)
+        tokens = set(re.findall(r'["\']([A-Z][A-Z0-9_]*)(?:=[^"\']*)?["\']', code_text))
+        intentionally_pinned_or_dead = {
+            "CANDIDATE_PASSER_DIVISOR",
+            "UNSTOPPABLE_PAWN_BONUS",
+            "INITIATIVE_PAWN_ENDGAME_WEIGHT_MG",
+            "INITIATIVE_PAWN_ENDGAME_WEIGHT_EG",
+        }
+        missing = sorted(
+            set(self.pm.list_param_names()) - tokens - intentionally_pinned_or_dead
+        )
+        self.assertEqual(missing, [], msg=f"Active params missing from notebook: {missing}")
 
 
 class TestSplitDatasetIndices(unittest.TestCase):
@@ -469,6 +543,105 @@ class TestCustomConstantsAndSessionModes(unittest.TestCase):
                 self.assertEqual(rec_dual["verdict"], "REJECT")
                 self.assertIsNotNone(rec_dual["pgn_val"])
                 self.assertEqual(session.accept_if_pass("block_test"), [])
+
+    def test_parse_proc_meminfo_gb_handles_linux_meminfo_and_fallback(self):
+        meminfo = (
+            "MemTotal:       13289612 kB\n"
+            "MemFree:         2097152 kB\n"
+            "MemAvailable:   10485760 kB\n"
+        )
+        avail, total = _parse_proc_meminfo_gb(meminfo)
+        self.assertAlmostEqual(avail, 10.0, places=6)
+        self.assertAlmostEqual(total, 13289612 / (1024 ** 2), places=6)
+
+        meminfo_fallback = "MemTotal: 4194304 kB\nMemFree: 2097152 kB\n"
+        avail2, total2 = _parse_proc_meminfo_gb(meminfo_fallback)
+        self.assertAlmostEqual(avail2, 2.0, places=6)
+        self.assertAlmostEqual(total2, 4.0, places=6)
+
+        self.assertEqual(_parse_proc_meminfo_gb("malformed"), (None, None))
+
+    def test_drive_backup_dir_mirrors_constants_runs_and_rollback(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_dir = Path(tmp)
+            train_npz = tmp_dir / "train_drive.npz"
+            const_copy = tmp_dir / "classical_constants.py"
+            drive_dir = tmp_dir / "drive_backup"
+            shutil.copyfile(CONSTANTS_PATH, const_copy)
+
+            pb0, ob0, gs0 = parse_fen_to_arrays(
+                "r3k2r/pppq1ppp/2npbn2/4p3/4P3/2NPBN2/PPPQ1PPP/R3K2R w KQkq - 4 8"
+            )
+            n_train = 60
+            np.savez(
+                train_npz,
+                piece_bbs=np.tile(pb0, (n_train, 1)),
+                occupancy_bbs=np.tile(ob0, (n_train, 1)),
+                game_states=np.tile(gs0, (n_train, 1)),
+                results=np.full(n_train, 0.80, dtype=np.float32),
+            )
+
+            init_idx, _ = ParameterManager().get_param_indices("INITIATIVE_MG_OFFSET")
+
+            def _fake_eval(pb, ob, gs, theta, lazy=False):
+                return np.int32(int(np.rint(theta[init_idx])))
+
+            def _fake_scores(pbs, obs, gss, theta):
+                jitter = (np.arange(len(pbs), dtype=np.int32) % 7) - 3
+                return np.int32(int(np.rint(theta[init_idx]))) + jitter
+
+            with (
+                patch("tuner.notebook_session.evaluate_position_tunable", side_effect=_fake_eval),
+                patch("tuner.notebook_session.compute_white_scores", side_effect=_fake_scores),
+                patch("tuner.validate_tuned.compute_white_scores", side_effect=_fake_scores),
+                patch("sys.stdout", new_callable=io.StringIO),
+            ):
+                session = TexelTuningSession(
+                    train_npz=train_npz,
+                    eval_sample=10,
+                    holdout_sample=20,
+                    use_pgn_val=False,
+                    target_engine="classical",
+                    target_constants_path=const_copy,
+                    runs_dir=tmp_dir / "runs_drive",
+                    drive_backup_dir=drive_dir,
+                )
+                base_val = int(session.step_baseline_theta[init_idx])
+                cand_theta = session.step_baseline_theta.copy()
+                cand_theta[init_idx] = base_val + 40
+                cand_file = session.runs_dir / "block_drive.py"
+                cand_file.write_text(
+                    session.pm.update_constants_string(cand_theta),
+                    encoding="utf-8",
+                    newline="\n",
+                )
+
+                rec = session.validate_candidate_theta(
+                    "block_drive", cand_theta, out_path=cand_file
+                )
+                self.assertEqual(rec["verdict"], "PASS")
+                changed = session.accept_if_pass("block_drive")
+                self.assertEqual(changed, ["INITIATIVE_MG_OFFSET"])
+
+                mirrored_top = drive_dir / "classical_constants.py"
+                mirrored_run_const = drive_dir / "runs_drive" / "classical_constants.py"
+                mirrored_cand = drive_dir / "runs_drive" / "block_drive.py"
+                mirrored_backups = list((drive_dir / "runs_drive" / "backups").glob("*.py"))
+
+                self.assertTrue(mirrored_top.is_file())
+                self.assertTrue(mirrored_run_const.is_file())
+                self.assertTrue(mirrored_cand.is_file())
+                self.assertTrue(mirrored_backups)
+                self.assertEqual(
+                    int(_eval_const_module(mirrored_top)["INITIATIVE_MG_OFFSET"]),
+                    base_val + 40,
+                )
+
+                session.rollback("block_drive")
+                self.assertEqual(
+                    int(_eval_const_module(mirrored_top)["INITIATIVE_MG_OFFSET"]),
+                    base_val,
+                )
 
 
 class TestSfMixedLabelsAndKStarGate(unittest.TestCase):

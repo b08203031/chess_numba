@@ -33,10 +33,11 @@ python -m tuner.run status
 
 ## 濃縮指令（推薦日常用法）
 
-> **互動式區塊調參（推薦）：** [`tuner/texel_tuner_runner.ipynb`](texel_tuner_runner.ipynb) 透過 `tuner/notebook_session.py` 在單一 Kernel 載入一次 20M 主資料集 +（可選）PGN 驗證集（約 3.44~3.72 GB RAM，免重複載入與免重編譯 Numba），預設自動在 `1M dev` 上校準最佳尺度 `K*`（`k_factor="auto"`，防止固定 `K=1.0` 造成假性尺度膨脹）。Cell 1 支援實驗切換參數（重跑 Cell 1 可透過 `session.reconfigure(...)` 在 ~3 秒內免重載切換）：
+> **互動式區塊調參（推薦）：** [`tuner/texel_tuner_runner.ipynb`](texel_tuner_runner.ipynb) 透過 `tuner/notebook_session.py` 在單一 Kernel 載入一次 20M 主資料集 +（可選）PGN 驗證集（約 3.44~3.72 GB RAM，免重複載入與免重編譯 Numba），預設自動在 `1M dev` 上校準最佳尺度 `K*`（`k_factor="auto"`，防止固定 `K=1.0` 造成假性尺度膨脹）。`# 0` Cell 支援實驗切換參數（重跑 `# 0` 可透過 `session.reconfigure(...)` 在 ~3 秒內免重載切換）：
 > - `USE_PGN_VAL`（`True` / `False`）：是否啟用 `val_pgn.npz` 雙重驗證閘門（`False` 時僅用 2M unseen holdout `@ K*` 驗收；另支援 `USE_ZURICHESS_VAL` 啟用 `val_zurichess.npz` 仲裁集）。
 > - `TARGET_ENGINE`（`"classical"` / `"classical_old"`）：指定 `accept()` 寫入 `chess_engine/classical/constants.py` 或 `chess_engine/classical_old/constants.py`（輸出與備份自動隔離於 `tuner/runs/<engine>_<mode>[_sfXX]/`）。
 > - `USE_SF_LABELS` & `SF_LAMBDA`（預設 `False`, `0.25`）：啟用後讀取側車檔 `<dataset>.sf19.npz`，自動校準無偏 $K_{\text{sf}}$ 並於記憶體動態合成 `(1-λ)·WDL + λ·sigmoid(K_sf·sf_cp)`（自動過濾 `|sf_cp - sf_d1_cp| > 180` 戰術跳分局面），同時保持 `2M unseen holdout` 與 `val_pgn` 為純 WDL 驗收。
+> - **Google Colab + Google Drive 雲端調參（`# 00` & `# 9d` Cell）**：請先手動將 `tuner/data/hce/dataset_epd_wdl_20m.npz`（及選用之 `val_pgn.npz` / `val_zurichess.npz` / `.sf19.npz`）上傳至 Google Drive `MyDrive/chess_numba_data/hce/`。在 Colab 執行 `# 00` 會自動掛載 Drive、同步 GitHub 程式碼（本機執行自動略過）並把 `.npz` 複製至本機 SSD；每次 `run_block()` / `scan_grid()` / `accept()` / `rollback()` 會自動即時備份至 `MyDrive/chess_numba_data/texel_runs/`（支援 `RESUME_FROM_DRIVE = True` 斷線續跑），結束時執行 `# 9d` 可打包 `.zip` 匯出下載。
 
 ```bash
 # 0) 看資料是否齊 / 重建本引擎對戰 PGN 獨立驗證集 / 產生 SF19 混合標籤側車檔
@@ -233,9 +234,9 @@ python -m tuner.tuner --dataset tuner/data/hce/dataset_mix03_20m_s2.npz \
   --c 3.0 --iter 4000 --batch-size 65536
 ```
 
-**永遠凍結 / 硬 pin：** MG Pawn 材質 100、MG/EG King 材質 0、unused table 洞、部分公式骨架（`UNSTOPPABLE_PAWN_BONUS` 等）。
+**永遠凍結 / 硬 pin（115 組共 1,278 維註冊參數之外）：** MG Pawn 材質 100、MG/EG King 材質 0、unused table 洞、與分子 100% 共線的固定分母（`KING_DANGER_OUT_*_DEN`、`KING_FLANK_ATTACK_DEN`、`KING_SHELTER_FEEDBACK_DEN`）、結構不變量/切剪門檻（`LAZY_EVAL_THRESHOLD`、`PHASE_*`、`SCALE_FACTOR_*`）、以及部分公式骨架（`CANDIDATE_PASSER_DIVISOR=2`、`UNSTOPPABLE_PAWN_BONUS=800` 與未引用死碼 `INITIATIVE_PAWN_ENDGAME_WEIGHT_*`）。
 
-**Soft band（可小動）：** EG Pawn 材質 θ₀±10%（≈108–132，選 `--pst-pieces P` 且包含 `EG_MATERIAL_VALUES` 時會開啟）；`PASSED_DYNAMICS_*` / 多數 `KING_PROX_*` 為 θ₀±1；`KING_PROX_FRIENDLY_MULT∈{1,2}`；prox clamp 與 `INITIATIVE_*` ±10%；imbalance 二次非零 ±10% 且至少可動一個整數（0 釘死）。見 `tuner.py` `_setup_constraints`。
+**Soft band（可小動）與離散小整數：** EG Pawn 材質 θ₀±10%（≈108–132，選 `--pst-pieces P` 且包含 `EG_MATERIAL_VALUES` 時會開啟）；`PASSED_DYNAMICS_*` / 多數 `KING_PROX_*` / `IMBALANCE_DIVISOR` 為 θ₀±1；`KING_PROX_FRIENDLY_MULT∈{1,2}`；`KING_PAWN_PROXIMITY_FACTOR∈[2,8]` 與 `BISHOP_PAWNS_CENTER_BLOCKED_FACTOR∈[0,3]`（已解鎖供離散掃描）；prox clamp 與 `INITIATIVE_*` ±10%；imbalance 二次非零 ±10% 且至少可動一個整數（0 釘死）；`KING_DANGER_OUT_MG_NUM` / `KING_DANGER_OUT_EG_NUM` / `EG_SAFETY_SCALE` 為 θ₀±35% 軟帶，`KING_FLANK_ATTACK_NUM` / `KING_FLANK_DEFENSE_MULT` / `KING_SHELTER_FEEDBACK_NUM` 為 θ₀±50%（至少 ±2）。見 `tuner.py` `_setup_constraints`。
 
 `TRAPPED_ROOK` / `FLANK_ATTACKS` / `THREAT_RESTRICTED_PIECE` 為 soft band（非死鎖）。
 
@@ -244,7 +245,7 @@ python -m tuner.tuner --dataset tuner/data/hce/dataset_mix03_20m_s2.npz \
 - `MIDGAME_LIMIT` 由候選 MG `N/B/R/Q` 的完整開局非兵材質即時計算；`ENDGAME_LIMIT` 保持 SF11 的 `3915/15258` 比例。正式引擎、runtime match weights、Texel 的 `theta+ / theta-` 都走同一公式，因此 start position 永遠是 phase 128。
 - `PST_MG/PST_EG` 每個棋種列保留 θ₀ 平均值（兵只計 rank 2–7），只調格子間形狀；現有表不會被重新置中。
 - 每張 mobility table 的 0-mobility MG/EG bin 固定在 θ₀，material 負責棋種基準值。
-- tuner 候選與輸出檔都使用 `np.rint/np.round` 的同一整數量化；`SPSAOptimizer` 預設啟用 **整數擾動保底 `c_floor = 1.25`**（確保對任意分數殘差 `[-0.5, +0.5]`，`theta ± c_k` 皆雙向跨越整數格點，杜絕量化死鎖）、**依單位自動尺度化 `auto_scale=True`**（對 King Danger ~12 units/cp、二次 Imbalance ~35 units/cp 與高階表項自動放大擾動與步幅，Material + PST 則維持嚴格 1.0 cp），以及 **整數向量驗證快取 + EMA 平滑候選追蹤**（`--verbose-buckets endpoints` 僅於起訖輸出 12 分桶表，省去重複驗證與洗版）。
+- tuner 候選與輸出檔都使用 `np.rint/np.round` 的同一整數量化；`SPSAOptimizer` 預設啟用 **整數擾動保底 `c_floor = 1.25`**（確保對任意分數殘差 `[-0.5, +0.5]`，`theta ± c_k` 皆雙向跨越整數格點，杜絕量化死鎖）、**依單位自動尺度化 `auto_scale=True`**（對 King Danger ~12 units/cp、`KING_DANGER_OUT_EG_NUM` (~512)、二次 Imbalance ~35 units/cp 與高階表項自動放大擾動與步幅，Material + PST 則維持嚴格 1.0 cp），以及 **整數向量驗證快取 + EMA 平滑候選追蹤**（`--verbose-buckets endpoints` 僅於起訖輸出 12 分桶表，省去重複驗證與洗版）。
 - validation bucket 以初始 θ₀ 固定成員，候選 material 改變時不重分桶；這樣各次報告可直接比較。
 - 跨輪比較必須固定 dataset、`--eval-sample` 與 validation split。輸出 `tuned_*.py` 不會自動套回 production；接受後須先套用、執行 `python -m tuner.run sync` 清除 stale Numba cache，再啟動下一輪，否則下一輪不會承接前一輪 best。
 - 20M dataset 的目前預設為 3-way 切分（`split_dataset_indices`）：**17,000,000 train**、`--eval-sample 1,000,000`（SPSA 過程報告與 early stop 專用）、`--holdout-sample 2,000,000`（完全不進梯度也不進 early stop 的獨立 holdout）。`validate_tuned.py` 預設（`--split holdout`）直接檢驗這 2M unseen holdout，並支援 `--pgn-val tuner/data/hce/val_pgn.npz` 同時驗證本引擎實戰 PGN（含 `castling!=0` 易位權桶與 baseline 校準 `K*`）。

@@ -11,12 +11,24 @@ import unittest
 
 import numpy as np
 
+from chess_engine.classical.constants import MAX_PLY
+from chess_engine.classical.engine_types import SearchContext
 from chess_engine.classical.evaluation import (
+    _evaluate_position_jit,
     _phase_limits_from_material as production_phase_limits,
     evaluate_position,
 )
 from chess_engine.classical.fen_parser import parse_fen
 from chess_engine.classical.endgame import evaluate_special_endgame_with_material
+from chess_engine.classical.transposition_table import create_transposition_table
+from tune_eval_match.eval_weights import (
+    EW_EG_SAFETY_SCALE,
+    EW_KING_DANGER_OUT_EG_NUM,
+    EW_KING_DANGER_OUT_MG_NUM,
+    EW_KING_FLANK_ATTACK_NUM,
+    EW_KING_FLANK_DEFENSE_MULT,
+    EW_KING_SHELTER_FEEDBACK_NUM,
+)
 from tuner.constraint_manager import ConstraintManager
 from tuner.parameters import ParameterManager
 from tuner.tunable_eval import (
@@ -198,6 +210,74 @@ class TestTunableEvalParity(unittest.TestCase):
         self.assertEqual(int(np.count_nonzero(knight_mask[eg_start : eg_start + 6])), 1)
         self.assertEqual(knight_mask[mg_start + 1], 1.0)
         self.assertEqual(knight_mask[eg_start + 1], 1.0)
+
+    def test_king_safety_output_and_flank_weights_match_runtime_eval(self):
+        def _make_ctx():
+            tt = create_transposition_table(1)
+            return SearchContext(
+                tt,
+                np.zeros(MAX_PLY * 2, dtype=np.uint16),
+                np.zeros((MAX_PLY, MAX_PLY), dtype=np.uint16),
+                np.zeros((12, 64), dtype=np.int32),
+                np.zeros((64, 64), dtype=np.int32),
+                np.zeros((5, 12, 64, 12, 64), dtype=np.int16),
+                np.zeros((12, 64, 6), dtype=np.int32),
+                np.full((8192, 12, 64), -1238, dtype=np.int16),
+                np.zeros(16384, dtype=np.int16),
+                np.zeros(16384, dtype=np.int16),
+                np.zeros(16384, dtype=np.int16),
+                np.zeros(16384, dtype=np.int16),
+                np.zeros((12, 64, 12, 64), dtype=np.int16),
+            )
+
+        attack_fens = [
+            FENS[1],
+            "r2q1rk1/ppp2ppp/2n1bn2/2b1p1N1/2B1P3/2NP2Q1/PPP2PPP/R1B2RK1 w - - 0 1",
+            "r1b2rk1/pp2bppp/1qn1pn2/3p2B1/3P4/2N1PN1P/PPQ1BPP1/R4RK1 w - - 0 12",
+            "2r3k1/5ppp/4q3/8/8/2B3Q1/5PPP/4R1K1 w - - 0 1",
+        ]
+        parsed = [parse_fen(f) for f in attack_fens]
+        base_scores = [
+            int(evaluate_position_tunable(p, o, g, self.theta, False))
+            for p, o, g in parsed
+        ]
+
+        specs = (
+            ("KING_FLANK_ATTACK_NUM", EW_KING_FLANK_ATTACK_NUM, 4),
+            ("KING_FLANK_DEFENSE_MULT", EW_KING_FLANK_DEFENSE_MULT, 5),
+            ("KING_SHELTER_FEEDBACK_NUM", EW_KING_SHELTER_FEEDBACK_NUM, 5),
+            ("KING_DANGER_OUT_MG_NUM", EW_KING_DANGER_OUT_MG_NUM, 80),
+            ("KING_DANGER_OUT_EG_NUM", EW_KING_DANGER_OUT_EG_NUM, 8000),
+            ("EG_SAFETY_SCALE", EW_EG_SAFETY_SCALE, 50),
+        )
+
+        # Verify each individual knob affects score and matches runtime eval_weights
+        for name, ew_idx, delta in specs:
+            idx, _ = self.param_manager.get_param_indices(name)
+            cand_theta = self.theta.copy()
+            cand_theta[idx] += delta
+            any_diff = False
+            for (p, o, g), base in zip(parsed, base_scores):
+                ctx = _make_ctx()
+                ctx.eval_weights[ew_idx] += np.int32(delta)
+                rt_score = int(_evaluate_position_jit(p, o, g, False, ctx)[0])
+                tun_score = int(evaluate_position_tunable(p, o, g, cand_theta, False))
+                self.assertEqual(rt_score, tun_score, msg=f"{name}: rt={rt_score} tun={tun_score}")
+                if tun_score != base:
+                    any_diff = True
+            self.assertTrue(any_diff, msg=f"Expected mutation of {name} to affect at least one test FEN")
+
+        # Verify simultaneous mutation of all 6 weights preserves exact parity
+        cand_all = self.theta.copy()
+        ctx_all = _make_ctx()
+        for name, ew_idx, delta in specs:
+            idx, _ = self.param_manager.get_param_indices(name)
+            cand_all[idx] += delta
+            ctx_all.eval_weights[ew_idx] += np.int32(delta)
+        for p, o, g in parsed:
+            rt_all = int(_evaluate_position_jit(p, o, g, False, ctx_all)[0])
+            tun_all = int(evaluate_position_tunable(p, o, g, cand_all, False))
+            self.assertEqual(rt_all, tun_all)
 
     def test_validation_bucket_membership_uses_reference_phase(self):
         optimizer = SPSAOptimizer.__new__(SPSAOptimizer)

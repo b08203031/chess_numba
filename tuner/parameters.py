@@ -99,7 +99,10 @@ def _collect_param_specs(constants_source=None):
         ("KING_DANGER_KNIGHT_DEF", c.KING_DANGER_KNIGHT_DEF),
         ("KING_DANGER_OFFSET", c.KING_DANGER_OFFSET),
         ("KING_DANGER_THRESHOLD", c.KING_DANGER_THRESHOLD),
-        # Shelter / storm
+        ("KING_DANGER_OUT_MG_NUM", c.KING_DANGER_OUT_MG_NUM),
+        ("KING_DANGER_OUT_EG_NUM", c.KING_DANGER_OUT_EG_NUM),
+        ("EG_SAFETY_SCALE", c.EG_SAFETY_SCALE),
+        # Shelter / storm / flank feedback
         ("SHELTER_STRENGTH", c.SHELTER_STRENGTH),
         ("UNBLOCKED_STORM", c.UNBLOCKED_STORM),
         ("BLOCKED_STORM", c.BLOCKED_STORM),
@@ -109,6 +112,9 @@ def _collect_param_specs(constants_source=None):
         ("KING_PAWN_DIST_PENALTY_EG", c.KING_PAWN_DIST_PENALTY_EG),
         ("PAWNLESS_FLANK", c.PAWNLESS_FLANK),
         ("FLANK_ATTACKS", c.FLANK_ATTACKS),
+        ("KING_FLANK_ATTACK_NUM", c.KING_FLANK_ATTACK_NUM),
+        ("KING_FLANK_DEFENSE_MULT", c.KING_FLANK_DEFENSE_MULT),
+        ("KING_SHELTER_FEEDBACK_NUM", c.KING_SHELTER_FEEDBACK_NUM),
         # Threats
         ("THREAT_SAFE_PAWN", c.THREAT_SAFE_PAWN),
         ("THREAT_KNIGHT_ON_QUEEN", c.THREAT_KNIGHT_ON_QUEEN),

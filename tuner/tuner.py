@@ -255,7 +255,13 @@ class SPSAOptimizer:
         maybe_range("KING_DANGER_NO_QUEEN_ROOKLESS", min_val=300, max_val=950)
         maybe_range("KING_DANGER_KNIGHT_DEF", min_val=20, max_val=180)       # ~78
         maybe_range("KING_DANGER_OFFSET", min_val=0, max_val=80)             # ~28
+        maybe_range("KING_DANGER_OUT_MG_NUM", min_val=40, max_val=300)
+        maybe_range("KING_DANGER_OUT_EG_NUM", min_val=4000, max_val=35000)
+        maybe_range("EG_SAFETY_SCALE", min_val=30, max_val=200)
         maybe_range("KING_ATTACK_WEIGHTS", min_val=0)
+        maybe_range("KING_FLANK_ATTACK_NUM", min_val=1, max_val=10)
+        maybe_range("KING_FLANK_DEFENSE_MULT", min_val=0, max_val=12)
+        maybe_range("KING_SHELTER_FEEDBACK_NUM", min_val=1, max_val=14)
         # Shelter / storm (SF tables can be negative)
         maybe_range("SHELTER_BASE_MG", min_val=0, max_val=20)
         maybe_range("SHELTER_BASE_EG", min_val=0, max_val=15)
@@ -280,6 +286,8 @@ class SPSAOptimizer:
         maybe_range("WEAK_QUEEN", min_val=0)
         maybe_range("KING_PROTECTOR", min_val=0)
         maybe_range("UNSTOPPABLE_PAWN_BONUS", min_val=0)
+        maybe_range("KING_PAWN_PROXIMITY_FACTOR", min_val=2, max_val=8)
+        maybe_range("BISHOP_PAWNS_CENTER_BLOCKED_FACTOR", min_val=0, max_val=3)
         # TEMPO / SPACE_THRESHOLD: soft bands applied later (not hard-pin)
         maybe_range("TEMPO_BONUS", min_val=12, max_val=36)  # SF 28 scaled ≈22; allow modest search-coupled move
         maybe_range("SPACE_THRESHOLD", min_val=3500, max_val=6500)  # SF 12222 scaled ≈5.5k; keep mid-open gate
@@ -393,18 +401,21 @@ class SPSAOptimizer:
                     lo, hi = hi, lo
                 cm.add_range_on_absolute_index(start + i, min_val=lo, max_val=hi)
 
-        # Multiplicative / structural factors still hard-pinned (not passer dynamics / king-prox).
+        # Large known-win constant (not a free HCE knob)
         for name, lo, hi in (
-            # King–pawn endgame: (b_dist - w_dist) * factor
-            ("KING_PAWN_PROXIMITY_FACTOR", 5.0, 5.0),
-            # Bad bishop: penalty * (1 + factor * center_blocked)
-            ("BISHOP_PAWNS_CENTER_BLOCKED_FACTOR", 1.0, 1.0),
-            # Large known-win constant (not a free HCE knob)
             ("UNSTOPPABLE_PAWN_BONUS", 800.0, 800.0),
         ):
             if name in names:
                 idx, _ = cm.pm.get_param_indices(name)
                 cm.add_range_on_absolute_index(idx, min_val=lo, max_val=hi)
+
+        # Discrete/bounded king-safety output scaling & flank feedback coeffs
+        soft_band_theta0("KING_DANGER_OUT_MG_NUM", frac=0.35, min_half=20.0, abs_min=40.0, abs_max=300.0)
+        soft_band_theta0("KING_DANGER_OUT_EG_NUM", frac=0.35, min_half=1500.0, abs_min=4000.0, abs_max=35000.0)
+        soft_band_theta0("EG_SAFETY_SCALE", frac=0.35, min_half=15.0, abs_min=30.0, abs_max=200.0)
+        soft_band_theta0("KING_FLANK_ATTACK_NUM", frac=0.5, min_half=2.0, abs_min=1.0, abs_max=10.0)
+        soft_band_theta0("KING_FLANK_DEFENSE_MULT", frac=0.5, min_half=2.0, abs_min=0.0, abs_max=12.0)
+        soft_band_theta0("KING_SHELTER_FEEDBACK_NUM", frac=0.5, min_half=2.0, abs_min=1.0, abs_max=14.0)
 
         def abs_pm1(name: str, lo_floor: float | None = 1.0) -> None:
             """Integer-ish scalar: θ₀ ± 1. Optional lo_floor (None = no floor, allows negatives)."""
@@ -1047,6 +1058,7 @@ class SPSAOptimizer:
             "KING_DANGER_KNIGHT_DEF",
             "KING_DANGER_ATTACK_ON_KING_SQ",
             "KING_ATTACK_WEIGHTS",
+            "KING_DANGER_OUT_MG_NUM",
         }
         imbalance_quad_groups = {
             "IMBALANCE_QUADRATIC_OURS",
@@ -1072,6 +1084,8 @@ class SPSAOptimizer:
                 local_s = np.clip(vals / 30.0, 1.0, 5.0)
             elif name in imbalance_quad_groups:
                 local_s = np.clip(vals / 25.0, 1.5, 20.0)
+            elif name == "KING_DANGER_OUT_EG_NUM":
+                local_s = np.clip(vals / 30.0, 100.0, 800.0)
             else:
                 local_s = np.clip(vals / 30.0, 1.0, 4.0)
 
