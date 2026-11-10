@@ -100,7 +100,8 @@ def quiescence_search(piece_bbs, occupancy_bbs, game_state, alpha, beta, ply, se
     if ply >= MAX_PLY:
         return evaluate_position(piece_bbs, occupancy_bbs, game_state, search_context, ply, lazy=False), q_nodes
 
-    if not has_sufficient_material(piece_bbs):
+    halfmove_clock_qs = int(game_state[3])
+    if halfmove_clock_qs >= FIFTY_MOVE_RULE_LIMIT or not has_sufficient_material(piece_bbs):
         if not is_in_check(piece_bbs, occupancy_bbs, game_state):
             return np.int32(0), q_nodes
 
@@ -392,6 +393,64 @@ search_return_type = numba.types.Tuple([
     numba.int32, numba.uint16, numba.uint64, numba.uint64, numba.uint64
 ])
 
+
+# cache=False: nnue SearchContext uses @jitclass whose type name embeds process id(class).
+@numba.njit(
+    numba.boolean(numba.uint64, numba.int32, numba.int32, search_context_type),
+    cache=False,
+    boundscheck=False,
+    fastmath=True,
+)
+def _is_repetition_jit(zobrist_key, halfmove_clock, ply, search_context):
+    """
+    Stockfish-aligned repetition check (`Position::is_repetition(ply)`):
+      - Respects `min(halfmove_clock, pliesFromNull)`: never scans across a null move (`NO_MOVE`).
+      - 2-fold repetition strictly inside the search tree (`ply_path_stack[1..ply-2]`): draw.
+      - Matching root (`ply_path_stack[0]`) or pre-root `game_history`: requires 3-fold (>= 2 prior hits).
+    Assumes `ply > 0` and `search_context.ply_path_stack[ply]` is already updated.
+    """
+    if halfmove_clock < 2:
+        return False
+
+    min_ply = max(0, ply - halfmove_clock)
+    crossed_null = False
+    root_hit = 0
+    i = ply - 2
+    while i >= min_ply:
+        if (search_context.move_stack[i + 1] == NO_MOVE
+                or search_context.move_stack[i] == NO_MOVE):
+            crossed_null = True
+            break
+        if search_context.ply_path_stack[i] == zobrist_key:
+            if i > 0:
+                return True
+            root_hit += 1
+        i -= 2
+
+    if crossed_null:
+        return False
+
+    hist_to_check = halfmove_clock - ply
+    if hist_to_check < 1:
+        return False
+
+    if (ply & 1) != 0 and search_context.move_stack[0] == NO_MOVE:
+        return False
+
+    prior_hits = root_hit
+    count = search_context.game_history_count
+    start_offset = 2 if (ply & 1) != 0 else 3
+    start_idx = count - start_offset
+    end_idx = max(0, count - hist_to_check - 1)
+    for j in range(start_idx, end_idx - 1, -2):
+        if search_context.game_history[j] == zobrist_key:
+            prior_hits += 1
+            if prior_hits >= 2:
+                return True
+
+    return False
+
+
 @numba.njit(search_return_type(piece_bbs_signature, occupancy_bbs_signature, game_state_signature, numba.int32, numba.int32, numba.int32, search_context_type, numba.int32, numba.uint16, numba.boolean, numba.boolean), cache=True)
 def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_context, ply, excluded_move: np.uint16 = NO_MOVE, is_pv: bool = True, cut_node: bool = False):
     # ==========================================
@@ -436,49 +495,17 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
             return (np.int32(alpha), NO_MOVE, nodes_searched, quiescence_nodes, tt_hits)
 
     # --- Repetition Detection ---
-    # Performance Optimization (Bolt): Use halfmove_clock to limit checks and skip odd plies.
-    # Impact: ~1.8% NPS improvement on Kiwipete benchmark.
     zobrist_key = game_state[4]
-    
-    # Store current key in path stack
     search_context.ply_path_stack[ply] = zobrist_key
-    
-    repetition_count = 0
-    
-    # Check against Game History and Path, but only up to the last irreversible move
-    # game_state[3] is the halfmove clock.
     halfmove_clock = int(game_state[3])
-    
-    if halfmove_clock >= 2:
-        # Check Path (even plies only, as odd plies have different side-to-move)
-        # Current position is at 'ply', so we check ply-2, ply-4, etc.
-        for i in range(ply - 2, max(-1, ply - halfmove_clock - 1), -2):
-            if search_context.ply_path_stack[i] == zobrist_key:
-                repetition_count += 1
-                if repetition_count >= 1: break
-        
-        if repetition_count < 1:
-            # Check Game History
-            # Number of moves in history that are within the halfmove clock
-            # halfmove_clock includes moves from both path and history.
-            hist_to_check = halfmove_clock - ply
-            if hist_to_check >= 1:
-                # Same side to move:
-                # If ply is even, we match game_history[count-3, count-5, ...]
-                # If ply is odd, we match game_history[count-2, count-4, ...]
-                start_offset = 2 if (ply % 2) != 0 else 3
-                start_idx = search_context.game_history_count - start_offset
-                end_idx = max(-1, search_context.game_history_count - hist_to_check - 1)
-                for i in range(start_idx, end_idx - 1, -2):
-                    if i < 0: break
-                    if search_context.game_history[i] == zobrist_key:
-                        repetition_count += 1
-                        if repetition_count >= 1: break
 
-    # Avoid 1st repetition (2nd occurrence total) or 50-move rule
     # Crucial fix: Do not prune at the root (ply 0).
+    # For root/pre-root history, require 3-fold repetition (>= 2 prior hits);
+    # only 2-fold cycles strictly inside the search tree cut off immediately.
     if ply > 0:
-        if repetition_count >= 1:
+        if halfmove_clock >= 2 and _is_repetition_jit(
+            zobrist_key, np.int32(halfmove_clock), np.int32(ply), search_context
+        ):
             search_context.pv_table[ply, ply] = NO_MOVE
             return (np.int32(0), NO_MOVE, nodes_searched, quiescence_nodes, tt_hits)
 
@@ -1514,8 +1541,9 @@ def iterative_deepening_search(piece_bbs, occupancy_bbs, game_state, max_depth, 
     if game_history_list is not None:
         count = len(game_history_list)
         limit = min(count, 1024)
+        start_offset = count - limit
         for i in range(limit):
-            search_context.game_history[i] = game_history_list[i]
+            search_context.game_history[i] = game_history_list[start_offset + i]
         search_context.game_history_count = limit
     else:
         search_context.game_history_count = 0

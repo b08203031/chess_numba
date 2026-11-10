@@ -1123,11 +1123,47 @@ class ChessVisionApp(tk.Tk):
         except Exception:
             return None
 
+    @staticmethod
+    def _get_actual_game_over_outcome(board_obj: chess.Board):
+        """Returns a ``chess.Outcome`` only once the game is already over on the board.
+
+        Never uses ``claim_draw=True``: python-chess's ``can_claim_*`` triggers
+        one half-move early when the side to move merely has a reply that *would*
+        complete a threefold repetition (~2.5 cycles) or reach halfmove 100.
+        """
+        outcome = board_obj.outcome(claim_draw=False)
+        if outcome is not None:
+            return outcome
+        if board_obj.is_fifty_moves():
+            return chess.Outcome(chess.Termination.FIFTY_MOVES, None)
+        if board_obj.is_repetition(3):
+            return chess.Outcome(chess.Termination.THREEFOLD_REPETITION, None)
+        return None
+
+    @staticmethod
+    def _format_game_over_reason(outcome: chess.Outcome) -> str:
+        term = outcome.termination
+        if term == chess.Termination.CHECKMATE:
+            return "將殺 (Checkmate)"
+        if term == chess.Termination.STALEMATE:
+            return "逼和 (Stalemate)"
+        if term == chess.Termination.INSUFFICIENT_MATERIAL:
+            return "子力不足和棋 (Insufficient Material)"
+        if term == chess.Termination.THREEFOLD_REPETITION:
+            return "三次重複和棋 (Threefold Repetition)"
+        if term == chess.Termination.FIVEFOLD_REPETITION:
+            return "五次重複和棋 (Fivefold Repetition)"
+        if term == chess.Termination.FIFTY_MOVES:
+            return "五十步規則和棋 (50-Move Rule)"
+        if term == chess.Termination.SEVENTYFIVE_MOVES:
+            return "七十五步規則和棋 (75-Move Rule)"
+        return "平局/和棋 (Draw)"
+
     def _check_and_handle_game_over(self, board_obj: chess.Board) -> bool:
-        if board_obj.is_game_over(claim_draw=True):
-            outcome = board_obj.outcome(claim_draw=True)
-            res_str = outcome.result() if outcome else "*"
-            reason = "將殺 (Checkmate)" if board_obj.is_checkmate() else "平局/和棋 (Draw)"
+        outcome = self._get_actual_game_over_outcome(board_obj)
+        if outcome is not None:
+            res_str = outcome.result()
+            reason = self._format_game_over_reason(outcome)
             self.lbl_status.config(text=f"狀態 (Status): 遊戲結束 ({reason}) - {res_str}", foreground="purple")
             self.auto_play_var.set(False)
             self.auto_detect_opponent_var.set(False)
@@ -1582,10 +1618,12 @@ class ChessVisionApp(tk.Tk):
 
     def _run_analysis(self, precomputed_fen=None, search_id=0):
         try:
+            board_snapshot = None
             if precomputed_fen:
                 # Board was already updated on the main thread
-                position_cmd = self.build_uci_position_cmd(self.board)
-                fen_final = self.board.fen()
+                board_snapshot = self.board.copy(stack=True)
+                position_cmd = self.build_uci_position_cmd(board_snapshot)
+                fen_final = board_snapshot.fen()
             else:
                 try:
                     rec = self._ensure_recognizer()
@@ -1625,7 +1663,7 @@ class ChessVisionApp(tk.Tk):
 
                 # Synchronize `self.board` safely on the main thread
                 sync_done = threading.Event()
-                sync_result = {"wait_for_opponent": False}
+                sync_result = {"wait_for_opponent": False, "board_snapshot": None}
 
                 def sync_board_main_thread():
                     try:
@@ -1666,6 +1704,8 @@ class ChessVisionApp(tk.Tk):
                             parts[3] = user_ep
                             self.init_game_from_board(chess.Board(" ".join(parts)))
 
+                        if not sync_result["wait_for_opponent"]:
+                            sync_result["board_snapshot"] = self.board.copy(stack=True)
                         self._refresh_ui_snapshot()
                         self.draw_board()
                     except Exception as ex:
@@ -1685,18 +1725,23 @@ class ChessVisionApp(tk.Tk):
                     self._post_ui(switch_to_opp_wait)
                     return
 
-                position_cmd = self.build_uci_position_cmd(self.board)
-                fen_final = self.board.fen()
+                board_snapshot = sync_result.get("board_snapshot")
+                if board_snapshot is not None:
+                    position_cmd = self.build_uci_position_cmd(board_snapshot)
+                    fen_final = board_snapshot.fen()
+                else:
+                    position_cmd = self.build_uci_position_cmd(self.board)
+                    fen_final = self.board.fen()
 
             if search_id != self.current_search_id:
                 return
 
             self.message_queue.put({"type": "fen_update", "fen": fen_final, "search_id": search_id})
 
-            # Check for Game Over before sending to engine
-            temp_board = chess.Board(fen_final)
-            if temp_board.is_game_over(claim_draw=True):
-                self._post_ui(self._check_and_handle_game_over, temp_board)
+            # Check for actual on-board Game Over (preserving move_stack) before sending to engine
+            board_to_check = board_snapshot if board_snapshot is not None else chess.Board(fen_final)
+            if self._get_actual_game_over_outcome(board_to_check) is not None:
+                self._post_ui(self._check_and_handle_game_over, board_to_check)
                 return
 
             go_cmd = self.__dict__.get("_ui_state", {}).get("go_cmd") or "go movetime 10000"

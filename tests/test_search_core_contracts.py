@@ -438,6 +438,106 @@ class TestSearchCoreContracts(unittest.TestCase):
         self.assertIn('if not is_capture_or_promo and (max_eval > static_score) == has_best_move:', search[corr_idx:corr_end])
         self.assertEqual(search.count('trunc_div(curr * abs(clamped), LOW_PLY_HISTORY_MAX)'), 2)
 
+    def test_repetition_stockfish_alignment_contracts(self):
+        import numpy as np
+        from chess_engine.classical.constants import NO_MOVE
+        from chess_engine.classical.engine_types import SearchContext
+        from chess_engine.classical.search_heuristics import _is_repetition_jit
+        from chess_engine.classical.transposition_table import numba_tt_entry_type
+
+        for path_str in ('chess_engine/classical/search_heuristics.py', 'chess_engine/nnue/search.py'):
+            src = (ROOT / path_str).read_text(encoding='utf-8')
+            self.assertIn('def _is_repetition_jit(', src)
+
+        for path_str in ('chess_engine/classical/search.py', 'chess_engine/nnue/search.py'):
+            src = (ROOT / path_str).read_text(encoding='utf-8')
+            self.assertIn('_is_repetition_jit(', src)
+            self.assertIn('if ply > 0:', src)
+            self.assertIn('halfmove_clock_qs >= FIFTY_MOVE_RULE_LIMIT', src)
+            self.assertIn('start_offset = count - limit', src)
+            self.assertIn('game_history_list[start_offset + i]', src)
+
+        import ast
+        assistant_src = (ROOT / 'assistant.py').read_text(encoding='utf-8')
+        assistant_tree = ast.parse(assistant_src)
+        for node in ast.walk(assistant_tree):
+            if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
+                self.assertFalse(
+                    node.func.attr.startswith('can_claim_'),
+                    f"Unexpected lookahead claim call {node.func.attr} in assistant.py",
+                )
+                for kw in node.keywords:
+                    if kw.arg == 'claim_draw' and isinstance(kw.value, ast.Constant):
+                        self.assertFalse(
+                            kw.value.value,
+                            "Unexpected claim_draw=True call in assistant.py",
+                        )
+        self.assertIn('def _get_actual_game_over_outcome(', assistant_src)
+
+        ctx = SearchContext(
+            np.zeros(4, dtype=numba_tt_entry_type),
+            np.zeros(256, dtype=np.uint16),
+            np.zeros((128, 128), dtype=np.uint16),
+            np.zeros((12, 64), dtype=np.int32),
+            np.zeros((64, 64), dtype=np.int32),
+            np.zeros((5, 12, 64, 12, 64), dtype=np.int16),
+            np.zeros((12, 64, 6), dtype=np.int32),
+            np.zeros((8192, 12, 64), dtype=np.int16),
+            np.zeros(16384, dtype=np.int16),
+            np.zeros(16384, dtype=np.int16),
+            np.zeros(16384, dtype=np.int16),
+            np.zeros(16384, dtype=np.int16),
+        )
+
+        P0, P1, P2, P3, PA, PB, PC, PD = [np.uint64(x) for x in (100, 101, 102, 103, 200, 201, 202, 203)]
+
+        # 1. Pre-root 1st repetition (2 occurrences total): must NOT trigger draw at ply 1 or ply 2
+        ctx.game_history[:5] = [P0, P1, P2, P3, P0]
+        ctx.game_history_count = np.int32(5)
+        ctx.move_stack[:8] = np.uint16(123)
+        ctx.ply_path_stack[:5] = [P0, P1, P2, PA, P0]
+        self.assertFalse(bool(_is_repetition_jit(P1, np.int32(5), np.int32(1), ctx)))
+        self.assertFalse(bool(_is_repetition_jit(P2, np.int32(6), np.int32(2), ctx)))
+
+        # 2. Root + pre-root 3-fold repetition (3 occurrences total): DOES trigger draw
+        # At ply 4, key P0 matches ply_path_stack[0] AND game_history[0]
+        self.assertTrue(bool(_is_repetition_jit(P0, np.int32(8), np.int32(4), ctx)))
+
+        # Returning to root P0 without earlier pre-root occurrence (only 2 total): NOT draw
+        ctx.game_history[:5] = [PA, PB, PC, PD, P0]
+        self.assertFalse(bool(_is_repetition_jit(P0, np.int32(8), np.int32(4), ctx)))
+
+        # Two prior hits purely in game_history (indices 1 and 3 share ply=1 side-to-move):
+        # 3rd occurrence at ply 1 DOES trigger draw
+        ctx.game_history[:5] = [P2, P1, P3, P1, P0]
+        ctx.ply_path_stack[:2] = [P0, P1]
+        self.assertTrue(bool(_is_repetition_jit(P1, np.int32(5), np.int32(1), ctx)))
+
+        # 3. Strictly internal search-tree 2-fold (i > 0): DOES trigger draw
+        ctx.game_history[:2] = [PA, P0]
+        ctx.game_history_count = np.int32(2)
+        ctx.move_stack[:8] = np.uint16(123)
+        ctx.ply_path_stack[:6] = [P0, PA, PB, PC, PD, PA]
+        self.assertTrue(bool(_is_repetition_jit(PA, np.int32(5), np.int32(5), ctx)))
+
+        # 4. Null-move barrier (NO_MOVE) stops repetition scan
+        ctx.move_stack[2] = NO_MOVE
+        self.assertFalse(bool(_is_repetition_jit(PA, np.int32(5), np.int32(5), ctx)))
+
+        ctx.game_history[:5] = [P2, P1, P3, P1, P0]
+        ctx.game_history_count = np.int32(5)
+        ctx.move_stack[:8] = np.uint16(123)
+        ctx.move_stack[0] = NO_MOVE
+        ctx.ply_path_stack[:2] = [P0, P1]
+        self.assertFalse(bool(_is_repetition_jit(P1, np.int32(5), np.int32(1), ctx)))
+
+        # 5. halfmove_clock limits pre-root scan
+        ctx.move_stack[:8] = np.uint16(123)
+        ctx.game_history[:5] = [P0, P1, P2, P3, P0]
+        ctx.ply_path_stack[:5] = [P0, P1, P2, P3, P0]
+        # At ply 4 with hmc=6, hist_to_check=2 checks only back to index 2 (not index 0) -> False
+        self.assertFalse(bool(_is_repetition_jit(P0, np.int32(6), np.int32(4), ctx)))
+
 
 if __name__ == '__main__':
     unittest.main()

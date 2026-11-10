@@ -477,6 +477,67 @@ class TestUniversalRecognizerAndAssistant(unittest.TestCase):
         finally:
             root.destroy()
 
+    def test_09_game_over_requires_actual_repetition_or_fifty_moves(self):
+        """
+        Regression test for premature Draw termination in assistant.py:
+        2.5 repetition cycles or halfmove_clock == 99 must NOT end the game early;
+        only an actual on-board 3-fold repetition or halfmove_clock >= 100 terminates.
+        """
+        import tkinter as tk
+        from unittest.mock import MagicMock
+
+        root = tk.Tk()
+        root.withdraw()
+        try:
+            app = object.__new__(assistant.ChessVisionApp)
+            app.auto_play_var = tk.BooleanVar(master=root, value=True)
+            app.auto_detect_opponent_var = tk.BooleanVar(master=root, value=True)
+            app.auto_detecting_opponent = True
+            app.analyzing = True
+            app.lbl_status = MagicMock()
+            app.btn_analyze = MagicMock()
+            app.btn_stop = MagicMock()
+
+            # 1. Play 2.5 repetition cycles: 1. Nf3 Nf6 2. Ng1 Ng8 3. Nf3 Nf6 4. Ng1
+            board = chess.Board()
+            for uci in ("g1f3", "g8f6", "f3g1", "f6g8", "g1f3", "g8f6", "f3g1"):
+                board.push_uci(uci)
+            app.board = board
+
+            # Old `claim_draw=True` would trigger here via `can_claim_threefold_repetition()`!
+            self.assertTrue(app.board.can_claim_threefold_repetition())
+            self.assertFalse(app.board.is_repetition(3))
+            self.assertFalse(app._check_and_handle_game_over(app.board))
+            self.assertTrue(app.auto_play_var.get())
+            self.assertTrue(app.analyzing)
+
+            # 2. Complete the 3rd repetition on board with 4... Ng8 -> must end as Draw 1/2-1/2
+            app.board.push_uci("f6g8")
+            self.assertTrue(app.board.is_repetition(3))
+            self.assertTrue(app._check_and_handle_game_over(app.board))
+            self.assertFalse(app.auto_play_var.get())
+            self.assertFalse(app.analyzing)
+            status_text = app.lbl_status.config.call_args.kwargs["text"]
+            self.assertIn("1/2-1/2", status_text)
+
+            # 3. 50-move boundary: halfmove_clock == 99 must NOT end even if claimable on next move
+            b99 = chess.Board("4k3/8/8/8/8/8/8/4K2R w - - 99 70")
+            self.assertTrue(b99.can_claim_fifty_moves())
+            self.assertFalse(app._check_and_handle_game_over(b99))
+
+            b100 = chess.Board("4k3/8/8/8/8/8/8/4K2R w - - 100 71")
+            self.assertTrue(app._check_and_handle_game_over(b100))
+            self.assertIn("1/2-1/2", app.lbl_status.config.call_args.kwargs["text"])
+
+            # 4. Checkmate at halfmove_clock == 100 must report Checkmate (1-0), not 50-move Draw
+            b_mate = chess.Board("7k/6Q1/6K1/8/8/8/8/8 b - - 100 90")
+            self.assertTrue(app._check_and_handle_game_over(b_mate))
+            mate_text = app.lbl_status.config.call_args.kwargs["text"]
+            self.assertIn("將殺 (Checkmate)", mate_text)
+            self.assertIn("1-0", mate_text)
+        finally:
+            root.destroy()
+
 
 if __name__ == "__main__":
     unittest.main()

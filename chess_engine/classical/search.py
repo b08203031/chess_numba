@@ -189,6 +189,7 @@ from chess_engine.classical.search_heuristics import (
     get_quiet_stat_score, get_quiet_stat_components,
     get_continuation_pruning_score,
     compute_lmr_reduction_1024, get_lmr_stat_score,
+    _is_repetition_jit,
 )
 
 
@@ -530,7 +531,8 @@ def quiescence_search(piece_bbs, occupancy_bbs, game_state, alpha, beta, ply, se
         eval_score, _, _ = _evaluate_position_jit(piece_bbs, occupancy_bbs, game_state, False, search_context)
         return np.int32(eval_score), q_nodes
 
-    if not has_sufficient_material(piece_bbs):
+    halfmove_clock_qs = int(game_state[3])
+    if halfmove_clock_qs >= FIFTY_MOVE_RULE_LIMIT or not has_sufficient_material(piece_bbs):
         if not _is_in_check_jit(piece_bbs, occupancy_bbs, game_state):
             return np.int32(0), q_nodes
 
@@ -1190,6 +1192,7 @@ search_return_type = numba.types.Tuple([
     numba.int32, numba.uint16, numba.uint64, numba.uint64, numba.uint64
 ])
 
+
 @numba.njit(search_return_type(piece_bbs_signature, occupancy_bbs_signature, game_state_signature, numba.int32, numba.int32, numba.int32, search_context_type, numba.int32, numba.uint16, numba.boolean, numba.boolean), cache=False, nogil=True, boundscheck=False, fastmath=True)
 def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_context, ply, excluded_move, is_pv, cut_node):
     # ==========================================
@@ -1262,50 +1265,18 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
         if alpha >= beta:
             return (np.int32(alpha), NO_MOVE, nodes_searched, quiescence_nodes, tt_hits)
 
-    # --- Repetition Detection ---
-    # Performance Optimization (Bolt): Use halfmove_clock to limit checks and skip odd plies.
-    # Impact: ~1.8% NPS improvement on Kiwipete benchmark.
+    # --- Repetition Detection (Stockfish Position::is_repetition alignment) ---
     zobrist_key = game_state[4]
-    
-    # Store current key in path stack
     search_context.ply_path_stack[ply] = zobrist_key
-    
-    repetition_count = 0
-    
-    # Check against Game History and Path, but only up to the last irreversible move
-    # game_state[3] is the halfmove clock.
     halfmove_clock = int(game_state[3])
-    
-    if halfmove_clock >= 2:
-        # Check Path (even plies only, as odd plies have different side-to-move)
-        # Current position is at 'ply', so we check ply-2, ply-4, etc.
-        for i in range(ply - 2, max(-1, ply - halfmove_clock - 1), -2):
-            if search_context.ply_path_stack[i] == zobrist_key:
-                repetition_count += 1
-                if repetition_count >= 1: break
-        
-        if repetition_count < 1:
-            # Check Game History
-            # Number of moves in history that are within the halfmove clock
-            # halfmove_clock includes moves from both path and history.
-            hist_to_check = halfmove_clock - ply
-            if hist_to_check >= 1:
-                # Same side to move:
-                # If ply is even, we match game_history[count-3, count-5, ...]
-                # If ply is odd, we match game_history[count-2, count-4, ...]
-                start_offset = 2 if (ply % 2) != 0 else 3
-                start_idx = search_context.game_history_count - start_offset
-                end_idx = max(-1, search_context.game_history_count - hist_to_check - 1)
-                for i in range(start_idx, end_idx - 1, -2):
-                    if i < 0: break
-                    if search_context.game_history[i] == zobrist_key:
-                        repetition_count += 1
-                        if repetition_count >= 1: break
 
-    # Avoid 1st repetition (2nd occurrence total) or 50-move rule
     # Crucial fix: Do not prune at the root (ply 0).
+    # For root/pre-root history, require 3-fold repetition (>= 2 prior hits);
+    # only 2-fold cycles strictly inside the search tree cut off immediately.
     if ply > 0:
-        if repetition_count >= 1:
+        if halfmove_clock >= 2 and _is_repetition_jit(
+            zobrist_key, np.int32(halfmove_clock), np.int32(ply), search_context
+        ):
             search_context.pv_table[ply, ply] = NO_MOVE
             return (np.int32(0), NO_MOVE, nodes_searched, quiescence_nodes, tt_hits)
 
@@ -4233,8 +4204,9 @@ def iterative_deepening_search(piece_bbs, occupancy_bbs, game_state, max_depth, 
     if game_history_list is not None:
         count = len(game_history_list)
         limit = min(count, 1024)
+        start_offset = count - limit
         for i in range(limit):
-            search_context.game_history[i] = game_history_list[i]
+            search_context.game_history[i] = game_history_list[start_offset + i]
         search_context.game_history_count = limit
     else:
         search_context.game_history_count = 0
