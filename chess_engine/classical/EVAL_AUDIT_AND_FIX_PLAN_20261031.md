@@ -582,5 +582,82 @@ flowchart TD
 * 執行 `python tools/sync_classical_old.py --sync`，將包含第二輪 Texel 微調與最新搜尋常數的 `classical` 完整同步至 `classical_old`。
 * 舊基線 `classical_old` 正式更新為專案最新的最高 Elo 冠軍基準，驗收完成。
 
+---
 
+### Phase 7：`USE_PGN_VAL` 雙輪 Texel 調參架構與實戰驗證（R2 vs Holdout-Only、R2 vs R1）【✅ 階段性勝出／保留殘局收斂待辦】(2026-11-08 ~ 2026-11-11)
+
+#### 1. 調參系統升級與搜尋基準對齊
+* **Session / SPSA 架構強化**（Commits `91e5cb3`、`968ec0d`、`f8609c2`）：
+  * [`tuner/notebook_session.py`](../../tuner/notebook_session.py) 與 [`tuner/tuner.py`](../../tuner/tuner.py) 新增 1M dev 自動校準 `k_factor="auto"`、整數擾動保底 `c_floor=1.25`、`auto_scale=True`、`USE_PGN_VAL` 雙重驗證閘門（`2M Unseen Holdout` + `1.59M val_pgn.npz`）、Colab/Google Drive 自動續跑備份。
+  * 新增獨立參數調優區塊：`block1e_kp_prox_grid`（`KING_PAWN_PROXIMITY_FACTOR`）、`block2b_bishop_pawns_factor_grid`、`block5a_king_flank_grid`、`block5c_king_safety_output`（`EG_SAFETY_SCALE`、`KING_DANGER_OUT_MG_NUM`、`KING_DANGER_OUT_EG_NUM`）、`block7a_imbalance_div_grid`（總計 115 組／1,278 維註冊參數）。
+* **搜尋對等修復**（Commit `eac424a`，2026-11-10）：
+  * 修復 [`search.py`](search.py) / [`search_heuristics.py`](search_heuristics.py) 的 `_is_repetition_jit` 過早判定和棋問題，並已同步至 `classical_old/`；執行 `python tools/sync_classical_old.py --diff-code` 確認引擎演算法與搜尋常數 100% 一致，確保本次對戰為純評估常數 A/B。
+
+#### 2. 四輪 `tuner` 調參軌跡橫向紀錄
+
+| 版本標記 | 來源 Commit / Snapshot | `USE_PGN_VAL` | 相較起點變動維度 | Unseen Holdout (`2M`) | Independent PGN (`1.59M val_pgn`) | 重點特徵與觀察 |
+| :--- | :--- | :---: | :---: | :---: | :---: | :--- |
+| **Round 1 (R1)** | `91e5cb3`（現工作區 `classical_old/constants.py`） | **True** | **562 / 1,278 維**（45 組，L1=1,118，vs `d649a2c` R0） | `@K=1.152`: `delta=-2.7857e-04` (**z=-57.65**); `broad-EG z=-37.23`; `queenless z=-22.80` | `@K=1.000`: **`delta=-9.0720e-05` (z=-24.29)**; `broad-EG z=-26.56`; `phase=0 z=-8.44`; `castling!=0 z=-9.54`; `@K*=1.084`: `z=-37.87` | 嚴格拒絕 `1c/2a/2b/5a_grid/6b/6e/7b/7c`，`@K=1.0` 全殘局桶全面顯著改善 |
+| **Holdout-Only R1 (H1)** | `8d9a560`（git `HEAD` 上的 `classical_old/constants.py`） | **False** | **700 / 1,278 維** vs R0（74 組，L1=1,372，基於 `d649a2c` R0） | `@K=1.152`: `delta=-4.4163e-04` (**z=-57.93**); `broad-EG z=-34.73`; 但 `K+P z=+23.39`, `minor-only EG z=+4.54` | **未啟用（Skipped）** | 無 PGN 獨立防線，接納 `1c`/`2a`/`2b`/`4b`/`6b`/`6e`/`7b`/`7c` 等易過擬合靜態 EPD 之項目，且與 R1 (`91e5cb3`) 分道 414 維 |
+| **Holdout-Only R2 (H2)** | `tuner/runs/texel_tuned_classical_old_classical_old_holdout_only_20261109_193207`（Colab 續調未入 git） | **False** | **629 / 1,278 維** vs H1（65 組，L1=2,991；累計 vs R0 為 **833 維／88 組**，L1=4,191） | 見 [tuner/runs/texel_tuned_classical_old_classical_old_holdout_only_20261109_193207](../../tuner/runs/texel_tuned_classical_old_classical_old_holdout_only_20261109_193207)（他機 Colab 執行，未保留本地 notebook log） | **未啟用（Skipped）** | 在 `8d9a560` 上再次全程跑 `USE_PGN_VAL=False`（接納 17 個區塊含 `2a`/`5a`/`5a_flank`/`6b`/`6e`/`7b`/`8`），與 R2 (`eac424a`) 差 575 維 |
+| **Round 2 (R2)** | `eac424a`（現 `classical/constants.py`，`tuner/runs/texel_tuned_classical_classical_with_pgn_20261109_162326`） | **True** | **492 / 1,278 維** vs R1（42 組，L1=2,535；累計 vs `d649a2c` 為 665 維，L1=3,525） | `@K=1.182`: `delta=-1.7164e-04` (**z=-31.62**); `broad-EG z=-13.56`; 但 `phase=0 z=+5.35`, `minor-only EG z=+6.39` | **`@K=1.000`: `delta=+2.2083e-05` (z=+5.31) 退步**；`broad-EG z=+8.45`, `phase=0 z=+9.76`, `rook EG z=+12.93`, `pure K+P z=+5.16`；**`@K*=1.106`: `z=-25.56`**, `castling!=0 z=-13.64` | 在 R1 (`91e5cb3`) 上**多調一輪**；新接納 `1a`/`1e` (`KPPF:5->3`)/`3`/`4a`/`5a_grid` (`THRESHOLD:69->66`)/`5b`/`5c` (`MG_NUM:131->120, EG_NUM:15360->17076, EG_SAFETY_SCALE:100->110`)/`6a,c,d`/`7a_div` (`21->20`)/`7a` (`SCALE_EG:73->75`)/`7b_initiative`/`8` |
+
+> **關鍵靜態診斷（R2 尺度上漂與 `block7b_initiative` 漏放機制）**：[`_gate_summary`](../../tuner/notebook_session.py#L1089-L1110) 檢查 `val_pgn` 時以校準尺度 $K^*$ (`p_kstar["z"]`) 作為嚴格退步門檻，未硬卡 `val_pgn @ K=1.000` 的 `all` 與 `broad-EG` 物理尺度。R2 執行 `block7b_initiative` 時出現 `val_pgn @ K=1.0: z=+23.85` 而 `@K*: z=-13.18`，Gate 放行並使下一個區塊的 holdout $K^*$ 單步由 `1.193` 跳升至 `1.242`（整個 `USE_PGN_VAL` 雙輪累計使 $K^*_{\text{pgn}}$ 從 `1.000 -> 1.084 (R1) -> 1.106 (R2)`）。
+
+#### 3. 兩場跨輪實戰對決總覽
+
+| 對決戰役 | PGN 檔案 | 對陣雙方 (New vs Old) | 局數 (對數) | 總戰績 (W-D-L) | 勝率 / 淨勝 | Elo 增益 (95% CI) | 核心結論 |
+| :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- |
+| **驗證實驗對比** | [`USE_PGN_VAL_vs_HOLDOUT_ONLY.pgn`](../../tournament_analysis/USE_PGN_VAL_vs_HOLDOUT_ONLY.pgn) | **R2 (`USE_PGN_VAL`, `20261109_162326`)** vs **Holdout-Only R2 (`20261109_193207`)** | 3,674 (1,837) | 717 - 2,329 - 628 | 51.21% (+89) | **+8.42** `[+1.75, +15.09]` | `USE_PGN_VAL` 顯著勝出；惟 `>80` 步長局 `43-189-53 (0.482)` 與 `Pure B+P 40-219-47 (-7)` 顯露純殘局隱憂 |
+| **同架構雙輪遞進 (主驗收)** | [`tournament_results_USE_PGN_VAL_NEWvsOLD.pgn`](../../tournament_analysis/tournament_results_USE_PGN_VAL_NEWvsOLD.pgn) | **R2 (`New`)** vs **R1 (`91e5cb3`)**（均用 `USE_PGN_VAL=True`，代碼對等） | **2,094 (1,047)** | **389 - 1,377 - 328** | **51.46% (+61)** | **+10.12** **`[+1.96, +18.30]`** | **多調一輪 R2 顯著勝過 R1**；中長殘局與車馬類殘局全面改善，但殘局高分未轉化比率依然偏高（`131 vs 104`） |
+
+#### 4. `tournament_results_USE_PGN_VAL_NEWvsOLD.pgn`（R2 vs R1，2,094 局）深度紀錄（2026-11-10）
+
+##### (1) 對局條件、配對品質與搜尋對等性
+* **配對檢查**（[`tournament_analysis/game_stats_report.txt`](../../tournament_analysis/game_stats_report.txt)、[`search_stats_report.txt`](../../tournament_analysis/search_stats_report.txt)）：共 **2,094 局**（日期 `2026.11.10`，嚴格 **1,047 對**同 FEN 換先配對，無重複局；Lag-1 自相關 `0.0056`，游程檢定 `p = 0.9173`）。
+* **終局判定分佈**：
+  * `New` 勝（389 局）：白優裁定 230、黑優裁定 158、正常將死 1。
+  * 和局（1,377 局，和局率 **65.76%**）：正常和棋（三次重複／五十步／子力不足）1,068、第 40 回合後 `±8 cp` 連續 12 半步裁定和 309。
+  * `New` 負（328 局）：白優裁定 205、黑優裁定 121、正常將死 2。
+* **搜尋統計對等性（`parse_search_stats.py`）**：
+
+| 指標 | New (R2) | Old (R1) | 差異 / 檢定 |
+| :--- | :---: | :---: | :--- |
+| 有效主統計步數 | 104,783 | 104,839 | 排除 `d>=40` 深和局 (`97` vs `75`) |
+| 平均深度 `mean_d` (`d>=14`) | 16.66 (`90.0%`) | 16.63 (`89.1%`) | `+0.03` (`Welch p = 0.0875` 不顯著) |
+| 平均節點數 `mean_n` | 241,200 | 241,049 | `+0.1%` (`Welch p = 0.3521` 不顯著) |
+| 每步平均耗時 / NPS | 483.9 ms / 546,333 | 483.5 ms / 546,792 | `-0.1%` (`Welch p = 0.6565` 不顯著) |
+| 同深度節點比 (`d=12..24`) | — | — | `0.993 ~ 1.006`（搜尋行為高度一致） |
+
+##### (2) 戰績拆解：執色、換先配對與對局長度
+* **總體得分**：**1077.5 - 1016.5**（**389W - 1,377D - 328L**，**51.46%**，**+10.12 Elo**，`95% CI [+1.96, +18.30]`，trinomial 近似 `LLR[0,10]=2.60`、`LLR[0,5]=1.94`）。
+* **分執色**：持白 **55.16%**（230W - 695D - 122L，淨勝 +108）；持黑 **47.76%**（159W - 682D - 206L，淨負 -47）；前後半安定度：前半 523 對 `0.509`、後半 524 對 `0.521`。
+* **換先九宮格（n=1,047）**：`DD=460 (43.9%)`、`WD=136 (13.0%)`、`DL=132 (12.6%)`、`DW=103 (9.8%)`、`LD=86 (8.2%)`、`WL=62 (5.9%)`、`WW=32 (3.1%)`、`LW=24 (2.3%)`、`LL=12 (1.1%)`（雙勝對雙敗 `32:12`；單勝單和 `239:218`）。
+* **對局長度分桶（full-moves）**：
+  * `short (<=25)`: `n=180`, `7-160-13`, score **`0.483`** (`-6`)
+  * `medium (26-50)`: `n=990`, `160-682-148`, score **`0.506`** (`+12`)
+  * `long (51-80)`: `n=765`, `198-417-150`, score **`0.531`** (**`+48`**, `avg_moves=61.9`)
+  * `very_long (>80)`: `n=159`, `24-118-17`, score **`0.522`** (**`+7`**, `avg_moves=96.7`) — 其中 `Pure Rook EG (n=54)` 達 `7-43-4 (0.5278)`
+
+##### (3) 終局殘局類型與優勢轉化表現
+
+| 終局盤面類別 | 局數 `n` | W - D - L | 淨勝 | 得分率 | 診斷解析 |
+| :--- | :---: | :---: | :---: | :---: | :--- |
+| **`Rook+Minor EG (no Q)`** | 638 | 133 - 400 - 105 | **+28** | **52.19%** | 相對 Holdout-Only (`-1`) 轉正大勝；`5b/5c/6a/6c/3` 協同明顯有效 |
+| **`Pure Rook EG (R+P)`** | 416 | 76 - 281 - 59 | **+17** | **52.04%** | 全場穩定主力之一（`>80` 步亦保持 `7-43-4, +3`） |
+| **`Pure Knight EG (N+P)`** | 89 | 23 - 53 - 13 | **+10** | **55.62%** | 騎士價值 (`6a_knight`, `MG 351->353`, `EG 419->418`) 與 PST 形狀獲實戰回報 |
+| **`Pure K+P`** | 69 | 21 - 30 - 18 | **+3** | **52.17%** | 小樣本微正，與 `val_pgn` K+P 回歸警告需持續追蹤 |
+| **`Minor-only EG (N/B+P)`** | 110 | 21 - 70 - 19 | **+2** | **50.91%** | 基本持平略正 |
+| **`Queen EG / Middlegame`** | 606 | 90 - 427 - 89 | **+1** | **50.08%** | 與同為 `USE_PGN_VAL` 的 R1 勝負極接近 |
+| **`Pure Bishop EG (B+P)`** | 166 | 25 - 116 - 25 | **0** | **50.00%** | 止住對 Holdout-Only 的負分 (`-7`) 但未拉開差距（`6b_bishop` 連續兩輪被 `castling!=0` 退步擋下） |
+
+* **進入無后殘局轉換穩定度**：`Eval >= +1.50` 進入無后殘局後 `203-41-0`（**91.60%，0 敗**）；子力領先 `>= +1.5p` 為 `87-50-8`（77.24%），領先 `+1p` 為 `106-182-10`（66.11%）。
+* **優勢轉化偏誤遺留現象**：在 `move >= 35` 出現過 `eval >= +1.50` 卻未能獲勝之對局中，`NEW (R2)` 有 **131 局**（`0L, 131D`），仍高於 `OLD (R1)` 的 **104 局**（`2L, 102D`）。此現象與對戰 Holdout-Only（`214 vs 185`）完全一致，證實了 R2 的 `EG_SAFETY_SCALE=110`、`KING_DANGER_OUT_EG_NUM=17076`、`KING_PAWN_PROXIMITY_FACTOR=3` 及 `block7b_initiative` 等改動確實賦予殘局過強的主動權／安全係數與尺度上浮，容易把原本僅微小優勢或技術性官和的殘局報成 `>+1.50`。
+
+#### 5. 基準狀態與後續調參改進清單
+* **當前基線狀態**：`chess_engine/classical/constants.py`（R2）相對 `classical_old/constants.py`（R1 `91e5cb3`）於 2,094 局達成 **+10.12 Elo `[+1.96, +18.30]`** 統計顯著進步；依據專案規則，**基準同步 (`tools/sync_classical_old.py --sync`) 保留給使用者審閱定奪**，本次僅完整記錄數據。
+* **後續調參工程待辦（下一輪前修正）**：
+  1. 在 [`tuner/notebook_session.py`](../../tuner/notebook_session.py) `_gate_summary` 為 `val_pgn.npz` 補入 **`@ K=1.000` 總體及 `broad-EG (phase<=64)` 的硬性卡控**，避免單純靠擬合更高的 $K^*$ 放行高尺度膨脹區塊（特別是 `block7b_initiative`）。
+  2. 解耦 `block6b_bishop`（拆開開局有易位權階段與無后／殘局象評估／PST_EG）與將 `block8_nbrq_joint_polish` 拆分為 `MG`／`EG` 兩階段收尾，改善開中局高權重稀釋純殘局（尤其 `Pure Bishop EG`）梯度的問題。
+  3. 針對過度樂觀因子 `EG_SAFETY_SCALE`（`110`）、`KING_PAWN_PROXIMITY_FACTOR`（`3`）與 `INITIATIVE_*_EG` 進行局部保守掃描或對局調優（`tune_eval_match`），壓低實戰殘局「報優不贏」虛高評分，同時保留 R2 已在 `Rook+Minor` / `Pure Rook` / `Pure Knight` 取得的實戰增益。
 

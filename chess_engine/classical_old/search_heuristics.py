@@ -560,3 +560,60 @@ def partial_insertion_sort_moves(moves, scores, start_idx, end_idx, limit):
             moves[q] = tmp_move
             
     return sorted_end + 1
+
+
+@numba.njit(
+    numba.boolean(numba.uint64, numba.int32, numba.int32, search_context_type),
+    cache=True,
+    nogil=True,
+    boundscheck=False,
+    fastmath=True,
+)
+def _is_repetition_jit(zobrist_key, halfmove_clock, ply, search_context):
+    """
+    Stockfish-aligned repetition check (`Position::is_repetition(ply)`):
+      - Respects `min(halfmove_clock, pliesFromNull)`: never scans across a null move (`NO_MOVE`).
+      - 2-fold repetition strictly inside the search tree (`ply_path_stack[1..ply-2]`): draw.
+      - Matching root (`ply_path_stack[0]`) or pre-root `game_history`: requires 3-fold (>= 2 prior hits).
+    Assumes `ply > 0` and `search_context.ply_path_stack[ply]` is already updated.
+    """
+    if halfmove_clock < 2:
+        return False
+
+    min_ply = max(0, ply - halfmove_clock)
+    crossed_null = False
+    root_hit = 0
+    i = ply - 2
+    while i >= min_ply:
+        if (search_context.move_stack[i + 1] == NO_MOVE
+                or search_context.move_stack[i] == NO_MOVE):
+            crossed_null = True
+            break
+        if search_context.ply_path_stack[i] == zobrist_key:
+            if i > 0:
+                return True
+            root_hit += 1
+        i -= 2
+
+    if crossed_null:
+        return False
+
+    hist_to_check = halfmove_clock - ply
+    if hist_to_check < 1:
+        return False
+
+    if (ply & 1) != 0 and search_context.move_stack[0] == NO_MOVE:
+        return False
+
+    prior_hits = root_hit
+    count = search_context.game_history_count
+    start_offset = 2 if (ply & 1) != 0 else 3
+    start_idx = count - start_offset
+    end_idx = max(0, count - hist_to_check - 1)
+    for j in range(start_idx, end_idx - 1, -2):
+        if search_context.game_history[j] == zobrist_key:
+            prior_hits += 1
+            if prior_hits >= 2:
+                return True
+
+    return False

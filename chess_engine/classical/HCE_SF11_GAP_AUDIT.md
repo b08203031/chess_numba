@@ -472,15 +472,19 @@ SF 係數在「pawn MG=128」空間與 SF mobility/shelter 共調。我們材質
 
 | 版本標籤 | 內容 |
 | :--- | :--- |
-| `classical` / `classical_old`（目前） | 搜尋、`evaluation.py`、`endgame.py` 與全部相依程式一致；只保留 New/Old 評估常數差異作乾淨 A/B |
+| `classical` vs `classical_old`（現行對戰基準） | 搜尋、`evaluation.py`、`endgame.py` 與相依程式一致（含 `eac424a` `_is_repetition_jit` 修復）；`classical` 為 `USE_PGN_VAL` R2，`classical_old` 為 R1（`91e5cb3`）純評估常數 A/B |
+| **Phase 7 R2 vs R1 (`USE_PGN_VAL`, 2,094 局)** | 1077.5 - 1016.5（389W 1377D 328L，51.46%，淨勝 +61），**+10.12 Elo**（CI **[+1.96, +18.30] 顯著**）；詳見 [EVAL_AUDIT_AND_FIX_PLAN_20261031.md](EVAL_AUDIT_AND_FIX_PLAN_20261031.md) Phase 7 |
+| **Phase 7 R2 (`USE_PGN_VAL`) vs Holdout-Only (3,674 局)** | 1881.5 - 1792.5（717W 2329D 628L，51.21%，淨勝 +89），**+8.42 Elo**（CI **[+1.75, +15.09] 顯著**） |
+| **Phase 6 第二輪微調 (1,000 局)** | 515.0 - 485.0（227W 576D 197L，51.50%，淨勝 +30），**+10.43 ± 14.02 Elo** → 已於當時同步基準 |
+| **Phase 5 乾淨 EPD 調參 A/B (542 / 1,000 局)** | 整體對舊引擎 **+35.38 Elo**（SPRT H1 Accepted `LLR=2.99`）；純參數消融 **+18.08 ± 15.10 Elo** |
 | **Phase 1+BUG-1 對戰（`copy 8.ipynb`, 1,000 局）** | 513.5 - 486.5（217W 593D 190L，51.35%），**+9.38 ± 13.74 Elo**（+27 淨勝） |
 | **Phase 2 累積對戰（`copy.ipynb`, 686 局）** | 369.0 - 317.0（165W 408D 113L，53.79%），**+26.39 ± 16.53 Elo**（+52 淨勝），**SPRT H1 Accepted（顯著）** |
 | B4 對戰（**200 局**） | ~**+9 Elo**（CI 含 0） |
-| **B5+P2 對戰（**352 局**）** | ~**+30 Elo**（**顯著**）← HCE 定稿 |
+| **B5+P2 對戰（**352 局**）** | ~**+30 Elo**（**顯著**）← HCE 結構定稿 |
 | **搜尋 PR-A（64 局）** | **50% / Elo 0** |
 | **搜尋 PR-B+C（122 局）** | **50% / Elo 0** ← 搜尋護欄全套定稿 |
 | 評估 P3 整包 / 純 P3a | 負向或中性偏負 → 已回滾 |
-| 建議下一動 | 棋力向：PST/搜尋強度；**勿**再開評估係數抬升；可選搜尋 P5–P7 |
+| 建議下一動 | 強化 `val_pgn @ K=1.0` `broad-EG` 卡控、解耦 `6b_bishop` 與拆開 `block8` MG/EG 收斂殘局虛高評估；**勿**再開純係數抬升 |
 
 ---
 
@@ -489,11 +493,11 @@ SF 係數在「pawn MG=128」空間與 SF mobility/shelter 共調。我們材質
 | 文件 | 用途 |
 | :--- | :--- |
 | **本文** `HCE_SF11_GAP_AUDIT.md` | HCE ↔ SF11 對齊主文件 |
-| [EVAL_AUDIT_AND_FIX_PLAN_20261031.md](EVAL_AUDIT_AND_FIX_PLAN_20261031.md) | 2026-10-31 `evaluation.py` 全檔 Bug、計算順序與熱路徑效能審計報告暨 Phase 1–4 修復計畫書 |
+| [EVAL_AUDIT_AND_FIX_PLAN_20261031.md](EVAL_AUDIT_AND_FIX_PLAN_20261031.md) | 2026-10-31 `evaluation.py` 全檔審計暨 Phase 1–7 修復、乾淨 EPD 雙輪 `USE_PGN_VAL` 調參與實戰驗收主報告 |
 | `ENDGAME_SF_VERIFICATION.md` | 專用殘局 vs SF 搜尋 oracle；KPK golden 入口 |
 | `tests/test_kpk_golden.py` / `tools/verify_kpk_golden.py` | KPK bitbase 全表 + 理論 FEN |
-| `tournament_analysis/game_stats_report.txt` | 當期對戰局級統計（含 PR-B+C 122 局） |
-| `tournament_analysis/search_stats_report.txt` | 當期 depth/nodes/NPS |
+| `tournament_analysis/game_stats_report.txt` | 當期對戰局級統計（`tournament_results_USE_PGN_VAL_NEWvsOLD.pgn` 2,094 局） |
+| `tournament_analysis/search_stats_report.txt` | 當期 depth/nodes/NPS（對應同批 2,094 局對戰） |
 | [SEARCH_EVAL_INTERFACE.md](SEARCH_EVAL_INTERFACE.md) | 搜尋 KNOWN_WIN 護欄 PR-A/B/C 定稿 |
 | `tournament_analysis/PHASE_A_TOURNAMENT_ANALYSIS.md` | 階段 A 對戰（歷史，+61 Elo） |
 | `tournament_analysis/PHASE_B_TOURNAMENT_ANALYSIS.md` | 階段 B 對戰（200 局，+30 Elo） |

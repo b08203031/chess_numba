@@ -250,7 +250,7 @@ python -m tuner.tuner --dataset tuner/data/hce/dataset_mix03_20m_s2.npz \
 - 跨輪比較必須固定 dataset、`--eval-sample` 與 validation split。輸出 `tuned_*.py` 不會自動套回 production；接受後須先套用、執行 `python -m tuner.run sync` 清除 stale Numba cache，再啟動下一輪，否則下一輪不會承接前一輪 best。
 - 20M dataset 的目前預設為 3-way 切分（`split_dataset_indices`）：**17,000,000 train**、`--eval-sample 1,000,000`（SPSA 過程報告與 early stop 專用）、`--holdout-sample 2,000,000`（完全不進梯度也不進 early stop 的獨立 holdout）。`validate_tuned.py` 預設（`--split holdout`）直接檢驗這 2M unseen holdout，並支援 `--pgn-val tuner/data/hce/val_pgn.npz` 同時驗證本引擎實戰 PGN（含 `castling!=0` 易位權桶與 baseline 校準 `K*`）。
 
-接受一組參數時，除了總 `val MSE`，至少同時查看 `phase=0`、`phase=1..31`、`phase=32..63`、`broad-EG phase<=64` 以及 `val_pgn.npz`（若動到 shelter / storm / trapped rook / 王 PST，額外盯緊 `castling!=0`）。若總 MSE 下降但 broad-EG 或實戰 PGN 顯著退步，該組不應進入對局閘門。
+接受一組參數時，除了總 `val MSE`，至少同時查看 `phase=0`、`phase=1..31`、`phase=32..63`、`broad-EG phase<=64` 以及 `val_pgn.npz`（若動到 shelter / storm / trapped rook / 王 PST，額外盯緊 `castling!=0`）。若總 MSE 下降但 broad-EG 或實戰 PGN 顯著退步，該組不應進入對局閘門。此外，連續進行多輪 `USE_PGN_VAL` 微調時，務必同步檢查 `val_pgn @ K=1.000` 的總體與 `broad-EG` MSE 及每次 `K*` 變化幅度，避免單靠擬合更高 $K^*$（例如 `block7b_initiative` 推動 $K^*$ 跳升）掩蓋實際評估尺度膨脹與殘局報分虛高（實戰歷史詳見 [`EVAL_AUDIT_AND_FIX_PLAN_20261031.md` Phase 7](../chess_engine/classical/EVAL_AUDIT_AND_FIX_PLAN_20261031.md)）。
 
 ### 5. Unseen Holdout + 獨立 PGN Paired Validation 與離散 scalar
 
