@@ -43,6 +43,7 @@ from concurrent.futures import ThreadPoolExecutor
 import gc
 import os
 from pathlib import Path
+import shutil
 import subprocess
 import threading
 import time
@@ -61,6 +62,10 @@ SF_CANDIDATES = (
     "external/stockfish/stockfish-windows-x86-64-universal.exe",
     "stockfish_repo/dist/stockfish/stockfish-windows-x86-64-avx2.exe",
     "external/stockfish_dir/stockfish-windows-x86-64-avx2.exe",
+    "external/stockfish/stockfish-ubuntu-x86-64-avx2",
+    "external/stockfish/stockfish",
+    "stockfish_repo/src/stockfish",
+    "/usr/games/stockfish",
 )
 
 _PIECE_CHARS = "PNBRQKpnbrqk"
@@ -410,10 +415,30 @@ def _query_sf_banner(sf_path: str) -> str:
         return os.path.basename(sf_path)
 
 
+def _sync_to_drive(src_path: Path, drive_dest: Path | None) -> None:
+    """Safely mirror ``src_path`` to ``drive_dest`` (e.g. Google Drive on Colab)."""
+    if drive_dest is None or not src_path.is_file():
+        return
+    try:
+        if src_path.resolve() == drive_dest.resolve():
+            return
+    except OSError:
+        pass
+    try:
+        drive_dest.parent.mkdir(parents=True, exist_ok=True)
+        tmp_dest = drive_dest.with_name(f"{drive_dest.stem}.tmp{drive_dest.suffix}")
+        shutil.copy2(src_path, tmp_dest)
+        tmp_dest.replace(drive_dest)
+    except Exception as exc:
+        print(f"\n  [Drive Sync Warning] Could not sync to {drive_dest}: {exc}")
+
+
 def annotate_dataset(
     dataset_path: str | Path = DEFAULT_DATASET,
     output_path: str | Path | None = None,
     *,
+    drive_output_path: str | Path | None = None,
+    drive_sync_every: int = 250_000,
     stockfish_path: str | None = None,
     nodes: int = 4000,
     depth: int = 0,
@@ -431,6 +456,7 @@ def annotate_dataset(
     if not ds_path.is_file():
         raise FileNotFoundError(f"Dataset not found: {ds_path}")
     out_path = Path(output_path) if output_path else default_sidecar_path(ds_path)
+    drive_dest = Path(drive_output_path) if drive_output_path else None
     sf_bin = find_sf_binary(stockfish_path)
     sf_banner = _query_sf_banner(sf_bin)
     go_cmd = f"go depth {int(depth)}" if depth and depth > 0 else f"go nodes {int(nodes)}"
@@ -439,6 +465,8 @@ def annotate_dataset(
     print(f"=== Stockfish Mixed-Label Sidecar Annotator ===")
     print(f"  Dataset   : {ds_path}")
     print(f"  Output    : {out_path}")
+    if drive_dest is not None:
+        print(f"  Drive Sync: {drive_dest} (every {drive_sync_every:,} rows)")
     print(f"  Engine    : {sf_banner} ({sf_bin})")
     print(f"  Search    : '{go_cmd}' | workers={n_workers} | hash={hash_mb} MB/worker")
 
@@ -472,14 +500,19 @@ def annotate_dataset(
         )
         cp_mmap[:] = UNANNOTATED_CP
         d1_mmap[:] = UNANNOTATED_CP
-        if resume and out_path.is_file():
-            with np.load(out_path) as prev:
+        seed_npz_path = (
+            out_path
+            if (resume and out_path.is_file())
+            else (drive_dest if (resume and drive_dest is not None and drive_dest.is_file()) else None)
+        )
+        if seed_npz_path is not None:
+            with np.load(seed_npz_path) as prev:
                 if len(prev["sf_cp"]) == n_total:
                     cp_mmap[:] = prev["sf_cp"]
                     if "sf_d1_cp" in prev.files:
                         d1_mmap[:] = prev["sf_d1_cp"]
                     prev_done = int(np.count_nonzero(cp_mmap != UNANNOTATED_CP))
-                    print(f"  [Resume] Seeded checkpoint from existing {out_path.name} ({prev_done:,} rows)")
+                    print(f"  [Resume] Seeded checkpoint from existing {seed_npz_path} ({prev_done:,} rows)")
         cp_mmap.flush()
         d1_mmap.flush()
 
@@ -512,6 +545,7 @@ def annotate_dataset(
             sf_banner=sf_banner,
             source_dataset=ds_path.name,
         )
+        _sync_to_drive(out_path, drive_dest)
         _close_memmap(cp_mmap)
         _close_memmap(d1_mmap)
         del cp_mmap, d1_mmap
@@ -527,6 +561,7 @@ def annotate_dataset(
     t_start = time.time()
     done_now = 0
     since_flush = 0
+    since_drive_sync = 0
     interrupted = False
     worker_state = _SfWorkerPoolState(sf_bin, hash_mb)
     atexit.register(worker_state.close_all)
@@ -542,11 +577,27 @@ def annotate_dataset(
                 step_n = len(b_idx)
                 done_now += step_n
                 since_flush += step_n
+                since_drive_sync += step_n
 
                 if since_flush >= save_every:
                     cp_mmap.flush()
                     d1_mmap.flush()
                     since_flush = 0
+
+                if drive_dest is not None and drive_sync_every > 0 and since_drive_sync >= drive_sync_every:
+                    cp_mmap.flush()
+                    d1_mmap.flush()
+                    _save_sidecar_npz(
+                        out_path,
+                        cp_mmap,
+                        d1_mmap,
+                        nodes=nodes,
+                        depth=depth,
+                        sf_banner=sf_banner,
+                        source_dataset=ds_path.name,
+                    )
+                    _sync_to_drive(out_path, drive_dest)
+                    since_drive_sync = 0
 
                 elapsed = max(time.time() - t_start, 1e-6)
                 rate = done_now / elapsed
@@ -573,6 +624,7 @@ def annotate_dataset(
             sf_banner=sf_banner,
             source_dataset=ds_path.name,
         )
+        _sync_to_drive(out_path, drive_dest)
 
     print()
     total_annotated = int(np.count_nonzero(cp_mmap != UNANNOTATED_CP))
@@ -590,6 +642,8 @@ def annotate_dataset(
         f"Saved sidecar: {out_path} ({out_path.stat().st_size / (1024 ** 2):.2f} MB) "
         f"| annotated={total_annotated:,}/{n_total:,} ({100.0 * total_annotated / n_total:.2f}%)"
     )
+    if drive_dest is not None and drive_dest.is_file():
+        print(f"Synced to Drive: {drive_dest} ({drive_dest.stat().st_size / (1024 ** 2):.2f} MB)")
     if len(valid_cp) > 0:
         print(
             f"  sf_cp stats : mean={float(np.mean(valid_cp)):+.1f} cp, "
@@ -631,6 +685,17 @@ def main() -> int:
         "--output",
         default=None,
         help="Output sidecar .npz path (default: <dataset_stem>.sf19.npz)",
+    )
+    parser.add_argument(
+        "--drive-output",
+        default=None,
+        help="Optional Google Drive path to mirror the sidecar .sf19.npz periodically and on exit",
+    )
+    parser.add_argument(
+        "--drive-sync-every",
+        type=int,
+        default=250_000,
+        help="Mirror sidecar .sf19.npz to --drive-output every N newly annotated rows (default: 250000)",
     )
     parser.add_argument(
         "--stockfish",
@@ -706,6 +771,8 @@ def main() -> int:
     annotate_dataset(
         dataset_path=args.dataset,
         output_path=args.output,
+        drive_output_path=args.drive_output,
+        drive_sync_every=args.drive_sync_every,
         stockfish_path=args.stockfish,
         nodes=args.nodes,
         depth=args.depth,
