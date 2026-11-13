@@ -657,7 +657,45 @@ flowchart TD
 #### 5. 基準狀態與後續調參改進清單
 * **當前基線狀態**：`chess_engine/classical/constants.py`（R2）相對 `classical_old/constants.py`（R1 `91e5cb3`）於 2,094 局達成 **+10.12 Elo `[+1.96, +18.30]`** 統計顯著進步；依據專案規則，**基準同步 (`tools/sync_classical_old.py --sync`) 保留給使用者審閱定奪**，本次僅完整記錄數據。
 * **後續調參工程待辦（下一輪前修正）**：
-  1. 在 [`tuner/notebook_session.py`](../../tuner/notebook_session.py) `_gate_summary` 為 `val_pgn.npz` 補入 **`@ K=1.000` 總體及 `broad-EG (phase<=64)` 的硬性卡控**，避免單純靠擬合更高的 $K^*$ 放行高尺度膨脹區塊（特別是 `block7b_initiative`）。
+  1. ~~在 `tuner/notebook_session.py` `_gate_summary` 為 `val_pgn.npz` 補入 `@ K=1.000` 總體及 `broad-EG` 卡控~~ → **【已於 Phase 8 實戰證偽並修正】**：見下方 Phase 8，`400k` 消融對戰證明 `Block 7b (Initiative)` 帶來實戰顯著增益（雙樣本 `z = 2.13`），`K=1.000` 因偏離引擎真實校準尺度 `K* ≈ 1.153` 會系統性誤殺複雜度／收斂型修正，故現已改為**僅以校準 `K*` 與 `castling!=0` 判定 `val_pgn` 閘門**。
   2. 解耦 `block6b_bishop`（拆開開局有易位權階段與無后／殘局象評估／PST_EG）與將 `block8_nbrq_joint_polish` 拆分為 `MG`／`EG` 兩階段收尾，改善開中局高權重稀釋純殘局（尤其 `Pure Bishop EG`）梯度的問題。
-  3. 針對過度樂觀因子 `EG_SAFETY_SCALE`（`110`）、`KING_PAWN_PROXIMITY_FACTOR`（`3`）與 `INITIATIVE_*_EG` 進行局部保守掃描或對局調優（`tune_eval_match`），壓低實戰殘局「報優不贏」虛高評分，同時保留 R2 已在 `Rook+Minor` / `Pure Rook` / `Pure Knight` 取得的實戰增益。
+  3. 針對殘局安全與接近係數（如 `EG_SAFETY_SCALE`、`KING_PAWN_PROXIMITY_FACTOR`）結合 `USE_SF_LABELS` 或對局調優（`tune_eval_match`）持續精修，同時保留已在對局取得驗證的改動。
+
+---
+
+### Phase 8：Round 3 (`USE_PGN_VAL`) 調參、`K=1.0` 閘門假說證偽與 `Block 7b (Initiative)` 400k 消融實戰驗收 (2026-11-12 ~ 2026-11-13)
+
+#### 1. 調參基礎設施與 Gate 邏輯修正
+* **SF19 Colab 搜尋標籤側車管線**（Commit `0a812f9` 及後續相容性修復）：
+  * 新增 [`tuner/sf19_annotate_colab_runner.ipynb`](../../tuner/sf19_annotate_colab_runner.ipynb) 並擴充 [`tuner/data_pipeline/annotate_sf_labels.py`](../../tuner/data_pipeline/annotate_sf_labels.py)，支援 Colab Linux Stockfish AVX2 自動下載、定期同步 `.sf19.npz` 至 Google Drive（`--drive-output` / `--drive-sync-every`）與斷點續傳。
+  * [`split_dataset_indices`](../../tuner/tuner.py#L129) 補齊可選 `seed` 參數以相容外部呼叫。
+* **SPSA 動態時間種子（`RANDOM_SEED = True`）**：
+  * [`TexelTuningSession`](../../tuner/notebook_session.py) 新增 `random_seed` 參數（預設 `False` 保單元測試可重現），[`tuner/texel_tuner_runner.ipynb`](../../tuner/texel_tuner_runner.ipynb) `# 0` Cell 預設啟用 `RANDOM_SEED = True`，於每個調參區塊開始時以 `time_ns` 解析動態種子並寫入驗證紀錄 `seed`，避免多輪反覆重調一直抽取相同的 SPSA 隨機採樣順序。
+* **移除 `val_pgn` raw `K=1.0` Gate 懲罰**：
+  * 原 `_gate_summary` 曾短暫升級檢查 `val_pgn @ K=1.0`（`z@K=1`），企圖防堵評估尺度微漂；但數學上本引擎把兵錨定在 ~100 cp（SF11 display scale），真實最佳斜率為 `holdout K* ≈ 1.245`、`val_pgn K* ≈ 1.153`。
+  * 由於 `K=1.000` 遠小於 `K*=1.153` 而坐落在 MSE(K) 曲線的非極值陡坡上，任何微幅收斂殘局過度擴張分數、讓 `K*` 從 `1.151` 移至 `1.154`（僅 `0.26%`）的改動，都會在 `val_pgn` 百萬樣本上出現巨大「K=1 假回歸 Z 值」（Block 7b 即呈現 `z@K=1 = +41.01` vs `z@K* = +0.46`）。
+  * 現已修改 [`_gate_summary`](../../tuner/notebook_session.py#L1094-L1107)，使 `val_pgn` 與 `zurichess_res` 完全對稱：**僅依校準後的 `p_kstar["z"]`（`> 2.5` REJECT / `> 1.2` CAUTION）與 `castling!=0` 判定**，`delta@K=1` 僅保留於日誌印出觀察；並新增單元測試 `test_pgn_gate_judges_calibrated_kstar_not_raw_k1`（[`tests/test_texel_parameterization.py`](../../tests/test_texel_parameterization.py#L552-L584)）。
+
+#### 2. Round 3 (R3) 分區 Texel SPSA 調參成果
+* **起點與配置**：基於 Phase 7 R2 並已同步之 `classical_old`（Commit `d59ebcd`），啟用 `USE_PGN_VAL = True`、純 WDL 標籤執行全流程 [`tuner/texel_tuner_runner.ipynb`](../../tuner/texel_tuner_runner.ipynb)。
+* **區塊接納狀況**：
+  * **Gate PASS 套用（11 個區塊）**：`block1a_passed_tables`、`block1d_king_prox`、`block3_mobility`、`block4a_pawn_structure`、`block5b_shelter_storm_king_pst`、`block6a_knight`、`block6c_rook`、`block6d_queen`、`block7a_imbalance`、`block7b_initiative`、`block8_nbrq_joint_polish`。
+  * **Gate SKIP / REJECT / CAUTION（自動跳過保護基線）**：`block1c_passed_path_grid`、`block2a_threats`、`block5a_king_danger`、`block5a_king_flank_grid`、`block5c_king_safety_output`、`block6b_bishop`（`castling!=0` 退步）、`block6e_pawn`、`block7c_space_tempo_grid` 等（其餘網格掃描為 NO-OP）。
+* **累積參數與靜態表現（Cell 70，對比 R2 / `d59ebcd`）**：
+  * **參數變動量**：總計 **453 / 1,278 維**變動（跨 **40 組**常數，`L1 = 696`）。
+  * **2M Unseen Holdout（純 WDL）**：`@K=1.244` `delta = -1.0737e-04 (z = -39.94)`、`@K*=1.245` `delta = -1.0778e-04 (z = -40.06)`、`broad-EG z = -28.50`、`castling!=0 z = -13.15`。
+  * **1.59M Independent `val_pgn`**：**`@K*=1.153` `delta = -4.3661e-05 (z = -18.91)`**、`castling!=0 z = -5.72`（而 `@K=1.000` 受到 `Block 7b` 影響為 `+6.3577e-06, z = +3.09`）。
+
+#### 3. 400,000 nodes/move 實戰消融對戰（`Block 7b Initiative` 價值定案）
+
+為驗證 R3 與「`val_pgn @ K=1.0: z=+41.01` 的 `Block 7b` 究竟是過擬合還是真改善」，以 R2 已同步基線 `classical_old`（`d59ebcd`）為對手，於 Colab 進行同條件 **400,000 nodes/move** 成對換先長時控 SPRT（Bounds `[-2.94, +2.94]`，64 MB TT，7 workers）：
+
+| 測試版本 | 參考筆記本 / Commit | 完成對數（局數） | 戰績 (W - D - L) | 得分率 / 淨勝 | Elo 表現 (95% CI) | SPRT LLR | 關鍵分項與結論 |
+| :--- | :--- | :---: | :---: | :---: | :---: | :---: | :--- |
+| **R3 完整版（含 Block 7b）** | `tournament_colab_runner_se_multicut copy.ipynb` (`36d5ade`) | **1,815 對（3,630 局）** | **686 - 2,330 - 614** (`1851.0 - 1779.0`) | **51.0%** (`50.99%`, **+72**) | **`+6.89 ± 6.76 Elo`** (`+6.9 ± 6.8`) | **`+1.75`**（1,497 對峰值 **`+2.56`**, `+8.4 ± 7.5`） | **95% CI 下界嚴格大於 0**；執白 `397W-1173D-245L (54.19%)`、執黑 `289W-1157D-369L (47.80%)` |
+| **R3 剔除 Block 7b 版** | `tournament_colab_runner_se_multicut copy 8.ipynb` (`b69ed83`) | **375 對（750 局）** | **119 - 489 - 142** (`363.5 - 386.5`) | **48.5%** (`48.47%`, **-23**) | **`-10.66 ± 14.66 Elo`** | **`-2.99`（H0 Accepted 終止）** | 剔除該 8 個 Initiative 參數後立即全面轉負，中局明顯退步 |
+
+* **跨實驗統計檢定**：兩組 400k 對戰相差 **`+6.89 - (-10.66) = +17.55 Elo`**（合併 `SE = 8.24`，雙樣本 **`z = 2.13`**, $p \approx 0.033$）。這直接證實 `Block 7b` 的 8 個常數變動（`INITIATIVE_PAWN_WEIGHT_MG: 11->12`、`OUTFLANKING_MG: 5->4`、`PASSED_EG: 7->6`、`PAWN_EG: 4->3`、`OUTFLANKING_EG: 3->2`、`INFILTRATION_EG: 8->7`、`BOTH_FLANKS_EG: 17->19`、`OFFSET_EG: -48->-46`）確實顯著增強了真實搜尋棋力。
+* **當前倉庫基線處置**：已將上述 8 個 `Block 7b` 參數從 `b69ed83` 還原回 [`constants.py`](constants.py#L105-L123)，並執行 `python -m tuner.sync_constants_snapshot` 更新 [`tuner/constants_snapshot.py`](../../tuner/constants_snapshot.py) 與清除舊 Numba 快取（共 260 檔）；透過 [`tests.test_texel_parameterization`](../../tests/test_texel_parameterization.py)、[`tests.test_endgame_conformance`](../../tests/test_endgame_conformance.py)、[`tests.test_runtime_eval_weights`](../../tests/test_runtime_eval_weights.py) 共 **60 項測試全數通過（OK）**。`classical_old/` 暫維持 R2 基線不更動，待後續確定是否再衝擊 SPRT `+2.94` 或進行 `USE_SF_LABELS` 實驗後再行決定同步時機。
+
 

@@ -544,6 +544,45 @@ class TestCustomConstantsAndSessionModes(unittest.TestCase):
                 self.assertIsNotNone(rec_dual["pgn_val"])
                 self.assertEqual(session.accept_if_pass("block_test"), [])
 
+                # Verify dynamic random_seed toggle
+                self.assertFalse(session.random_seed)
+                session.reconfigure(random_seed=True)
+                self.assertTrue(session.random_seed)
+
+    def test_pgn_gate_judges_calibrated_kstar_not_raw_k1(self):
+        sess = TexelTuningSession.__new__(TexelTuningSession)
+        sess.use_pgn_val = True
+        sess.target_engine = "classical"
+        sess.train_path = Path("epd.npz")
+
+        changes = [{"name": "INITIATIVE_PAWN_WEIGHT_EG"}]
+        hold_res = {
+            "buckets": {
+                "all": {"n": 1000, "delta": -4.0e-5, "z": -13.0},
+                "broad-EG phase<=64": {"n": 400, "delta": -5.0e-5, "z": -8.0},
+            },
+            "fitted_k": {"n": 1000, "delta": -4.2e-5, "z": -13.5},
+        }
+        # Raw K=1 shows large positive z due solely to scale calibration offset, while K* is neutral
+        pgn_res_ok = {
+            "buckets": {
+                "all": {"n": 1000, "delta": +3.2e-5, "z": +41.0},
+                "castling!=0": {"n": 300, "delta": -1.5e-5, "z": -5.6},
+            },
+            "fitted_k": {"n": 1000, "delta": +1.0e-6, "z": +0.46},
+        }
+        with patch("sys.stdout", new_callable=io.StringIO):
+            self.assertEqual(sess._gate_summary(changes, hold_res, pgn_res_ok), "PASS")
+
+            pgn_res_bad = {
+                "buckets": {
+                    "all": {"n": 1000, "delta": -1.0e-5, "z": -2.0},
+                    "castling!=0": {"n": 300, "delta": -1.0e-6, "z": -0.2},
+                },
+                "fitted_k": {"n": 1000, "delta": +3.0e-5, "z": +2.6},
+            }
+            self.assertEqual(sess._gate_summary(changes, hold_res, pgn_res_bad), "REJECT")
+
     def test_parse_proc_meminfo_gb_handles_linux_meminfo_and_fallback(self):
         meminfo = (
             "MemTotal:       13289612 kB\n"

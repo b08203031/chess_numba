@@ -472,8 +472,10 @@ SF 係數在「pawn MG=128」空間與 SF mobility/shelter 共調。我們材質
 
 | 版本標籤 | 內容 |
 | :--- | :--- |
-| `classical` vs `classical_old`（現行對戰基準） | 搜尋、`evaluation.py`、`endgame.py` 與相依程式一致（含 `eac424a` `_is_repetition_jit` 修復）；`classical` 為 `USE_PGN_VAL` R2，`classical_old` 為 R1（`91e5cb3`）純評估常數 A/B |
-| **Phase 7 R2 vs R1 (`USE_PGN_VAL`, 2,094 局)** | 1077.5 - 1016.5（389W 1377D 328L，51.46%，淨勝 +61），**+10.12 Elo**（CI **[+1.96, +18.30] 顯著**）；詳見 [EVAL_AUDIT_AND_FIX_PLAN_20261031.md](EVAL_AUDIT_AND_FIX_PLAN_20261031.md) Phase 7 |
+| `classical` vs `classical_old`（現行對戰基準） | 搜尋、`evaluation.py`、`endgame.py` 與相依程式一致；`classical` 為 **R3（含 Block 7b，還原自 `36d5ade`）**、`classical_old` 為 **R2（`d59ebcd` 已同步基線）**純評估常數 A/B |
+| **Phase 8 R3 vs R2 (`USE_PGN_VAL`, `copy.ipynb`, 3,630 局)** | **1851.0 - 1779.0**（**686W 2330D 614L**，51.0%，淨勝 +72），**`+6.89 ± 6.76 Elo`**（95% CI 下界 > 0；`LLR = +1.75`，1,497 對曾達 `+2.56`）；見 [EVAL_AUDIT_AND_FIX_PLAN_20261031.md](EVAL_AUDIT_AND_FIX_PLAN_20261031.md) Phase 8 |
+| **Phase 8 R3 剔除 Block 7b vs R2 (`copy 8.ipynb`, 750 局)** | 363.5 - 386.5（119W 489D 142L，48.5%，淨勝 -23），**`-10.66 ± 14.66 Elo`**（**H0 Accepted** `LLR = -2.99`）→ 跨測試差 `+17.55 Elo (z = 2.13)` 證實 Block 7b 應保留 |
+| **Phase 7 R2 vs R1 (`USE_PGN_VAL`, 2,094 局)** | 1077.5 - 1016.5（389W 1377D 328L，51.46%，淨勝 +61），**+10.12 Elo**（CI **[+1.96, +18.30] 顯著**）→ 已於 `d59ebcd` 同步為 R2 基線 |
 | **Phase 7 R2 (`USE_PGN_VAL`) vs Holdout-Only (3,674 局)** | 1881.5 - 1792.5（717W 2329D 628L，51.21%，淨勝 +89），**+8.42 Elo**（CI **[+1.75, +15.09] 顯著**） |
 | **Phase 6 第二輪微調 (1,000 局)** | 515.0 - 485.0（227W 576D 197L，51.50%，淨勝 +30），**+10.43 ± 14.02 Elo** → 已於當時同步基準 |
 | **Phase 5 乾淨 EPD 調參 A/B (542 / 1,000 局)** | 整體對舊引擎 **+35.38 Elo**（SPRT H1 Accepted `LLR=2.99`）；純參數消融 **+18.08 ± 15.10 Elo** |
@@ -484,7 +486,7 @@ SF 係數在「pawn MG=128」空間與 SF mobility/shelter 共調。我們材質
 | **搜尋 PR-A（64 局）** | **50% / Elo 0** |
 | **搜尋 PR-B+C（122 局）** | **50% / Elo 0** ← 搜尋護欄全套定稿 |
 | 評估 P3 整包 / 純 P3a | 負向或中性偏負 → 已回滾 |
-| 建議下一動 | 強化 `val_pgn @ K=1.0` `broad-EG` 卡控、解耦 `6b_bishop` 與拆開 `block8` MG/EG 收斂殘局虛高評估；**勿**再開純係數抬升 |
+| 建議下一動 | `val_pgn` 閘門已改為僅看校準 `K*`（移除 raw `K=1` 假警報）；維持 R3 + Block 7b，視需要續衝 SPRT `+2.94` 或進行 `USE_SF_LABELS` 混合標籤調參實驗 |
 
 ---
 

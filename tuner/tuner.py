@@ -127,7 +127,7 @@ def fit_best_k(scores, results, lo=0.25, hi=2.50, iters=36):
 
 
 def split_dataset_indices(
-    n_total, eval_sample=1_000_000, holdout_sample=2_000_000
+    n_total, eval_sample=1_000_000, holdout_sample=2_000_000, seed=None
 ):
     """Deterministic leak-free 3-way split: (train_indices, eval_indices, holdout_indices).
 

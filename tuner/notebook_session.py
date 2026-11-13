@@ -251,6 +251,7 @@ class TexelTuningSession:
         sf_labels_path: str | Path | None = None,
         sf_max_tactical_gap: int = 180,
         drive_backup_dir: str | Path | None = None,
+        random_seed: bool = False,
     ):
         self.train_path = Path(train_npz)
         self.pgn_val_path = Path(pgn_val_npz) if pgn_val_npz else None
@@ -268,6 +269,7 @@ class TexelTuningSession:
         )
         self.sf_max_tactical_gap = int(sf_max_tactical_gap)
         self.drive_backup_dir = Path(drive_backup_dir) if drive_backup_dir else None
+        self.random_seed = bool(random_seed)
         (
             self.target_engine,
             self.target_constants_path,
@@ -704,9 +706,12 @@ class TexelTuningSession:
         sf_labels_path: str | Path | None = None,
         sf_max_tactical_gap: int | None = None,
         drive_backup_dir: str | Path | None = None,
+        random_seed: bool | None = None,
     ) -> None:
         """Switch validation mode, SF19 label blend, or target engine in-place without reloading 20M rows."""
         t0 = time.time()
+        if random_seed is not None:
+            self.random_seed = bool(random_seed)
         if drive_backup_dir is not None:
             self.drive_backup_dir = Path(drive_backup_dir) if drive_backup_dir else None
         if pgn_val_npz is not None:
@@ -1088,11 +1093,13 @@ class TexelTuningSession:
 
         if pgn_res is not None:
             p_kstar = pgn_res["fitted_k"] or pgn_res["buckets"]["all"]
-            p_all = pgn_res["buckets"]["all"]
-            if p_kstar["z"] > 2.5 or (p_kstar["z"] > 2.0 and p_all["z"] > 1.5):
+            # Judge val_pgn at its calibrated baseline K* (~1.15), not raw K=1.000:
+            # our engine anchors Pawn~100cp (K* > 1.0), so uncalibrated K=1 systematically
+            # penalizes dampening/complexity refinements that tighten score spread (e.g. Block 7b).
+            if p_kstar["z"] > 2.5:
                 severe = True
                 reasons.append(
-                    f"val_pgn worsened significantly (z@K=1={p_all['z']:+.2f}, z@K*={p_kstar['z']:+.2f})"
+                    f"val_pgn @ K* worsened significantly (z={p_kstar['z']:+.2f})"
                 )
             elif p_kstar["z"] > 1.2:
                 reasons.append(
@@ -1158,7 +1165,11 @@ class TexelTuningSession:
         return verdict
 
     def validate_candidate_theta(
-        self, block_id: str, candidate: np.ndarray, out_path: Path | None = None
+        self,
+        block_id: str,
+        candidate: np.ndarray,
+        out_path: Path | None = None,
+        seed: int | None = None,
     ) -> dict:
         changes = print_effective_integer_changes(
             self.pm, self.step_baseline_theta, candidate
@@ -1227,6 +1238,7 @@ class TexelTuningSession:
         record = {
             "block_id": block_id,
             "path": str(out_path) if out_path else None,
+            "seed": seed,
             "verdict": verdict,
             "target_engine": getattr(self, "target_engine", "classical"),
             "use_pgn_val": getattr(self, "use_pgn_val", True),
@@ -1258,12 +1270,25 @@ class TexelTuningSession:
         report_every: int = 50,
         patience: int = 25,
         metrics_sample: int = 250_000,
-        seed: int = 0,
+        seed: int | str | None = 0,
         k_factor: float | str = "auto",
         auto_scale: bool = True,
         verbose_buckets: str = "endpoints",
     ) -> dict:
         """Run SPSA on one block in-memory and validate on unseen sets."""
+        if (
+            (getattr(self, "random_seed", False) and (seed is None or seed == 0 or seed == "random" or seed == "time"))
+            or seed is None
+            or seed == "random"
+            or seed == "time"
+        ):
+            eff_seed = int((time.time() * 1000) % 2_147_483_647)
+            if eff_seed == 0:
+                eff_seed = 1
+            print(f"  [SPSA Seed] Using dynamic time seed: {eff_seed}")
+        else:
+            eff_seed = int(seed)
+
         eff_k = self._resolve_k_factor(k_factor)
         out_path = self.runs_dir / f"{block_id}.py"
         lbl_tag = (
@@ -1286,7 +1311,7 @@ class TexelTuningSession:
             eval_sample=self.eval_sample,
             holdout_sample=self.holdout_sample,
             metrics_sample=metrics_sample,
-            seed=seed,
+            seed=eff_seed,
             report_every=report_every,
             patience=patience,
             king_pst_only=king_pst_only,
@@ -1307,7 +1332,7 @@ class TexelTuningSession:
         )
         print(f"\n--- {val_header} for [{block_id}] ---")
         res = self.validate_candidate_theta(
-            block_id, optimizer.best_theta.copy(), out_path=out_path
+            block_id, optimizer.best_theta.copy(), out_path=out_path, seed=eff_seed
         )
         self.sync_to_drive(tag=f"{block_id}_candidate")
         return res
