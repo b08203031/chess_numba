@@ -86,7 +86,7 @@ $$P(Win) = \frac{1}{1 + 10^{\frac{- \Delta Elo}{400}}}$$
 
 ---
 
-## 4. [	ools/tournament.py](../tools/tournament.py) 裡的常態分佈近似算法 (Normal Approximation)
+## 4. [tools/tournament.py](../tools/tournament.py) 裡的常態分佈近似算法 (Normal Approximation)
 
 在現實的引擎測試中，西洋棋有「和棋 (Draws)」，更有「白棋先手優勢」。為了消除先後手優勢，我們會讓引擎兩兩一組，針對相同開局下兩盤棋（黑白互換），這也是為什麼您的腳本裡叫做 `Pair Scores`。
 

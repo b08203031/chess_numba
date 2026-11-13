@@ -40,6 +40,7 @@ from tuner.notebook_session import (
 )
 from tuner.parameters import ParameterManager
 from tuner.tuner import SPSAOptimizer, split_dataset_indices
+from tuner.validate_tuned import run_paired_validation
 
 
 class _DummyParameterManager:
@@ -831,6 +832,195 @@ class TestSfMixedLabelsAndKStarGate(unittest.TestCase):
                 session.reconfigure(use_sf_labels=False)
                 self.assertFalse(session.use_sf_labels)
                 np.testing.assert_array_equal(session.train_data["results"], wdl)
+
+    def test_gate_subbucket_guards_catch_king_pawns_phase0_and_castling_collapse(self):
+        sess = TexelTuningSession.__new__(TexelTuningSession)
+        sess.use_pgn_val = True
+        sess.target_engine = "classical"
+        sess.train_path = Path("epd.npz")
+
+        changes = [{"name": "CONNECTED_BONUS_EG"}]
+        base_hold = {
+            "k_factor": 1.26,
+            "buckets": {
+                "all": {"n": 2_000_000, "delta": -4.0e-6, "z": -1.8},
+                "broad-EG phase<=64": {"n": 1_100_000, "delta": -3.5e-5, "z": -3.9},
+                "pure king+pawns": {"n": 23_458, "delta": -1.0e-6, "z": -0.3},
+                "phase=0": {"n": 595_000, "delta": -1.0e-6, "z": -0.5},
+            },
+            "fitted_k": None,
+        }
+        base_pgn = {
+            "k_factor": 1.17,
+            "buckets": {
+                "all": {"n": 1_590_000, "delta": -2.0e-6, "z": -1.1},
+                "castling!=0": {"n": 104_000, "delta": -1.0e-6, "z": -0.3},
+                "pure king+pawns": {"n": 17_779, "delta": 0.0, "z": 0.0},
+            },
+            "fitted_k": None,
+        }
+        with patch("sys.stdout", new_callable=io.StringIO):
+            # 1) Pure king+pawns sub-noise jitter (delta below 2e-5 floor) -> PASS
+            tiny_noise = dict(base_hold)
+            tiny_noise["buckets"] = dict(base_hold["buckets"])
+            tiny_noise["buckets"]["pure king+pawns"] = {"n": 23_458, "delta": 1.0e-6, "z": 4.0}
+            self.assertEqual(sess._gate_summary(changes, tiny_noise, base_pgn), "PASS")
+
+            # 2) Pure king+pawns moderate regression -> CAUTION
+            kp_warn = dict(base_hold)
+            kp_warn["buckets"] = dict(base_hold["buckets"])
+            kp_warn["buckets"]["pure king+pawns"] = {"n": 23_458, "delta": 1.5e-5, "z": 2.4}
+            self.assertEqual(sess._gate_summary(changes, kp_warn, base_pgn), "CAUTION")
+
+            # 3) Block 4a-style pure king+pawns collapse -> REJECT despite improved broad-EG
+            kp_collapse = dict(base_hold)
+            kp_collapse["buckets"] = dict(base_hold["buckets"])
+            kp_collapse["buckets"]["pure king+pawns"] = {"n": 23_458, "delta": 4.0e-4, "z": 22.88}
+            self.assertEqual(sess._gate_summary(changes, kp_collapse, base_pgn), "REJECT")
+
+            # 4) Holdout phase=0 collapse -> REJECT
+            p0_collapse = dict(base_hold)
+            p0_collapse["buckets"] = dict(base_hold["buckets"])
+            p0_collapse["buckets"]["phase=0"] = {"n": 595_000, "delta": 5.0e-5, "z": 11.6}
+            self.assertEqual(sess._gate_summary(changes, p0_collapse, base_pgn), "REJECT")
+
+            # 5) Severe val_pgn castling!=0 collapse at calibrated K* -> REJECT
+            pgn_castle_bad = dict(base_pgn)
+            pgn_castle_bad["buckets"] = dict(base_pgn["buckets"])
+            pgn_castle_bad["buckets"]["castling!=0"] = {"n": 104_000, "delta": 3.25e-5, "z": 10.9}
+            self.assertEqual(sess._gate_summary(changes, base_hold, pgn_castle_bad), "REJECT")
+
+    def test_validation_never_uses_k1_and_decouples_dev_holdout_pgn_kstar(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_dir = Path(tmp)
+            train_npz = tmp_dir / "train_sf.npz"
+            pgn_npz = tmp_dir / "val_pgn.npz"
+            zuri_npz = tmp_dir / "val_zuri.npz"
+            sf_sidecar = tmp_dir / "train_sf.sf19.npz"
+            const_copy = tmp_dir / "constants_copy.py"
+            shutil.copyfile(CONSTANTS_PATH, const_copy)
+
+            pb0, ob0, gs0 = parse_fen_to_arrays(
+                "r3k2r/pppq1ppp/2npbn2/4p3/4P3/2NPBN2/PPPQ1PPP/R3K2R w KQkq - 4 8"
+            )
+
+            def _make_correlated_split(n: int, rng_seed: int, k_true: float):
+                local_rng = np.random.default_rng(rng_seed)
+                # Quantized cp values encodable into uint8..int64 game_states[:, 3]
+                cp = (local_rng.integers(-60, 61, size=n, dtype=np.int16) * 4).astype(np.int16)
+                p = 1.0 / (1.0 + np.exp(-cp.astype(np.float64) * 0.00575646273 * k_true))
+                # Stochastic WDL outcomes so fit_best_k recovers interior finite K* ~= k_true
+                draw_prob = 0.25 * (1.0 - np.abs(2.0 * p - 1.0))
+                win_prob = np.clip(p - 0.5 * draw_prob, 0.0, 1.0)
+                u = local_rng.random(n)
+                w = np.where(u < win_prob, 1.0, np.where(u < win_prob + draw_prob, 0.5, 0.0)).astype(np.float32)
+                gs_mat = np.tile(gs0, (n, 1))
+                gs_mat[:, 3] = (cp // 4) + 128
+                return cp, w, np.tile(pb0, (n, 1)), np.tile(ob0, (n, 1)), gs_mat
+
+            n_rows = 240
+            cp_train, wdl, pb_tr, ob_tr, gs_tr = _make_correlated_split(n_rows, 13, 1.45)
+            np.savez(
+                train_npz,
+                piece_bbs=pb_tr,
+                occupancy_bbs=ob_tr,
+                game_states=gs_tr,
+                results=wdl,
+            )
+            # Softened bounded SF targets pull dev K* lower than sharp pure-WDL holdout K*
+            compressed_sf = np.sign(cp_train).astype(np.int16) * np.int16(20)
+            np.savez(
+                sf_sidecar,
+                sf_cp=compressed_sf,
+                sf_d1_cp=compressed_sf,
+            )
+            for ext_path, seed_i, k_ext in ((pgn_npz, 29, 1.75), (zuri_npz, 41, 1.95)):
+                _, w_ext, pb_ext, ob_ext, gs_ext = _make_correlated_split(120, seed_i, k_ext)
+                np.savez(
+                    ext_path,
+                    piece_bbs=pb_ext,
+                    occupancy_bbs=ob_ext,
+                    game_states=gs_ext,
+                    results=w_ext,
+                )
+
+            init_idx, _ = ParameterManager().get_param_indices("INITIATIVE_MG_OFFSET")
+            base_init = int(ParameterManager().theta[init_idx])
+
+            def _fake_eval(pb, ob, gs, theta, lazy=False):
+                return np.int32(int(np.rint(theta[init_idx])))
+
+            def _fake_scores(pbs, obs, gss, theta):
+                delta = int(np.rint(theta[init_idx])) - base_init
+                decoded = (gss[:, 3].astype(np.int32) - 128) * 4
+                return decoded + delta * 10
+
+            with (
+                patch("tuner.notebook_session.evaluate_position_tunable", side_effect=_fake_eval),
+                patch("tuner.notebook_session.compute_white_scores", side_effect=_fake_scores),
+                patch("tuner.validate_tuned.compute_white_scores", side_effect=_fake_scores),
+                patch("sys.stdout", new_callable=io.StringIO) as buf,
+            ):
+                session = TexelTuningSession(
+                    train_npz=train_npz,
+                    pgn_val_npz=pgn_npz,
+                    zurichess_val_npz=zuri_npz,
+                    use_pgn_val=True,
+                    use_zurichess_val=True,
+                    eval_sample=35,
+                    holdout_sample=40,
+                    target_engine="classical",
+                    target_constants_path=const_copy,
+                    runs_dir=tmp_dir / "runs_kstar",
+                    use_sf_labels=True,
+                    sf_lambda=0.30,
+                    sf_labels_path=sf_sidecar,
+                )
+                self.assertIsNotNone(session.dev_idx)
+                self.assertAlmostEqual(session._resolve_k_factor("auto"), session._step_dev_k_star, places=6)
+                self.assertGreater(
+                    abs(session._step_holdout_k_star - session._step_dev_k_star), 0.02
+                )
+
+                # Ensure BaselineReport never emits K=1.000 and tracks per-dataset K*
+                rep = session.baseline_report()
+                self.assertNotIn("mse_k1", rep["holdout"])
+                self.assertNotIn("mse_k1", rep["pgn_val"])
+                self.assertNotIn("mse_k1", rep["zurichess_val"])
+                self.assertAlmostEqual(rep["holdout"]["k_star"], session._step_holdout_k_star, places=6)
+                self.assertAlmostEqual(rep["pgn_val"]["k_star"], session._step_pgn_k_star, places=6)
+                self.assertAlmostEqual(rep["zurichess_val"]["k_star"], session._step_zurichess_k_star, places=6)
+
+                cand_theta = session.step_baseline_theta.copy()
+                cand_theta[init_idx] = base_init + 15
+                rec = session.validate_candidate_theta("block_k", cand_theta)
+                self.assertAlmostEqual(rec["k_factor"], session._step_holdout_k_star, places=6)
+                self.assertAlmostEqual(rec["holdout"]["k_factor"], session._step_holdout_k_star, places=6)
+                self.assertAlmostEqual(rec["pgn_val"]["k_factor"], session._step_pgn_k_star, places=6)
+                self.assertAlmostEqual(rec["zurichess_val"]["k_factor"], session._step_zurichess_k_star, places=6)
+                self.assertIsNone(rec["holdout"]["fitted_k"])
+                self.assertIsNone(rec["pgn_val"]["fitted_k"])
+                self.assertIsNone(rec["zurichess_val"]["fitted_k"])
+
+                cum = session.cumulative_report()
+                self.assertAlmostEqual(cum["holdout"]["k_factor"], session._initial_holdout_k_star, places=6)
+                self.assertAlmostEqual(cum["pgn_val"]["k_factor"], session._initial_pgn_k_star, places=6)
+                self.assertAlmostEqual(cum["zurichess_val"]["k_factor"], session._initial_zurichess_k_star, places=6)
+                self.assertNotIn("K=1.000", buf.getvalue())
+
+                # Direct CLI helper with default k_factor="auto" calibrates K* directly without K=1 pass
+                cli_res = run_paired_validation(
+                    dataset=pgn_npz,
+                    baseline=session.step_baseline_theta,
+                    candidate=cand_theta,
+                    pm=session.pm,
+                    split="all",
+                    sample=0,
+                    verbose=False,
+                )
+                self.assertIsNotNone(cli_res["fitted_k"])
+                self.assertAlmostEqual(cli_res["k_factor"], cli_res["fitted_k"]["k_star"], places=6)
+                self.assertGreater(cli_res["k_factor"], 1.05)
 
 
 if __name__ == "__main__":

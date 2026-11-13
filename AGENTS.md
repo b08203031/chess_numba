@@ -34,6 +34,7 @@
 | [hce-evaluation.md](.agents/rules/hce-evaluation.md) | `evaluation` / `pawns` / `material` / `endgame` / `constants` | HCE↔SF11、殘局尺度 |
 | [nnue-specification.md](.agents/rules/nnue-specification.md) | `chess_engine/nnue/**/*.py` | 拓撲、HalfKA、累加器、整數推理 |
 | [nnue-training.md](.agents/rules/nnue-training.md) | `chess_engine/nnue/ml_eval/**/*.py` | Factorizer 導出、loss、LR、採樣 |
+| [texel-tuner.md](.agents/rules/texel-tuner.md) | `tuner/**/*.{py,ipynb}` | 無 `K=1.000`、混合/純 WDL `K*` 分離、子桶守衛、Notebook 同步與跨平台路徑 |
 
 ### 參考原始碼（倉庫相對路徑）
 

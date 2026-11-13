@@ -1,240 +1,85 @@
-# Python Chess Engine
+# Chess Numba Engine
 
-這是一個使用 Python 和 Numba 開發的高性能西洋棋引擎。它利用位元棋盤（Bitboards）表示法和先進的搜尋演算法，旨在提供快速且強大的分析能力。
+使用 **Python 3.10 + NumPy + Numba `@njit`** 編寫的高效能西洋棋引擎，具備 **Classical HCE（對齊 SF11）** 與 **NNUE（LayerStack，PyTorch 訓練）** 雙評估系統、Alpha-Beta / PVS 搜尋、UCI 協定、螢幕輔助工具與自動化 SPSA / 對戰調參管線。
 
-## 特色
+---
 
-* **位元棋盤 (Bitboards):** 使用 64 位元整數高效表示棋盤狀態，利用位元運算加速棋子移動生成和攻擊計算。
-* **Numba 加速:** 核心搜尋和評估函數使用 `@numba.njit` 進行即時編譯 (JIT)，大幅提升執行速度，接近 C++ 引擎的性能。
-* **先進搜尋演算法:**
-  * 迭代加深搜尋 (Iterative Deepening)
-  * Alpha-Beta 剪枝
-  * 主要變例搜尋 (Principal Variation Search, PVS)
-  * 靜態搜尋 (Quiescence Search)
-  * 置換表 (Transposition Table)
-* **剪枝與歸約技術:**
-  * 空著剪枝 (Null Move Pruning)
-  * 晚期移動歸約 (Late Move Reductions, LMR)
-  * 殺手步啟發 (Killer Heuristic)
-  * 歷史啟發 (History Heuristic)
-  * 徒勞剪枝 (Futility Pruning)
-  * 反向徒勞剪枝 (Reverse Futility Pruning)
-  * Razoring
-  * 概率剪枝 (ProbCut)
-  * 晚期移動剪枝 (Late Move Pruning, LMP)
-  * Delta 剪枝 (Delta Pruning)
-  * 靜態交換評估 (Static Exchange Evaluation, SEE)
-  * 內部迭代加深 (Internal Iterative Deepening, IID)
-  * 奇異延展 (Singular Extensions)
-* **評估函數:**
-  * 漸進式評估 (Tapered Evaluation)
-  * 材質平衡
-  * 棋子位置分數表 (Piece-Square Tables, PST)
-  * 兵型結構 (通路兵、孤兵、重疊兵)
-  * 國王安全 (兵盾、攻擊者、兵風暴、材質縮放)
-  * 棋子機動性
-  * 棋子協同性
-* **UCI 協議:** 支援通用西洋棋介面 (UCI) 協議，可與任何標準西洋棋 GUI (如 Arena, CuteChess) 配合使用。
-* **Polyglot 開局書:** 支援讀取 `.bin` 格式的 Polyglot 開局書。
+## 快速開始
 
-## 環境需求
-
-* Python 3.10
-* NumPy
-* Numba
-* （NNUE 訓練另需 PyTorch）
-
-## 安裝
-
-1. 克隆此倉庫：
-
-    ```bash
-    git clone <repository_url>
-    cd <repository_directory>
-    ```
-
-2. 安裝依賴套件：
-
-    ```bash
-    pip install numpy numba
-    ```
-
-## 使用方法
-
-### 作為 UCI 引擎運行
-
-您可以運行對應的進入點腳本來啟動引擎（會等待標準 UCI 命令輸入）：
-
-* **經典評估版本 (Classical Engine)**:
-
-    ```bash
-    python main.py
-    ```
-
-* **NNUE 評估版本 (NNUE Engine)**:
-
-    ```bash
-    python main_nn.py
-    ```
-
-在西洋棋 GUI（如 Arena、CuteChess）中，將引擎可執行命令分別設置為 `python main.py` 或 `python main_nn.py`。
-
-### 運行螢幕輔助工具 (GUI Assistant)
-
-您可以使用螢幕輔助程式在網頁棋盤上自動偵測並標示推薦走步：
-
-* **經典評估版本**:
-
-    ```bash
-    python assistant.py
-    ```
-
-* **NNUE 評估版本**:
-
-    ```bash
-    python assistant_nn.py
-    ```
-
-### 運行基準測試與 Puzzle 測試
-
-要測試引擎的性能與編譯正確性：
-
+### 環境需求
 ```bash
-# 經典/NNUE 引擎搜尋正確性測試
+pip install numpy numba      # NNUE 訓練另需 PyTorch
+```
+
+### 啟動引擎與輔助工具
+| 用途 | Classical HCE | Classical Old（對戰基準） | NNUE |
+| :--- | :--- | :--- | :--- |
+| **UCI 引擎** | `python main.py` | `python main_old.py` | `python main_nn.py` |
+| **螢幕輔助 GUI** | `python assistant.py` | — | `python assistant_nn.py` |
+
+### 常用測試與檢查
+```bash
 python -m tests.test_search
-
-# NNUE 引擎 JIT、量化與數據管線安全性單元測試
-python -m unittest tests.test_nnue_validation
-
-# 經典評估版本戰術謎題測試
-python -m tests.test_puzzle
-
-# NNUE 評估版本戰術謎題測試
-python -m tests.test_puzzle_nn
-
-# 經典/NNUE 引擎效能基準測試
-python -m tests.benchmark
-python -m tests.benchmark_nn_real
-```
-
-### 運行 Perft 測試
-
-Perft (Performance Test) 用於驗證移動生成器的正確性：
-
-```bash
+python -m unittest tests.test_texel_parameterization tests.test_endgame_conformance tests.test_nnue_validation
 python -m tests.perft perft --depth 5
+python -m tests.test_puzzle      # NNUE 版：python -m tests.test_puzzle_nn
+python -m tests.benchmark        # NNUE 版：python -m tests.benchmark_nn_real
 ```
 
-您還可以指定 FEN 字串：
+---
 
-```bash
-python -m tests.perft perft --fen "r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1" --depth 4
-```
+## 倉庫結構總覽
 
-使用 `divide` 命令查看每個首步的節點數詳細信息：
+| 目錄 | 職責說明 |
+| :--- | :--- |
+| `chess_engine/` | 核心引擎套件：`classical/`（現行 HCE + 搜尋）、`classical_old/`（凍結對戰快照，僅用 `tools/sync_classical_old.py` 同步 `.py`）、`nnue/`（HalfKAv2_hm + `ml_eval/` 訓練/量化/推理）、`polyglot.bin`。模組詳情見 [chess_engine/README.md](chess_engine/README.md) |
+| `tuner/` | Classical HCE 靜態 Texel / SPSA 調參工作台（`texel_tuner_runner.ipynb`、`data_pipeline/`、`nnue_pipeline/`） |
+| `tune_search/` | 搜尋常數 SPSA 調優器（44 軸 runtime `SearchContext.tune[]` 單次 JIT + UCI compile-time 路徑） |
+| `tune_eval_match/` | 對局式 HCE 評估權重 SPSA（單進程共享 JIT、`SearchContext.eval_weights`） |
+| `tools/` | `tournament.py`（New vs Old 成對換先 + SPRT）、`match_runner.py`（對外部 Stockfish）、`match_core.py`、螢幕棋盤辨識 CNN |
+| `tournament_analysis/` | 對戰棋譜 `tournament_results.pgn`、局級/著法級統計分析腳本與實驗日誌 |
+| `tests/`、`data/`、`external/` | 單元/謎題/效能測試、開局庫與 CNN 模型、外部 Stockfish 執行檔 |
 
-```bash
-python -m tests.perft divide --depth 4
-```
-
-## 專案結構
-
-本專案結構清晰，模組分工明確：
-
-* `main.py`: 經典評估引擎的 UCI 進入點。
-* `main_nn.py`: NNUE 評估引擎的 UCI 進入點。
-* `assistant.py`: 經典評估引擎螢幕輔助 GUI 進入點。
-* `assistant_nn.py`: NNUE 評估引擎螢幕輔助 GUI 進入點。
-* `main_old.py`: 對戰用舊版 Classical 進入點（`chess_engine.classical_old`）。
-* `chess_engine/`: 引擎核心套件。
-  * `polyglot.bin`: 共享的二進位開局庫檔案。
-  * `classical/`: 現行經典評估（HCE）與搜尋；各模組自洽。
-    * `constants.py`, `evaluation.py`, `pawns.py`, `material.py`, `endgame.py`, `search.py`, `move_generator.py` 等。
-  * `classical_old/`: 對戰基準快照；純參數 A/B 以 `tools/sync_classical_old.py --sync-code` 同步程式與搜尋常數、保留舊評估常數（**不維護 md**）。
-  * `nnue/`: NNUE 評估版本，包含推理邏輯。
-    * `constants.py`, `evaluation.py`, `search.py` 等。
-    * `ml_eval/`: 機器學習訓練、量化及推理模組。
-      * `train.py`: 訓練 `LayerStackNNUE` 模型。
-      * `quantize_weights.py`: 將 PyTorch 權重導出為量化 `.npy` 格式。
-      * `inference.py`: 基於 Numba JIT 的前向推理引擎。
-      * `weights/`: 儲存 `*.pth` 與 `*.npy` 權重檔案。
-* `tests/`: 單元測試與效能基準測試目錄。
-  * `test_nnue_validation.py`: NNUE JIT、量化與數據管線安全性單元測試。
-  * `test_vision_and_assistant.py`: 通用螢幕棋盤定位、ONNX 棋子分類器與 `assistant.py` 狀態機回歸測試。
-  * `test_puzzle.py` & `test_puzzle_nn.py`: 戰術謎題測試。
-  * `test_search.py`: 搜尋邏輯測試。
-  * `perft.py`: 移動生成器性能與正確性測試。
-  * `benchmark*.py`: 引擎效能基準測試。
-* `tools/`: 工具與對決管理目錄。
-  * `screen_recognizer.py`: 螢幕棋盤影像識別模組（支援無色彩限制 8×8 鞍點格網定位與通用 ONNX 棋子分類器）。
-  * `train_piece_cnn.py`: 跨網站通用 13 類棋子影像分類器（PyTorch 訓練與零額外依賴 ONNX 匯出腳本）。
-  * `match_core.py`: 共用 in-process context 池、UCI adapter、裁判、PGN 與 SPRT。
-  * `tournament.py` & `match_runner.py`: 單進程共享 JIT 的引擎對決，以及對 Stockfish 的混合式 match runner。
-  * `filter_book.py`: 開局庫過濾工具。
-* `data/`: 資料儲存目錄。
-  * `models/piece_classifier.onnx`: 通用 13 類棋格辨識輕量 CNN 模型（供 `cv2.dnn` 批次推理）。
-  * `templates/`: 棋子識別影像範本（Default 與 `custom/` 自訂學習範本）。
-  * `openings.epd`: 聯賽開局庫。
-* `external/`: 外部工具。
-  * `stockfish/`: 包含官方 Stockfish 執行檔，用於聯賽對手或資料標記。
-* `tuner/`: Classical HCE 評估參數 SPSA（`data_pipeline/`、`data/` 大檔）、以及 `nnue_pipeline/` 訓練資料。
-* `tune_search/`: 搜尋參數 SPSA 調優器（單一 registry、runtime/compile-time 分層、runtime 單次 JIT fixed-node match、compile-time UCI match）。
-* `tune_eval_match/`: **對局式 HCE 權重 SPSA**（單進程 / 單次 JIT，`SearchContext.eval_weights` 即時改權）。
+---
 
 ## 📂 專案文件導覽 (Documentation Map)
 
-技術設計、演算法說明與操作指南放在對應子目錄。**本節為專案 Markdown 的唯一主索引**；請勿在倉庫根目錄堆積 session 筆記或一次性分析報告（歷史稿可放 `archive/`）。
+**本節為全專案技術 Markdown 的唯一主索引**（不於倉庫根目錄堆積一次性筆記；歷史檔案歸入 `archive/`）。
 
-### 1. 引擎整體與神經網路 (NNUE)
+### 1. 核心手冊與 AI 規範（日常優先閱讀）
+* **[AI 助手入口 (`AGENTS.md`)](AGENTS.md)** 與 **`.agents/rules/`**（工作流、Numba JIT、棋盤完整性、搜尋約束、HCE、NNUE、Texel 調參規範）
+* **[引擎核心架構說明書](chess_engine/README.md)**：UCI、分層架構與 `classical` / `classical_old` / `nnue` 模組清單
+* **[Classical HCE 調參手冊](tuner/README.md)**：20M EPD / `val_pgn` / `SF19` 混合標籤、per-dataset `K*` 分離、SPSA `scales^2` 與子桶守衛
+* **[搜尋參數 SPSA 手冊](tune_search/README.md)**：96/44 軸清冊、Fishtest `inprocess` SPSA、L0→L2 SPRT 流程與非對稱峭壁經驗
+* **[對局式 HCE 權重 SPSA](tune_eval_match/README.md)**：單進程共享 JIT 的 `eval_weights` 對局 SPSA
+* **[引擎對戰指南](tools/TOURNAMENT_TUTORIAL.md)**、**[對戰分析框架](tournament_analysis/README.md)**、**[SPRT 統計原理](tournament_analysis/sprt_tutorial.md)**
+* **[NNUE 架構設計說明](chess_engine/nnue/ARCHITECTURE.md)** 與 **[NNUE 訓練及量化說明書](chess_engine/nnue/ml_eval/ml_eval_documentation_and_architecture.md)**
 
-* **[引擎核心架構說明書](chess_engine/README.md)**：UCI、搜尋、評估、移動生成、棋盤表示與 `classical` / `classical_old` / `nnue` 分工。
-* **[NNUE 架構設計說明](chess_engine/nnue/ARCHITECTURE.md)**：HalfKAv2_hm、8 分桶 LayerStack、CReLU、結構重參數化與整數推理。
-* **[NNUE 訓練與量化流程](chess_engine/nnue/ml_eval/ml_eval_documentation_and_architecture.md)**：資料管線、訓練、量化、Numba 推理操作說明。
-* **[NNUE 搜尋分析](chess_engine/nnue/SEARCH_ANALYSIS.md)**：PVS、剪枝與 `SearchContext` UCI 開關。
+### 2. 現行系統分析、審計與專題報告
+* **[HCE 與 SF11 對齊審核](chess_engine/classical/HCE_SF11_GAP_AUDIT.md)**（HCE 對齊主文件）與 **[殘局 vs Stockfish 驗證](chess_engine/classical/ENDGAME_SF_VERIFICATION.md)**
+* **[2026-10-31 經典評估審計與修復計畫](chess_engine/classical/EVAL_AUDIT_AND_FIX_PLAN_20261031.md)**：`evaluation.py` Bug 修復與多輪 `USE_PGN_VAL` 調參／400k 對戰驗收
+* **[古典搜尋算法分析](chess_engine/classical/SEARCH_ANALYSIS.md)** 與 **[NNUE 搜尋分析](chess_engine/nnue/SEARCH_ANALYSIS.md)**：PVS、QS、剪枝及 Phase 18–29 調參結論
+* **[Numba JIT 編譯與快取報告](chess_engine/classical/JIT_COMPILE_CACHE_REPORT.md)**：1 MB 表上限、packed rook、StructRef 與冷/暖快取量測
+* **[搜尋 ↔ 評估介面](chess_engine/classical/SEARCH_EVAL_INTERFACE.md)**（KNOWN_WIN 護欄）、**[SEE 專題](chess_engine/classical/SEE_ANALYSIS.md)**、**[歷史啟發](chess_engine/classical/HISTORY_HEURISTICS_CN.md)**
+* **[Classical 搜尋單項實驗日誌](tournament_analysis/SEARCH_EXP_LOG.md)**（E1+ 連續 A/B 實驗流水紀錄）
 
-### 2. 經典 (Classical) 評估與搜尋
+### 3. 已結案階段計畫與歷史戰役報告（歸檔候選）
+* **[搜尋演算法深度審計與 SF19 提案 (2026-10-19)](chess_engine/classical/SEARCH_AUDIT_AND_SF19_PROPOSALS_20261019.md)**、**[搜尋優化診斷 (2026-08-04)](chess_engine/classical/SEARCH_OPTIMIZATION_DIAGNOSTIC_20260804.md)**
+* **[歷史啟發重構工程計畫](chess_engine/classical/HISTORY_REFORM_PLAN.md)**、**[走步排序與歷史剪枝解耦計畫](chess_engine/classical/QUIET_ORDERING_DECOUPLING_PLAN.md)**
+* **[Phase 7 歷史動力鏈與 LMR 對齊計畫](chess_engine/classical/PHASE7_HISTORY_LMR_ALIGNMENT_PLAN.md)**、**[Phase 8 空步剪枝對齊計畫](chess_engine/classical/PHASE8_NMP_SF19_ALIGNMENT_PLAN.md)**
+* **[2026-07-15/16 搜尋戰役報告](tournament_analysis/REPORT_2026-07-15_16_search_campaign.md)**、**[2026-10-14 Phase 8 NMP 戰役報告](tournament_analysis/REPORT_2026-10-14_nmp_alignment_campaign.md)**、**[NMP 實驗計畫](tournament_analysis/NMP_EXPERIMENT_PLAN.md)**、**[搜尋候選提案 E47–E50](tournament_analysis/SEARCH_PROPOSALS_E47_E50.md)**
 
-* **[搜尋算法分析](chess_engine/classical/SEARCH_ANALYSIS.md)**：PVS、NMP / LMR / Futility / Singular 等剪枝與 move ordering。
-* **[2026-10-19 搜尋演算法深度審計與 SF19 對齊報告](chess_engine/classical/SEARCH_AUDIT_AND_SF19_PROPOSALS_20261019.md)**：全檔邏輯 Bug 診斷（Fail-Low TT 污染、Non-LMR cut_node 錯誤、ContCorr 重複等）、SPSA 現況與 SF19 對齊優化路線圖。
-* **[2026-08-04 搜尋優化診斷與交接](chess_engine/classical/SEARCH_OPTIMIZATION_DIAGNOSTIC_20260804.md)**：500 戰術 + 500 開局／安靜盤面的 n30k 複驗；P0–P4 diagnostics/rollback、P5 暖 history attribution，以及 P6 history-prune cont1 負尾保護。
-* **[Numba JIT 編譯與快取實驗報告](chess_engine/classical/JIT_COMPILE_CACHE_REPORT.md)**（**JIT / disk cache 主文件**）：1 MB 表上限、packed rook、StructRef `SearchContext`、特化爆炸、cold/warm 量測與 checklist；後續 JIT 工作請參考並擴寫。
-* **[2026-07-15/16 搜尋戰役報告](tournament_analysis/REPORT_2026-07-15_16_search_campaign.md)**：座標下降 R1–R3、結構 A/B、E1/E2、雙對戰 scale 100/85 結論與接納決策。
-* **[2026-10-14 Phase 8 NMP 戰役報告](tournament_analysis/REPORT_2026-10-14_nmp_alignment_campaign.md)**：NMP SF19 極簡架構、Numba 結構化陣列記憶體別名修復、門檻 30~50 cp 幾何槓桿調優、600 局實戰驗收 (+12.17 Elo，救援 24 局落敗)。
-* **[Classical 搜尋單項實驗日誌](tournament_analysis/SEARCH_EXP_LOG.md)**：E1+ 連續 A/B（200@100k）、留下/回滾門檻、early-trash、累積基線；**E14 起診斷隨對戰**（可選 `tools/hist_diag_bench.py` 事後彙總）。
-* **[NMP 實驗計畫](tournament_analysis/NMP_EXPERIMENT_PLAN.md)**：~15% 節點貢獻診斷、S1 失敗複盤、漏斗 KPI 與 Phase 0–3 中間態實驗閘道。
-* **[搜尋 ↔ 評估介面](chess_engine/classical/SEARCH_EVAL_INTERFACE.md)**：KNOWN_WIN 護欄（**PR-A+B+C 已定稿**；122 局 50%）、NMP/RFP/ProbCut/Razor 與 SF11/SF18 對照。
-* **[SEE 專題](chess_engine/classical/SEE_ANALYSIS.md)**：Swap 演算法、射線過濾、動態解牽制、過路兵、升變/欠升變、Step 14 前置合法性預檢（E84 600 局採納）與子力價值對齊 MG_MATERIAL_VALUES（E85 1000 局 LTC 400k +7.99 Elo 驗證與 5 軸 SPSA 微調）。
-* **[HCE 與 SF11 對齊審核](chess_engine/classical/HCE_SF11_GAP_AUDIT.md)**（**評估對齊主文件**）：階段 A/B/B3/B4/B5/P2、對戰結論；評估 P3 回滾；搜尋護欄交叉引用。
-* **[2026-10-31 經典評估函數深度審計與修復計畫書](chess_engine/classical/EVAL_AUDIT_AND_FIX_PLAN_20261031.md)**：`evaluation.py` 全檔 8 項邏輯／幾何／對齊 Bug、通路兵折半順序顛倒、熱路徑優化，以及 Phase 1–8 修復、乾淨 EPD 三輪 `USE_PGN_VAL` Texel 調參與實戰對決驗收（R2 vs Holdout-Only +8.42 Elo；R2 vs R1 +10.12 Elo；R3 vs R2 +6.89 Elo @ 3,630 局暨 Block 7b 消融實證）。
-* **[殘局 vs Stockfish 驗證](chess_engine/classical/ENDGAME_SF_VERIFICATION.md)**：專用殘局說明；日常測 `tests/test_endgame_conformance.py`，可選 oracle `tools/verify_endgame_vs_sf.py`。
-* **[歷史啟發](chess_engine/classical/HISTORY_HEURISTICS_CN.md)**：主 / 蝴蝶 / 吃子 / 延續 / 糾錯歷史與重力公式；**現用基線 Phase 1a**。
-* **[歷史啟發重構工程計畫](chess_engine/classical/HISTORY_REFORM_PLAN.md)**：五階段閘門紀錄；**1a 凍結、P2 已回退、P3–5 暫緩**；下一段方向見 §11（timeman / 剪枝尺度 / HCE 單項）。
-* **[走步排序與歷史剪枝解耦計畫書](chess_engine/classical/QUIET_ORDERING_DECOUPLING_PLAN.md)**：MovePicker 走步排序評分與 Step 14b 歷史剪枝架構解耦、0-Node Tree Delta 驗證與 SF19 平滑權重路線圖。
-* **[搜尋優化候選提案 (E47–E50)](tournament_analysis/SEARCH_PROPOSALS_E47_E50.md)**：ProbCut 深度動態自適應、LMR ALL-Node / CutNode 減深對齊、廢除將軍延伸方案規劃。
-* **[Phase 7 歷史動力鏈與 SF19 對齊計畫書](chess_engine/classical/PHASE7_HISTORY_LMR_ALIGNMENT_PLAN.md)**：Phase 6 實戰 400 局 @ 300k 大勝（+19.13 Elo）複盤、21 個歷史強耦合參數拓撲、42 槽位免編譯架構、以及 Phase 7 雲端 L1 SPSA 4,800 局 + L2 1,000 局 @ 300k 驗收確證 Plan A 最優平原（+0.7 Elo，凍結維持生產參數）。
-* **[Phase 8 空步剪枝體系 SF19 對齊與調參計畫書](chess_engine/classical/PHASE8_NMP_SF19_ALIGNMENT_PLAN.md)**：徹底廢除 NMP 離散模式選擇器、全面對齊 SF19 Step 10 極簡架構，以及方案甲（分階段解耦：4 軸連續 SPSA + 3 軸離散小整數 LTC 格點 A/B 驗收）實施藍圖。
+### 4. 隔離區（不進日常維護）
+* `archive/`、`tuner/archive/`：歷史分析稿、2026-07 舊戰役 PGN 與早期 tuned dumps。
+* `stockfish_repo/`（SF 19）、`stockfish_11/`（SF 11）、`external/`：上游參考原始碼與執行檔。
 
-### 3. 對戰、聯賽與調參
+---
 
+## 開發規範摘要
 
-* **[引擎對戰指南](tools/TOURNAMENT_TUTORIAL.md)**：`tools/tournament.py`、SPRT、併發與 JIT 暖機。
-* **[對戰框架說明](tournament_analysis/README.md)**：本目錄角色、成對賽果九宮格、局級/著法級統計圖表與分析腳本。
-* **[SPRT 統計原理推導](tournament_analysis/sprt_tutorial.md)**：瓦爾德序貫機率比檢定（SPRT）數學推導與 LLR 邊界解析。
-* **[Classical HCE 調參手冊](tuner/README.md)**（靜態資料集 SPSA、資料標籤、與 classical 同步）、**[搜尋參數 SPSA](tune_search/README.md)**、**[對局式 HCE 權重 SPSA](tune_eval_match/README.md)**（單進程 / 單次 JIT；king danger / tempo 等 runtime 權重與調參路線圖）。
-* **[AI 助手入口](AGENTS.md)** 與 **`.agents/rules/`**（工作流、Numba、棋盤完整性、搜尋約束、NNUE 規範）。
-
-### 4. 隔離區（不進日常索引）
-
-* `archive/`、`tuner/archive/`（含 `tuned_dumps/` 歷史 SPSA 輸出）、`archive/scratch/`：舊腳本與歷史產物，僅考古用。
-* `stockfish_repo/`、`stockfish_11/`、`external/`：上游原始碼與工具，非本引擎文件。
-
-## 開發者注意事項
-
-* **Numba JIT:** 計算密集型函數使用 `@numba.njit`；修改時須保持 Numba 相容型別（NumPy 陣列與基本型別）。首次 / 清 cache 後編譯可能需數分鐘；disk cache、1 MB 全域表上限、StructRef 與遞迴 cache 策略見 **[JIT 編譯與快取實驗報告](chess_engine/classical/JIT_COMPILE_CACHE_REPORT.md)**。
-* **Make-Unmake 架構:** 搜尋樹以原地 make/unmake 遍歷，須維護佔用位元棋盤與狀態完整性。
-* **Zobrist 哈希:** 每次移動與撤銷都必須正確增量更新，置換表才可靠。
-* **文件維護:** 重大功能或重構後更新對應技術文件，並同步本節導覽索引。
+* **Numba JIT**：熱路徑保持 `@numba.njit` 相容（固定全域表 `<= 1 MB`、`SearchContext` 使用 `StructRef`）；見 [numba-jit.md](.agents/rules/numba-jit.md)。
+* **棋盤與搜尋不變量**：維護 `piece_bbs` / `occupancy_bbs` / Zobrist 增量同步與根節點剪枝邊界；見 [board-integrity.md](.agents/rules/board-integrity.md)、[search-constraints.md](.agents/rules/search-constraints.md)。
+* **文件與基準同步**：任何新增/刪除/更名技術 `.md` 須同步更新本頁導覽；未經對戰驗證與明確同意勿同步 `classical_old/`。
 
 ## 授權
-
 [MIT License](LICENSE)

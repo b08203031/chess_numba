@@ -1,11 +1,11 @@
 """Paired MSE validation for a generated HCE tuning candidate.
 
 Supports leak-free validation on:
-1. The strictly unseen 2M ``holdout`` split of ``dataset_mix03_20m_s2.npz``
+1. The strictly unseen 2M ``holdout`` split of ``dataset_epd_wdl_20m.npz``
    (via ``split_dataset_indices``; never seen by SPSA gradients or early stopping).
 2. An independent external PGN validation set (``--pgn-val tuner/data/hce/val_pgn.npz``)
    with real castling rights, en-passant squares, and 50-move clocks, evaluated
-   at both ``K=1.0`` and baseline-calibrated ``K*``.
+   at each dataset's baseline-calibrated ``K*`` across all buckets.
 """
 from __future__ import annotations
 
@@ -194,7 +194,7 @@ def run_paired_validation(
     holdout_sample: int = 2_000_000,
     exclude_fixed_val: int = 1_000_000,
     chunk_size: int = 500_000,
-    k_factor: float = 1.0,
+    k_factor: float | str | None = "auto",
     fit_k: bool = False,
     seed: int = 2,
     cached_base_scores: np.ndarray | None = None,
@@ -229,9 +229,6 @@ def run_paired_validation(
         )
 
     n_sel = len(indices)
-    if verbose:
-        print(f"[{label}] {split_desc}: n={n_sel:,} (K={k_factor:.3f})")
-
     has_castling = bool(np.any(data["game_states"][indices, 1] != 0)) if n_sel else False
     dummy_gs = data["game_states"][indices[:1]] if has_castling else None
     bucket_names = [
@@ -245,15 +242,42 @@ def run_paired_validation(
         for name in bucket_names
     }
 
+    has_valid_cache = cached_base_scores is not None and len(cached_base_scores) == n_sel
     all_base_scores = (
-        cached_base_scores
-        if (cached_base_scores is not None and len(cached_base_scores) == n_sel)
-        else np.empty(n_sel, dtype=np.int32)
+        cached_base_scores if has_valid_cache else np.empty(n_sel, dtype=np.int32)
     )
-    need_base_eval = cached_base_scores is None or len(cached_base_scores) != n_sel
-    all_cand_scores = np.empty(n_sel, dtype=np.int32) if fit_k else None
+    need_base_eval = not has_valid_cache
 
     step = max(int(chunk_size), 1)
+    auto_k = k_factor is None or (
+        isinstance(k_factor, str) and k_factor.strip().lower() == "auto"
+    )
+    if auto_k:
+        if n_sel > 0:
+            if need_base_eval:
+                for offset in range(0, n_sel, step):
+                    end_off = min(offset + step, n_sel)
+                    idx = indices[offset:end_off]
+                    all_base_scores[offset:end_off] = compute_white_scores(
+                        data["piece_bbs"][idx],
+                        data["occupancy_bbs"][idx],
+                        data["game_states"][idx],
+                        baseline,
+                    )
+                need_base_eval = False
+            eff_k, _ = fit_best_k(all_base_scores, data["results"][indices])
+        else:
+            eff_k = 1.0
+    else:
+        eff_k = float(k_factor)
+
+    if verbose:
+        print(f"[{label}] {split_desc}: n={n_sel:,} (K={eff_k:.3f})")
+
+    all_cand_scores = (
+        np.empty(n_sel, dtype=np.int32) if (fit_k and not auto_k) else None
+    )
+
     for offset in range(0, n_sel, step):
         end_off = min(offset + step, n_sel)
         idx = indices[offset:end_off]
@@ -272,8 +296,8 @@ def run_paired_validation(
         if all_cand_scores is not None:
             all_cand_scores[offset:end_off] = c_scores
 
-        base_err = squared_errors_from_scores(b_scores, results, k_factor)
-        cand_err = squared_errors_from_scores(c_scores, results, k_factor)
+        base_err = squared_errors_from_scores(b_scores, results, eff_k)
+        cand_err = squared_errors_from_scores(c_scores, results, eff_k)
         diff = cand_err - base_err
 
         chunk_gs = states if has_castling else None
@@ -294,7 +318,7 @@ def run_paired_validation(
 
     bucket_reports: dict[str, dict] = {}
     if verbose:
-        print(f"Paired candidate - baseline @ K={k_factor:.3f} (negative is better):")
+        print(f"Paired candidate - baseline @ K={eff_k:.3f} (negative is better):")
     for b_name in bucket_names:
         stat = stats[b_name]
         count = stat["n"]
@@ -330,7 +354,10 @@ def run_paired_validation(
             )
 
     fitted_k_report = None
-    if fit_k and n_sel > 0 and all_cand_scores is not None:
+    if auto_k:
+        fitted_k_report = dict(bucket_reports["all"])
+        fitted_k_report["k_star"] = eff_k
+    elif fit_k and n_sel > 0 and all_cand_scores is not None:
         sel_results = data["results"][indices]
         best_k, _ = fit_best_k(all_base_scores, sel_results)
         b_err_k = squared_errors_from_scores(all_base_scores, sel_results, best_k)
@@ -350,7 +377,7 @@ def run_paired_validation(
         "label": label,
         "split": split,
         "n": n_sel,
-        "k_factor": k_factor,
+        "k_factor": eff_k,
         "buckets": bucket_reports,
         "fitted_k": fitted_k_report,
         "base_scores": all_base_scores,
@@ -411,14 +438,20 @@ def main() -> int:
     parser.add_argument("--holdout-sample", type=int, default=2_000_000)
     parser.add_argument("--exclude-fixed-val", type=int, default=1_000_000)
     parser.add_argument("--chunk-size", type=int, default=500_000)
-    parser.add_argument("--k-factor", type=float, default=1.0)
+    parser.add_argument(
+        "--k-factor",
+        default="auto",
+        help="Sigmoid K scale ('auto' calibrates baseline K* per dataset, or pass numeric K)",
+    )
     parser.add_argument(
         "--fit-k",
         action="store_true",
-        help="Also report paired delta at baseline-fitted optimal K*",
+        help="When a fixed numeric --k-factor is given, also print calibrated K* summary",
     )
     parser.add_argument("--seed", type=int, default=2)
     args = parser.parse_args()
+    raw_k = str(args.k_factor).strip().lower()
+    k_arg: float | str = "auto" if raw_k == "auto" else float(args.k_factor)
 
     pm = ParameterManager()
     baseline = pm.get_initial_theta()
@@ -458,7 +491,7 @@ def main() -> int:
         holdout_sample=args.holdout_sample,
         exclude_fixed_val=args.exclude_fixed_val,
         chunk_size=args.chunk_size,
-        k_factor=args.k_factor,
+        k_factor=k_arg,
         fit_k=args.fit_k,
         seed=args.seed,
         verbose=True,
@@ -475,8 +508,8 @@ def main() -> int:
             split="all",
             sample=0,
             chunk_size=args.chunk_size,
-            k_factor=args.k_factor,
-            fit_k=True,
+            k_factor=k_arg,
+            fit_k=(k_arg != "auto"),
             seed=args.seed,
             verbose=True,
         )

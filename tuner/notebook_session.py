@@ -448,8 +448,13 @@ class TexelTuningSession:
         self._step_zurichess_scores: np.ndarray | None = None
         self._step_dev_k_star: float = 1.0
         self._step_holdout_k_star: float = 1.0
+        self._step_pgn_k_star: float = 1.0
+        self._step_zurichess_k_star: float = 1.0
         self._refresh_baseline_score_caches()
         self._initial_dev_k_star = self._step_dev_k_star
+        self._initial_holdout_k_star = self._step_holdout_k_star
+        self._initial_pgn_k_star = self._step_pgn_k_star
+        self._initial_zurichess_k_star = self._step_zurichess_k_star
         self._initial_holdout_scores = (
             self._step_holdout_scores.copy()
             if self._step_holdout_scores is not None
@@ -777,6 +782,9 @@ class TexelTuningSession:
         self.initial_theta0 = self.step_baseline_theta.copy()
         self._refresh_baseline_score_caches()
         self._initial_dev_k_star = self._step_dev_k_star
+        self._initial_holdout_k_star = self._step_holdout_k_star
+        self._initial_pgn_k_star = self._step_pgn_k_star
+        self._initial_zurichess_k_star = self._step_zurichess_k_star
         self._initial_holdout_scores = (
             self._step_holdout_scores.copy()
             if self._step_holdout_scores is not None
@@ -801,7 +809,8 @@ class TexelTuningSession:
             f"Reconfigured session in {time.time() - t0:.1f}s (reused preloaded {self.train_path.name}):\n"
             f"  target_engine = {self.target_engine!r} -> {_display_path(self.target_constants_path)}\n"
             f"  use_pgn_val   = {self.use_pgn_val} | use_zurichess_val = {self.use_zurichess_val}\n"
-            f"  train_labels  = {lbl_desc} | calibrated K* = {self._step_dev_k_star:.3f}\n"
+            f"  train_labels  = {lbl_desc} | dev_K*={self._step_dev_k_star:.3f} | "
+            f"holdout_K*={self._step_holdout_k_star:.3f}\n"
             f"  runs_dir      = {_display_path(self.runs_dir)}"
         )
 
@@ -881,15 +890,27 @@ class TexelTuningSession:
             self._step_pgn_scores = self._eval_scores_chunked(
                 self.pgn_data, self.step_baseline_theta, None
             )
+            self._step_pgn_k_star, _ = (
+                fit_best_k(self._step_pgn_scores, self.pgn_data["results"])
+                if len(self._step_pgn_scores)
+                else (1.0, 0.0)
+            )
         else:
             self._step_pgn_scores = None
+            self._step_pgn_k_star = 1.0
 
         if getattr(self, "use_zurichess_val", False) and getattr(self, "zurichess_data", None) is not None:
             self._step_zurichess_scores = self._eval_scores_chunked(
                 self.zurichess_data, self.step_baseline_theta, None
             )
+            self._step_zurichess_k_star, _ = (
+                fit_best_k(self._step_zurichess_scores, self.zurichess_data["results"])
+                if len(self._step_zurichess_scores)
+                else (1.0, 0.0)
+            )
         else:
             self._step_zurichess_scores = None
+            self._step_zurichess_k_star = 1.0
 
     def _resolve_k_factor(self, k_factor: float | str | None) -> float:
         if k_factor is None or (isinstance(k_factor, str) and k_factor.strip().lower() == "auto"):
@@ -918,11 +939,6 @@ class TexelTuningSession:
             if use_sf
             else "pure_WDL"
         )
-        print(
-            f"=== Current Step Baseline Health Report "
-            f"[target={target_engine} -> {_display_path(target_path)} | "
-            f"use_pgn_val={use_pgn} | train={lbl_str} | auto_K*={report['auto_k_factor']:.3f}] ==="
-        )
         raw_wdl = getattr(self, "_raw_results_wdl", self.train_data["results"])
         h_idx = (
             self.holdout_idx
@@ -930,24 +946,29 @@ class TexelTuningSession:
             else np.arange(len(raw_wdl), dtype=np.int64)
         )
         h_res = raw_wdl[h_idx]
-        h_mse_k1 = float(np.mean(squared_errors_from_scores(self._step_holdout_scores, h_res, 1.0)))
         h_k_star, h_mse_kstar = fit_best_k(self._step_holdout_scores, h_res)
+        self._step_holdout_k_star = h_k_star
+        report["holdout_k_factor"] = h_k_star
+        print(
+            f"=== Current Step Baseline Health Report "
+            f"[target={target_engine} -> {_display_path(target_path)} | "
+            f"use_pgn_val={use_pgn} | train={lbl_str} | "
+            f"dev_K*={report['auto_k_factor']:.3f} | hold_K*={h_k_star:.3f}] ==="
+        )
         print(
             f"  [1] {self.train_path.name} unseen holdout [pure WDL] (n={len(h_idx):,}):\n"
-            f"      MSE @ K=1.000 : {h_mse_k1:.7f}\n"
             f"      MSE @ K*={h_k_star:.3f}: {h_mse_kstar:.7f}"
         )
         report["holdout"] = {
             "n": int(len(h_idx)),
-            "mse_k1": h_mse_k1,
             "k_star": h_k_star,
             "mse_k_star": h_mse_kstar,
         }
 
         if use_pgn and self.pgn_data is not None and self._step_pgn_scores is not None:
             p_res = self.pgn_data["results"]
-            p_mse_k1 = float(np.mean(squared_errors_from_scores(self._step_pgn_scores, p_res, 1.0)))
             p_k_star, p_mse_kstar = fit_best_k(self._step_pgn_scores, p_res)
+            self._step_pgn_k_star = p_k_star
             castle_mask = self.pgn_data["game_states"][:, 1] != 0
             p_castle_mse = (
                 float(
@@ -962,7 +983,6 @@ class TexelTuningSession:
             )
             print(
                 f"  [2] {self.pgn_val_path.name} independent PGN val (n={len(p_res):,}):\n"
-                f"      Static Eval MSE @ K=1.000 : {p_mse_k1:.7f}\n"
                 f"      Static Eval MSE @ K*={p_k_star:.3f}: {p_mse_kstar:.7f}\n"
                 f"      Castling!=0 MSE @ K*      : {p_castle_mse:.7f} (n={int(np.count_nonzero(castle_mask)):,})"
             )
@@ -977,7 +997,6 @@ class TexelTuningSession:
                     )
             report["pgn_val"] = {
                 "n": int(len(p_res)),
-                "mse_k1": p_mse_k1,
                 "k_star": p_k_star,
                 "mse_k_star": p_mse_kstar,
             }
@@ -990,22 +1009,97 @@ class TexelTuningSession:
             and self._step_zurichess_scores is not None
         ):
             z_res = self.zurichess_data["results"]
-            z_mse_k1 = float(
-                np.mean(squared_errors_from_scores(self._step_zurichess_scores, z_res, 1.0))
-            )
             z_k_star, z_mse_kstar = fit_best_k(self._step_zurichess_scores, z_res)
+            self._step_zurichess_k_star = z_k_star
             print(
                 f"  [3] {self.zurichess_val_path.name} Zurichess quiet EPD (n={len(z_res):,}):\n"
-                f"      Static Eval MSE @ K=1.000 : {z_mse_k1:.7f}\n"
                 f"      Static Eval MSE @ K*={z_k_star:.3f}: {z_mse_kstar:.7f}"
             )
             report["zurichess_val"] = {
                 "n": int(len(z_res)),
-                "mse_k1": z_mse_k1,
                 "k_star": z_k_star,
                 "mse_k_star": z_mse_kstar,
             }
         return report
+
+    @staticmethod
+    def _check_subbucket_guard(
+        buckets: dict[str, dict],
+        bucket_name: str,
+        *,
+        dataset_label: str,
+        severe_z: float,
+        severe_delta: float,
+        warn_z: float,
+        warn_delta: float,
+        reasons: list[str],
+    ) -> bool:
+        """Check one validation sub-bucket for severe collapse or mild regression."""
+        b = buckets.get(bucket_name)
+        if not b or b["n"] <= 0:
+            return False
+        if b["z"] > severe_z and b["delta"] > severe_delta:
+            reasons.append(
+                f"{dataset_label} '{bucket_name}' collapsed "
+                f"(delta={b['delta']:+.2e}, z={b['z']:+.2f})"
+            )
+            return True
+        if b["z"] > warn_z and b["delta"] > warn_delta:
+            reasons.append(
+                f"{dataset_label} '{bucket_name}' regressed "
+                f"(delta={b['delta']:+.2e}, z={b['z']:+.2f})"
+            )
+        return False
+
+    @classmethod
+    def _eval_independent_gate(
+        cls,
+        dataset_label: str,
+        res: dict,
+        *,
+        castling_sensitive: bool,
+        reasons: list[str],
+    ) -> bool:
+        """Evaluate an independent PGN/Zurichess validation report at calibrated K*."""
+        severe = False
+        kstar = res.get("fitted_k") or res["buckets"]["all"]
+        if kstar["z"] > 2.5:
+            severe = True
+            reasons.append(
+                f"{dataset_label} @ K* worsened significantly (z={kstar['z']:+.2f})"
+            )
+        elif kstar["z"] > 1.2:
+            reasons.append(
+                f"{dataset_label} @ K* mildly positive ({kstar['delta']:+.2e}, z={kstar['z']:+.2f})"
+            )
+
+        # PGN positions within a game share opening castling state (~10 plies/game),
+        # inflating naive i.i.d. z-scores on small noise blips.
+        z_warn = 2.5 if castling_sensitive else 3.5
+        d_warn = 1.5e-5 if castling_sensitive else 3.0e-5
+        if cls._check_subbucket_guard(
+            res["buckets"],
+            "castling!=0",
+            dataset_label=dataset_label,
+            severe_z=4.0,
+            severe_delta=2.0e-5,
+            warn_z=z_warn,
+            warn_delta=d_warn,
+            reasons=reasons,
+        ):
+            severe = True
+        if cls._check_subbucket_guard(
+            res["buckets"],
+            "pure king+pawns",
+            dataset_label=dataset_label,
+            severe_z=4.0,
+            severe_delta=2.0e-5,
+            warn_z=2.2,
+            warn_delta=1.0e-5,
+            reasons=reasons,
+        ):
+            severe = True
+        return severe
 
     def _gate_summary(
         self,
@@ -1028,17 +1122,21 @@ class TexelTuningSession:
         reasons: list[str] = []
         severe = False
 
-        # Primary unseen holdout checks: require genuine improvement at calibrated K*
-        # (prevents accepting fake K=1.0 scale-inflation blowups when use_pgn_val=False)
-        if h_all["delta"] >= 0.0 and h_kstar["delta"] >= 0.0:
+        # Judge holdout strictly at its own pure-WDL baseline-calibrated K*.
+        if h_kstar["delta"] >= 0.0:
             severe = True
             reasons.append(
-                f"{hold_name} holdout worsened (delta={h_all['delta']:+.2e}, z@K*={h_kstar['z']:+.2f})"
+                f"{hold_name} holdout @ K* worsened (delta={h_kstar['delta']:+.2e}, z={h_kstar['z']:+.2f})"
             )
-        elif h_kstar["z"] > 2.0 or h_all["z"] > 2.0:
+        elif h_kstar["z"] > 2.0:
             severe = True
             reasons.append(
-                f"{hold_name} holdout @ K* regressed due to scale distortion "
+                f"{hold_name} holdout @ K* regressed (z={h_kstar['z']:+.2f})"
+            )
+        elif h_all["z"] > 2.0:
+            severe = True
+            reasons.append(
+                f"{hold_name} holdout regressed vs baseline scale "
                 f"(z={h_all['z']:+.2f}, z@K*={h_kstar['z']:+.2f})"
             )
         elif h_kstar["z"] > 1.0 or h_all["z"] > 1.0:
@@ -1052,6 +1150,30 @@ class TexelTuningSession:
             reasons.append(f"{hold_name} holdout 'broad-EG' regressed (z={h_eg['z']:+.2f})")
         elif h_eg["n"] > 0 and h_eg["z"] > 1.0:
             reasons.append(f"{hold_name} holdout 'broad-EG' mildly positive (z={h_eg['z']:+.2f})")
+
+        # Catch localized late-endgame collapse masked by aggregate broad-EG phases.
+        if self._check_subbucket_guard(
+            hold_res["buckets"],
+            "pure king+pawns",
+            dataset_label=f"{hold_name} holdout",
+            severe_z=3.5,
+            severe_delta=2.0e-5,
+            warn_z=2.0,
+            warn_delta=1.0e-5,
+            reasons=reasons,
+        ):
+            severe = True
+        if self._check_subbucket_guard(
+            hold_res["buckets"],
+            "phase=0",
+            dataset_label=f"{hold_name} holdout",
+            severe_z=3.5,
+            severe_delta=1.0e-5,
+            warn_z=2.0,
+            warn_delta=5.0e-6,
+            reasons=reasons,
+        ):
+            severe = True
 
         castling_sensitive = any(
             ch["name"]
@@ -1092,37 +1214,19 @@ class TexelTuningSession:
         )
 
         if pgn_res is not None:
-            p_kstar = pgn_res["fitted_k"] or pgn_res["buckets"]["all"]
-            # Judge val_pgn at its calibrated baseline K* (~1.15), not raw K=1.000:
-            # our engine anchors Pawn~100cp (K* > 1.0), so uncalibrated K=1 systematically
-            # penalizes dampening/complexity refinements that tighten score spread (e.g. Block 7b).
-            if p_kstar["z"] > 2.5:
+            if self._eval_independent_gate(
+                "val_pgn", pgn_res, castling_sensitive=castling_sensitive, reasons=reasons
+            ):
                 severe = True
-                reasons.append(
-                    f"val_pgn @ K* worsened significantly (z={p_kstar['z']:+.2f})"
-                )
-            elif p_kstar["z"] > 1.2:
-                reasons.append(
-                    f"val_pgn @ K* mildly positive ({p_kstar['delta']:+.2e}, z={p_kstar['z']:+.2f})"
-                )
-            if "castling!=0" in pgn_res["buckets"]:
-                c_b = pgn_res["buckets"]["castling!=0"]
-                # PGN positions within a game share opening castling state (~10 plies/game),
-                # inflating naive i.i.d. z-scores ~3x on tiny sub-1.5e-5 noise blips.
-                z_warn = 2.5 if castling_sensitive else 3.5
-                d_warn = 1.5e-5 if castling_sensitive else 3.0e-5
-                if c_b["n"] > 0 and c_b["z"] > z_warn and c_b["delta"] > d_warn:
-                    reasons.append(
-                        f"val_pgn 'castling!=0' regressed (delta={c_b['delta']:+.2e}, z={c_b['z']:+.2f})"
-                    )
 
         if zurichess_res is not None:
-            z_kstar = zurichess_res["fitted_k"] or zurichess_res["buckets"]["all"]
-            if z_kstar["z"] > 2.5:
+            if self._eval_independent_gate(
+                "val_zurichess",
+                zurichess_res,
+                castling_sensitive=castling_sensitive,
+                reasons=reasons,
+            ):
                 severe = True
-                reasons.append(f"val_zurichess @ K* worsened significantly (z={z_kstar['z']:+.2f})")
-            elif z_kstar["z"] > 1.2:
-                reasons.append(f"val_zurichess @ K* mildly positive (z={z_kstar['z']:+.2f})")
 
         if severe:
             verdict = "REJECT"
@@ -1131,33 +1235,44 @@ class TexelTuningSession:
         else:
             verdict = "PASS"
 
+        hold_kp = hold_res["buckets"].get("pure king+pawns")
+        kp_txt = f" | K+P z={hold_kp['z']:+.2f}" if (hold_kp and hold_kp["n"] > 0) else ""
+        hold_k_tag = (
+            f"K={hold_res['k_factor']:.3f}" if hold_res.get("k_factor") is not None else "K*"
+        )
         print("\n" + "=" * 72)
         print(
             f">>> GATE VERDICT: {verdict}  "
             f"({len(changes)} parameter group(s) changed | target={target_engine}, use_pgn_val={use_pgn})"
         )
         print(
-            f"    unseen holdout   : delta={h_all['delta']:+.4e} (z={h_all['z']:+.2f}) | "
-            f"delta@K*={h_kstar['delta']:+.4e} (z={h_kstar['z']:+.2f}) | "
-            f"broad-EG z={h_eg['z']:+.2f}"
+            f"    unseen holdout   : delta@{hold_k_tag}={h_kstar['delta']:+.4e} "
+            f"(z={h_kstar['z']:+.2f}) | broad-EG z={h_eg['z']:+.2f}{kp_txt}"
         )
         if pgn_res is not None:
-            pk = pgn_res["fitted_k"] or pgn_res["buckets"]["all"]
-            pa = pgn_res["buckets"]["all"]
+            pk = pgn_res.get("fitted_k") or pgn_res["buckets"]["all"]
             cb = pgn_res["buckets"].get("castling!=0")
             castle_txt = (
                 f" | castling!=0 z={cb['z']:+.2f}" if (cb and cb["n"] > 0) else ""
             )
+            pgn_k_tag = (
+                f"K={pgn_res['k_factor']:.3f}" if pgn_res.get("k_factor") is not None else "K*"
+            )
             print(
-                f"    PGN independent  : delta@K=1={pa['delta']:+.4e} (z={pa['z']:+.2f}) | "
-                f"delta@K*={pk['delta']:+.4e} (z={pk['z']:+.2f}){castle_txt}"
+                f"    PGN independent  : delta@{pgn_k_tag}={pk['delta']:+.4e} "
+                f"(z={pk['z']:+.2f}){castle_txt}"
             )
         elif not use_pgn:
             print("    PGN independent  : skipped (use_pgn_val=False)")
         if zurichess_res is not None:
-            zk = zurichess_res["fitted_k"] or zurichess_res["buckets"]["all"]
+            zk = zurichess_res.get("fitted_k") or zurichess_res["buckets"]["all"]
+            z_k_tag = (
+                f"K={zurichess_res['k_factor']:.3f}"
+                if zurichess_res.get("k_factor") is not None
+                else "K*"
+            )
             print(
-                f"    Zurichess quiet  : delta@K*={zk['delta']:+.4e} (z={zk['z']:+.2f})"
+                f"    Zurichess quiet  : delta@{z_k_tag}={zk['delta']:+.4e} (z={zk['z']:+.2f})"
             )
         for r in reasons:
             print(f"    ! Note: {r}")
@@ -1181,7 +1296,7 @@ class TexelTuningSession:
             if (self.holdout_idx is not None and len(self.holdout_idx) > 0)
             else np.arange(len(hold_view["results"]), dtype=np.int64)
         )
-        hold_k = float(getattr(self, "_step_dev_k_star", 1.0))
+        hold_k = float(getattr(self, "_step_holdout_k_star", 1.0))
         hold_res = run_paired_validation(
             dataset=hold_view,
             baseline=self.step_baseline_theta,
@@ -1190,7 +1305,7 @@ class TexelTuningSession:
             label=f"{self.train_path.name} [unseen holdout, pure WDL]",
             chunk_size=self.chunk_size,
             k_factor=hold_k,
-            fit_k=True,
+            fit_k=False,
             cached_base_scores=self._step_holdout_scores,
             indices_override=hold_indices,
             verbose=True,
@@ -1198,6 +1313,7 @@ class TexelTuningSession:
 
         pgn_res = None
         if getattr(self, "use_pgn_val", True) and self.pgn_data is not None:
+            pgn_k = float(getattr(self, "_step_pgn_k_star", 1.0))
             print()
             pgn_res = run_paired_validation(
                 dataset=self.pgn_data,
@@ -1208,8 +1324,8 @@ class TexelTuningSession:
                 split="all",
                 sample=0,
                 chunk_size=self.chunk_size,
-                k_factor=1.0,
-                fit_k=True,
+                k_factor=pgn_k,
+                fit_k=False,
                 cached_base_scores=self._step_pgn_scores,
                 indices_override=np.arange(len(self.pgn_data["results"]), dtype=np.int64),
                 verbose=True,
@@ -1217,6 +1333,7 @@ class TexelTuningSession:
 
         zurichess_res = None
         if getattr(self, "use_zurichess_val", False) and getattr(self, "zurichess_data", None) is not None:
+            z_k = float(getattr(self, "_step_zurichess_k_star", 1.0))
             print()
             zurichess_res = run_paired_validation(
                 dataset=self.zurichess_data,
@@ -1227,8 +1344,8 @@ class TexelTuningSession:
                 split="all",
                 sample=0,
                 chunk_size=self.chunk_size,
-                k_factor=1.0,
-                fit_k=True,
+                k_factor=z_k,
+                fit_k=False,
                 cached_base_scores=self._step_zurichess_scores,
                 indices_override=np.arange(len(self.zurichess_data["results"]), dtype=np.int64),
                 verbose=True,
@@ -1266,6 +1383,7 @@ class TexelTuningSession:
         c: float = 2.5,
         c_floor: float = 1.25,
         alpha: float = 50000.0,
+        A: float = 100.0,
         batch_size: int = 65536,
         report_every: int = 50,
         patience: int = 25,
@@ -1305,6 +1423,7 @@ class TexelTuningSession:
             iterations=iters,
             alpha=alpha,
             c=c,
+            A=A,
             include_list=tune,
             exclude_list=exclude,
             batch_size=batch_size,
@@ -1543,7 +1662,13 @@ class TexelTuningSession:
             if (self.holdout_idx is not None and len(self.holdout_idx) > 0)
             else np.arange(len(hold_view["results"]), dtype=np.int64)
         )
-        init_k = float(getattr(self, "_initial_dev_k_star", 1.0))
+        init_k = float(
+            getattr(
+                self,
+                "_initial_holdout_k_star",
+                getattr(self, "_step_holdout_k_star", 1.0),
+            )
+        )
         print()
         hold_res = run_paired_validation(
             dataset=hold_view,
@@ -1553,13 +1678,16 @@ class TexelTuningSession:
             label=f"{self.train_path.name} [cumulative vs start, pure WDL]",
             chunk_size=self.chunk_size,
             k_factor=init_k,
-            fit_k=True,
+            fit_k=False,
             cached_base_scores=self._initial_holdout_scores,
             indices_override=hold_indices,
             verbose=True,
         )
         pgn_res = None
         if use_pgn and self.pgn_data is not None:
+            init_pgn_k = float(
+                getattr(self, "_initial_pgn_k_star", getattr(self, "_step_pgn_k_star", 1.0))
+            )
             print()
             pgn_res = run_paired_validation(
                 dataset=self.pgn_data,
@@ -1570,14 +1698,21 @@ class TexelTuningSession:
                 split="all",
                 sample=0,
                 chunk_size=self.chunk_size,
-                k_factor=1.0,
-                fit_k=True,
+                k_factor=init_pgn_k,
+                fit_k=False,
                 cached_base_scores=self._initial_pgn_scores,
                 indices_override=np.arange(len(self.pgn_data["results"]), dtype=np.int64),
                 verbose=True,
             )
         zurichess_res = None
         if use_zuri and getattr(self, "zurichess_data", None) is not None:
+            init_z_k = float(
+                getattr(
+                    self,
+                    "_initial_zurichess_k_star",
+                    getattr(self, "_step_zurichess_k_star", 1.0),
+                )
+            )
             print()
             zurichess_res = run_paired_validation(
                 dataset=self.zurichess_data,
@@ -1588,8 +1723,8 @@ class TexelTuningSession:
                 split="all",
                 sample=0,
                 chunk_size=self.chunk_size,
-                k_factor=1.0,
-                fit_k=True,
+                k_factor=init_z_k,
+                fit_k=False,
                 cached_base_scores=self._initial_zurichess_scores,
                 indices_override=np.arange(len(self.zurichess_data["results"]), dtype=np.int64),
                 verbose=True,

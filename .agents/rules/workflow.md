@@ -58,3 +58,10 @@ Apply on every development, refactor, debug, or documentation task.
   * Verify clean file writes: `\r\r\n` must never be introduced into committed or modified files.
 * **Sidecar module synchronization**:
   * When `chess_engine/classical/constants.py` changes: run `python -m tuner.sync_constants_snapshot` to regenerate tuner snapshot and clear stale Numba cache.
+
+---
+
+## 6. Open / Running Notebook (`.ipynb`) Safety (MUST)
+
+* **Do NOT silently overwrite an active/running `.ipynb`**: Before editing a `.ipynb` on disk, check whether it is the user's open `Active Document` or executing a long run (tuning/tournament). Finish `.py`/`.md`/test edits first and defer `.ipynb` writes until the user saves/closes or confirms, avoiding IDE `[Overwrite] / [Revert]` save-conflict races.
+* **Lossless JSON & syntax check**: Match existing `.ipynb` JSON formatting (`indent=1, ensure_ascii=False`, trailing `\n`, `LF` without `\r\r\n`), verify round-trip preservation of untouched cell `outputs`/`execution_count`, and `ast.parse` all code cells after patching.
