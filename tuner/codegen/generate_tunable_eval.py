@@ -247,7 +247,6 @@ import numpy as np
 
 from chess_engine.classical.constants import *  # non-tuned constants + bitboards
 from chess_engine.classical.endgame import (
-    get_endgame_scale_factor,
     get_endgame_scale_factor_with_counts,
     evaluate_special_endgame_with_material,
 )
@@ -300,7 +299,6 @@ def get_2d_val(theta, base_idx, row, col_size, col):
         "_evaluate_king_pawn_endgame",
         "_process_piece_score_and_count",
         "_evaluate_king_attackers",
-        "_evaluate_pawn_shield_for_color",
         "_compute_initiative",
         "_evaluate_position_jit",
     ]

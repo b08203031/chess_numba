@@ -66,8 +66,6 @@ ENDGAME_LIMIT = np.int32(
      + int(PHASE_ENDGAME_RATIO_DEN) // 2)
     // int(PHASE_ENDGAME_RATIO_DEN)
 )
-# Legacy piece-count weights (kept for reference / any external tools)
-PHASE_WEIGHTS = np.array([0, 1, 1, 2, 4, 0], dtype=np.int32)
 
 # =============================================================================
 # --- Piece-Square Tables (PSTs) / 棋子位置分數表 ---
@@ -107,7 +105,6 @@ INITIATIVE_PAWN_WEIGHT_MG = 11
 INITIATIVE_OUTFLANKING_WEIGHT_MG = 5
 INITIATIVE_INFILTRATION_WEIGHT_MG = 10
 INITIATIVE_BOTH_FLANKS_WEIGHT_MG = 14
-INITIATIVE_PAWN_ENDGAME_WEIGHT_MG = 41
 INITIATIVE_ALMOST_UNWIN_WEIGHT_MG = 30
 INITIATIVE_OFFSET_MG = -76
 INITIATIVE_MG_OFFSET = np.int32(39)              # +50 * 0.78 ≈ 39 / 主動權分數修正偏置
@@ -118,7 +115,6 @@ INITIATIVE_PAWN_WEIGHT_EG = 4
 INITIATIVE_OUTFLANKING_WEIGHT_EG = 3
 INITIATIVE_INFILTRATION_WEIGHT_EG = 8
 INITIATIVE_BOTH_FLANKS_WEIGHT_EG = 17
-INITIATIVE_PAWN_ENDGAME_WEIGHT_EG = 28
 INITIATIVE_ALMOST_UNWIN_WEIGHT_EG = 25
 INITIATIVE_OFFSET_EG = -48
 TEMPO_BONUS = 19
@@ -266,7 +262,6 @@ CONNECTED_BONUS = np.array([0, 2, 7, 7, 8, 35, 68, 0], dtype=np.int32)
 CONNECTED_BONUS_EG = np.array([0, 4, 4, 11, 16, 21, 31, 0], dtype=np.int32)
 CONNECTED_SUPPORT_WEIGHT = 14
 CONNECTED_SUPPORT_WEIGHT_EG = 5
-CONNECTED_PASSED_PAWN_BONUS = np.array([15, 35], dtype=np.int32) # MG, EG (legacy)
 PASSED_CONNECTED_BONUS = np.array([0, 0, 2, 3, 7, 22, 54, 0], dtype=np.int32)
 PASSED_PHALANX_BONUS = np.array([0, 0, 5, 12, 23, 40, 75, 0], dtype=np.int32)
 # =============================================================================
@@ -327,7 +322,6 @@ def _sf_danger_to_ours(sf_val: int) -> np.int32:
     return np.int32((int(sf_val) * _MG_SCALE_NUM) // _MG_SCALE_DEN)
 
 KING_ATTACK_WEIGHTS = np.array([0, 0, 56, 19, 29, 20], dtype=np.int32)
-KING_SAFETY_ATTACK_UNITS = KING_ATTACK_WEIGHTS[1:].copy()  # legacy alias P,N,B,R,Q
 
 # Safe checks (SF raw -> our danger space)
 # G4 match-SPSA best (L2 accept iter 19, score 0.526 vs prior; frozen 2026-07-20).
@@ -348,8 +342,6 @@ KING_DANGER_NO_QUEEN_ROOKLESS = 867
 KING_DANGER_KNIGHT_DEF = 79
 KING_DANGER_OFFSET = 0
 KING_DANGER_THRESHOLD = 66
-KING_DANGER_QUAD_DIV = np.int32(4096)
-KING_DANGER_EG_DIV = np.int32(16)
 # Match-SPSA A-block best (L2 iter 74, score 0.534; source spsa_eval_a123/best_params.json).
 # Was _MG_SCALE_DEN (=128). Passed/material/passed_rank blocks had no L2 accept.
 KING_DANGER_OUT_MG_NUM = np.int32(120)
@@ -357,20 +349,9 @@ KING_DANGER_OUT_MG_DEN = np.int32(4096 * _MG_SCALE_NUM)   # 409600
 KING_DANGER_OUT_EG_NUM = np.int32(17076)    # 128*120
 KING_DANGER_OUT_EG_DEN = np.int32(_MG_SCALE_NUM * 16 * 213)  # 100*16*213
 
-# Deprecated aliases
-KING_DANGER_PINNED = np.int32(0)
-KING_DANGER_DIVISOR = np.int32(2)
-KING_DANGER_QUAD_DIVISOR = KING_DANGER_QUAD_DIV
-KING_DANGER_MG_NUM = KING_DANGER_OUT_MG_NUM
-KING_DANGER_MG_DEN = KING_DANGER_OUT_MG_DEN
-KING_DANGER_EG_NUM = KING_DANGER_OUT_EG_NUM
-KING_DANGER_EG_DEN = KING_DANGER_OUT_EG_DEN
-
 # King tropism removed (was dead code: computed but never added to final score;
 # kingDanger already captures approach-to-king via ring attacks / safe checks).
 # --- Phase 4: Advanced & Dynamic / 進階與動態 ---
-SCALING_WEIGHTS = np.array([0, 4, 4, 6, 10], dtype=np.int32)  # legacy
-MAX_SCALING_MATERIAL = (2 * 4 + 2 * 4 + 2 * 6 + 1 * 10)
 # Match-SPSA A: fixed-point integer scale (100 == 1.0; aligned with evaluation.py & eval_weights.py)
 EG_SAFETY_SCALE = 110
 
@@ -439,9 +420,6 @@ THREAT_BY_KING = np.array([18, 33], dtype=np.int32)
 THREAT_HANGING = np.array([4, 17], dtype=np.int32)
 THREAT_RESTRICTED_PIECE = np.array([0, 0], dtype=np.int32)
 THREAT_PAWN_PUSH = np.array([11, 14], dtype=np.int32)
-THREAT_MINOR_ON_MAJOR = np.array([25, 15], dtype=np.int32)  # kept for reference
-# Rook Attacking Queen (replaced by THREAT_BY_ROOK)
-THREAT_ROOK_ON_QUEEN = np.array([20, 10], dtype=np.int32)   # kept for reference
 
 # =============================================================================
 # --- Per-Piece Bonus/Penalty Constants (SF11-inspired, scaled by Pawn ratio) ---
@@ -460,15 +438,7 @@ ROOK_ON_QUEEN_FILE = np.array([4, 3], dtype=np.int32)
 WEAK_QUEEN = np.array([21, 2], dtype=np.int32)
 SCALE_FACTOR_NORMAL = 64              # Normal scaling (64/64 = 1.0) / 正常殘局縮放因子（無縮減）
 SCALE_FACTOR_DRAW = 0                 # Scaling for forced draw positions (0/64 = 0.0) / 強制和棋局面縮放因子
-SCALE_FACTOR_OCB_ONE_PAWN = 16        # Opposite-colored bishops endgame with 1 pawn / 異色象殘局且僅有 1 兵時的縮放因子
-SCALE_FACTOR_OCB_TWO_PAWNS = 32       # Opposite-colored bishops endgame with 2 pawns / 異色象殘局且有 2 兵時的縮放因子
-SCALE_FACTOR_OCB_MULTIPLE_PAWNS = 48  # Opposite-colored bishops endgame with multiple pawns / 異色象殘局且有多兵時的縮放因子
-SCALE_FACTOR_KXK = 64                 # King vs King or other basic endgames / 基本國王殘局縮放因子
-SCALE_FACTOR_KBNK = 64                # King + Bishop + Knight vs King / 王象馬對單王殘局縮放因子
-SCALE_FACTOR_KBPSK_FORTRESS = 8       # King + Bishop + Pawn vs King (fortress) / 王象兵對單王堡壘局面縮放因子
 SCALE_FACTOR_KRPKR_FORTRESS = 8       # King + Rook + Pawn vs King + Rook (fortress) / 王車兵對王車堡壘局面縮放因子
-SCALE_FACTOR_KQKR_FORTRESS = 64       # King + Queen vs King + Rook / 王后對王車殘局縮放因子
-SCALE_FACTOR_KQKRPs_FORTRESS = 8      # King + Queen vs King + Rook + Pawns (fortress) / 王后對王車兵堡壘局面縮放因子
 
 # =============================================================================
 # --- Material Imbalance Polynomial Matrix (SF11 material.cpp) ---

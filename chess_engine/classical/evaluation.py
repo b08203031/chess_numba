@@ -5,7 +5,6 @@ import numpy as np
 
 from chess_engine.classical.constants import *
 from chess_engine.classical.endgame import (
-    get_endgame_scale_factor,
     get_endgame_scale_factor_with_counts,
     evaluate_special_endgame_with_material,
 )
@@ -1663,7 +1662,7 @@ def _evaluate_position_jit(piece_bbs, occupancy_bbs, game_state, lazy: bool, sea
          white_mg_shield, white_eg_shield, black_mg_shield, black_eg_shield,
          w_passed, b_passed,
          white_pawn_attacks_span, black_pawn_attacks_span) = evaluate_pawn_structure(
-             piece_bbs, castling_rights, _DUMMY_EW, False)
+             piece_bbs, castling_rights, ew, use_ew)
     mg_score += mg_pawn_structure
     eg_score += eg_pawn_structure
 

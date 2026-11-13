@@ -179,18 +179,6 @@ def build_blended_labels(
             "SF sidecar contains 0 annotated positions (all rows == UNANNOTATED_CP)."
         )
 
-    non_mate = np.abs(sf_cp.astype(np.int32)) < (MATE_CP_BASE - 1000)
-    if fit_indices is not None and len(fit_indices) > 0:
-        cal_mask = np.zeros(len(results_wdl), dtype=bool)
-        cal_mask[np.asarray(fit_indices, dtype=np.int64)] = True
-        cal_mask &= annotated_mask & non_mate
-    else:
-        cal_mask = annotated_mask & non_mate
-    if not np.any(cal_mask):
-        cal_mask = annotated_mask
-
-    k_sf, sf_cal_mse = fit_best_k(sf_cp[cal_mask], results_wdl[cal_mask])
-
     if sf_d1_cp is not None and max_tactical_gap and max_tactical_gap > 0:
         has_d1 = np.asarray(sf_d1_cp != UNANNOTATED_CP, dtype=bool)
         cp_i32 = sf_cp.astype(np.int32)
@@ -202,6 +190,27 @@ def build_blended_labels(
         tactical_mask = np.zeros(len(results_wdl), dtype=bool)
 
     quiet_annotated_mask = annotated_mask & (~tactical_mask)
+
+    # Calibrate K_sf on competitive quiet scores (|sf_cp| <= 1000) so tablebase /
+    # decided outliers (±2000..±27999 cp) with drawn/blundered WDL outcomes do not
+    # distort K_sf downward.
+    cp_abs = np.abs(sf_cp.astype(np.int32))
+    competitive = cp_abs <= 1000
+    non_mate = cp_abs < (MATE_CP_BASE - 1000)
+    if fit_indices is not None and len(fit_indices) > 0:
+        fit_mask = np.zeros(len(results_wdl), dtype=bool)
+        fit_mask[np.asarray(fit_indices, dtype=np.int64)] = True
+        cal_mask = fit_mask & quiet_annotated_mask & competitive
+        if not np.any(cal_mask):
+            cal_mask = fit_mask & annotated_mask & non_mate
+    else:
+        cal_mask = quiet_annotated_mask & competitive
+        if not np.any(cal_mask):
+            cal_mask = annotated_mask & non_mate
+    if not np.any(cal_mask):
+        cal_mask = annotated_mask
+
+    k_sf, sf_cal_mse = fit_best_k(sf_cp[cal_mask], results_wdl[cal_mask])
 
     blended = np.array(results_wdl, dtype=np.float32, copy=True)
     if lam > 0.0 and np.any(quiet_annotated_mask):
@@ -599,14 +608,16 @@ class TexelTuningSession:
             max_tactical_gap=self.sf_max_tactical_gap,
             fit_indices=self._base_train_idx,
         )
-        quiet_ann = stats["quiet_annotated_mask"]
         ann = stats["annotated_mask"]
 
-        act_train = self._base_train_idx[quiet_ann[self._base_train_idx]]
+        # Retain all annotated rows (including tactical swings, which fall back to pure WDL
+        # in `blended`) so train_idx and dev_idx share the exact same distribution and avoid
+        # survivorship bias against breakthrough features.
+        act_train = self._base_train_idx[ann[self._base_train_idx]]
         if len(act_train) == 0:
             raise RuntimeError(
-                "0 annotated quiet training rows available for SF mixed-label mode. "
-                "Run annotate_sf_labels on more rows or increase sf_max_tactical_gap."
+                "0 annotated training rows available for SF mixed-label mode. "
+                "Run annotate_sf_labels on more rows before enabling use_sf_labels."
             )
         self.train_idx = act_train
 
@@ -1090,6 +1101,17 @@ class TexelTuningSession:
             severe = True
         if cls._check_subbucket_guard(
             res["buckets"],
+            "broad-EG phase<=64",
+            dataset_label=dataset_label,
+            severe_z=3.0,
+            severe_delta=1.5e-5,
+            warn_z=2.0,
+            warn_delta=1.0e-5,
+            reasons=reasons,
+        ):
+            severe = True
+        if cls._check_subbucket_guard(
+            res["buckets"],
             "pure king+pawns",
             dataset_label=dataset_label,
             severe_z=4.0,
@@ -1473,18 +1495,8 @@ class TexelTuningSession:
             f"=== Discrete Grid Scan [{block_id}] -> {_display_path(out_path)} "
             f"(K={eff_k:.3f}) ==="
         )
-        scan_pool = (
-            {
-                "piece_bbs": self.train_data["piece_bbs"][self.dev_idx],
-                "occupancy_bbs": self.train_data["occupancy_bbs"][self.dev_idx],
-                "game_states": self.train_data["game_states"][self.dev_idx],
-                "results": self.train_data["results"][self.dev_idx],
-            }
-            if (split == "dev" and self.dev_idx is not None)
-            else self.train_data
-        )
         scan = run_scalar_grid_scan(
-            dataset=scan_pool,
+            dataset=self.train_data,
             grid_specs=grids,
             pm=self.pm,
             baseline=self.step_baseline_theta,
@@ -1494,6 +1506,7 @@ class TexelTuningSession:
             k_factor=eff_k,
             top=top,
             verbose=True,
+            indices_override=(self.dev_idx if split == "dev" else None),
         )
         best_theta = scan["best_theta"]
         content = self.pm.update_constants_string(best_theta)

@@ -57,7 +57,7 @@ python -m tests.benchmark        # NNUE 版：python -m tests.benchmark_nn_real
 
 ### 2. 現行系統分析、審計與專題報告
 * **[HCE 與 SF11 對齊審核](chess_engine/classical/HCE_SF11_GAP_AUDIT.md)**（HCE 對齊主文件）與 **[殘局 vs Stockfish 驗證](chess_engine/classical/ENDGAME_SF_VERIFICATION.md)**
-* **[2026-10-31 經典評估審計與修復計畫](chess_engine/classical/EVAL_AUDIT_AND_FIX_PLAN_20261031.md)**：`evaluation.py` Bug 修復與多輪 `USE_PGN_VAL` 調參／400k 對戰驗收
+* **[2026-10-31 經典評估審計與修復計畫](chess_engine/classical/EVAL_AUDIT_AND_FIX_PLAN_20261031.md)**：`evaluation.py` Bug／死碼清理與多輪 WDL／`SF19` 調參、400k 對戰驗收及 R2 基線同步
 * **[古典搜尋算法分析](chess_engine/classical/SEARCH_ANALYSIS.md)** 與 **[NNUE 搜尋分析](chess_engine/nnue/SEARCH_ANALYSIS.md)**：PVS、QS、剪枝及 Phase 18–29 調參結論
 * **[Numba JIT 編譯與快取報告](chess_engine/classical/JIT_COMPILE_CACHE_REPORT.md)**：1 MB 表上限、packed rook、StructRef 與冷/暖快取量測
 * **[搜尋 ↔ 評估介面](chess_engine/classical/SEARCH_EVAL_INTERFACE.md)**（KNOWN_WIN 護欄）、**[SEE 專題](chess_engine/classical/SEE_ANALYSIS.md)**、**[歷史啟發](chess_engine/classical/HISTORY_HEURISTICS_CN.md)**

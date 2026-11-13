@@ -696,6 +696,30 @@ flowchart TD
 | **R3 剔除 Block 7b 版** | `tournament_colab_runner_se_multicut copy 8.ipynb` (`b69ed83`) | **375 對（750 局）** | **119 - 489 - 142** (`363.5 - 386.5`) | **48.5%** (`48.47%`, **-23**) | **`-10.66 ± 14.66 Elo`** | **`-2.99`（H0 Accepted 終止）** | 剔除該 8 個 Initiative 參數後立即全面轉負，中局明顯退步 |
 
 * **跨實驗統計檢定**：兩組 400k 對戰相差 **`+6.89 - (-10.66) = +17.55 Elo`**（合併 `SE = 8.24`，雙樣本 **`z = 2.13`**, $p \approx 0.033$）。這直接證實 `Block 7b` 的 8 個常數變動（`INITIATIVE_PAWN_WEIGHT_MG: 11->12`、`OUTFLANKING_MG: 5->4`、`PASSED_EG: 7->6`、`PAWN_EG: 4->3`、`OUTFLANKING_EG: 3->2`、`INFILTRATION_EG: 8->7`、`BOTH_FLANKS_EG: 17->19`、`OFFSET_EG: -48->-46`）確實顯著增強了真實搜尋棋力。
-* **當前倉庫基線處置**：已將上述 8 個 `Block 7b` 參數從 `b69ed83` 還原回 [`constants.py`](constants.py#L105-L123)，並執行 `python -m tuner.sync_constants_snapshot` 更新 [`tuner/constants_snapshot.py`](../../tuner/constants_snapshot.py) 與清除舊 Numba 快取（共 260 檔）；透過 [`tests.test_texel_parameterization`](../../tests/test_texel_parameterization.py)、[`tests.test_endgame_conformance`](../../tests/test_endgame_conformance.py)、[`tests.test_runtime_eval_weights`](../../tests/test_runtime_eval_weights.py) 共 **60 項測試全數通過（OK）**。`classical_old/` 暫維持 R2 基線不更動，待後續確定是否再衝擊 SPRT `+2.94` 或進行 `USE_SF_LABELS` 實驗後再行決定同步時機。
+* **當前倉庫基線處置（Phase 8 結案時）**：曾將上述 8 個 `Block 7b` 參數還原回 R3（`3996ccf`）並保留 `classical_old/` 於 R2；隨後進入 Phase 9 `USE_SF_LABELS = True` 首輪實驗與清潔回退。
+
+---
+
+### 九、Phase 9：`USE_SF_LABELS` 首輪調參診斷、HCE 死碼清理與乾淨 R2 基線同步
+
+#### 1. `SF19` 首輪調參實戰回歸與根因診斷（Commit `1edb352` / `23b640e`）
+* **實戰測試結果**：於 [`tournament_colab_runner_se_multicut copy.ipynb`](../../tournament_colab_runner_se_multicut%20copy.ipynb) 在 **400,000 nodes/move**、64 MB TT 下對戰 R2（`classical_old` `d59ebcd`），至 **274 對（548 局）**時戰績為 **`267.5 / 548`（83W - 369D - 96L，48.8%），`-8.2 ± 16.6 Elo`，`SPRT LLR = -2.05`**（早期 350 局曾達 `-12.9 ± 20.8 Elo`），顯示混合標籤首輪結果不如純 WDL 基線。
+* **調參系統根因與修復（詳見 [`tuner/README.md`](../../tuner/README.md)）**：
+  1. **離群值壓縮 `K_sf` 與訓練集分佈偏移**：[`build_blended_labels`](../../tuner/notebook_session.py) 原未對 `quiet_annotated_mask & (|sf_cp| <= 1000)` 過濾即校準 `K_sf`，易受極端殘局/大優評分壓縮斜率；[`_apply_label_mode`](../../tuner/notebook_session.py) 現於 `self.train_idx` 保留全部 `annotated_mask` 列（戰術劇烈波動列退回純 WDL 標籤），消除 train/dev 分佈落差。
+  2. **獨立閘門與網格約束缺口**：[`_eval_independent_gate`](../../tuner/notebook_session.py) 補齊 `val_pgn` / `val_zurichess` 的 `broad-EG (phase<=64)` 守衛（`severe_z=3.0, severe_delta=1.5e-5`；`warn_z=2.0, warn_delta=1.0e-5`）；[`scan_scalar_grid.py`](../../tuner/scan_scalar_grid.py) 新增 `_clip_grids_to_constraints`（`respect_constraints=True`）與 `indices_override`，避免網格掃描越過 `SPSAOptimizer` 約束；[`scan_grid`](../../tuner/notebook_session.py) 同步傳入 `dev_idx`。
+  3. **King Flank / Shelter 回授過寬約束**：[`tuner/tuner.py`](../../tuner/tuner.py) 將 `KING_FLANK_ATTACK_NUM`、`KING_FLANK_DEFENSE_MULT`、`KING_SHELTER_FEEDBACK_NUM` 由 `soft_band_theta0(..., frac=0.5, min_half=2.0)` 收緊為 `abs_pm1(..., lo_floor=1.0)`，並移除死參數 `INITIATIVE_PAWN_ENDGAME_WEIGHT_MG/EG`（維度由 `1,278` 精簡為 **`1,276`**、參數組 `115 -> 113`）。
+
+#### 2. Classical HCE 死碼清除與邊界修補
+* **`constants.py` 清除 26 個未使用常量**：包含 `PHASE_WEIGHTS`、`INITIATIVE_PAWN_ENDGAME_WEIGHT_MG/EG`、`CONNECTED_PASSED_PAWN_BONUS`、`KING_SAFETY_ATTACK_UNITS`、`KING_DANGER_QUAD_DIV`、`KING_DANGER_EG_DIV`、`KING_DANGER_PINNED`、`KING_DANGER_DIVISOR`、`KING_DANGER_QUAD_DIVISOR`、`KING_DANGER_MG_NUM/DEN`、`KING_DANGER_EG_NUM/DEN`、`SCALING_WEIGHTS`、`MAX_SCALING_MATERIAL`、`THREAT_MINOR_ON_MAJOR`、`THREAT_ROOK_ON_QUEEN` 與 8 個未用 `SCALE_FACTOR_*`（僅保留 `SCALE_FACTOR_NORMAL`、`SCALE_FACTOR_DRAW`、`SCALE_FACTOR_KRPKR_FORTRESS`）。
+* **相依模組清理**：
+  * [`endgame.py`](endgame.py)：移除上述 8 個未用 `SCALE_FACTOR_*` 匯入。
+  * [`evaluation.py`](evaluation.py)：移除未用 `get_endgame_scale_factor` 匯入；在 [`evaluate`](evaluation.py) 將未快取路徑的 `evaluate_pawn_structure` 呼叫由 `(_DUMMY_EW, False)` 修正為傳入 `(ew, use_ew)`（修復開銷權重傳遞一致性）。
+  * [`pawns.py`](pawns.py)：移除死常量 `_DUMMY_EW`。
+  * [`engine_types.py`](engine_types.py)：改傳 `default_eval_weights(_classical_constants)`（避免相依呼叫缺省參數，且支援 `sync_classical_old.py` 自動切換為 `classical_old` 匯入）。
+  * [`codegen/generate_tunable_eval.py`](../../tuner/codegen/generate_tunable_eval.py)：移除未用 `get_endgame_scale_factor` 匯入與死函式 `_evaluate_pawn_shield_for_color`，重新生成 [`tuner/tunable_eval.py`](../../tuner/tunable_eval.py) 與 [`tuner/constants_snapshot.py`](../../tuner/constants_snapshot.py)。
+
+#### 3. 乾淨 R2 基線回退與基準同步
+* 因 Phase 8 R3（`36d5ade` / `3996ccf`）仍完整保留於 Git 歷史，為讓修正後的 `USE_SF_LABELS = True` 調參自乾淨且無雜訊之基準重新起跑，本階段將 [`constants.py`](constants.py) 有效評估權重回退至 R2（`d59ebcd`），並經使用者明確確認後執行 `python tools/sync_classical_old.py --sync`。
+* 目前 `chess_engine/classical/` 與 `chess_engine/classical_old/` 雙目錄程式碼、搜尋常量與清潔後評估常數均 **100% 邏輯一致**，待執行新一輪 `USE_SF_LABELS = True` 調參後，即可直接與此清潔版 R2 基準展開 400k 對戰驗收。
 
 

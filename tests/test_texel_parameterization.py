@@ -167,18 +167,36 @@ class TestIntegerAwareTuningBands(unittest.TestCase):
             np.array([0.0, 0.0, 1.0, 1.0, 1.0, 1.0]),
         )
 
-    def test_dead_initiative_pawn_endgame_weights_are_pinned_and_frozen(self):
-        dead = [
-            "INITIATIVE_PAWN_ENDGAME_WEIGHT_MG",
-            "INITIATIVE_PAWN_ENDGAME_WEIGHT_EG",
-        ]
-        mask = self.optimizer._create_mask(include_list=dead)
-        for name in dead:
+    def test_dead_initiative_pawn_endgame_weights_removed_and_flank_knobs_tight(self):
+        names = set(self.pm.list_param_names())
+        self.assertNotIn("INITIATIVE_PAWN_ENDGAME_WEIGHT_MG", names)
+        self.assertNotIn("INITIATIVE_PAWN_ENDGAME_WEIGHT_EG", names)
+
+        for name in (
+            "KING_FLANK_ATTACK_NUM",
+            "KING_FLANK_DEFENSE_MULT",
+            "KING_SHELTER_FEEDBACK_NUM",
+        ):
             start, _ = self.pm.get_param_indices(name)
             v0 = float(self.pm.theta[start])
             lower, upper = self.cm._absolute_bounds(name, np.array([start]))
-            self.assertEqual((lower[0], upper[0]), (v0, v0))
-            self.assertEqual(mask[start], 0.0)
+            self.assertEqual((lower[0], upper[0]), (max(1.0, v0 - 1.0), v0 + 1.0))
+
+        from tuner.scan_scalar_grid import _clip_grids_to_constraints
+
+        start_atk, _ = self.pm.get_param_indices("KING_FLANK_ATTACK_NUM")
+        v0_atk = int(round(float(self.pm.theta[start_atk])))
+        clipped = _clip_grids_to_constraints(
+            [("KING_FLANK_ATTACK_NUM", list(range(1, 8)))],
+            [start_atk],
+            self.pm,
+            self.pm.get_initial_theta(),
+            verbose=False,
+        )
+        self.assertEqual(
+            clipped[0][1],
+            [v for v in range(1, 8) if max(1, v0_atk - 1) <= v <= v0_atk + 1],
+        )
 
     def test_param_scales_respect_unit_classes_and_tight_boxes(self):
         theta0 = self.pm.get_initial_theta()
@@ -271,8 +289,6 @@ class TestIntegerAwareTuningBands(unittest.TestCase):
         intentionally_pinned_or_dead = {
             "CANDIDATE_PASSER_DIVISOR",
             "UNSTOPPABLE_PAWN_BONUS",
-            "INITIATIVE_PAWN_ENDGAME_WEIGHT_MG",
-            "INITIATIVE_PAWN_ENDGAME_WEIGHT_EG",
         }
         missing = sorted(
             set(self.pm.list_param_names()) - tokens - intentionally_pinned_or_dead
@@ -715,10 +731,12 @@ class TestSfMixedLabelsAndKStarGate(unittest.TestCase):
         self.assertEqual((b_cp, b_d1), (-48, -22))
 
     def test_build_blended_labels_calibrates_ksf_and_filters_tactical_spikes(self):
-        wdl = np.array([1.0, 0.5, 0.0, 1.0, 0.0], dtype=np.float32)
-        sf_cp = np.array([150, 0, -150, 20, -320], dtype=np.int16)
+        wdl = np.array([1.0, 0.5, 0.0, 1.0, 0.0, 0.5, 0.5], dtype=np.float32)
+        sf_cp = np.array([150, 0, -150, 20, -320, 5000, -5000], dtype=np.int16)
         # Row 4 has |sf_cp - sf_d1_cp| = |-320 - 30| = 350 > 180 -> tactical spike!
-        sf_d1 = np.array([130, 10, -140, 15, 30], dtype=np.int16)
+        # Rows 5-6 are extreme tablebase outliers (±5000cp with 0.5 WDL) that must
+        # not crush calibrated K_sf downward.
+        sf_d1 = np.array([130, 10, -140, 15, 30, 5000, -5000], dtype=np.int16)
 
         blended, stats = build_blended_labels(
             wdl,
@@ -726,10 +744,11 @@ class TestSfMixedLabelsAndKStarGate(unittest.TestCase):
             0.25,
             sf_d1_cp=sf_d1,
             max_tactical_gap=180,
-            fit_indices=np.array([0, 1, 2, 3], dtype=np.int64),
+            fit_indices=np.array([0, 1, 2, 3, 5, 6], dtype=np.int64),
         )
         self.assertEqual(stats["n_tactical_filtered"], 1)
         self.assertFalse(bool(stats["quiet_annotated_mask"][4]))
+        self.assertGreater(stats["k_sf"], 0.8)
         # Row 4 falls back to pure WDL (0.0), while quiet rows 0 and 2 move smoothly inward
         self.assertEqual(float(blended[4]), 0.0)
         self.assertGreater(float(blended[2]), 0.0)
@@ -805,7 +824,11 @@ class TestSfMixedLabelsAndKStarGate(unittest.TestCase):
                 self.assertTrue(session.use_sf_labels)
                 self.assertIsNotNone(session.sf_blend_stats)
                 self.assertNotIn(0, set(session.train_idx.tolist()))
-                self.assertNotIn(1, set(session.train_idx.tolist()))
+                # Tactical-swing row 1 remains in train_idx (preventing survivorship bias)
+                # with its target falling back to pure WDL.
+                if 1 in set(session._base_train_idx.tolist()):
+                    self.assertIn(1, set(session.train_idx.tolist()))
+                self.assertEqual(float(session.train_data["results"][1]), float(wdl[1]))
 
                 # Unseen holdout strictly preserves pure WDL {0.0, 0.5, 1.0}
                 np.testing.assert_array_equal(

@@ -6,8 +6,9 @@ import itertools
 
 import numpy as np
 
+from tuner.constraint_manager import ConstraintManager
 from tuner.parameters import ParameterManager
-from tuner.tuner import compute_squared_errors, split_dataset_indices
+from tuner.tuner import SPSAOptimizer, compute_squared_errors, split_dataset_indices
 from tuner.validate_tuned import _bucket_masks
 
 
@@ -34,6 +35,53 @@ def _parse_grid(spec: str) -> tuple[str, list[int]]:
     return name, values
 
 
+def _clip_grids_to_constraints(
+    grids: list[tuple[str, list[int]]],
+    scalar_indices: list[int],
+    pm: ParameterManager,
+    baseline: np.ndarray,
+    *,
+    verbose: bool = True,
+) -> list[tuple[str, list[int]]]:
+    """Filter discrete grid values through SPSAOptimizer range constraints around baseline."""
+    opt = SPSAOptimizer.__new__(SPSAOptimizer)
+    opt.param_manager = pm
+    opt.constraint_manager = ConstraintManager(pm)
+    opt.best_theta = np.asarray(baseline, dtype=np.float64).copy()
+    orig_theta = list(pm.theta)
+    try:
+        pm.theta = opt.best_theta.tolist()
+        opt._setup_constraints()
+    finally:
+        pm.theta = orig_theta
+
+    clipped: list[tuple[str, list[int]]] = []
+    for (name, values), start in zip(grids, scalar_indices):
+        lo_arr, hi_arr = opt.constraint_manager._absolute_bounds(
+            name, np.array([start], dtype=np.int64)
+        )
+        lo_val = float(lo_arr[0])
+        hi_val = float(hi_arr[0])
+        lo_int = int(np.ceil(lo_val - 1e-9)) if np.isfinite(lo_val) else None
+        hi_int = int(np.floor(hi_val + 1e-9)) if np.isfinite(hi_val) else None
+
+        kept = [
+            v
+            for v in values
+            if (lo_int is None or v >= lo_int) and (hi_int is None or v <= hi_int)
+        ]
+        if not kept:
+            kept = [int(round(float(baseline[start])))]
+        if kept != values and verbose:
+            print(
+                f"  [Grid Constraint] {name}: clipped {values} -> {kept} "
+                f"(bounds=[{lo_int if lo_int is not None else '-inf'}, "
+                f"{hi_int if hi_int is not None else '+inf'}])"
+            )
+        clipped.append((name, kept))
+    return clipped
+
+
 def run_scalar_grid_scan(
     dataset,
     grid_specs: list[str],
@@ -48,6 +96,8 @@ def run_scalar_grid_scan(
     seed: int = 2,
     top: int = 0,
     verbose: bool = True,
+    indices_override: np.ndarray | None = None,
+    respect_constraints: bool = True,
 ) -> dict:
     grids = [_parse_grid(spec) for spec in grid_specs]
     if pm is None:
@@ -62,6 +112,11 @@ def run_scalar_grid_scan(
             raise ValueError(f"Grid scan supports scalars only: {name}")
         scalar_indices.append(start)
 
+    if respect_constraints:
+        grids = _clip_grids_to_constraints(
+            grids, scalar_indices, pm, baseline, verbose=verbose
+        )
+
     if isinstance(dataset, dict):
         data = dataset
     else:
@@ -74,34 +129,42 @@ def run_scalar_grid_scan(
             }
 
     n_total = len(data["results"])
-    train_idx, eval_idx, hold_idx = split_dataset_indices(
-        n_total, eval_sample=eval_sample, holdout_sample=holdout_sample
-    )
-    excluded_n = min(max(exclude_fixed_val, 0), n_total)
-    if excluded_n:
-        pool = train_idx
+    if indices_override is not None:
+        pool = np.asarray(indices_override, dtype=np.int64)
         sample_n = min(max(eval_sample, 1), len(pool))
-        indices = np.sort(
+        indices = pool[:sample_n] if sample_n == len(pool) else np.sort(
             np.random.default_rng(seed).choice(pool, size=sample_n, replace=False)
         )
-    elif split == "holdout" and hold_idx is not None:
-        sample_n = min(max(eval_sample, 1), len(hold_idx))
-        indices = hold_idx[:sample_n] if sample_n == len(hold_idx) else np.sort(
-            np.random.default_rng(seed).choice(hold_idx, size=sample_n, replace=False)
-        )
-    elif split == "train" and len(train_idx) > 0:
-        sample_n = min(max(eval_sample, 1), len(train_idx))
-        indices = np.sort(
-            np.random.default_rng(seed).choice(train_idx, size=sample_n, replace=False)
-        )
-    elif eval_idx is not None:
-        sample_n = min(max(eval_sample, 1), len(eval_idx))
-        indices = eval_idx[:sample_n]
+        excluded_n = 0
     else:
-        sample_n = min(max(eval_sample, 1), n_total)
-        indices = np.sort(
-            np.random.default_rng(0).choice(n_total, size=sample_n, replace=False)
+        train_idx, eval_idx, hold_idx = split_dataset_indices(
+            n_total, eval_sample=eval_sample, holdout_sample=holdout_sample
         )
+        excluded_n = min(max(exclude_fixed_val, 0), n_total)
+        if excluded_n:
+            pool = train_idx
+            sample_n = min(max(eval_sample, 1), len(pool))
+            indices = np.sort(
+                np.random.default_rng(seed).choice(pool, size=sample_n, replace=False)
+            )
+        elif split == "holdout" and hold_idx is not None:
+            sample_n = min(max(eval_sample, 1), len(hold_idx))
+            indices = hold_idx[:sample_n] if sample_n == len(hold_idx) else np.sort(
+                np.random.default_rng(seed).choice(hold_idx, size=sample_n, replace=False)
+            )
+        elif split == "train" and len(train_idx) > 0:
+            sample_n = min(max(eval_sample, 1), len(train_idx))
+            indices = np.sort(
+                np.random.default_rng(seed).choice(train_idx, size=sample_n, replace=False)
+            )
+        elif eval_idx is not None:
+            sample_n = min(max(eval_sample, 1), len(eval_idx))
+            indices = eval_idx[:sample_n]
+        else:
+            sample_n = min(max(eval_sample, 1), n_total)
+            indices = np.sort(
+                np.random.default_rng(0).choice(n_total, size=sample_n, replace=False)
+            )
 
     bbs = data["piece_bbs"][indices]
     occ = data["occupancy_bbs"][indices]

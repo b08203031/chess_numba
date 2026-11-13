@@ -334,8 +334,9 @@ def SearchContext(
     diag_enabled = bool(enable_diagnostics)
     tune = np.zeros(TUNE_SIZE, dtype=np.int32)
     try:
+        from chess_engine.classical import constants as _classical_constants
         from tune_eval_match.eval_weights import default_eval_weights
-        eval_weights = np.ascontiguousarray(default_eval_weights())
+        eval_weights = np.ascontiguousarray(default_eval_weights(_classical_constants))
     except Exception:
         eval_weights = np.zeros(64, dtype=np.int32)
     tune[TUNE_RFP_MULT] = RFP_BASE_MULT

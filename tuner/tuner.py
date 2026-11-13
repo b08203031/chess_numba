@@ -409,13 +409,10 @@ class SPSAOptimizer:
                 idx, _ = cm.pm.get_param_indices(name)
                 cm.add_range_on_absolute_index(idx, min_val=lo, max_val=hi)
 
-        # Discrete/bounded king-safety output scaling & flank feedback coeffs
+        # Discrete/bounded king-safety output scaling
         soft_band_theta0("KING_DANGER_OUT_MG_NUM", frac=0.35, min_half=20.0, abs_min=40.0, abs_max=300.0)
         soft_band_theta0("KING_DANGER_OUT_EG_NUM", frac=0.35, min_half=1500.0, abs_min=4000.0, abs_max=35000.0)
         soft_band_theta0("EG_SAFETY_SCALE", frac=0.35, min_half=15.0, abs_min=30.0, abs_max=200.0)
-        soft_band_theta0("KING_FLANK_ATTACK_NUM", frac=0.5, min_half=2.0, abs_min=1.0, abs_max=10.0)
-        soft_band_theta0("KING_FLANK_DEFENSE_MULT", frac=0.5, min_half=2.0, abs_min=0.0, abs_max=12.0)
-        soft_band_theta0("KING_SHELTER_FEEDBACK_NUM", frac=0.5, min_half=2.0, abs_min=1.0, abs_max=14.0)
 
         def abs_pm1(name: str, lo_floor: float | None = 1.0) -> None:
             """Integer-ish scalar: θ₀ ± 1. Optional lo_floor (None = no floor, allows negatives)."""
@@ -465,6 +462,10 @@ class SPSAOptimizer:
         # Connected support weights: multiplicative but small DOF — θ₀ ± 1
         abs_pm1("CONNECTED_SUPPORT_WEIGHT", lo_floor=1.0)
         abs_pm1("CONNECTED_SUPPORT_WEIGHT_EG", lo_floor=1.0)
+        # King-safety flank feedback multipliers (sit inside quadratic w_danger): θ₀ ± 1
+        abs_pm1("KING_FLANK_ATTACK_NUM", lo_floor=1.0)
+        abs_pm1("KING_FLANK_DEFENSE_MULT", lo_floor=1.0)
+        abs_pm1("KING_SHELTER_FEEDBACK_NUM", lo_floor=1.0)
         # Divisors: θ₀ ± 1 (IMBALANCE/SPACE_BONUS ~16; SPACE_SCALE ~4 → [3,5])
         abs_pm1("IMBALANCE_DIVISOR", lo_floor=1.0)
         abs_pm1("SPACE_BONUS_DIVISOR", lo_floor=1.0)
@@ -517,10 +518,6 @@ class SPSAOptimizer:
 
         # Initiative complexity weights/offsets — soft ±10% (was hard-pin),
         # with at least ±1 because the evaluator consumes integer constants.
-        # Note: INITIATIVE_PAWN_ENDGAME_WEIGHT_MG/EG are currently unreferenced
-        # by evaluation.py, so hard-pin them to theta0 to prevent SPSA drift.
-        pin_to_theta0("INITIATIVE_PAWN_ENDGAME_WEIGHT_MG")
-        pin_to_theta0("INITIATIVE_PAWN_ENDGAME_WEIGHT_EG")
         for name in (
             "INITIATIVE_PASSED_WEIGHT_MG",
             "INITIATIVE_PAWN_WEIGHT_MG",
@@ -997,15 +994,6 @@ class SPSAOptimizer:
             if count >= 6 and np.any(mask[start : start + count] > 0):
                 mask[start + 5] = 0.0
                 print("EG_MATERIAL_VALUES: keep King frozen (index 5)")
-
-        # Dead / unreferenced knobs in evaluation.py: never perturb under SPSA.
-        for dead_name in (
-            "INITIATIVE_PAWN_ENDGAME_WEIGHT_MG",
-            "INITIATIVE_PAWN_ENDGAME_WEIGHT_EG",
-        ):
-            if dead_name in name_to_indices:
-                d_start, d_count = name_to_indices[dead_name]
-                mask[d_start : d_start + d_count] = 0.0
 
         # Exclude any hard-pinned entries (lower >= upper) so SPSA only perturbs
         # real degrees of freedom (skips unused rank/col padding, mobility 0-bins, etc.).

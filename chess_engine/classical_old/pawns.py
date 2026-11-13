@@ -133,7 +133,6 @@ _EW_SHELTER_BASE_MG = 22
 _EW_SHELTER_BASE_EG = 23
 _EW_BLOCKED_STORM = 24
 _EW_BLOCKED_STORM_EG = 25
-_DUMMY_EW = np.zeros(64, dtype=np.int32)
 
 
 @numba.njit(cache=True, inline="always")

@@ -44,8 +44,8 @@ PAWN, KNIGHT, BISHOP, ROOK, QUEEN, KING = 0, 1, 2, 3, 4, 5
 #   SF types.h → N 367/401, B 387/430, R 599/648, Q 1192/1259.
 # Passed / path / prox use the same *100/213 so pass/N matches SF relative strength.
 # Index: PAWN, KNIGHT, BISHOP, ROOK, QUEEN, KING
-MG_MATERIAL_VALUES = np.array([100, 353, 361, 569, 1176, 0], dtype=np.int32)
-EG_MATERIAL_VALUES = np.array([117, 418, 438, 699, 1302, 0], dtype=np.int32)
+MG_MATERIAL_VALUES = np.array([100, 353, 361, 570, 1175, 0], dtype=np.int32)
+EG_MATERIAL_VALUES = np.array([117, 418, 439, 698, 1299, 0], dtype=np.int32)
 # =============================================================================
 # --- Game Phase Calculation (SF11 npm taper) / 遊戲階段計算 ---
 # =============================================================================
@@ -70,8 +70,6 @@ ENDGAME_LIMIT = np.int32(
      + int(PHASE_ENDGAME_RATIO_DEN) // 2)
     // int(PHASE_ENDGAME_RATIO_DEN)
 )
-# Legacy piece-count weights (kept for reference / any external tools)
-PHASE_WEIGHTS = np.array([0, 1, 1, 2, 4, 0], dtype=np.int32)
 
 # =============================================================================
 # --- Piece-Square Tables (PSTs) / 棋子位置分數表 ---
@@ -83,19 +81,19 @@ PHASE_WEIGHTS = np.array([0, 1, 1, 2, 4, 0], dtype=np.int32)
 
 PST_MG = np.array([
     [0, 0, 0, 0, 0, 0, 0, 0, -9, -10, -7, -6, -7, -8, 10, 4, -14, -23, -18, -11, -11, -5, -12, -6, -6, -16, -5, 6, 9, 0, 11, -11, 7, -1, -10, 16, 19, 10, 1, 11, 9, 11, 17, 27, 32, 16, 9, 16, 51, 49, 51, 49, 53, 45, 50, 49, 0, 0, 0, 0, 0, 0, 0, 0],
-    [-45, -31, -33, -30, -19, -24, -35, -51, -44, -22, -13, -7, -9, -4, -19, -24, -28, -6, -3, 6, 8, 4, 3, -14, -18, 4, 13, 18, 15, 14, 1, -12, -25, 1, 12, 15, 13, 19, 8, -21, -26, -5, 11, 16, 13, 4, -6, -18, -46, -27, -4, 0, -1, -3, -20, -43, -39, -44, -41, -26, -32, -30, -45, -50],
-    [-12, 6, -10, -10, -8, -17, -9, -18, -3, -6, 8, -4, -2, 4, 6, -8, -4, 14, -11, 4, 4, -5, 11, 2, -8, -1, 5, 10, 11, 5, 0, -5, -13, 3, -2, 9, 8, 8, 2, -6, -5, 9, 8, 14, 8, 0, -4, -6, -5, -4, 5, -4, 2, -2, -6, -8, -26, -8, -12, -6, -14, 0, -7, -20],
-    [-9, -6, -1, 6, 5, 3, 0, -9, -10, -3, -5, 1, -1, 0, 1, -9, -15, -4, -5, -1, 2, -2, 1, -12, -11, -1, -1, 1, -1, 1, -4, -13, -7, 8, 8, 14, 6, 6, 6, -9, -4, 9, 2, 2, 6, -1, 1, -5, 7, 9, 9, 13, 17, 9, 11, 12, 6, -1, 1, -1, -2, -2, 6, 0],
-    [-2, -7, -4, 1, -1, -13, -8, -19, -6, -1, 6, 0, 0, 6, 4, -8, -4, 7, 3, -6, -7, 4, 12, -1, 4, 2, -2, -9, -8, 6, 9, 1, -6, 0, 4, -7, -2, 2, 5, 8, -6, -2, 5, 5, 7, 6, -4, -5, -6, -16, 6, 2, -4, 3, 3, -10, -15, -10, -6, -7, -2, -14, -10, -20],
-    [17, 40, 25, 6, -6, 7, 33, 27, 29, 21, -1, 7, -14, -15, 19, 20, -7, -17, -19, -30, -21, -17, -23, -6, -16, -31, -25, -46, -42, -37, -27, -19, -30, -42, -41, -47, -46, -32, -34, -39, -30, -34, -32, -51, -49, -37, -45, -26, -24, -45, -34, -49, -52, -39, -43, -24, -25, -47, -43, -50, -53, -31, -40, -38],
+    [-45, -32, -33, -31, -21, -26, -38, -50, -43, -22, -12, -6, -8, -3, -19, -26, -29, -6, -3, 6, 9, 5, 3, -17, -17, 5, 13, 18, 15, 16, -1, -15, -26, 2, 12, 17, 13, 19, 9, -23, -26, -3, 11, 18, 13, 4, -4, -18, -46, -27, -4, 0, -1, -3, -20, -43, -39, -44, -41, -26, -32, -30, -45, -49],
+    [-12, 6, -10, -10, -8, -18, -9, -18, -4, -6, 8, -5, -2, 4, 6, -9, -4, 14, -10, 4, 4, -5, 11, 1, -8, -1, 5, 10, 11, 6, -1, -5, -12, 3, -1, 9, 9, 8, 2, -6, -5, 9, 8, 14, 8, 0, -4, -6, -5, -3, 5, -4, 2, -2, -6, -8, -26, -8, -12, -6, -14, 0, -7, -20],
+    [-9, -6, -1, 6, 5, 4, 0, -9, -9, -2, -5, 1, -1, 0, 0, -9, -14, -3, -4, -1, 2, -1, 1, -11, -10, -1, 1, 1, -1, 2, -4, -13, -7, 8, 7, 12, 5, 5, 5, -10, -3, 8, 1, 0, 6, -1, 1, -5, 7, 11, 9, 13, 17, 9, 11, 12, 6, -1, 1, -1, -2, -4, 5, 0],
+    [-6, -7, -4, 1, -3, -13, -8, -20, -7, -1, 5, -1, -1, 5, 4, -8, -6, 7, 3, -6, -6, 5, 12, -2, 5, 1, 0, -9, -6, 6, 10, -1, -5, 0, 7, -6, 1, 2, 4, 7, -6, -2, 6, 5, 7, 6, -4, -5, -6, -12, 6, 2, -3, 3, 3, -10, -16, -10, -6, -7, -2, -14, -11, -20],
+    [18, 39, 24, 5, -3, 8, 34, 26, 28, 22, -2, 5, -14, -15, 19, 20, -7, -18, -19, -31, -20, -19, -23, -8, -16, -31, -27, -45, -41, -35, -25, -20, -31, -41, -41, -47, -47, -33, -35, -38, -30, -33, -34, -51, -48, -37, -45, -25, -24, -43, -36, -49, -53, -38, -44, -23, -25, -48, -42, -50, -52, -32, -37, -37],
 ], dtype=np.int32)
 PST_EG = np.array([
     [0, 0, 0, 0, 0, 0, 0, 0, 11, 12, 15, 12, 25, 20, 10, -1, 9, 9, 10, 15, 11, 12, 6, 1, 10, 9, 6, 3, 4, 2, 4, 5, 26, 16, 14, 17, 8, 12, 17, 13, 48, 42, 43, 54, 50, 39, 43, 46, 75, 73, 85, 76, 80, 87, 74, 74, 0, 0, 0, 0, 0, 0, 0, 0],
-    [-49, -39, -33, -22, -24, -30, -35, -50, -40, -22, -16, -5, -6, -8, -18, -33, -31, -10, -5, 10, 8, -3, -7, -28, -19, -2, 14, 19, 22, 16, 8, -17, -22, -5, 13, 23, 24, 20, 2, -17, -30, -1, 10, 14, 16, 10, 2, -38, -38, -16, -7, 15, 10, -5, -22, -38, -49, -43, -33, -31, -24, -29, -37, -56],
-    [-34, -29, -17, -15, -16, -17, -33, -26, -20, -25, -9, -5, -7, -7, -28, -22, -17, 0, -5, 0, 2, -7, -5, -20, -17, -1, 6, 9, 9, 4, 3, -16, -15, 4, 10, 15, 8, 18, -2, -9, -17, 0, 1, 4, 3, 3, -8, 0, -29, -9, -16, 6, 4, -6, -17, -29, -42, -20, -28, -11, -11, -28, -25, -42],
-    [-11, -12, -10, -15, -16, -9, -14, -18, -18, -14, -9, -12, -13, -10, -12, -19, -9, -4, -6, -8, -8, -11, -3, -3, -1, 6, 7, 0, -1, 2, 2, -4, 6, 9, 9, 15, 12, 7, 3, 3, 8, 5, 9, 12, 11, 5, -3, 9, 3, 5, 12, 9, 6, 18, 8, 8, 12, 13, 19, 16, 14, 23, 12, 22],
-    [-63, -54, -46, -31, -34, -45, -55, -70, -54, -34, -33, -16, -21, -36, -31, -60, -42, -16, -12, -9, -9, -12, -22, -41, -32, -6, -4, 10, 13, 4, -7, -24, -28, 2, 9, 21, 21, 16, 2, -15, -43, -16, -8, -2, 6, -7, -21, -32, -45, -33, -18, -6, 1, -18, -24, -52, -70, -49, -40, -33, -35, -39, -43, -74],
-    [-53, -30, -24, -21, -36, -32, -34, -64, -24, -25, -11, -10, -10, -10, -20, -34, -41, -10, 7, 9, 7, 3, -7, -32, -28, -8, 31, 31, 22, 23, -2, -24, -18, 1, 33, 40, 38, 37, 6, -27, -29, -5, 29, 27, 29, 28, -8, -26, -29, -4, -3, -2, -7, -5, -13, -31, -56, -40, -38, -24, -9, -24, -34, -48],
+    [-49, -39, -33, -24, -25, -31, -35, -50, -39, -22, -15, -5, -5, -5, -19, -34, -31, -9, -4, 10, 9, -2, -7, -28, -19, -2, 15, 19, 22, 16, 8, -18, -24, -4, 14, 23, 25, 20, 3, -19, -30, -1, 10, 14, 15, 9, 3, -38, -37, -16, -7, 15, 8, -6, -22, -38, -49, -43, -33, -31, -25, -29, -37, -56],
+    [-34, -29, -18, -15, -16, -17, -34, -27, -20, -25, -9, -5, -7, -7, -27, -22, -17, 0, -5, 1, 2, -6, -4, -20, -17, -1, 6, 9, 10, 4, 3, -16, -16, 4, 11, 15, 8, 18, -2, -9, -17, 0, 2, 4, 3, 3, -8, 0, -29, -9, -16, 6, 4, -6, -17, -30, -43, -20, -29, -11, -11, -28, -25, -42],
+    [-11, -13, -10, -15, -16, -9, -14, -18, -17, -14, -9, -11, -12, -9, -11, -18, -7, -3, -6, -7, -7, -10, -1, -2, -1, 6, 8, 1, -1, 4, 1, -4, 4, 9, 8, 14, 11, 5, 3, 2, 9, 4, 8, 12, 11, 4, -4, 9, 3, 4, 13, 8, 5, 19, 8, 8, 12, 11, 19, 16, 14, 22, 10, 22],
+    [-63, -54, -46, -31, -34, -45, -55, -70, -55, -34, -29, -15, -19, -33, -31, -60, -42, -15, -12, -8, -7, -12, -22, -41, -32, -6, -3, 10, 15, 3, -6, -24, -28, 2, 11, 22, 22, 15, 0, -16, -43, -16, -8, -1, 6, -7, -21, -33, -47, -33, -18, -6, 1, -18, -25, -53, -71, -52, -41, -34, -36, -41, -44, -76],
+    [-52, -31, -24, -22, -37, -32, -33, -62, -25, -26, -11, -9, -11, -10, -19, -33, -39, -12, 8, 9, 7, 3, -8, -30, -29, -8, 31, 31, 23, 23, -2, -24, -20, 1, 33, 41, 39, 38, 5, -27, -27, -7, 30, 28, 29, 27, -9, -25, -29, -6, -3, -2, -6, -7, -12, -31, -57, -40, -39, -24, -9, -24, -34, -48],
 ], dtype=np.int32)
 # =============================================================================
 # --- Other Evaluation Constants / 其他評估常量 ---
@@ -107,24 +105,22 @@ PST_EG = np.array([
 
 # Middlegame (MG) weights - scaled by Pawn ratio MG = 100/128 ≈ 0.78 / 中局主動權/複雜度係數
 INITIATIVE_PASSED_WEIGHT_MG = 7
-INITIATIVE_PAWN_WEIGHT_MG = 12
-INITIATIVE_OUTFLANKING_WEIGHT_MG = 4
+INITIATIVE_PAWN_WEIGHT_MG = 11
+INITIATIVE_OUTFLANKING_WEIGHT_MG = 5
 INITIATIVE_INFILTRATION_WEIGHT_MG = 10
 INITIATIVE_BOTH_FLANKS_WEIGHT_MG = 14
-INITIATIVE_PAWN_ENDGAME_WEIGHT_MG = 41
 INITIATIVE_ALMOST_UNWIN_WEIGHT_MG = 30
 INITIATIVE_OFFSET_MG = -76
 INITIATIVE_MG_OFFSET = np.int32(39)              # +50 * 0.78 ≈ 39 / 主動權分數修正偏置
 
 # Endgame (EG) weights - scaled by Pawn ratio EG = 120/213 ≈ 0.563 / 殘局主動權/複雜度係數
-INITIATIVE_PASSED_WEIGHT_EG = np.int32(6)      # 9  * 0.563 ≈ 5 / 通路兵權重
-INITIATIVE_PAWN_WEIGHT_EG = 3
-INITIATIVE_OUTFLANKING_WEIGHT_EG = 2
-INITIATIVE_INFILTRATION_WEIGHT_EG = 7
-INITIATIVE_BOTH_FLANKS_WEIGHT_EG = 19
-INITIATIVE_PAWN_ENDGAME_WEIGHT_EG = 28
+INITIATIVE_PASSED_WEIGHT_EG = np.int32(7)      # 9  * 0.563 ≈ 5 / 通路兵權重
+INITIATIVE_PAWN_WEIGHT_EG = 4
+INITIATIVE_OUTFLANKING_WEIGHT_EG = 3
+INITIATIVE_INFILTRATION_WEIGHT_EG = 8
+INITIATIVE_BOTH_FLANKS_WEIGHT_EG = 17
 INITIATIVE_ALMOST_UNWIN_WEIGHT_EG = 25
-INITIATIVE_OFFSET_EG = -46
+INITIATIVE_OFFSET_EG = -48
 TEMPO_BONUS = 19
 LAZY_EVAL_THRESHOLD = np.int32(1100)             # Dynamic evaluation exit threshold / 動態評估提早結束閥值 (SF11 1400 scaled by 100/128)
 PINNED_UNCOMPUTED_SENTINEL = np.uint64(18446744073709551615)  # Sentinel when evaluation exits early without computing pins
@@ -147,76 +143,76 @@ SPACE_SCALE_DIVISOR = 6
 KNIGHT_MOBILITY_BONUS = np.array([
     [-17, -26],
     [-12, -19],
-    [-1, -9],
+    [1, -9],
     [2, 3],
     [3, 7],
     [5, 12],
-    [10, 17],
-    [15, 17],
+    [10, 16],
+    [16, 16],
     [18, 17],
 ], dtype=np.int32)
 BISHOP_MOBILITY_BONUS = np.array([
     [-10, -18],
     [5, -13],
     [15, 0],
-    [21, 9],
+    [22, 9],
     [26, 20],
-    [29, 30],
+    [30, 30],
     [30, 36],
-    [30, 41],
+    [30, 40],
     [33, 41],
-    [34, 45],
-    [48, 45],
-    [50, 46],
-    [58, 47],
-    [61, 47],
+    [35, 44],
+    [48, 44],
+    [50, 45],
+    [56, 47],
+    [62, 47],
 ], dtype=np.int32)
 ROOK_MOBILITY_BONUS = np.array([
     [-27, -32],
-    [1, -1],
-    [15, 20],
-    [15, 32],
-    [15, 43],
-    [15, 55],
-    [16, 60],
-    [21, 65],
-    [25, 71],
-    [26, 76],
-    [26, 81],
+    [-1, -1],
+    [14, 20],
+    [14, 32],
+    [14, 43],
+    [14, 54],
+    [16, 59],
+    [21, 63],
+    [25, 70],
+    [26, 74],
+    [26, 79],
+    [31, 83],
     [31, 84],
     [32, 84],
-    [33, 85],
-    [36, 85],
+    [36, 84],
 ], dtype=np.int32)
 QUEEN_MOBILITY_BONUS = np.array([
     [-26, -10],
-    [-13, -3],
-    [9, 7],
-    [12, 8],
-    [18, 16],
-    [27, 22],
-    [27, 35],
-    [34, 37],
-    [40, 38],
-    [42, 48],
-    [44, 58],
-    [47, 59],
-    [47, 66],
-    [48, 67],
-    [49, 67],
+    [-13, -4],
+    [8, 7],
+    [13, 8],
+    [19, 17],
+    [25, 22],
+    [26, 34],
+    [32, 36],
+    [39, 37],
+    [41, 47],
+    [44, 56],
+    [46, 56],
+    [46, 63],
+    [48, 64],
+    [48, 64],
+    [48, 71],
     [49, 71],
+    [49, 73],
     [50, 73],
-    [50, 74],
-    [50, 76],
-    [51, 76],
-    [53, 77],
-    [56, 78],
-    [63, 79],
-    [64, 79],
-    [67, 79],
-    [70, 88],
-    [76, 95],
-    [76, 95],
+    [51, 75],
+    [56, 76],
+    [57, 77],
+    [62, 77],
+    [64, 78],
+    [66, 78],
+    [69, 87],
+    [74, 94],
+    [77, 94],
 ], dtype=np.int32)
 # =============================================================================
 # --- Piece Coordination Constants / 棋子協同常量 ---
@@ -225,10 +221,10 @@ QUEEN_MOBILITY_BONUS = np.array([
 # --- Bishop Pair / 雙象優勢 ---
 # Bonus for having both bishops. This bonus is generally stronger in open positions.
 # 擁有雙象的獎勵。這個獎勵在開放局面中通常更強。
-BISHOP_PAIR_BONUS = np.array([10, 12], dtype=np.int32)
-BISHOP_PAIR_PAWN_SCALE = np.array([17, 33], dtype=np.int32)
-ROOK_ON_SEMI_OPEN_FILE_BONUS = np.array([15, 0], dtype=np.int32)
-ROOK_ON_OPEN_FILE_BONUS = np.array([29, 15], dtype=np.int32)
+BISHOP_PAIR_BONUS = np.array([9, 14], dtype=np.int32)
+BISHOP_PAIR_PAWN_SCALE = np.array([17, 32], dtype=np.int32)
+ROOK_ON_SEMI_OPEN_FILE_BONUS = np.array([16, 2], dtype=np.int32)
+ROOK_ON_OPEN_FILE_BONUS = np.array([30, 18], dtype=np.int32)
 # =============================================================================
 # --- Pawn Structure Constants / 兵型結構常量 ---
 # =============================================================================
@@ -242,11 +238,11 @@ PASSED_PAWN_BONUS = np.array([
     [0, 20],
     [0, 36],
     [30, 52],
-    [64, 99],
-    [126, 93],
+    [66, 102],
+    [126, 95],
     [0, 0],
 ], dtype=np.int32)
-PASSED_FILE_BONUS = np.array([10, 5], dtype=np.int32)
+PASSED_FILE_BONUS = np.array([11, 6], dtype=np.int32)
 CANDIDATE_PASSER_DIVISOR = 2
 
 # Path Safety (SF11 35/20/9/+5 * 100/213) — was *3/5; now same display scale as material
@@ -256,23 +252,22 @@ PASSED_PATH_SAFE_BLOCK_ONLY = 2
 PASSED_PATH_SUPPORT_BONUS = 3
 PASSED_DYNAMICS_MULT = 4
 PASSED_DYNAMICS_OFFSET = -10
-KING_PROXIMITY_MAX_DIST = 6
+KING_PROXIMITY_MAX_DIST = 7
 KING_PROX_ENEMY_MULT = 8
 KING_PROX_ENEMY_DIV = 3
 KING_PROX_FRIENDLY_MULT = 1
-KING_PROX_MIN_BONUS = -79
-KING_PROX_MAX_BONUS = 92
-ISOLATED_PAWN_PENALTY = np.array([0, -9], dtype=np.int32)
-DOUBLED_PAWN_PENALTY = np.array([-12, -24], dtype=np.int32)
-WEAK_LEVER_PENALTY = np.array([-4, -28], dtype=np.int32)
-WEAK_UNOPPOSED_PENALTY = np.array([-7, -5], dtype=np.int32)
-CONNECTED_BONUS = np.array([0, 2, 7, 7, 8, 33, 71, 0], dtype=np.int32)
-CONNECTED_BONUS_EG = np.array([0, 5, 6, 10, 16, 20, 30, 0], dtype=np.int32)
+KING_PROX_MIN_BONUS = -80
+KING_PROX_MAX_BONUS = 82
+ISOLATED_PAWN_PENALTY = np.array([0, -8], dtype=np.int32)
+DOUBLED_PAWN_PENALTY = np.array([-14, -27], dtype=np.int32)
+WEAK_LEVER_PENALTY = np.array([-5, -27], dtype=np.int32)
+WEAK_UNOPPOSED_PENALTY = np.array([-9, -5], dtype=np.int32)
+CONNECTED_BONUS = np.array([0, 2, 7, 7, 8, 35, 68, 0], dtype=np.int32)
+CONNECTED_BONUS_EG = np.array([0, 4, 4, 11, 16, 21, 31, 0], dtype=np.int32)
 CONNECTED_SUPPORT_WEIGHT = 14
 CONNECTED_SUPPORT_WEIGHT_EG = 5
-CONNECTED_PASSED_PAWN_BONUS = np.array([15, 35], dtype=np.int32) # MG, EG (legacy)
-PASSED_CONNECTED_BONUS = np.array([0, 0, 2, 2, 6, 22, 52, 0], dtype=np.int32)
-PASSED_PHALANX_BONUS = np.array([0, 0, 5, 11, 21, 39, 74, 0], dtype=np.int32)
+PASSED_CONNECTED_BONUS = np.array([0, 0, 2, 3, 7, 22, 54, 0], dtype=np.int32)
+PASSED_PHALANX_BONUS = np.array([0, 0, 5, 12, 23, 40, 75, 0], dtype=np.int32)
 # =============================================================================
 # --- Outpost Constants / 前哨常量 ---
 # =============================================================================
@@ -286,9 +281,9 @@ PASSED_PHALANX_BONUS = np.array([0, 0, 5, 11, 21, 39, 74, 0], dtype=np.int32)
 OUTPOST_BONUS_KNIGHT = np.array([
     [0, 0],
     [0, 0],
-    [11, 2],
+    [12, 1],
     [25, 19],
-    [44, 27],
+    [44, 28],
     [39, 19],
     [21, 1],
     [0, 0],
@@ -296,14 +291,14 @@ OUTPOST_BONUS_KNIGHT = np.array([
 OUTPOST_BONUS_BISHOP = np.array([
     [0, 0],
     [0, 0],
-    [4, 7],
-    [24, 13],
-    [27, 21],
-    [24, 20],
-    [7, 1],
+    [4, 6],
+    [23, 13],
+    [25, 20],
+    [25, 21],
+    [8, 1],
     [0, 0],
 ], dtype=np.int32)
-REACHABLE_OUTPOST_BONUS = np.array([12, 5], dtype=np.int32)
+REACHABLE_OUTPOST_BONUS = np.array([13, 6], dtype=np.int32)
 # =============================================================================
 # --- King Safety Constants (NEW - based on Chessprogramming Wiki) / 王的安全常量 ---
 # =============================================================================
@@ -331,7 +326,6 @@ def _sf_danger_to_ours(sf_val: int) -> np.int32:
     return np.int32((int(sf_val) * _MG_SCALE_NUM) // _MG_SCALE_DEN)
 
 KING_ATTACK_WEIGHTS = np.array([0, 0, 56, 19, 29, 20], dtype=np.int32)
-KING_SAFETY_ATTACK_UNITS = KING_ATTACK_WEIGHTS[1:].copy()  # legacy alias P,N,B,R,Q
 
 # Safe checks (SF raw -> our danger space)
 # G4 match-SPSA best (L2 accept iter 19, score 0.526 vs prior; frozen 2026-07-20).
@@ -352,8 +346,6 @@ KING_DANGER_NO_QUEEN_ROOKLESS = 867
 KING_DANGER_KNIGHT_DEF = 79
 KING_DANGER_OFFSET = 0
 KING_DANGER_THRESHOLD = 66
-KING_DANGER_QUAD_DIV = np.int32(4096)
-KING_DANGER_EG_DIV = np.int32(16)
 # Match-SPSA A-block best (L2 iter 74, score 0.534; source spsa_eval_a123/best_params.json).
 # Was _MG_SCALE_DEN (=128). Passed/material/passed_rank blocks had no L2 accept.
 KING_DANGER_OUT_MG_NUM = np.int32(120)
@@ -361,51 +353,40 @@ KING_DANGER_OUT_MG_DEN = np.int32(4096 * _MG_SCALE_NUM)   # 409600
 KING_DANGER_OUT_EG_NUM = np.int32(17076)    # 128*120
 KING_DANGER_OUT_EG_DEN = np.int32(_MG_SCALE_NUM * 16 * 213)  # 100*16*213
 
-# Deprecated aliases
-KING_DANGER_PINNED = np.int32(0)
-KING_DANGER_DIVISOR = np.int32(2)
-KING_DANGER_QUAD_DIVISOR = KING_DANGER_QUAD_DIV
-KING_DANGER_MG_NUM = KING_DANGER_OUT_MG_NUM
-KING_DANGER_MG_DEN = KING_DANGER_OUT_MG_DEN
-KING_DANGER_EG_NUM = KING_DANGER_OUT_EG_NUM
-KING_DANGER_EG_DEN = KING_DANGER_OUT_EG_DEN
-
 # King tropism removed (was dead code: computed but never added to final score;
 # kingDanger already captures approach-to-king via ring attacks / safe checks).
 # --- Phase 4: Advanced & Dynamic / 進階與動態 ---
-SCALING_WEIGHTS = np.array([0, 4, 4, 6, 10], dtype=np.int32)  # legacy
-MAX_SCALING_MATERIAL = (2 * 4 + 2 * 4 + 2 * 6 + 1 * 10)
 # Match-SPSA A: fixed-point integer scale (100 == 1.0; aligned with evaluation.py & eval_weights.py)
 EG_SAFETY_SCALE = 110
 
 # --- SF11-aligned King Shelter & Storm Tables ---
 # ShelterStrength: friendly pawn shield defense values (MG)
 SHELTER_STRENGTH = np.array([
-    [15, 53, 57, 44, 30, 21, 32, 0],
-    [-24, 32, 20, -29, -20, -8, -50, 0],
-    [1, 52, 20, 9, 22, -1, -47, 0],
-    [-30, -1, -10, -20, -26, -51, -147, 0],
+    [15, 56, 59, 45, 30, 20, 32, 0],
+    [-25, 32, 20, -30, -21, -7, -47, 0],
+    [2, 54, 20, 8, 21, -1, -47, 0],
+    [-29, -2, -10, -19, -27, -50, -146, 0],
 ], dtype=np.int32)
 UNBLOCKED_STORM = np.array([
-    [-66, 240, 76, -60, -41, -29, -30, 0],
-    [-33, 14, -83, -31, -24, -3, -9, 0],
-    [7, -38, -103, -12, 7, 17, 15, 0],
-    [-2, 4, -69, 9, 6, 18, 14, 0],
+    [-69, 237, 86, -61, -41, -30, -30, 0],
+    [-33, 14, -83, -32, -25, -3, -10, 0],
+    [8, -38, -109, -13, 6, 17, 16, 0],
+    [-1, 4, -71, 7, 4, 18, 15, 0],
 ], dtype=np.int32)
-BLOCKED_STORM = -40
-BLOCKED_STORM_EG = -29
+BLOCKED_STORM = -44
+BLOCKED_STORM_EG = -32
 SHELTER_BASE_MG = 20
-SHELTER_BASE_EG = 10
+SHELTER_BASE_EG = 9
 KING_PAWN_DIST_PENALTY_EG = -5
-KING_FLANK_ATTACK_NUM = np.int32(5)
+KING_FLANK_ATTACK_NUM = np.int32(3)
 KING_FLANK_ATTACK_DEN = np.int32(8)
-KING_SHELTER_FEEDBACK_NUM = np.int32(8)
+KING_SHELTER_FEEDBACK_NUM = np.int32(6)
 KING_SHELTER_FEEDBACK_DEN = np.int32(8)
-KING_FLANK_DEFENSE_MULT = np.int32(6)
+KING_FLANK_DEFENSE_MULT = np.int32(4)
 
 # --- Pawnless Flank & Flank Attacks (SF11-inspired) ---
 # Match-SPSA A best: was [-14,-51] / [-2,0]
-PAWNLESS_FLANK = np.array([-14, -55], dtype=np.int32)
+PAWNLESS_FLANK = np.array([-12, -57], dtype=np.int32)
 FLANK_ATTACKS = np.array([-2, 0], dtype=np.int32)
 # =============================================================================
 # --- Threat Evaluation Constants / 威脅評估常量 ---
@@ -443,9 +424,6 @@ THREAT_BY_KING = np.array([18, 33], dtype=np.int32)
 THREAT_HANGING = np.array([4, 17], dtype=np.int32)
 THREAT_RESTRICTED_PIECE = np.array([0, 0], dtype=np.int32)
 THREAT_PAWN_PUSH = np.array([11, 14], dtype=np.int32)
-THREAT_MINOR_ON_MAJOR = np.array([25, 15], dtype=np.int32)  # kept for reference
-# Rook Attacking Queen (replaced by THREAT_BY_ROOK)
-THREAT_ROOK_ON_QUEEN = np.array([20, 10], dtype=np.int32)   # kept for reference
 
 # =============================================================================
 # --- Per-Piece Bonus/Penalty Constants (SF11-inspired, scaled by Pawn ratio) ---
@@ -454,25 +432,17 @@ THREAT_ROOK_ON_QUEEN = np.array([20, 10], dtype=np.int32)   # kept for reference
 # KingProtector: Penalty for minor piece being far from own king.
 # 王保護者：輕子距離己方王越遠，懲罰越重（每格切比雪夫距離）。
 # SF11 S(7, 8). P3a full scale (5,4) not kept after neutral/slightly-negative match → (4,3).
-KING_PROTECTOR = np.array([2, 1], dtype=np.int32)
-MINOR_BEHIND_PAWN = np.array([6, 17], dtype=np.int32)
+KING_PROTECTOR = np.array([1, 1], dtype=np.int32)
+MINOR_BEHIND_PAWN = np.array([6, 19], dtype=np.int32)
 BISHOP_PAWNS_PENALTY = np.array([0, 3], dtype=np.int32)
 BISHOP_PAWNS_CENTER_BLOCKED_FACTOR = 1
-TRAPPED_ROOK = np.array([12, 1], dtype=np.int32)
-LONG_DIAGONAL_BISHOP = np.array([21, 8], dtype=np.int32)
-ROOK_ON_QUEEN_FILE = np.array([3, 5], dtype=np.int32)
+TRAPPED_ROOK = np.array([13, 1], dtype=np.int32)
+LONG_DIAGONAL_BISHOP = np.array([22, 8], dtype=np.int32)
+ROOK_ON_QUEEN_FILE = np.array([4, 3], dtype=np.int32)
 WEAK_QUEEN = np.array([21, 2], dtype=np.int32)
 SCALE_FACTOR_NORMAL = 64              # Normal scaling (64/64 = 1.0) / 正常殘局縮放因子（無縮減）
 SCALE_FACTOR_DRAW = 0                 # Scaling for forced draw positions (0/64 = 0.0) / 強制和棋局面縮放因子
-SCALE_FACTOR_OCB_ONE_PAWN = 16        # Opposite-colored bishops endgame with 1 pawn / 異色象殘局且僅有 1 兵時的縮放因子
-SCALE_FACTOR_OCB_TWO_PAWNS = 32       # Opposite-colored bishops endgame with 2 pawns / 異色象殘局且有 2 兵時的縮放因子
-SCALE_FACTOR_OCB_MULTIPLE_PAWNS = 48  # Opposite-colored bishops endgame with multiple pawns / 異色象殘局且有多兵時的縮放因子
-SCALE_FACTOR_KXK = 64                 # King vs King or other basic endgames / 基本國王殘局縮放因子
-SCALE_FACTOR_KBNK = 64                # King + Bishop + Knight vs King / 王象馬對單王殘局縮放因子
-SCALE_FACTOR_KBPSK_FORTRESS = 8       # King + Bishop + Pawn vs King (fortress) / 王象兵對單王堡壘局面縮放因子
 SCALE_FACTOR_KRPKR_FORTRESS = 8       # King + Rook + Pawn vs King + Rook (fortress) / 王車兵對王車堡壘局面縮放因子
-SCALE_FACTOR_KQKR_FORTRESS = 64       # King + Queen vs King + Rook / 王后對王車殘局縮放因子
-SCALE_FACTOR_KQKRPs_FORTRESS = 8      # King + Queen vs King + Rook + Pawns (fortress) / 王后對王車兵堡壘局面縮放因子
 
 # =============================================================================
 # --- Material Imbalance Polynomial Matrix (SF11 material.cpp) ---
@@ -488,24 +458,24 @@ SCALE_FACTOR_KQKRPs_FORTRESS = 8      # King + Queen vs King + Rook + Pawns (for
 # 最終不平衡 = (white_bonus - black_bonus) / 16
 
 IMBALANCE_QUADRATIC_OURS = np.array([
-    [1181, 0, 0, 0, 0, 0],
-    [24, 11, 0, 0, 0, 0],
-    [35, 146, -52, 0, 0, 0],
-    [0, 60, 4, 0, 0, 0],
-    [-23, -7, 47, 108, -155, 0],
-    [-209, 22, 133, 152, -119, -4],
+    [1246, 0, 0, 0, 0, 0],
+    [26, 13, 0, 0, 0, 0],
+    [35, 174, -54, 0, 0, 0],
+    [0, 68, 4, 0, 0, 0],
+    [-23, -5, 47, 109, -160, 0],
+    [-206, 22, 132, 147, -121, -4],
 ], dtype=np.int32)
 IMBALANCE_QUADRATIC_THEIRS = np.array([
     [0, 0, 0, 0, 0, 0],
-    [42, 0, 0, 0, 0, 0],
-    [10, 122, 0, 0, 0, 0],
-    [59, 95, 42, 0, 0, 0],
-    [50, 76, 27, -22, 0, 0],
-    [99, 206, -39, 164, 460, 0],
+    [41, 0, 0, 0, 0, 0],
+    [10, 104, 0, 0, 0, 0],
+    [60, 86, 44, 0, 0, 0],
+    [50, 65, 27, -23, 0, 0],
+    [100, 170, -40, 163, 407, 0],
 ], dtype=np.int32)
 IMBALANCE_DIVISOR = 20
-IMBALANCE_SCALE_MG = 55
-IMBALANCE_SCALE_EG = 85
+IMBALANCE_SCALE_MG = 53
+IMBALANCE_SCALE_EG = 75
 # =============================================================================
 # --- Search Constants / 搜尋常量 ---
 # =============================================================================

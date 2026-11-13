@@ -28,8 +28,8 @@
 * **`USE_PGN_VAL` / `USE_ZURICHESS_VAL`**：分別啟用 `val_pgn.npz` 與 `val_zurichess.npz` 獨立純 WDL 驗證閘門。
 * **`TARGET_ENGINE`**：`"classical"` 或 `"classical_old"`；輸出與備份自動隔離至 `tuner/runs/<engine>_<mode>[_sfXX]/`。
 * **`RANDOM_SEED`**（Notebook 預設 `True` / `TexelTuningSession` 預設 `False`）：為每個 block 產生動態時間種子並寫入紀錄，避免反覆調參重複相同 batch 序列。
-* **`USE_SF_LABELS` & `SF_LAMBDA`**（預設 `0.25`）：在 `train_idx` 擬合無偏 $K_{\text{sf}}$ 並合成 $y_{\text{mix}} = (1-\lambda)\,\text{WDL} + \lambda\,\sigma(K_{\text{sf}}\cdot \text{sf\_cp})$。
-  * **`train_idx` vs `dev_idx` 掩碼差異**：`train_idx` 使用 `quiet_annotated_mask` 排除 `|sf_cp - sf_d1_cp| > 180` 的戰術跳分局面以取得乾淨梯度；`dev_idx` 則用 `annotated_mask` 保留戰術局面退回純 WDL，兼作防遺忘與跨模式基準（約 11% 純 WDL 樣本）。
+* **`USE_SF_LABELS` & `SF_LAMBDA`**（預設 `0.25`）：在 `train_idx` 的平靜競爭局面（`quiet_annotated_mask` 且 `|sf_cp| <= 1000 cp`，避免殘局庫極端大比分壓低 $K_{\text{sf}}$）擬合 $K_{\text{sf}}$ 並合成 $y_{\text{mix}} = (1-\lambda)\,\text{WDL} + \lambda\,\sigma(K_{\text{sf}}\cdot \text{sf\_cp})$。
+  * **`train_idx` vs `dev_idx` 分布一致**：`train_idx` 與 `dev_idx` 皆使用 `annotated_mask`（**不再從 `train_idx` 剔除 `|sf_cp - sf_d1_cp| > 180` 局面**，而是讓這類戰術跳分局面保留並退回純 `WDL`），避免刪除動態突破成功樣本導致的存活者偏差。
 * **Google Colab + Drive 支援（`# 00`、`# 9d`）**：本機自動略過 `# 00`；Colab 會掛載 Drive `MyDrive/chess_numba_data/{hce,texel_runs}/` 並支援 `RESUME_FROM_DRIVE = True` 斷線續跑；[`sf19_annotate_colab_runner.ipynb`](sf19_annotate_colab_runner.ipynb) 可於雲端產生並同步 `.sf19.npz`。
 
 ---
@@ -44,7 +44,7 @@
 ### (2) `_gate_summary` 子桶防崩壞守衛與領域落差
 * 驗收除整體 `@ K*` 與 `broad-EG (phase<=64)` 外，對局部極端退步設有雜訊下限防護：
   * Holdout：`pure king+pawns`（`z > 3.5` & `delta > 2e-5` 判 `REJECT`）、`phase=0`（`z > 3.5` & `delta > 1e-5` 判 `REJECT`）。
-  * 獨立驗證集（`val_pgn` / `val_zurichess`）：`pure king+pawns` 與極端 `castling!=0` 退步（`z > 4.0` & `delta > 2e-5` 判 `REJECT`），保留較輕微 `CAUTION` 提示。
+  * 獨立驗證集（`val_pgn` / `val_zurichess`）：`broad-EG (phase<=64)`、`pure king+pawns` 與極端 `castling!=0` 退步（`z > 4.0` & `delta > 2e-5` 判 `REJECT`），保留較輕微 `CAUTION` 提示。
 * **EPD vs PGN 領域落差**：靜態 EPD 與實戰 PGN 在開局有易位權局面分佈差異明顯，`Block 6b` / `6e` / `7c` / `8` 常在 `holdout` 大勝卻被 `val_pgn`（尤其 `castling!=0`）攔下，屬保守防過擬合機制。
 
 ### (3) `SPSAOptimizer` 的 `scales^2` 座標步幅效應
@@ -52,16 +52,16 @@
 * 搭配 `USE_SF_LABELS=True`（`dev` MSE 較純 WDL 低 ~35.7%）：
   * **有較大 `scales` 的非 PST 區塊**（`1a`, `1d`, `2a`, `3`, `4a`, `5a`, `5c`, `7a`, `7b`）：`alpha` 過大易在前 200 步過衝或停滯；實戰宜調低 `alpha`（`15000~45000`）並設衰退視野 `A=150`。
   * **單棋種 PST (`6a–6d`, `P=128`, `scales=1.0`) 與 `Block 8` (`P=520`)**：格點出現率低且受固定列平均約束，需 `batch_size=131072`、`A=250`、`iters=4500~5000` 與較高 `alpha`（`6a–6d`: `135000~155000`；`Block 8`: `65000`）。
-  * **Grid 掃描與跨平台注意事項**：每次更新 `constants.py` 後，確認 Notebook 的 `scan_grid`（如 `4b`、`7a_div_grid`）仍置中於現值；後段執行與分析格需自動切換至專案根目錄（勿寫死 Colab 專用 `%cd /content/chess_numba`）；執行長跑時勿從硬碟覆寫開啟中的 `.ipynb`。
+  * **Grid 掃描與跨平台注意事項**：`scan_grid` 預設以 `SPSAOptimizer` 約束裁切範圍（如 `CONNECTED_SUPPORT_WEIGHT*` 與 `KING_FLANK_*` 限制於 `θ₀ ± 1`）；後段執行與分析格需自動切換至專案根目錄（勿寫死 Colab 專用 `%cd /content/chess_numba`）；執行長跑時勿從硬碟覆寫開啟中的 `.ipynb`。
 
 ---
 
 ## 4. 參數不變量、約束與常規指令
 
 ### 參數約束與耦合
-* **永遠凍結**（115 組共 1,278 維之外）：`MG Pawn = 100`、`MG/EG King = 0`、共線分母（`KING_DANGER_OUT_*_DEN`、`KING_FLANK_ATTACK_DEN`、`KING_SHELTER_FEEDBACK_DEN`）、結構常數（`LAZY_EVAL_THRESHOLD`、`PHASE_*`、`SCALE_FACTOR_*`、`CANDIDATE_PASSER_DIVISOR=2`、`UNSTOPPABLE_PAWN_BONUS=800`）與死碼 `INITIATIVE_PAWN_ENDGAME_WEIGHT_*`。
+* **永遠凍結**（113 組共 1,276 維之外）：`MG Pawn = 100`、`MG/EG King = 0`、共線分母（`KING_DANGER_OUT_*_DEN`、`KING_FLANK_ATTACK_DEN`、`KING_SHELTER_FEEDBACK_DEN`）、結構常數（`LAZY_EVAL_THRESHOLD`、`PHASE_*`、`SCALE_FACTOR_*`、`CANDIDATE_PASSER_DIVISOR=2`、`UNSTOPPABLE_PAWN_BONUS=800`）。
 * **結構守恆**：`MIDGAME_LIMIT` / `ENDGAME_LIMIT`（維持 `3915/15258` 比例）由候選 MG `N/B/R/Q` 動態推導；`PST_MG/EG` 保持各棋種列平均值（兵僅計 rank 2–7）；`Mobility` 0-bin 固定於 `θ₀`；`validation bucket` 成員依初始 `θ₀` 固定。
-* **Soft band 與離散項**：`EG Pawn` ±10%（`--pst-pieces P` 且含 `EG_MATERIAL_VALUES` 時解鎖）、`KING_PAWN_PROXIMITY_FACTOR∈[2,8]`、`BISHOP_PAWNS_CENTER_BLOCKED_FACTOR∈[0,3]`、`KING_PROX_FRIENDLY_MULT∈{1,2}`、`KING_DANGER_OUT_*_NUM` / `EG_SAFETY_SCALE` ±35%、`KING_FLANK_*` / `KING_SHELTER_FEEDBACK_NUM` ±50%（細節見 [`tuner.py`](tuner.py) `_setup_constraints`）。
+* **Soft band 與離散項**：`EG Pawn` ±10%（`--pst-pieces P` 且含 `EG_MATERIAL_VALUES` 時解鎖）、`KING_PAWN_PROXIMITY_FACTOR∈[2,8]`、`BISHOP_PAWNS_CENTER_BLOCKED_FACTOR∈[0,3]`、`KING_PROX_FRIENDLY_MULT∈{1,2}`、`KING_DANGER_OUT_*_NUM` / `EG_SAFETY_SCALE` ±35%、`KING_FLANK_*` / `KING_SHELTER_FEEDBACK_NUM` 與 `CONNECTED_SUPPORT_WEIGHT*` 限制於 `θ₀ ± 1`（細節見 [`tuner.py`](tuner.py) `_setup_constraints`）。
 
 ### 常用 CLI 指令（專案根目錄執行）
 
@@ -107,7 +107,7 @@ python tournament_analysis/統計數據.py --target New
 | 檔案 / 目錄 | 職責 |
 | :--- | :--- |
 | `texel_tuner_runner.ipynb`、`notebook_session.py` | 單 Kernel 分區調參工作台與雙重/三驗證閘門控制器 |
-| `tuner.py`、`parameters.py`、`constraint_manager.py` | `SPSAOptimizer`、1,278 維註冊對映與棋理投影約束 |
+| `tuner.py`、`parameters.py`、`constraint_manager.py` | `SPSAOptimizer`、1,276 維註冊對映與棋理投影約束 |
 | `validate_tuned.py`、`scan_scalar_grid.py` | Paired WDL / `K*` 驗證器與小範圍離散整數窮舉 |
 | `constants_snapshot.py`、`sync_constants_snapshot.py` | `classical/constants.py` 側車快照（改常數後必重跑同步） |
 | `tunable_eval.py`、`codegen/` | 可接受 `theta` 之 Numba 評估碼生成器 |
