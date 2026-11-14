@@ -7,7 +7,7 @@ import itertools
 import numpy as np
 
 from tuner.constraint_manager import ConstraintManager
-from tuner.parameters import ParameterManager
+from tuner.parameters import STATIC_ONLY_FROZEN_PARAM_SET, ParameterManager
 from tuner.tuner import SPSAOptimizer, compute_squared_errors, split_dataset_indices
 from tuner.validate_tuned import _bucket_masks
 
@@ -98,12 +98,29 @@ def run_scalar_grid_scan(
     verbose: bool = True,
     indices_override: np.ndarray | None = None,
     respect_constraints: bool = True,
+    static_only: bool = False,
 ) -> dict:
     grids = [_parse_grid(spec) for spec in grid_specs]
     if pm is None:
         pm = ParameterManager()
     if baseline is None:
         baseline = pm.get_initial_theta()
+
+    if static_only:
+        frozen_names = [name for name, _ in grids if name in STATIC_ONLY_FROZEN_PARAM_SET]
+        grids = [g for g in grids if g[0] not in STATIC_ONLY_FROZEN_PARAM_SET]
+        if frozen_names and verbose:
+            print(f"  [Static-Only Grid] Froze non-static scalar(s): {frozen_names}")
+        if not grids:
+            return {
+                "grids": [],
+                "rows": [],
+                "best_values": {},
+                "best_delta": {},
+                "best_theta": baseline.copy(),
+                "skipped": True,
+                "frozen_params": frozen_names,
+            }
 
     scalar_indices: list[int] = []
     for name, _ in grids:
@@ -188,8 +205,11 @@ def run_scalar_grid_scan(
     base_errors = compute_squared_errors(
         bbs, occ, states, results, baseline, k_factor
     )
+    def _bucket_mean(values: np.ndarray, mask: np.ndarray) -> float:
+        return float(np.mean(values[mask])) if np.any(mask) else float("nan")
+
     base_mse = {
-        name: float(np.mean(base_errors[buckets[name]])) for name in report_names
+        name: _bucket_mean(base_errors, buckets[name]) for name in report_names
     }
 
     rows = []
@@ -200,7 +220,7 @@ def run_scalar_grid_scan(
             theta[index] = value
         errors = compute_squared_errors(bbs, occ, states, results, theta, k_factor)
         deltas = {
-            name: float(np.mean(errors[buckets[name]])) - base_mse[name]
+            name: _bucket_mean(errors, buckets[name]) - base_mse[name]
             for name in report_names
         }
         rows.append((values, deltas))
@@ -261,6 +281,11 @@ def main() -> int:
         default=0,
         help="Print only the best N rows after sorting (0 prints every row)",
     )
+    parser.add_argument(
+        "--static-only",
+        action="store_true",
+        help="Freeze non-static/search-coupled params and scan static scalar features only",
+    )
     args = parser.parse_args()
 
     run_scalar_grid_scan(
@@ -274,6 +299,7 @@ def main() -> int:
         seed=args.seed,
         top=args.top,
         verbose=True,
+        static_only=args.static_only,
     )
     return 0
 

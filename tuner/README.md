@@ -27,8 +27,9 @@
 
 * **`USE_PGN_VAL` / `USE_ZURICHESS_VAL`**：分別啟用 `val_pgn.npz` 與 `val_zurichess.npz` 獨立純 WDL 驗證閘門。
 * **`TARGET_ENGINE`**：`"classical"` 或 `"classical_old"`；輸出與備份自動隔離至 `tuner/runs/<engine>_<mode>[_sfXX]/`。
-* **`RANDOM_SEED`**（Notebook 預設 `True` / `TexelTuningSession` 預設 `False`）：為每個 block 產生動態時間種子並寫入紀錄，避免反覆調參重複相同 batch 序列。
-* **`USE_SF_LABELS` & `SF_LAMBDA`**（預設 `0.25`）：在 `train_idx` 的平靜競爭局面（`quiet_annotated_mask` 且 `|sf_cp| <= 1000 cp`，避免殘局庫極端大比分壓低 $K_{\text{sf}}$）擬合 $K_{\text{sf}}$ 並合成 $y_{\text{mix}} = (1-\lambda)\,\text{WDL} + \lambda\,\sigma(K_{\text{sf}}\cdot \text{sf\_cp})$。
+* **`STATIC_FEATURES_ONLY`**（Notebook `# 0` / `TexelTuningSession` 預設 `True`）：僅調優 66 組純靜態評估特徵（凍結 47 組非靜態／搜尋耦合權重，全凍結區塊自動 `SKIPPED (static-only)`）。
+* **`RANDOM_SEED`**（Notebook 預設 `True` / `TexelTuningSession` 預設 `False`）：為每個 block 產生動態時間種子並寫入紀錄，避免反覆調參重複相同 batch 序列（Notebook 各 `run_block` Cell 依 `session.random_seed` 傳入 `seed=0` 啟用時間種子，切為 `False` 時才回落至各 Cell 固定種子）。
+* **`USE_SF_LABELS` & `SF_LAMBDA`**（預設 `0.15`，上限建議 `<= 0.25`）：在 `train_idx` 的平靜競爭局面（`quiet_annotated_mask` 且 `|sf_cp| <= 1000 cp`，避免殘局庫極端大比分壓低 $K_{\text{sf}}$）擬合 $K_{\text{sf}}$ 並合成 $y_{\text{mix}} = (1-\lambda)\,\text{WDL} + \lambda\,\sigma(K_{\text{sf}}\cdot \text{sf\_cp})$。
   * **`train_idx` vs `dev_idx` 分布一致**：`train_idx` 與 `dev_idx` 皆使用 `annotated_mask`（**不再從 `train_idx` 剔除 `|sf_cp - sf_d1_cp| > 180` 局面**，而是讓這類戰術跳分局面保留並退回純 `WDL`），避免刪除動態突破成功樣本導致的存活者偏差。
 * **Google Colab + Drive 支援（`# 00`、`# 9d`）**：本機自動略過 `# 00`；Colab 會掛載 Drive `MyDrive/chess_numba_data/{hce,texel_runs}/` 並支援 `RESUME_FROM_DRIVE = True` 斷線續跑；[`sf19_annotate_colab_runner.ipynb`](sf19_annotate_colab_runner.ipynb) 可於雲端產生並同步 `.sf19.npz`。
 
@@ -52,8 +53,8 @@
 ### (3) `SPSAOptimizer` 的 `scales^2` 座標步幅效應
 * `SPSAOptimizer` 透過 `u = theta / scales` 進行 `auto_scale=True` 縮放：`pert = ck * scales * delta` 且更新步幅再乘 `scales`，使等效座標學習率正比於 **`scales^2`**；同時啟用整數擾動保底 `c_floor = 1.0~1.25` 與 EMA 平滑候選追蹤。
 * 搭配 `USE_SF_LABELS=True`（`dev` MSE 較純 WDL 低 ~35.7%）：
-  * **有較大 `scales` 的非 PST 區塊**（`1a`, `1d`, `2a`, `3`, `4a`, `5a`, `5c`, `7a`, `7b`）：`alpha` 過大易在前 200 步過衝或停滯；實戰宜調低 `alpha`（`15000~45000`）並設衰退視野 `A=150`。
-  * **單棋種 PST (`6a–6d`, `P=128`, `scales=1.0`) 與 `Block 8` (`P=520`)**：格點出現率低且受固定列平均約束，需 `batch_size=131072`、`A=250`、`iters=4500~5000` 與較高 `alpha`（`6a–6d`: `135000~155000`；`Block 8`: `65000`）。
+  * **具較大 `scales` 之非 PST 與高稀疏混合區塊**（`1a`, `1d`, `2a`, `2b`, `3`, `4a`, `5a`, `5b`, `5c`, `7a`, `7b`）：`alpha` 過大或未顯式設定衰退視野 `A` 易在前 50~150 步過衝或停滯；依區塊實測收斂特性調整為 `alpha=9000~45000`、`A=150~200` 與 `batch_size=65536~131072`（如 `1d` 為 `9000/200/98304`、`2b` 為 `35000/180/98304`、`5b` 為 `40000/200/131072`、`7b` 為 `12000/200/131072`）。
+  * **單棋種 PST (`6a–6d`, `P=128`, `scales=1.0`)、`6e_pawn` 與 `Block 8` (`P=520`)**：格點出現率低且受固定列平均約束，`6a–6d` 採 `batch_size=131072`、`A=250`、`iters=4500~5500`（`6c_rook=5500`、`6d_queen=5000`）與 `alpha=135000~155000`；`6e_pawn` 採 `iters=4000`；`Block 8` 採 `iters=6000`、`patience=40`、`alpha=65000`。
   * **Grid 掃描與跨平台注意事項**：`scan_grid` 預設以 `SPSAOptimizer` 約束裁切範圍（如 `CONNECTED_SUPPORT_WEIGHT*` 與 `KING_FLANK_*` 限制於 `θ₀ ± 1`）；後段執行與分析格需自動切換至專案根目錄（勿寫死 Colab 專用 `%cd /content/chess_numba`）；執行長跑時勿從硬碟覆寫開啟中的 `.ipynb`。
 
 ---
@@ -62,6 +63,7 @@
 
 ### 參數約束與耦合
 * **永遠凍結**（113 組共 1,276 維之外）：`MG Pawn = 100`、`MG/EG King = 0`、共線分母（`KING_DANGER_OUT_*_DEN`、`KING_FLANK_ATTACK_DEN`、`KING_SHELTER_FEEDBACK_DEN`）、結構常數（`LAZY_EVAL_THRESHOLD`、`PHASE_*`、`SCALE_FACTOR_*`、`CANDIDATE_PASSER_DIVISOR=2`、`UNSTOPPABLE_PAWN_BONUS=800`）。
+* **靜態特徵專調預設凍結 (`static_features_only=True` / `--static-only`)**：[`TexelTuningSession`](notebook_session.py) 預設凍結 47 組搜尋／戰術耦合或 Match-SPSA 定錨常數（見 [`parameters.py`](parameters.py) `STATIC_ONLY_FROZEN_PARAMS`：`KING_ATTACK_WEIGHTS`、`SAFE_CHECK_*`、`KING_DANGER_*`、`EG_SAFETY_SCALE`、`KING_FLANK_*`、`KING_SHELTER_FEEDBACK_NUM`、`FLANK_ATTACKS`、`THREAT_*`、`PASSED_PATH_*`、`PASSED_DYNAMICS_*`、`IMBALANCE_*`、`SPACE_*`、`TEMPO_BONUS`），僅調靜態位置特徵（Material、PST、Mobility、Outposts/Coordination、Pawn Structure、Passed 靜態表／王距、Shelter/Storm、`INITIATIVE_*`）；執行全非靜態區塊時會自動標記 `SKIPPED (static-only)`。
 * **結構守恆**：`MIDGAME_LIMIT` / `ENDGAME_LIMIT`（維持 `3915/15258` 比例）由候選 MG `N/B/R/Q` 動態推導；`PST_MG/EG` 保持各棋種列平均值（兵僅計 rank 2–7）；`Mobility` 0-bin 固定於 `θ₀`；`validation bucket` 成員依初始 `θ₀` 固定。
 * **Soft band 與離散項**：`EG Pawn` ±10%（`--pst-pieces P` 且含 `EG_MATERIAL_VALUES` 時解鎖）、`KING_PAWN_PROXIMITY_FACTOR∈[2,8]`、`BISHOP_PAWNS_CENTER_BLOCKED_FACTOR∈[0,3]`、`KING_PROX_FRIENDLY_MULT∈{1,2}`、`KING_DANGER_OUT_*_NUM` / `EG_SAFETY_SCALE` ±35%、`KING_FLANK_*` / `KING_SHELTER_FEEDBACK_NUM` 與 `CONNECTED_SUPPORT_WEIGHT*` 限制於 `θ₀ ± 1`（細節見 [`tuner.py`](tuner.py) `_setup_constraints`）。
 
@@ -91,7 +93,7 @@ python -m tuner.scan_scalar_grid --dataset tuner/data/hce/dataset_epd_wdl_20m.np
 python -m tuner.tuner --list-params
 python -m tuner.tuner --dataset tuner/data/hce/dataset_epd_wdl_20m.npz \
   --tune KNIGHT_MOBILITY_BONUS BISHOP_MOBILITY_BONUS ROOK_MOBILITY_BONUS QUEEN_MOBILITY_BONUS \
-  --iter 4000 --batch-size 65536 --alpha 45000 --A 150 --c 2.5 --seed 0 --output tuner/tuned_constants.py
+  --static-only --iter 4000 --batch-size 65536 --alpha 45000 --A 150 --c 2.5 --seed 0 --output tuner/tuned_constants.py
 python -m tuner.apply_tuned --dry-run
 python -m tuner.apply_tuned
 ```

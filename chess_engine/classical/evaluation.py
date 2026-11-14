@@ -420,7 +420,7 @@ def _evaluate_king_attackers(king_sq, color, piece_bbs, occupancy_bbs, enemy_att
         + kd_block * pinned_count
         + flank_term
         + mg_mobility_diff
-        - (shelter_fb_num * mg_shield) // KING_SHELTER_FEEDBACK_DEN
+        - _trunc_div(shelter_fb_num * mg_shield, KING_SHELTER_FEEDBACK_DEN)
         - flank_def_term
         + kd_off
     )

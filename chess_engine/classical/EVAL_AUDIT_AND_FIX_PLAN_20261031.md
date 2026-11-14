@@ -747,3 +747,31 @@ flowchart TD
 * [`tuner/validate_tuned.py`](../../tuner/validate_tuned.py)：補齊 `--zurichess-val` CLI 參數以支援單次三驗證集對照評估。
 * 驗證目標維持**純 WDL**：所有驗收閘門持續不混入 SF19 標籤，避免教師偏好自我強化並維持跨 `lambda` 實驗可比性。
 
+#### 3. 400k 實戰回歸處置：回退乾淨 R2 基線與「僅調靜態特徵 (`static_features_only`)」機制
+* **本機基線還原（未動 `classical_old/`）**：後續基於 Run 2（`17a0790`）續跑之純 WDL / SF15 實驗在 400k nodes/move 對戰清潔 R2 合計 742 局呈現 `-9.84 Elo`（`120W-481D-141L`），確認 Run 2 動用 `SAFE_CHECK_*`、`KING_DANGER_*`、`KING_FLANK_*` 與 `IMBALANCE_DIVISOR` 缺乏勝率依據；故將 [`constants.py`](constants.py) 還原為已驗證之清潔 R2（與 [`classical_old/constants.py`](../classical_old/constants.py) 一致）並同步 [`tuner/constants_snapshot.py`](../../tuner/constants_snapshot.py)。
+* **預設凍結非靜態／搜尋耦合參數（`static_features_only=True`）**：於 [`tuner/parameters.py`](../../tuner/parameters.py) 定義單一來源 `STATIC_ONLY_FROZEN_PARAMS`（47 組：含 `PASSED_PATH_*`、`PASSED_DYNAMICS_*`、`THREAT_*`、`KING_ATTACK_WEIGHTS`、`SAFE_CHECK_*`、`KING_DANGER_*`、`EG_SAFETY_SCALE`、`KING_FLANK_*`、`KING_SHELTER_FEEDBACK_NUM`、`FLANK_ATTACKS`、`IMBALANCE_*`、`SPACE_*`、`TEMPO_BONUS` 與已釘死無效常數），僅保留靜態特徵（Material、`PST_MG/EG`、Mobility、Outposts/Coordination、Pawn Structure、Passed Pawn 靜態表與近王距離、Shelter/Storm、`INITIATIVE_*`）開放 Texel SPSA / Grid 調優；搜尋/戰術高度敏感之王安全與不平衡改保留給 400k Match-SPSA。
+* **管線接線**：[`TexelTuningSession`](../../tuner/notebook_session.py) 預設啟用 `static_features_only=True`（可透過 `reconfigure(static_features_only=...)` 覆寫），`run_block` 與 `scan_grid` 自動過濾或整塊跳過全非靜態區塊並標記 `SKIPPED (static-only)`；[`SPSAOptimizer`](../../tuner/tuner.py)、[`run_scalar_grid_scan`](../../tuner/scan_scalar_grid.py) 與 [`tuner/run.py`](../../tuner/run.py) 皆支援 `--static-only`。
+
+---
+
+### 十一、Phase 11：二次深度審查 — `PAWN_ATTACKS` 反轉、殘局對齊、Pawn Hash 分層與死碼清理 (2026-11-14)
+
+透過逐行交叉比對 [`evaluation.py`](evaluation.py)、[`pawns.py`](pawns.py)、[`endgame.py`](endgame.py)、[`constants.py`](constants.py) 與 `stockfish_11/src/` 並完成實戰導向對齊，本階段修復與優化以下問題：
+
+1. **兵型 `PAWN_ATTACKS` 索引語義反轉（[`pawns.py`](pawns.py)）**：
+   * [`move_generator.py`](move_generator.py) 的 `PAWN_ATTACKS[attacker_color, target_sq]` 儲存的是「攻擊 `target_sq` 的某方兵位置」（如 `PAWN_ATTACKS[WHITE, e4] = {d3, f3}`），與 SF11 `PawnAttacks[Us][s]`（「站在 `s` 上的 `Us` 兵可攻擊格」）相反。
+   * [`evaluate_pawn_structure`](pawns.py) 原誤用 `PAWN_ATTACKS[0, sq]` / `PAWN_ATTACKS[0, sq+8]` 偵測白兵 `lever` / `lever_push`（黑方亦對稱誤用 `PAWN_ATTACKS[1, sq]` / `PAWN_ATTACKS[1, sq-8]`），導致對兵互換（`cond_a`）、並肩突破（`cond_b`）、後兵（`backward`）、`pawn_attacks_span`（前哨與空間）與 `WEAK_LEVER_PENALTY` 全數看錯方向。已修正為白兵查 `PAWN_ATTACKS[1, sq]` / `PAWN_ATTACKS[1, sq+8]`、黑兵查 `PAWN_ATTACKS[0, sq]` / `PAWN_ATTACKS[0, sq-8]`。
+2. **殘局與縮放因子對齊 SF11（[`endgame.py`](endgame.py)）**：
+   * **`KPKP`（單兵對單兵）Bitbase 縮放**：於 `_get_specialized_scale_factor` 補齊 SF11 `Endgame<KPKP>`（非 5–7 線中心兵時移除弱兵探測 `kpk_bitbase_probe`，為和棋則回傳 `SCALE_FACTOR_DRAW`）。同步更新 [`tests/test_endgame_conformance.py`](../../tests/test_endgame_conformance.py) 中 `test_kpkp_scale_factor_draw` 預期為 `0`，並補入非對稱 `KPKP` 和棋測試 `test_kpkp_asymmetric_bitbase_draw`。
+   * **`KRPKB` 角落困王例外**：於 `rk == 4` 同色格象條件補上 `and not (d == 0 and ksq == wksq + 16)`，避免守方王在角落被攻方王隔兩格困死時誤判為 `24` 重度打折（應為 `48`）。
+   * **`KQKRPs` 擴展為多兵堡壘**：移除 `bp == 1`／`get_lsb_index` 限制，改為 `bp >= 1`（黑強 `wp >= 1`）搭配位元遮罩 `(piece_bbs[6] & KING_ATTACKS[bk_sq] & PAWN_ATTACKS[1, br_sq]) != 0`（黑強則 `PAWN_ATTACKS[0, wr_sq]`）。
+3. **Pawn Hash 分層重用與整數截斷一致性（[`pawns.py`](pawns.py)、[`evaluation.py`](evaluation.py)）**：
+   * [`evaluate_pawn_structure_cached`](pawns.py) 在 `pawn_key` 命中但國王格或易位權變動時，直接重用快取之兵型積分／通路兵／攻擊跨度，僅針對變動方重算 `evaluate_shelter_aligned`（含易位虛擬格），零分差純提升快取命中效能。
+   * 連兵殘局分數改由 [`material.py`](material.py) 匯入 `_trunc_div(..., 4)` 取代 `float64` 除法轉 `np.int32`；[`_compute_king_danger_value`](evaluation.py) 的 `mg_shield` 回授項亦改用 `_trunc_div` 對齊向 0 截斷語義。
+4. **死碼與重複表清理（[`constants.py`](constants.py)、[`pawns.py`](pawns.py)、[`endgame.py`](endgame.py)）**：
+   * 移除 [`constants.py`](constants.py) 未使用的 `DE_BRUIJN_SEQUENCE` / `DE_BRUIJN_INDEX`（並同步 [`tuner/constants_snapshot.py`](../../tuner/constants_snapshot.py)）。
+   * 移除 [`endgame.py`](endgame.py) 未使用的 `mate_kxk`、重複 `# 2. KBPKB` 註解，以及不可達的 `# 5. KRKP` 縮放分支（因 `KRKP` 已於 `evaluate_special_endgame_with_material` 無條件早退）。
+   * 統一從 [`pawns.py`](pawns.py) 匯入 `MANHATTAN_DISTANCE` / `CHEBYSHEV_DISTANCE` 至 [`endgame.py`](endgame.py)，並移除 [`pawns.py`](pawns.py) 重複定義的 `NOT_A_FILE` / `NOT_H_FILE`。
+5. **驗證結論**：重編 [`tuner/tunable_eval.py`](../../tuner/tunable_eval.py) 並通過 `unittest` 共 **60 項測試**（含 `test_endgame_conformance`、`test_phase4_sf11_alignment` 500-FEN 鏡像對稱性、`test_passed_pawn_order`、`test_sync_constants_snapshot`、`test_tunable_eval_parity`、`test_runtime_eval_weights`）。`classical_old/` 未更動，待後續開局庫或長時控對戰驗收勝率後再評估同步基準。
+
+

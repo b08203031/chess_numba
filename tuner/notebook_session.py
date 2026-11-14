@@ -34,7 +34,7 @@ from tuner.data_pipeline.annotate_sf_labels import (
     compute_quiet_and_tactical_masks,
     default_sidecar_path,
 )
-from tuner.scan_scalar_grid import run_scalar_grid_scan
+from tuner.scan_scalar_grid import _parse_grid, run_scalar_grid_scan
 from tuner.tunable_eval import evaluate_position_tunable
 from tuner.tuner import (
     SPSAOptimizer,
@@ -256,6 +256,7 @@ class TexelTuningSession:
         sf_max_tactical_gap: int = 180,
         drive_backup_dir: str | Path | None = None,
         random_seed: bool = False,
+        static_features_only: bool = True,
     ):
         self.train_path = Path(train_npz)
         self.pgn_val_path = Path(pgn_val_npz) if pgn_val_npz else None
@@ -274,6 +275,7 @@ class TexelTuningSession:
         self.sf_max_tactical_gap = int(sf_max_tactical_gap)
         self.drive_backup_dir = Path(drive_backup_dir) if drive_backup_dir else None
         self.random_seed = bool(random_seed)
+        self.static_features_only = bool(static_features_only)
         (
             self.target_engine,
             self.target_constants_path,
@@ -487,9 +489,9 @@ class TexelTuningSession:
         print(
             f"Session ready in {time.time() - t0:.1f}s! "
             f"[target={self.target_engine} -> {_display_path(self.target_constants_path)} | "
-            f"use_pgn_val={self.use_pgn_val} | labels={lbl_tag} | "
-            f"auto_K*={self._step_dev_k_star:.3f} | runs={_display_path(self.runs_dir)}] "
-            f"(RAM: {_ram_summary_gb()})"
+            f"use_pgn_val={self.use_pgn_val} | static_only={self.static_features_only} | "
+            f"labels={lbl_tag} | auto_K*={self._step_dev_k_star:.3f} | "
+            f"runs={_display_path(self.runs_dir)}] (RAM: {_ram_summary_gb()})"
         )
 
     def _update_run_directories(self) -> None:
@@ -838,11 +840,14 @@ class TexelTuningSession:
         sf_max_tactical_gap: int | None = None,
         drive_backup_dir: str | Path | None = None,
         random_seed: bool | None = None,
+        static_features_only: bool | None = None,
     ) -> None:
         """Switch validation mode, SF19 label blend, or target engine in-place without reloading 20M rows."""
         t0 = time.time()
         if random_seed is not None:
             self.random_seed = bool(random_seed)
+        if static_features_only is not None:
+            self.static_features_only = bool(static_features_only)
         if drive_backup_dir is not None:
             self.drive_backup_dir = Path(drive_backup_dir) if drive_backup_dir else None
         if pgn_val_npz is not None:
@@ -945,7 +950,8 @@ class TexelTuningSession:
         print(
             f"Reconfigured session in {time.time() - t0:.1f}s (reused preloaded {self.train_path.name}):\n"
             f"  target_engine = {self.target_engine!r} -> {_display_path(self.target_constants_path)}\n"
-            f"  use_pgn_val   = {self.use_pgn_val} | use_zurichess_val = {self.use_zurichess_val}\n"
+            f"  use_pgn_val   = {self.use_pgn_val} | use_zurichess_val = {self.use_zurichess_val} | "
+            f"static_only = {getattr(self, 'static_features_only', True)}\n"
             f"  train_labels  = {lbl_desc} | dev_K*={self._step_dev_k_star:.3f} | "
             f"holdout_K*={self._step_holdout_k_star:.3f}\n"
             f"  runs_dir      = {_display_path(self.runs_dir)}"
@@ -1685,8 +1691,39 @@ class TexelTuningSession:
         k_factor: float | str = "auto",
         auto_scale: bool = True,
         verbose_buckets: str = "endpoints",
+        static_only: bool | None = None,
     ) -> dict:
         """Run SPSA on one block in-memory and validate on unseen sets."""
+        eff_static_only = bool(
+            getattr(self, "static_features_only", True)
+            if static_only is None
+            else static_only
+        )
+        eff_tune = list(tune) if tune is not None else None
+        if eff_static_only and eff_tune is not None:
+            eff_tune, frozen_in_tune = parameters_mod.partition_static_only_params(eff_tune)
+            if not eff_tune:
+                print(
+                    f"=== Skipping Block [{block_id}] "
+                    f"(static_features_only=True; non-static params frozen: {', '.join(frozen_in_tune)}) ==="
+                )
+                record = {
+                    "block_id": block_id,
+                    "path": None,
+                    "seed": None,
+                    "verdict": "SKIPPED (static-only)",
+                    "skipped": True,
+                    "frozen_params": frozen_in_tune,
+                    "changes": [],
+                }
+                self.history[block_id] = record
+                return record
+            if frozen_in_tune:
+                print(
+                    f"  [Static-Only] Block [{block_id}] freezing non-static param(s): "
+                    f"{', '.join(frozen_in_tune)}"
+                )
+
         if (
             (getattr(self, "random_seed", False) and (seed is None or seed == 0 or seed == "random" or seed == "time"))
             or seed is None
@@ -1717,7 +1754,7 @@ class TexelTuningSession:
             alpha=alpha,
             c=c,
             A=A,
-            include_list=tune,
+            include_list=eff_tune,
             exclude_list=exclude,
             batch_size=batch_size,
             eval_sample=self.eval_sample,
@@ -1736,6 +1773,7 @@ class TexelTuningSession:
             c_floor=c_floor,
             auto_scale=auto_scale,
             verbose_buckets=verbose_buckets,
+            static_only=eff_static_only,
         )
         val_header = (
             "Dual Unseen Validation"
@@ -1758,8 +1796,48 @@ class TexelTuningSession:
         eval_sample: int = 1_000_000,
         k_factor: float | str = "auto",
         top: int = 10,
+        static_only: bool | None = None,
     ) -> dict:
         """Exhaustively scan discrete integer scalars on dev, then verify on unseen sets."""
+        eff_static_only = bool(
+            getattr(self, "static_features_only", True)
+            if static_only is None
+            else static_only
+        )
+        eff_grids = list(grids)
+        if eff_static_only:
+            kept_grids: list[str] = []
+            frozen_grids: list[str] = []
+            for spec in eff_grids:
+                gname, _ = _parse_grid(spec)
+                if gname in parameters_mod.STATIC_ONLY_FROZEN_PARAM_SET:
+                    frozen_grids.append(gname)
+                else:
+                    kept_grids.append(spec)
+            if not kept_grids:
+                print(
+                    f"=== Skipping Grid [{block_id}] "
+                    f"(static_features_only=True; non-static scalars frozen: {', '.join(frozen_grids)}) ==="
+                )
+                record = {
+                    "block_id": block_id,
+                    "path": None,
+                    "seed": None,
+                    "verdict": "SKIPPED (static-only)",
+                    "skipped": True,
+                    "frozen_params": frozen_grids,
+                    "grid_best_values": {},
+                    "changes": [],
+                }
+                self.history[block_id] = record
+                return record
+            if frozen_grids:
+                print(
+                    f"  [Static-Only] Grid [{block_id}] freezing non-static scalar(s): "
+                    f"{', '.join(frozen_grids)}"
+                )
+            eff_grids = kept_grids
+
         eff_k = self._resolve_k_factor(k_factor)
         out_path = self.runs_dir / f"{block_id}.py"
         print(
@@ -1768,7 +1846,7 @@ class TexelTuningSession:
         )
         scan = run_scalar_grid_scan(
             dataset=self.train_data,
-            grid_specs=grids,
+            grid_specs=eff_grids,
             pm=self.pm,
             baseline=self.step_baseline_theta,
             split=split,
@@ -1778,6 +1856,7 @@ class TexelTuningSession:
             top=top,
             verbose=True,
             indices_override=(self.dev_idx if split == "dev" else None),
+            static_only=eff_static_only,
         )
         best_theta = scan["best_theta"]
         content = self.pm.update_constants_string(best_theta)
@@ -1846,8 +1925,8 @@ class TexelTuningSession:
             if require_pass is not None
             else getattr(self, "require_pass_to_accept", False)
         )
+        rec = self.history.get(block_id)
         if must_pass:
-            rec = self.history.get(block_id)
             if rec is None:
                 print(f"\n[WARN] [{block_id}] 查無驗證紀錄 (可能尚未執行) -> 略過套用。")
                 return []
@@ -1862,6 +1941,12 @@ class TexelTuningSession:
                 f"\n[PASS] [{block_id}] Gate 判定為 PASS -> "
                 f"正在套用變更至 {target_rel} 並建立備份..."
             )
+        elif rec is not None and rec.get("skipped"):
+            print(
+                f"\n[SKIP] [{block_id}] Skipped under static_features_only=True -> "
+                f"keeping {target_rel} unchanged."
+            )
+            return []
 
         cand_path = self.runs_dir / f"{block_id}.py"
         if not cand_path.is_file():

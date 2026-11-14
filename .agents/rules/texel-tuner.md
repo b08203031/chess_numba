@@ -20,6 +20,8 @@ Verification suite: `tests/test_texel_parameterization.py`.
 
 ## 2. Gate & Sub-bucket Safety (MUST)
 
+* **`static_features_only=True` default**: `TexelTuningSession` defaults to `static_features_only=True`, freezing search/tactics-coupled and Match-SPSA-anchored groups (`tuner/parameters.py:STATIC_ONLY_FROZEN_PARAMS`: king danger/safe checks/flank attack multipliers, threats, passed path/dynamics, quadratic imbalance & divisor, space divisors/threshold, tempo) so Texel only tunes static features. Use `--static-only` on CLI runs (`tuner.tuner`, `tuner.run`, `tuner.scan_scalar_grid`); keep dynamic safety/imbalance tuning in Match-SPSA unless explicitly overridden.
+
 * Maintain noise-floored guards in `TexelTuningSession._gate_summary` against localized regressions masked by overall averages:
   * Holdout: `pure king+pawns` (`z > 3.5` & `delta > 2e-5` -> `REJECT`), `phase=0` (`z > 3.5` & `delta > 1e-5` -> `REJECT`).
   * Independent (`val_pgn` / `val_zurichess`): `all @ K*` (`z > 2.5`), `broad-EG` (`z > 3.0 & delta > 1.5e-5`), `pure king+pawns` (`z > 4.0 & delta > 2e-5`), and extreme `castling!=0` collapses (`z > 4.0 & delta > 2e-5` -> `REJECT`, keeping milder caution bounds).

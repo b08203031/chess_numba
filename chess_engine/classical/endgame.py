@@ -10,30 +10,8 @@ from chess_engine.classical.constants import (
     EG_MATERIAL_VALUES, MG_MATERIAL_VALUES, VALUE_KNOWN_WIN, MATE_IN_MAX_PLY,
 )
 from chess_engine.classical.bitboard_utils import get_lsb_index, count_bits, FILE_MASKS, BB_SQUARES
-from chess_engine.classical.move_generator import get_bishop_attacks, KING_ATTACKS, KNIGHT_ATTACKS
-
-# --- Helper Distance Tables ---
-def _create_manhattan_distance_table():
-    table = np.zeros((64, 64), dtype=np.int32)
-    for sq1 in range(64):
-        rank1, file1 = sq1 // 8, sq1 % 8
-        for sq2 in range(64):
-            rank2, file2 = sq2 // 8, sq2 % 8
-            table[sq1, sq2] = abs(rank1 - rank2) + abs(file1 - file2)
-    return table
-
-MANHATTAN_DISTANCE = _create_manhattan_distance_table()
-
-def _create_chebyshev_distance_table():
-    table = np.zeros((64, 64), dtype=np.int32)
-    for sq1 in range(64):
-        rank1, file1 = sq1 // 8, sq1 % 8
-        for sq2 in range(64):
-            rank2, file2 = sq2 // 8, sq2 % 8
-            table[sq1, sq2] = max(abs(rank1 - rank2), abs(file1 - file2))
-    return table
-
-CHEBYSHEV_DISTANCE = _create_chebyshev_distance_table()
+from chess_engine.classical.move_generator import get_bishop_attacks, KING_ATTACKS, KNIGHT_ATTACKS, PAWN_ATTACKS
+from chess_engine.classical.pawns import MANHATTAN_DISTANCE, CHEBYSHEV_DISTANCE
 
 # PushToEdges: 8x8 table pushing enemy king to edges
 PUSH_TO_EDGES = np.array([
@@ -199,12 +177,6 @@ def kpk_bitbase_probe(wksq, psq, bksq, us):
     )
     return (KPK_BITBASE[idx // 32] & (np.uint32(1) << np.uint32(idx & 31))) != np.uint32(0)
 
-
-@numba.njit(cache=True, boundscheck=False, fastmath=True)
-def mate_kxk(strong_king_sq, weak_king_sq):
-    dist = CHEBYSHEV_DISTANCE[strong_king_sq, weak_king_sq]
-    edge_bonus = PUSH_TO_EDGES[weak_king_sq]
-    return np.int32(PUSH_CLOSE[dist] + edge_bonus)
 
 @numba.njit(cache=True, boundscheck=False, fastmath=True, inline='always')
 def opposite_colors(sq1, sq2):
@@ -802,8 +774,6 @@ def _get_specialized_scale_factor(
                     
     # 2. KBPKB (King + Bishop + Pawn vs King + Bishop)
     # SF11 endgame.cpp lines 619-645
-    # 2. KBPKB (King + Bishop + Pawn vs King + Bishop)
-    # SF11 endgame.cpp lines 619-645
     if strong_side == 0 and w_minor_major == 1 and wb == 1 and wp == 1 and b_minor_major == 1 and bb == 1 and bp == 0:
         wb_sq = get_lsb_index(piece_bbs[2])
         bb_sq = get_lsb_index(piece_bbs[8])
@@ -869,6 +839,26 @@ def _get_specialized_scale_factor(
                     pb_temp &= pb_temp - np.uint64(1)
                 if ok:
                     return SCALE_FACTOR_DRAW
+
+    # KPKP (King + Pawn vs King + Pawn)
+    # SF11 endgame.cpp lines 786-806
+    if w_minor_major == 0 and b_minor_major == 0 and wp == 1 and bp == 1:
+        stm = int(game_state[0])
+        if strong_side == 0:
+            psq = get_lsb_index(piece_bbs[0])
+            wksq = normalize_square(wk_sq, 0, psq)
+            bksq = normalize_square(bk_sq, 0, psq)
+            npsq = normalize_square(psq, 0, psq)
+            us = np.int32(0) if stm == 0 else np.int32(1)
+        else:
+            psq = get_lsb_index(piece_bbs[6])
+            wksq = normalize_square(bk_sq, 1, psq)
+            bksq = normalize_square(wk_sq, 1, psq)
+            npsq = normalize_square(psq, 1, psq)
+            us = np.int32(0) if stm == 1 else np.int32(1)
+        if (npsq // 8) >= 4 and (npsq % 8) != 0:
+            return np.int32(-1)
+        return np.int32(-1) if kpk_bitbase_probe(wksq, npsq, bksq, us) else SCALE_FACTOR_DRAW
 
     # KNPKB (Knight + Pawn vs Bishop)
     # SF11 endgame.cpp lines 758-776
@@ -1023,13 +1013,14 @@ def _get_specialized_scale_factor(
         bb_sq_orig = get_lsb_index(piece_bbs[8])
         wp_sq_orig = get_lsb_index(piece_bbs[0])
         if wp_sq_orig % 8 == 0 or wp_sq_orig % 8 == 7:
+            wksq = normalize_square(wk_sq, 0, wp_sq_orig)
             ksq = normalize_square(bk_sq_orig, 0, wp_sq_orig)
             bsq = normalize_square(bb_sq_orig, 0, wp_sq_orig)
             psq = normalize_square(wp_sq_orig, 0, wp_sq_orig)
             rk = psq // 8
             if rk == 4 and not opposite_colors(bsq, psq):
                 d = CHEBYSHEV_DISTANCE[psq + 24, ksq]
-                if d <= 2:
+                if d <= 2 and not (d == 0 and ksq == wksq + 16):
                     return 24
                 else:
                     return 48
@@ -1045,13 +1036,14 @@ def _get_specialized_scale_factor(
         wb_sq_orig = get_lsb_index(piece_bbs[2])
         bp_sq_orig = get_lsb_index(piece_bbs[6])
         if bp_sq_orig % 8 == 0 or bp_sq_orig % 8 == 7:
+            wksq = normalize_square(bk_sq, 1, bp_sq_orig)
             ksq = normalize_square(wk_sq_orig, 1, bp_sq_orig)
             bsq = normalize_square(wb_sq_orig, 1, bp_sq_orig)
             psq = normalize_square(bp_sq_orig, 1, bp_sq_orig)
             rk = psq // 8
             if rk == 4 and not opposite_colors(bsq, psq):
                 d = CHEBYSHEV_DISTANCE[psq + 24, ksq]
-                if d <= 2:
+                if d <= 2 and not (d == 0 and ksq == wksq + 16):
                     return 24
                 else:
                     return 48
@@ -1084,25 +1076,6 @@ def _get_specialized_scale_factor(
         if wk_file == p_file and wk_rank < p_rank:
             if CHEBYSHEV_DISTANCE[wk_sq, p_sq - 8] <= 2 and CHEBYSHEV_DISTANCE[wn_sq, p_sq - 8] <= 2:
                 return SCALE_FACTOR_DRAW
-
-    # 5. KRKP (Rook vs Pawn)
-    if strong_side == 0 and w_minor_major == 1 and wr == 1 and wp == 0 and b_minor_major == 0 and bp == 1:
-        p_sq = get_lsb_index(piece_bbs[6])
-        p_rank = p_sq // 8
-        p_file = p_sq % 8
-        if p_rank == 1:  # Black pawn on 2nd rank
-            promo_sq = p_file
-            if CHEBYSHEV_DISTANCE[wk_sq, promo_sq] > 3 and CHEBYSHEV_DISTANCE[bk_sq, promo_sq] <= 1:
-                return SCALE_FACTOR_KRPKR_FORTRESS
-                
-    if strong_side == 1 and b_minor_major == 1 and br == 1 and bp == 0 and w_minor_major == 0 and wp == 1:
-        p_sq = get_lsb_index(piece_bbs[0])
-        p_rank = p_sq // 8
-        p_file = p_sq % 8
-        if p_rank == 6:  # White pawn on 7th rank
-            promo_sq = p_file + 56
-            if CHEBYSHEV_DISTANCE[bk_sq, promo_sq] > 3 and CHEBYSHEV_DISTANCE[wk_sq, promo_sq] <= 1:
-                return SCALE_FACTOR_KRPKR_FORTRESS
 
     # 6. KRPKR (Rook + Pawn vs Rook) - PHILIDOR & GLAURUNG RULES
     is_krpkr = False
@@ -1198,22 +1171,18 @@ def _get_specialized_scale_factor(
                 val = 24 - 2 * CHEBYSHEV_DISTANCE[wksq, bksq]
                 return max(0, val)
 
-    # 7. KQKRPs (Queen vs Rook + Pawn)
-    if strong_side == 0 and w_minor_major == 1 and wq == 1 and wp == 0 and b_minor_major == 1 and br == 1 and bp == 1:
-        p_sq = get_lsb_index(piece_bbs[6])
+    # 7. KQKRPs (Queen vs Rook + Pawns)
+    if strong_side == 0 and w_minor_major == 1 and wq == 1 and wp == 0 and b_minor_major == 1 and br == 1 and bp >= 1:
         br_sq = get_lsb_index(piece_bbs[9])
-        if 7 - (bk_sq // 8) <= 1 and 7 - (wk_sq // 8) >= 3 and 7 - (br_sq // 8) == 2:
-            if CHEBYSHEV_DISTANCE[bk_sq, p_sq] <= 1:
-                if p_sq // 8 == br_sq // 8 + 1 and abs(p_sq % 8 - br_sq % 8) == 1:
-                    return SCALE_FACTOR_DRAW
-                    
-    if strong_side == 1 and b_minor_major == 1 and bq == 1 and bp == 0 and w_minor_major == 1 and wr == 1 and wp == 1:
-        p_sq = get_lsb_index(piece_bbs[0])
+        if (bk_sq // 8) >= 6 and (wk_sq // 8) <= 4 and (br_sq // 8) == 5:
+            if (piece_bbs[6] & KING_ATTACKS[bk_sq] & PAWN_ATTACKS[1, br_sq]) != np.uint64(0):
+                return SCALE_FACTOR_DRAW
+
+    if strong_side == 1 and b_minor_major == 1 and bq == 1 and bp == 0 and w_minor_major == 1 and wr == 1 and wp >= 1:
         wr_sq = get_lsb_index(piece_bbs[3])
-        if wk_sq // 8 <= 1 and bk_sq // 8 >= 3 and wr_sq // 8 == 2:
-            if CHEBYSHEV_DISTANCE[wk_sq, p_sq] <= 1:
-                if p_sq // 8 == wr_sq // 8 - 1 and abs(p_sq % 8 - wr_sq % 8) == 1:
-                    return SCALE_FACTOR_DRAW
+        if (wk_sq // 8) <= 1 and (bk_sq // 8) >= 3 and (wr_sq // 8) == 2:
+            if (piece_bbs[0] & KING_ATTACKS[wk_sq] & PAWN_ATTACKS[0, wr_sq]) != np.uint64(0):
+                return SCALE_FACTOR_DRAW
 
     return np.int32(-1)
 

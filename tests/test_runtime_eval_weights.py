@@ -90,16 +90,16 @@ class TestRuntimeEvalWeights(unittest.TestCase):
         score_base4, _, _ = _evaluate_position_jit(p4, o4, g4, False, ctx_base4)
 
         ctx_boosted4 = make_test_context()
-        ctx_boosted4.eval_weights[EW_PASS_R4_EG] += np.int32(100)
+        ctx_boosted4.eval_weights[EW_PASS_R4_EG] += np.int32(-64)
         score_boosted4, _, _ = _evaluate_position_jit(p4, o4, g4, False, ctx_boosted4)
 
         self.assertEqual(
             int(score_boosted4 - score_base4),
-            100,
-            f"Unscaled KP (sf=64) must reflect full +100 EW_PASS_R4_EG delta: got {score_boosted4 - score_base4}",
+            -64,
+            f"Unscaled KP (sf=64) must reflect full -64 EW_PASS_R4_EG delta: got {score_boosted4 - score_base4}",
         )
 
-        # 2) Scaled KP (strong side has 2 pawns -> sf = min(64, 36 + 7*2) = 50; 100 * 50 // 64 = 78):
+        # 2) Scaled KP (strong side has 2 pawns -> sf = min(64, 36 + 7*2) = 50; -64 * 50 // 64 = -50, 0 remainder):
         # White Ka1, Pd5 vs Black Kh8, Pg7, Ph7
         fen_scaled = "7k/6pp/8/3P4/8/8/8/K7 w - - 0 1"
         p2, o2, g2 = parse_fen(fen_scaled)
@@ -108,13 +108,13 @@ class TestRuntimeEvalWeights(unittest.TestCase):
         score_base2, _, _ = _evaluate_position_jit(p2, o2, g2, False, ctx_base2)
 
         ctx_boosted2 = make_test_context()
-        ctx_boosted2.eval_weights[EW_PASS_R4_EG] += np.int32(100)
+        ctx_boosted2.eval_weights[EW_PASS_R4_EG] += np.int32(-64)
         score_boosted2, _, _ = _evaluate_position_jit(p2, o2, g2, False, ctx_boosted2)
 
         self.assertEqual(
             int(score_boosted2 - score_base2),
-            78,
-            f"Scaled KP (sf=50) must scale +100 EW_PASS_R4_EG delta to +78 cp: got {score_boosted2 - score_base2}",
+            -50,
+            f"Scaled KP (sf=50) must scale -64 EW_PASS_R4_EG delta to -50 cp: got {score_boosted2 - score_base2}",
         )
 
 

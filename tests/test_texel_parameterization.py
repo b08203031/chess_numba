@@ -41,7 +41,12 @@ from tuner.notebook_session import (
     _parse_proc_meminfo_gb,
     build_blended_labels,
 )
-from tuner.parameters import ParameterManager
+from tuner.parameters import (
+    STATIC_ONLY_FROZEN_PARAM_SET,
+    STATIC_ONLY_FROZEN_PARAMS,
+    ParameterManager,
+)
+from tuner.scan_scalar_grid import run_scalar_grid_scan
 from tuner.tuner import SPSAOptimizer, split_dataset_indices
 from tuner.validate_tuned import run_paired_validation
 
@@ -297,6 +302,38 @@ class TestIntegerAwareTuningBands(unittest.TestCase):
             set(self.pm.list_param_names()) - tokens - intentionally_pinned_or_dead
         )
         self.assertEqual(missing, [], msg=f"Active params missing from notebook: {missing}")
+
+    def test_notebook_run_block_seeds_honor_random_seed_toggle(self):
+        nb_path = Path(__file__).resolve().parents[1] / "tuner" / "texel_tuner_runner.ipynb"
+        nb = json.loads(nb_path.read_text(encoding="utf-8"))
+        checked = 0
+        for idx, cell in enumerate(nb.get("cells", [])):
+            if cell.get("cell_type") != "code":
+                continue
+            src = "".join(cell.get("source", []))
+            if "session.run_block(" not in src:
+                continue
+            cleaned = "\n".join(
+                line for line in src.splitlines()
+                if not line.lstrip().startswith(("!", "%"))
+            )
+            tree = ast.parse(cleaned, filename=f"{nb_path.name}#code_cell_{idx}")
+            for node in ast.walk(tree):
+                if (
+                    isinstance(node, ast.Call)
+                    and isinstance(node.func, ast.Attribute)
+                    and node.func.attr == "run_block"
+                ):
+                    checked += 1
+                    seed_kw = next((kw for kw in node.keywords if kw.arg == "seed"), None)
+                    if seed_kw is not None:
+                        seed_src = ast.unparse(seed_kw.value)
+                        self.assertIn(
+                            "random_seed",
+                            seed_src,
+                            msg=f"Cell {idx} hardcodes run_block seed={seed_src!r}, bypassing RANDOM_SEED toggle",
+                        )
+        self.assertEqual(checked, 17)
 
 
 class TestSplitDatasetIndices(unittest.TestCase):
@@ -1341,6 +1378,160 @@ class TestSfMixedLabelsAndKStarGate(unittest.TestCase):
             stdout_text = buf.getvalue()
             self.assertIn("sf19-quiet z=", stdout_text)
             self.assertEqual(stdout_text.count("| sf19-quiet z="), 3)
+
+
+class TestStaticFeaturesOnlyMode(unittest.TestCase):
+    def test_static_only_frozen_list_names_are_valid_and_freeze_expected_groups(self):
+        pm = ParameterManager()
+        registered = set(pm.list_param_names())
+        self.assertTrue(STATIC_ONLY_FROZEN_PARAM_SET <= registered)
+        self.assertEqual(len(STATIC_ONLY_FROZEN_PARAMS), len(STATIC_ONLY_FROZEN_PARAM_SET))
+
+        optimizer = SPSAOptimizer.__new__(SPSAOptimizer)
+        optimizer.param_manager = pm
+        optimizer.constraint_manager = ConstraintManager(pm)
+        optimizer._setup_constraints()
+        optimizer.best_theta = pm.get_initial_theta()
+
+        mask = optimizer._create_mask(static_only=True)
+        for name in (
+            "SAFE_CHECK_QUEEN",
+            "KING_ATTACK_WEIGHTS",
+            "KING_DANGER_WEAK_SQ",
+            "KING_DANGER_OUT_MG_NUM",
+            "EG_SAFETY_SCALE",
+            "KING_FLANK_ATTACK_NUM",
+            "FLANK_ATTACKS",
+            "THREAT_SAFE_PAWN",
+            "THREAT_HANGING",
+            "PASSED_PATH_SAFE_NONE_ATTACK",
+            "PASSED_DYNAMICS_MULT",
+            "IMBALANCE_DIVISOR",
+            "IMBALANCE_QUADRATIC_OURS",
+            "TEMPO_BONUS",
+            "SPACE_THRESHOLD",
+        ):
+            start, count = pm.get_param_indices(name)
+            self.assertEqual(
+                float(np.sum(mask[start : start + count])),
+                0.0,
+                msg=f"{name} must be completely frozen in static_only mode",
+            )
+
+        for name in (
+            "MG_MATERIAL_VALUES",
+            "EG_MATERIAL_VALUES",
+            "PST_MG",
+            "PST_EG",
+            "KNIGHT_MOBILITY_BONUS",
+            "PASSED_PAWN_BONUS",
+            "ISOLATED_PAWN_PENALTY",
+            "OUTPOST_BONUS_KNIGHT",
+            "SHELTER_STRENGTH",
+            "INITIATIVE_PASSED_WEIGHT_EG",
+        ):
+            start, count = pm.get_param_indices(name)
+            self.assertGreater(
+                float(np.sum(mask[start : start + count])),
+                0.0,
+                msg=f"{name} must stay active in static_only mode",
+            )
+
+        mixed_mask = optimizer._create_mask(
+            include_list=["FLANK_ATTACKS", "SHELTER_STRENGTH"],
+            static_only=True,
+        )
+        flank_s, flank_c = pm.get_param_indices("FLANK_ATTACKS")
+        shel_s, shel_c = pm.get_param_indices("SHELTER_STRENGTH")
+        self.assertEqual(float(np.sum(mixed_mask[flank_s : flank_s + flank_c])), 0.0)
+        self.assertGreater(float(np.sum(mixed_mask[shel_s : shel_s + shel_c])), 0.0)
+
+    def test_session_and_grid_skip_non_static_blocks_by_default(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_dir = Path(tmp)
+            main_npz = tmp_dir / "main.npz"
+            const_copy = tmp_dir / "constants.py"
+            shutil.copyfile(CONSTANTS_PATH, const_copy)
+
+            fens = [
+                "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
+                "r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1",
+                "4k3/8/8/8/8/8/4P3/4K3 w - - 0 1",
+                "4k3/4p3/8/8/8/8/8/4K3 b - - 0 1",
+                "4k3/8/8/8/8/8/3N4/4K3 w - - 0 1",
+                "4k3/8/8/8/8/8/3R4/4K3 w - - 0 1",
+            ]
+            pb, ob, gs = [], [], []
+            for idx in range(60):
+                p, o, g = parse_fen_to_arrays(fens[idx % len(fens)])
+                pb.append(p)
+                ob.append(o)
+                gs.append(g)
+            wdl = np.tile(np.array([1.0, 0.5, 0.0], dtype=np.float32), 20)
+            np.savez(
+                main_npz,
+                piece_bbs=np.asarray(pb, dtype=np.uint64),
+                occupancy_bbs=np.asarray(ob, dtype=np.uint64),
+                game_states=np.asarray(gs, dtype=np.int32),
+                results=wdl,
+            )
+
+            buf = io.StringIO()
+            with patch("sys.stdout", buf):
+                session = TexelTuningSession(
+                    train_npz=main_npz,
+                    pgn_val_npz=None,
+                    use_pgn_val=False,
+                    eval_sample=10,
+                    holdout_sample=10,
+                    target_engine="classical",
+                    target_constants_path=const_copy,
+                    runs_dir=tmp_dir / "runs",
+                )
+                self.assertTrue(session.static_features_only)
+
+                skip_blk = session.run_block(
+                    "block5a_king_danger",
+                    tune=["KING_ATTACK_WEIGHTS", "SAFE_CHECK_QUEEN"],
+                    iters=10,
+                )
+                self.assertTrue(skip_blk["skipped"])
+                self.assertEqual(skip_blk["verdict"], "SKIPPED (static-only)")
+                self.assertEqual(session.accept_if_pass("block5a_king_danger"), [])
+                self.assertEqual(session.accept("block5a_king_danger"), [])
+
+                skip_grid = session.scan_grid(
+                    "block7c_space_tempo_grid",
+                    grids=["TEMPO_BONUS=18:20", "SPACE_THRESHOLD=5800:6000:100"],
+                )
+                self.assertTrue(skip_grid["skipped"])
+                self.assertEqual(skip_grid["verdict"], "SKIPPED (static-only)")
+                self.assertEqual(session.accept_if_pass("block7c_space_tempo_grid"), [])
+
+                # Mixed grid keeps static KING_PROX_FRIENDLY_MULT while freezing PASSED_DYNAMICS_MULT.
+                partial_grid = session.scan_grid(
+                    "block1b_mixed",
+                    grids=["PASSED_DYNAMICS_MULT=3:5", "KING_PROX_FRIENDLY_MULT=1:2"],
+                    eval_sample=10,
+                )
+                self.assertFalse(partial_grid.get("skipped", False))
+                self.assertNotIn("PASSED_DYNAMICS_MULT", partial_grid["grid_best_values"])
+                self.assertIn("KING_PROX_FRIENDLY_MULT", partial_grid["grid_best_values"])
+
+                # Direct grid helper skips cleanly when all scalars are non-static.
+                direct_skip = run_scalar_grid_scan(
+                    main_npz,
+                    ["IMBALANCE_DIVISOR=19:21"],
+                    eval_sample=10,
+                    holdout_sample=10,
+                    verbose=False,
+                    static_only=True,
+                )
+                self.assertTrue(direct_skip["skipped"])
+                self.assertEqual(direct_skip["best_values"], {})
+
+                session.reconfigure(static_features_only=False)
+                self.assertFalse(session.static_features_only)
 
 
 if __name__ == "__main__":

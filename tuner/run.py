@@ -155,6 +155,8 @@ def cmd_tune(args: argparse.Namespace) -> int:
     ]
     if getattr(args, "no_auto_scale", False):
         cmd.append("--no-auto-scale")
+    if getattr(args, "static_only", False):
+        cmd.append("--static-only")
     if args.tune:
         cmd += ["--tune", *args.tune]
     if args.exclude:
@@ -270,6 +272,11 @@ def main() -> int:
         p.add_argument("--c", type=float, default=2.5)
         p.add_argument("--c-floor", type=float, default=1.25)
         p.add_argument("--no-auto-scale", action="store_true")
+        p.add_argument(
+            "--static-only",
+            action="store_true",
+            help="Freeze non-static/search-coupled params and tune static HCE features only",
+        )
 
     p_tune = sub.add_parser("tune", help="Run SPSA on existing dataset.npz")
     add_tune_args(p_tune)

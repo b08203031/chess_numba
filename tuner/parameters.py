@@ -163,6 +163,97 @@ def _collect_param_specs(constants_source=None):
     ]
 
 
+# Non-static / search-tactics-coupled / Match-SPSA-anchored parameter groups
+# that are frozen when Texel tuning runs in static-features-only mode.
+STATIC_ONLY_FROZEN_PARAMS: tuple[str, ...] = (
+    # Dynamic passed-pawn unblock path, rank multipliers & dead/pinned knobs
+    "CANDIDATE_PASSER_DIVISOR",
+    "PASSED_PATH_SAFE_NONE_ATTACK",
+    "PASSED_PATH_SAFE_EDGE_ATTACK",
+    "PASSED_PATH_SAFE_BLOCK_ONLY",
+    "PASSED_PATH_SUPPORT_BONUS",
+    "PASSED_DYNAMICS_MULT",
+    "PASSED_DYNAMICS_OFFSET",
+    "UNSTOPPABLE_PAWN_BONUS",
+    # King danger, safe checks, flank attack multipliers & safety output scale
+    "KING_ATTACK_WEIGHTS",
+    "SAFE_CHECK_QUEEN",
+    "SAFE_CHECK_ROOK",
+    "SAFE_CHECK_BISHOP",
+    "SAFE_CHECK_KNIGHT",
+    "KING_DANGER_WEAK_SQ",
+    "KING_DANGER_UNSAFE_CHECK",
+    "KING_DANGER_BLOCKERS",
+    "KING_DANGER_ATTACK_ON_KING_SQ",
+    "KING_DANGER_NO_QUEEN",
+    "KING_DANGER_NO_QUEEN_ROOKLESS",
+    "KING_DANGER_KNIGHT_DEF",
+    "KING_DANGER_OFFSET",
+    "KING_DANGER_THRESHOLD",
+    "KING_DANGER_OUT_MG_NUM",
+    "KING_DANGER_OUT_EG_NUM",
+    "EG_SAFETY_SCALE",
+    "FLANK_ATTACKS",
+    "KING_FLANK_ATTACK_NUM",
+    "KING_FLANK_DEFENSE_MULT",
+    "KING_SHELTER_FEEDBACK_NUM",
+    # Qsearch-sensitive tactical threats
+    "THREAT_SAFE_PAWN",
+    "THREAT_KNIGHT_ON_QUEEN",
+    "THREAT_SLIDER_ON_QUEEN",
+    "THREAT_BY_MINOR",
+    "THREAT_BY_ROOK",
+    "THREAT_BY_KING",
+    "THREAT_HANGING",
+    "THREAT_RESTRICTED_PIECE",
+    "THREAT_PAWN_PUSH",
+    # Tempo & global space divisors/thresholds
+    "SPACE_THRESHOLD",
+    "SPACE_BONUS_DIVISOR",
+    "SPACE_SCALE_DIVISOR",
+    "TEMPO_BONUS",
+    # Quadratic material imbalance & global imbalance divisor (Match-SPSA zone)
+    "IMBALANCE_QUADRATIC_OURS",
+    "IMBALANCE_QUADRATIC_THEIRS",
+    "IMBALANCE_DIVISOR",
+    "IMBALANCE_SCALE_MG",
+    "IMBALANCE_SCALE_EG",
+)
+STATIC_ONLY_FROZEN_PARAM_SET: frozenset[str] = frozenset(STATIC_ONLY_FROZEN_PARAMS)
+
+
+def partition_static_only_params(names) -> tuple[list[str], list[str]]:
+    """Split ``names`` into ``(static_names, frozen_non_static_names)`` preserving order."""
+    static_names: list[str] = []
+    frozen_names: list[str] = []
+    seen: set[str] = set()
+    for name in names:
+        if name in seen:
+            continue
+        seen.add(name)
+        if name in STATIC_ONLY_FROZEN_PARAM_SET:
+            frozen_names.append(name)
+        else:
+            static_names.append(name)
+    return static_names, frozen_names
+
+
+def resolve_effective_excludes(
+    exclude_list=None,
+    *,
+    static_only: bool = False,
+) -> list[str]:
+    """Return deduplicated parameter names to exclude for the active tuning policy."""
+    out: list[str] = []
+    seen: set[str] = set()
+    for group in (exclude_list or (), STATIC_ONLY_FROZEN_PARAMS if static_only else ()):
+        for name in group:
+            if name not in seen:
+                seen.add(name)
+                out.append(name)
+    return out
+
+
 class ParameterManager:
     """Maps flat theta <-> structured HCE constants."""
 

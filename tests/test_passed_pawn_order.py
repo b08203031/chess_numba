@@ -220,6 +220,46 @@ class TestPassedPawnOrder(unittest.TestCase):
         self.assertEqual(ce._trunc_div(np.int32(-3), np.int32(2)), -1)
         self.assertEqual(ce._trunc_div(np.int32(-4), np.int32(2)), -2)
 
+    def test_lever_and_phalanx_passed_pawn_detection_in_pawns_py(self):
+        """
+        Verify PAWN_ATTACKS[attacker_color, target_sq] convention in evaluate_pawn_structure:
+        1. cond_a: White Pe5 facing Black Pd6 lever is passed, and a Black Pd4 behind Pe5 does not break cond_a.
+        2. cond_b: White Pd4/Pe4 phalanx facing Black Pd6 lever_push makes Pe4 passed.
+        3. backward: White Pe3 stopped by Black Pd5 attacking e4 is backward (excluded from forward span).
+        """
+        from chess_engine.classical.pawns import evaluate_pawn_structure
+
+        # 1a. White Pe5 (sq=36) vs Black Pd6 (sq=43): cond_a lever passed pawn
+        pb1, _, gs1 = parse_fen('4k3/8/3p4/4P3/8/8/8/4K3 w - - 0 1')
+        res1 = evaluate_pawn_structure(pb1, gs1[1], ce._DUMMY_EW, False)
+        self.assertNotEqual(res1[6] & (np.uint64(1) << np.uint64(36)), 0)
+
+        # 1b. White Pe5 (sq=36) with Black Pd4 (sq=27) behind it: still passed!
+        pb1b, _, gs1b = parse_fen('4k3/8/8/4P3/3p4/8/8/4K3 w - - 0 1')
+        res1b = evaluate_pawn_structure(pb1b, gs1b[1], ce._DUMMY_EW, False)
+        self.assertNotEqual(res1b[6] & (np.uint64(1) << np.uint64(36)), 0)
+
+        # 2. White Pd4 (27) + Pe4 (28) phalanx vs Black Pd6 (43): cond_b makes Pe4 passed
+        pb2, _, gs2 = parse_fen('4k3/8/3p4/8/3PP3/8/8/4K3 w - - 0 1')
+        res2 = evaluate_pawn_structure(pb2, gs2[1], ce._DUMMY_EW, False)
+        self.assertNotEqual(res2[6] & (np.uint64(1) << np.uint64(28)), 0)
+
+        # 3a. Backward White Pe3 (sq=20) stopped by Black Pd5 (sq=35) attacking e4 (sq=28)
+        # Span should contain d4/f4 base attacks only, NOT forward span squares like d6 (sq=43).
+        pb3, _, gs3 = parse_fen('4k3/8/8/3p4/8/4P3/8/4K3 w - - 0 1')
+        res3 = evaluate_pawn_structure(pb3, gs3[1], ce._DUMMY_EW, False)
+        self.assertEqual(res3[8] & (np.uint64(1) << np.uint64(43)), 0)
+
+        # 3b. Black mirror: Black Pd5 (sq=35) facing White Pe4 (sq=28) lever -> Pd5 is passed
+        pb4, _, gs4 = parse_fen('4k3/8/8/3p4/4P3/8/8/4K3 w - - 0 1')
+        res4 = evaluate_pawn_structure(pb4, gs4[1], ce._DUMMY_EW, False)
+        self.assertNotEqual(res4[7] & (np.uint64(1) << np.uint64(35)), 0)
+
+        # Black Pd6 (sq=43) stopped by White Pe4 (sq=28) attacking d5 -> backward, lacks e3 (sq=20) span
+        pb5, _, gs5 = parse_fen('4k3/8/3p4/8/4P3/8/8/4K3 w - - 0 1')
+        res5 = evaluate_pawn_structure(pb5, gs5[1], ce._DUMMY_EW, False)
+        self.assertEqual(res5[9] & (np.uint64(1) << np.uint64(20)), 0)
+
 
 if __name__ == '__main__':
     unittest.main()

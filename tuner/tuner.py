@@ -4,7 +4,10 @@ import numba
 import time
 import os
 import argparse
-from tuner.parameters import ParameterManager
+from tuner.parameters import (
+    ParameterManager,
+    resolve_effective_excludes,
+)
 from tuner.tunable_eval import evaluate_position_tunable
 from tuner.constraint_manager import ConstraintManager
 from tuner.constants_snapshot import (
@@ -855,7 +858,8 @@ class SPSAOptimizer:
         return out
 
     def _create_mask(self, include_list=None, exclude_list=None,
-                     king_pst_only=False, non_king_pst_only=False, pst_pieces=None):
+                     king_pst_only=False, non_king_pst_only=False, pst_pieces=None,
+                     static_only=False):
         """
         Creates a mask vector where 1 indicates the parameter should be tuned,
         and 0 indicates it should be frozen.
@@ -938,12 +942,29 @@ class SPSAOptimizer:
 
         if exclude_list:
             print(f"Freezing parameters: {exclude_list}")
-            for name in exclude_list:
+        effective_excludes = resolve_effective_excludes(
+            exclude_list, static_only=static_only
+        )
+        if effective_excludes:
+            froze_static = []
+            explicit_set = set(exclude_list or ())
+            for name in effective_excludes:
                 if name in name_to_indices:
                     start, count = name_to_indices[name]
+                    if (
+                        static_only
+                        and name not in explicit_set
+                        and np.any(mask[start : start + count] > 0)
+                    ):
+                        froze_static.append(name)
                     mask[start : start + count] = 0.0
-                else:
+                elif name in explicit_set:
                     print(f"Warning: Unknown parameter '{name}' in exclude list.")
+            if froze_static:
+                print(
+                    f"Static-only mode froze {len(froze_static)} non-static "
+                    f"parameter group(s): {froze_static}"
+                )
 
         # Imbalance matrices are lower-triangular. Upper-triangle entries are
         # never read, THEIRS diagonal terms cancel in the white-minus-black
@@ -1096,7 +1117,8 @@ class SPSAOptimizer:
                  report_every=50, patience=30, metrics_sample=500_000, seed=0,
                  king_pst_only=False, non_king_pst_only=False, pst_pieces=None,
                  k_factor=1.0, train_indices_override=None, eval_indices_override=None,
-                 c_floor=1.25, auto_scale=True, verbose_buckets="endpoints"):
+                 c_floor=1.25, auto_scale=True, verbose_buckets="endpoints",
+                 static_only=False):
         """
         Scale-aware SPSA with integer quantization floor, EMA candidate tracking,
         integer-memoized dev evaluation, parameter mask, and mini-batch gradients.
@@ -1121,8 +1143,13 @@ class SPSAOptimizer:
             king_pst_only=king_pst_only,
             non_king_pst_only=non_king_pst_only,
             pst_pieces=pst_pieces,
+            static_only=static_only,
         )
         active_bool = mask != 0
+        if not np.any(active_bool):
+            print("No active parameters remain after mask/exclusion; skipping optimization.")
+            self.save_results(save_path)
+            return
         scales = (
             self._build_param_scales(run_baseline_theta, mask, c=c)
             if auto_scale
@@ -1444,6 +1471,11 @@ if __name__ == "__main__":
         help="Restrict PST rows to these pieces, e.g. NBRQ or P (letters P,N,B,R,Q,K)",
     )
     parser.add_argument(
+        "--static-only",
+        action="store_true",
+        help="Freeze non-static/search-coupled params and tune static HCE features only",
+    )
+    parser.add_argument(
         "--output",
         type=str,
         default="tuner/tuned_constants.py",
@@ -1486,4 +1518,5 @@ if __name__ == "__main__":
             c_floor=args.c_floor,
             auto_scale=not args.no_auto_scale,
             verbose_buckets=args.verbose_buckets,
+            static_only=args.static_only,
         )

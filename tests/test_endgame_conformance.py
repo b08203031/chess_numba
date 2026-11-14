@@ -225,11 +225,78 @@ class TestEndgameConformance(unittest.TestCase):
 
     def test_kpkp_scale_factor_draw(self):
         # Symmetrical blocked pawns (e4 vs e5, kings e2 vs e7) -> theoretical draw (SF11 KPKP)
-        # Position score is 0; with Tempo bonus added for side to move, eval is TEMPO_BONUS
+        # Endgame<KPKP> returns SCALE_FACTOR_DRAW (0), which short-circuits pure K+P eval to 0.
         fen = "8/4k3/8/4p3/4P3/8/4K3/8 w - - 0 1"
         piece_bbs, occupancy_bbs, game_state = parse_fen(fen)
         val, _, _ = evaluate_position(piece_bbs, occupancy_bbs, game_state)
-        self.assertEqual(val, TEMPO_BONUS)
+        self.assertEqual(val, 0)
+
+    def test_kpkp_asymmetric_bitbase_draw(self):
+        # Asymmetrical KPKP: White has centralized Ke3 vs Black Kd8 (raw eval > 0),
+        # but probing KPK bitbase without Black's e5 pawn (Ke3+Pe4 vs Kd8, Black to move) is a draw.
+        fen = "3k4/8/8/4p3/4P3/4K3/8/8 b - - 0 1"
+        piece_bbs, occupancy_bbs, game_state = parse_fen(fen)
+        sf = get_endgame_scale_factor(piece_bbs, occupancy_bbs, game_state, np.int32(0), np.int32(100))
+        val, _, _ = evaluate_position(piece_bbs, occupancy_bbs, game_state)
+        self.assertEqual(int(sf), int(SCALE_FACTOR_DRAW))
+        self.assertEqual(val, 0)
+
+    def test_krpkb_corner_trapped_king_returns_48(self):
+        # SF11 Endgame<KRPKB>: rook pawn on 5th rank, same-color bishop, weak king in corner (d == 0).
+        # If strong king is on a6 trapping weak king on a8 (ksq == wksq + 16), scale factor is 48 (not 24).
+        fen_trapped = "k7/8/K7/P7/8/2b5/4R3/8 w - - 0 1"
+        pb_t, occ_t, gs_t = parse_fen(fen_trapped)
+        sf_trapped = get_endgame_scale_factor(pb_t, occ_t, gs_t, np.int32(0), np.int32(500))
+        self.assertEqual(int(sf_trapped), 48)
+
+        # Moving strong king to b6 avoids trapping weak king directly in front -> scale factor 24.
+        fen_free = "k7/8/1K6/P7/8/2b5/4R3/8 w - - 0 1"
+        pb_f, occ_f, gs_f = parse_fen(fen_free)
+        sf_free = get_endgame_scale_factor(pb_f, occ_f, gs_f, np.int32(0), np.int32(500))
+        self.assertEqual(int(sf_free), 24)
+
+    def test_kqkrps_multiple_pawns_fortress_draw(self):
+        # KQ vs KR + 2 pawns fortress: LSB pawn is h5 (not defending Rf6), second pawn g7
+        # is in King zone of Kg8 and defends Rf6 -> bitwise mask must detect fortress draw.
+        fen = "6k1/6p1/5r2/7p/4K3/8/8/3Q4 w - - 0 1"
+        piece_bbs, occupancy_bbs, game_state = parse_fen(fen)
+        sf = get_endgame_scale_factor(piece_bbs, occupancy_bbs, game_state, np.int32(0), np.int32(500))
+        self.assertEqual(int(sf), int(SCALE_FACTOR_DRAW))
+
+    def test_pawn_hash_partial_hit_shelter_recompute(self):
+        from chess_engine.classical.constants import MAX_PLY
+        from chess_engine.classical.engine_types import SearchContext
+        from chess_engine.classical.evaluation import _evaluate_position_jit
+        from chess_engine.classical.transposition_table import create_transposition_table
+
+        tt = create_transposition_table(1)
+        ctx = SearchContext(
+            tt,
+            np.zeros(MAX_PLY * 2, dtype=np.uint16),
+            np.zeros((MAX_PLY, MAX_PLY), dtype=np.uint16),
+            np.zeros((12, 64), dtype=np.int32),
+            np.zeros((64, 64), dtype=np.int32),
+            np.zeros((5, 12, 64, 12, 64), dtype=np.int16),
+            np.zeros((12, 64, 6), dtype=np.int32),
+            np.full((8192, 12, 64), -1238, dtype=np.int16),
+            np.zeros(16384, dtype=np.int16),
+            np.zeros(16384, dtype=np.int16),
+            np.zeros(16384, dtype=np.int16),
+            np.zeros(16384, dtype=np.int16),
+            np.zeros((12, 64, 12, 64), dtype=np.int16),
+        )
+        # Same pawn structure across all 4 FENs, varying White/Black king squares and castling rights
+        fens = [
+            "r3k2r/ppp2ppp/8/8/8/8/PPP2PPP/R3K2R w KQkq - 0 1",
+            "r3k2r/ppp2ppp/8/8/8/8/PPP2PPP/R4K1R b kq - 1 1",   # White king moved + lost KQ rights
+            "r4k1r/ppp2ppp/8/8/8/8/PPP2PPP/R4K1R w - - 2 2",    # Black king moved + lost kq rights
+            "r3k2r/ppp2ppp/8/8/8/8/PPP2PPP/R3K2R w K - 0 1",    # White castling rights changed (K vs KQkq)
+        ]
+        for fen in fens:
+            pb, occ, gs = parse_fen(fen)
+            cached_val, _, _ = _evaluate_position_jit(pb, occ, gs, False, ctx)
+            uncached_val, _, _ = _evaluate_position_jit(pb, occ, gs, False, None)
+            self.assertEqual(int(cached_val), int(uncached_val), msg=f"Pawn hash shelter mismatch for {fen}")
 
     def test_doubled_pawns_front_blocks_rear_unstoppable(self):
         # White has doubled pawns on a2 and a3, black king far away on h8 with irrelevant h7 pawn.
