@@ -1227,6 +1227,7 @@ class TestSfMixedLabelsAndKStarGate(unittest.TestCase):
             zuri_npz = tmp_dir / "val_zurichess.npz"
             zuri_sf = default_sidecar_path(zuri_npz)
             pgn_npz = tmp_dir / "val_pgn.npz"
+            pgn_sf = default_sidecar_path(pgn_npz)
             const_copy = tmp_dir / "classical_constants.py"
             shutil.copy2(CONSTANTS_PATH, const_copy)
 
@@ -1249,6 +1250,10 @@ class TestSfMixedLabelsAndKStarGate(unittest.TestCase):
                 game_states=np.asarray(gs_list[:32], dtype=np.int32),
                 results=main_wdl[:32],
             )
+            # PGN val: 24 quiet + 8 tactical
+            pgn_cp = np.where(np.arange(32) % 4 == 0, 280, 30).astype(np.int16)
+            pgn_d1 = np.full(32, 20, dtype=np.int16)
+            np.savez(pgn_sf, sf_cp=pgn_cp, sf_d1_cp=pgn_d1)
             np.savez(
                 zuri_npz,
                 piece_bbs=np.asarray(z_pb, dtype=np.uint64),
@@ -1267,7 +1272,7 @@ class TestSfMixedLabelsAndKStarGate(unittest.TestCase):
                     train_npz=main_npz,
                     pgn_val_npz=pgn_npz,
                     zurichess_val_npz=zuri_npz,
-                    use_pgn_val=False,
+                    use_pgn_val=True,
                     use_zurichess_val=True,
                     eval_sample=30,
                     holdout_sample=40,
@@ -1280,16 +1285,23 @@ class TestSfMixedLabelsAndKStarGate(unittest.TestCase):
                 np.testing.assert_allclose(session.train_data["results"], main_wdl, atol=1e-7)
                 rep = session.baseline_report()
                 self.assertIn("holdout", rep)
+                self.assertIn("pgn_val", rep)
 
                 cand = session.step_baseline_theta.copy()
                 p_idx, _ = session.pm.get_param_indices("INITIATIVE_MG_OFFSET")
                 cand[p_idx] += 15
                 rec = session.validate_candidate_theta("block_diag", cand)
                 hold_b = rec["holdout"]["buckets"]
+                pgn_b = rec["pgn_val"]["buckets"]
                 zuri_b = rec["zurichess_val"]["buckets"]
                 self.assertIn("sf19-quiet (WDL)", hold_b)
                 self.assertIn("sf19-tactical (WDL)", hold_b)
                 self.assertEqual(hold_b["sf19-quiet (WDL)"]["n"] + hold_b["sf19-tactical (WDL)"]["n"], 40)
+
+                self.assertIn("sf19-quiet (WDL)", pgn_b)
+                self.assertIn("sf19-tactical (WDL)", pgn_b)
+                self.assertEqual(pgn_b["sf19-quiet (WDL)"]["n"], 24)
+                self.assertEqual(pgn_b["sf19-tactical (WDL)"]["n"], 8)
 
                 self.assertIn("sf19-quiet (WDL)", zuri_b)
                 self.assertIn("sf19-tactical (WDL)", zuri_b)
@@ -1297,31 +1309,38 @@ class TestSfMixedLabelsAndKStarGate(unittest.TestCase):
                 self.assertEqual(zuri_b["sf19-tactical (WDL)"]["n"], 12)
 
                 # CLI auto-discovery via default_sidecar_path produces identical bucket stats
-                cli_z = run_paired_validation(
-                    dataset=zuri_npz,
-                    baseline=session.step_baseline_theta,
-                    candidate=cand,
-                    pm=session.pm,
-                    split="all",
-                    sample=0,
-                    k_factor=rec["zurichess_val"]["k_factor"],
-                    verbose=False,
-                )
-                self.assertEqual(
-                    cli_z["buckets"]["sf19-quiet (WDL)"]["n"],
-                    zuri_b["sf19-quiet (WDL)"]["n"],
-                )
-                self.assertAlmostEqual(
-                    cli_z["buckets"]["sf19-quiet (WDL)"]["delta"],
-                    zuri_b["sf19-quiet (WDL)"]["delta"],
-                    places=12,
-                )
+                for val_path, sess_rec, sess_buckets in (
+                    (pgn_npz, rec["pgn_val"], pgn_b),
+                    (zuri_npz, rec["zurichess_val"], zuri_b),
+                ):
+                    cli_res = run_paired_validation(
+                        dataset=val_path,
+                        baseline=session.step_baseline_theta,
+                        candidate=cand,
+                        pm=session.pm,
+                        split="all",
+                        sample=0,
+                        k_factor=sess_rec["k_factor"],
+                        verbose=False,
+                    )
+                    self.assertEqual(
+                        cli_res["buckets"]["sf19-quiet (WDL)"]["n"],
+                        sess_buckets["sf19-quiet (WDL)"]["n"],
+                    )
+                    self.assertAlmostEqual(
+                        cli_res["buckets"]["sf19-quiet (WDL)"]["delta"],
+                        sess_buckets["sf19-quiet (WDL)"]["delta"],
+                        places=12,
+                    )
 
                 cum = session.cumulative_report()
                 self.assertIn("sf19-quiet (WDL)", cum["holdout"]["buckets"])
+                self.assertIn("sf19-quiet (WDL)", cum["pgn_val"]["buckets"])
                 self.assertIn("sf19-quiet (WDL)", cum["zurichess_val"]["buckets"])
 
-            self.assertIn("sf19-quiet z=", buf.getvalue())
+            stdout_text = buf.getvalue()
+            self.assertIn("sf19-quiet z=", stdout_text)
+            self.assertEqual(stdout_text.count("| sf19-quiet z="), 3)
 
 
 if __name__ == "__main__":

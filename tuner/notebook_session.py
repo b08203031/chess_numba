@@ -400,6 +400,7 @@ class TexelTuningSession:
         )
         self.sf_blend_stats: dict | None = None
         self._holdout_sf_masks: dict[str, np.ndarray] | None = None
+        self._pgn_sf_masks: dict[str, np.ndarray] | None = None
         self._zurichess_sf_masks: dict[str, np.ndarray] | None = None
         self._apply_label_mode()
         self._load_holdout_sf_diag_masks_if_available()
@@ -703,8 +704,58 @@ class TexelTuningSession:
             "results": self._raw_results_wdl,
         }
 
+    def _load_external_sf_diag_masks(
+        self,
+        val_path: Path | None,
+        n_rows: int,
+        log_label: str,
+    ) -> dict[str, np.ndarray] | None:
+        """Load optional pure-WDL ``sf19-quiet`` / ``sf19-tactical`` masks for a validation set."""
+        if not val_path:
+            return None
+        sidecar = default_sidecar_path(val_path)
+        if not sidecar.is_file():
+            return None
+        with np.load(sidecar) as z:
+            raw_cp = np.asarray(z["sf_cp"], dtype=np.int16)
+            if len(raw_cp) != n_rows:
+                return None
+            raw_d1 = (
+                np.asarray(z["sf_d1_cp"], dtype=np.int16)
+                if "sf_d1_cp" in z.files
+                else None
+            )
+        ann, quiet, tactical = compute_quiet_and_tactical_masks(
+            raw_cp,
+            raw_d1,
+            max_tactical_gap=self.sf_max_tactical_gap,
+        )
+        n_ann = int(np.count_nonzero(ann))
+        if n_ann <= 0:
+            return None
+        n_q = int(np.count_nonzero(quiet))
+        n_t = int(np.count_nonzero(tactical))
+        print(
+            f"      [SF19-diag] {log_label} pure-WDL split ({sidecar.name}): "
+            f"annotated={n_ann:,}/{len(raw_cp):,} "
+            f"(quiet={n_q:,}, tactical={n_t:,})"
+        )
+        return {"quiet": quiet, "tactical": tactical}
+
+    def _load_pgn_sf_diag_masks_if_available(self) -> None:
+        if self.pgn_data is None:
+            self._pgn_sf_masks = None
+            return
+        self._pgn_sf_masks = self._load_external_sf_diag_masks(
+            self.pgn_val_path,
+            len(self.pgn_data["results"]),
+            "PGN",
+        )
+
     def _load_pgn_data_if_needed(self) -> None:
         if self.pgn_data is not None:
+            if getattr(self, "_pgn_sf_masks", None) is None:
+                self._load_pgn_sf_diag_masks_if_available()
             return
         if self.pgn_val_path and self.pgn_val_path.is_file():
             print(f"[2/4] Loading independent PGN validation set: {self.pgn_val_path.name}")
@@ -726,41 +777,21 @@ class TexelTuningSession:
                 f"(castling!=0: {n_castle:,} [{n_castle / max(n_pgn, 1):.2%}], "
                 f"RAM now: {_ram_summary_gb()})"
             )
+            self._load_pgn_sf_diag_masks_if_available()
         else:
+            self._pgn_sf_masks = None
             print(f"[2/4] PGN validation file not found ({self.pgn_val_path}); running holdout-only.")
 
     def _load_zurichess_sf_diag_masks_if_available(self) -> None:
         """Load optional pure-WDL ``sf19-quiet`` / ``sf19-tactical`` masks for Zurichess."""
-        self._zurichess_sf_masks = None
-        if getattr(self, "zurichess_data", None) is None or not self.zurichess_val_path:
+        if getattr(self, "zurichess_data", None) is None:
+            self._zurichess_sf_masks = None
             return
-        z_sidecar = default_sidecar_path(self.zurichess_val_path)
-        if not z_sidecar.is_file():
-            return
-        with np.load(z_sidecar) as z:
-            raw_cp = np.asarray(z["sf_cp"], dtype=np.int16)
-            if len(raw_cp) != len(self.zurichess_data["results"]):
-                return
-            raw_d1 = (
-                np.asarray(z["sf_d1_cp"], dtype=np.int16)
-                if "sf_d1_cp" in z.files
-                else None
-            )
-        ann, quiet, tactical = compute_quiet_and_tactical_masks(
-            raw_cp,
-            raw_d1,
-            max_tactical_gap=self.sf_max_tactical_gap,
+        self._zurichess_sf_masks = self._load_external_sf_diag_masks(
+            self.zurichess_val_path,
+            len(self.zurichess_data["results"]),
+            "Zurichess",
         )
-        n_ann = int(np.count_nonzero(ann))
-        if n_ann > 0:
-            self._zurichess_sf_masks = {"quiet": quiet, "tactical": tactical}
-            n_q = int(np.count_nonzero(quiet))
-            n_t = int(np.count_nonzero(tactical))
-            print(
-                f"       [SF19-diag] Zurichess pure-WDL split ({z_sidecar.name}): "
-                f"annotated={n_ann:,}/{len(raw_cp):,} "
-                f"(quiet={n_q:,}, tactical={n_t:,})"
-            )
 
     def _load_zurichess_data_if_needed(self) -> None:
         if getattr(self, "zurichess_data", None) is not None:
@@ -819,6 +850,7 @@ class TexelTuningSession:
             if new_pgn_path != self.pgn_val_path:
                 self.pgn_val_path = new_pgn_path
                 self.pgn_data = None
+                self._pgn_sf_masks = None
         if zurichess_val_npz is not None:
             new_z_path = Path(zurichess_val_npz) if zurichess_val_npz else None
             if new_z_path != getattr(self, "zurichess_val_path", None):
@@ -876,6 +908,8 @@ class TexelTuningSession:
         self._update_run_directories()
         if self.use_pgn_val:
             self._load_pgn_data_if_needed()
+            if need_diag_refresh:
+                self._load_pgn_sf_diag_masks_if_available()
         if self.use_zurichess_val:
             self._load_zurichess_data_if_needed()
             if need_diag_refresh:
@@ -1020,6 +1054,48 @@ class TexelTuningSession:
             return float(getattr(self, "_step_dev_k_star", 1.0))
         return float(k_factor)
 
+    @staticmethod
+    def _print_sf_diag_split(
+        sf_masks: dict[str, np.ndarray] | None,
+        scores: np.ndarray,
+        results_wdl: np.ndarray,
+        k_star: float,
+    ) -> None:
+        if sf_masks is None or len(scores) != len(results_wdl):
+            return
+        q, t = sf_masks["quiet"], sf_masks["tactical"]
+        sq = squared_errors_from_scores(scores, results_wdl, k_star)
+        q_txt = (
+            f"sf19-quiet={float(np.mean(sq[q])):.7f} (n={int(np.count_nonzero(q)):,})"
+            if np.any(q)
+            else "sf19-quiet=n/a"
+        )
+        t_txt = (
+            f"sf19-tactical={float(np.mean(sq[t])):.7f} (n={int(np.count_nonzero(t)):,})"
+            if np.any(t)
+            else "sf19-tactical=n/a"
+        )
+        print(f"      Pure-WDL split  : {q_txt} | {t_txt}")
+
+    @staticmethod
+    def _append_sf_diag_note(
+        val_label: str,
+        res_dict: dict,
+        diag_notes: list[str],
+    ) -> str:
+        sq = res_dict["buckets"].get("sf19-quiet (WDL)")
+        st = res_dict["buckets"].get("sf19-tactical (WDL)")
+        if sq and sq["n"] > 0 and st and st["n"] > 0:
+            diag_notes.append(
+                f"{val_label} pure-WDL split: sf19-quiet z={sq['z']:+.2f} (n={sq['n']:,}) "
+                f"vs sf19-tactical z={st['z']:+.2f} (n={st['n']:,})"
+            )
+        return (
+            f" | sf19-quiet z={sq['z']:+.2f}"
+            if (sq and sq["n"] > 0)
+            else ""
+        )
+
     def baseline_report(self) -> dict:
         """Print baseline MSE & optimal K* on unseen holdout and (optional) PGN / Zurichess validation."""
         use_pgn = getattr(self, "use_pgn_val", True)
@@ -1062,21 +1138,12 @@ class TexelTuningSession:
             f"  [1] {self.train_path.name} unseen holdout [pure WDL] (n={len(h_idx):,}):\n"
             f"      MSE @ K*={h_k_star:.3f}: {h_mse_kstar:.7f}"
         )
-        hold_masks = getattr(self, "_holdout_sf_masks", None)
-        if hold_masks is not None and len(h_idx) == len(self._step_holdout_scores):
-            hq, ht = hold_masks["quiet"], hold_masks["tactical"]
-            h_sq = squared_errors_from_scores(self._step_holdout_scores, h_res, h_k_star)
-            q_txt = (
-                f"sf19-quiet={float(np.mean(h_sq[hq])):.7f} (n={int(np.count_nonzero(hq)):,})"
-                if np.any(hq)
-                else "sf19-quiet=n/a"
-            )
-            t_txt = (
-                f"sf19-tactical={float(np.mean(h_sq[ht])):.7f} (n={int(np.count_nonzero(ht)):,})"
-                if np.any(ht)
-                else "sf19-tactical=n/a"
-            )
-            print(f"      Pure-WDL split  : {q_txt} | {t_txt}")
+        self._print_sf_diag_split(
+            getattr(self, "_holdout_sf_masks", None),
+            self._step_holdout_scores,
+            h_res,
+            h_k_star,
+        )
         report["holdout"] = {
             "n": int(len(h_idx)),
             "k_star": h_k_star,
@@ -1103,6 +1170,12 @@ class TexelTuningSession:
                 f"  [2] {self.pgn_val_path.name} independent PGN val (n={len(p_res):,}):\n"
                 f"      Static Eval MSE @ K*={p_k_star:.3f}: {p_mse_kstar:.7f}\n"
                 f"      Castling!=0 MSE @ K*      : {p_castle_mse:.7f} (n={int(np.count_nonzero(castle_mask)):,})"
+            )
+            self._print_sf_diag_split(
+                getattr(self, "_pgn_sf_masks", None),
+                self._step_pgn_scores,
+                p_res,
+                p_k_star,
             )
             scp = self.pgn_data.get("search_cp")
             if scp is not None:
@@ -1133,21 +1206,12 @@ class TexelTuningSession:
                 f"  [3] {self.zurichess_val_path.name} Zurichess quiet EPD (n={len(z_res):,}):\n"
                 f"      Static Eval MSE @ K*={z_k_star:.3f}: {z_mse_kstar:.7f}"
             )
-            z_masks = getattr(self, "_zurichess_sf_masks", None)
-            if z_masks is not None and len(z_res) == len(self._step_zurichess_scores):
-                zq, zt = z_masks["quiet"], z_masks["tactical"]
-                z_sq = squared_errors_from_scores(self._step_zurichess_scores, z_res, z_k_star)
-                zq_txt = (
-                    f"sf19-quiet={float(np.mean(z_sq[zq])):.7f} (n={int(np.count_nonzero(zq)):,})"
-                    if np.any(zq)
-                    else "sf19-quiet=n/a"
-                )
-                zt_txt = (
-                    f"sf19-tactical={float(np.mean(z_sq[zt])):.7f} (n={int(np.count_nonzero(zt)):,})"
-                    if np.any(zt)
-                    else "sf19-tactical=n/a"
-                )
-                print(f"      Pure-WDL split  : {zq_txt} | {zt_txt}")
+            self._print_sf_diag_split(
+                getattr(self, "_zurichess_sf_masks", None),
+                self._step_zurichess_scores,
+                z_res,
+                z_k_star,
+            )
             report["zurichess_val"] = {
                 "n": int(len(z_res)),
                 "k_star": z_k_star,
@@ -1451,12 +1515,7 @@ class TexelTuningSession:
 
         hold_kp = hold_res["buckets"].get("pure king+pawns")
         kp_txt = f" | K+P z={hold_kp['z']:+.2f}" if (hold_kp and hold_kp["n"] > 0) else ""
-        hold_sq = hold_res["buckets"].get("sf19-quiet (WDL)")
-        hold_sq_txt = (
-            f" | sf19-quiet z={hold_sq['z']:+.2f}"
-            if (hold_sq and hold_sq["n"] > 0)
-            else ""
-        )
+        hold_sq_txt = self._append_sf_diag_note("holdout", hold_res, diag_notes)
         hold_k_tag = (
             f"K={hold_res['k_factor']:.3f}" if hold_res.get("k_factor") is not None else "K*"
         )
@@ -1475,12 +1534,13 @@ class TexelTuningSession:
             castle_txt = (
                 f" | castling!=0 z={cb['z']:+.2f}" if (cb and cb["n"] > 0) else ""
             )
+            pgn_sq_txt = self._append_sf_diag_note("val_pgn", pgn_res, diag_notes)
             pgn_k_tag = (
                 f"K={pgn_res['k_factor']:.3f}" if pgn_res.get("k_factor") is not None else "K*"
             )
             print(
                 f"    PGN independent  : delta@{pgn_k_tag}={pk['delta']:+.4e} "
-                f"(z={pk['z']:+.2f}){castle_txt}"
+                f"(z={pk['z']:+.2f}){castle_txt}{pgn_sq_txt}"
             )
         elif not use_pgn:
             print("    PGN independent  : skipped (use_pgn_val=False)")
@@ -1490,12 +1550,7 @@ class TexelTuningSession:
             z_castle_txt = (
                 f" | castling!=0 z={zcb['z']:+.2f}" if (zcb and zcb["n"] > 0) else ""
             )
-            z_sq = zurichess_res["buckets"].get("sf19-quiet (WDL)")
-            z_sq_txt = (
-                f" | sf19-quiet z={z_sq['z']:+.2f}"
-                if (z_sq and z_sq["n"] > 0)
-                else ""
-            )
+            z_sq_txt = self._append_sf_diag_note("val_zurichess", zurichess_res, diag_notes)
             z_k_tag = (
                 f"K={zurichess_res['k_factor']:.3f}"
                 if zurichess_res.get("k_factor") is not None
@@ -1503,18 +1558,6 @@ class TexelTuningSession:
             )
             print(
                 f"    Zurichess quiet  : delta@{z_k_tag}={zk['delta']:+.4e} (z={zk['z']:+.2f}){z_castle_txt}{z_sq_txt}"
-            )
-            z_st = zurichess_res["buckets"].get("sf19-tactical (WDL)")
-            if z_sq and z_sq["n"] > 0 and z_st and z_st["n"] > 0:
-                diag_notes.append(
-                    f"val_zurichess pure-WDL split: sf19-quiet z={z_sq['z']:+.2f} (n={z_sq['n']:,}) "
-                    f"vs sf19-tactical z={z_st['z']:+.2f} (n={z_st['n']:,})"
-                )
-        hold_st = hold_res["buckets"].get("sf19-tactical (WDL)")
-        if hold_sq and hold_sq["n"] > 0 and hold_st and hold_st["n"] > 0:
-            diag_notes.append(
-                f"holdout pure-WDL split: sf19-quiet z={hold_sq['z']:+.2f} (n={hold_sq['n']:,}) "
-                f"vs sf19-tactical z={hold_st['z']:+.2f} (n={hold_st['n']:,})"
             )
         for r in reasons:
             print(f"    ! Note: {r}")
@@ -1574,6 +1617,8 @@ class TexelTuningSession:
                 fit_k=False,
                 cached_base_scores=self._step_pgn_scores,
                 indices_override=np.arange(len(self.pgn_data["results"]), dtype=np.int64),
+                sf_sidecar=getattr(self, "_pgn_sf_masks", None),
+                sf_max_tactical_gap=getattr(self, "sf_max_tactical_gap", 180),
                 verbose=True,
             )
 
@@ -1943,6 +1988,8 @@ class TexelTuningSession:
                 fit_k=False,
                 cached_base_scores=self._initial_pgn_scores,
                 indices_override=np.arange(len(self.pgn_data["results"]), dtype=np.int64),
+                sf_sidecar=getattr(self, "_pgn_sf_masks", None),
+                sf_max_tactical_gap=getattr(self, "sf_max_tactical_gap", 180),
                 verbose=True,
             )
         zurichess_res = None

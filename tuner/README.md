@@ -68,7 +68,7 @@
 ### 常用 CLI 指令（專案根目錄執行）
 
 ```bash
-# 0) 檢查資料 / 產生 SF19 側車標籤（可 --limit N 先測試；Colab 版 sf19_annotate_colab_runner.ipynb 支援 "both" / "zurichess" / "holdout_20m"）/ 重建 val_pgn
+# 0) 檢查資料 / 產生 SF19 側車標籤（可 --limit N 先測試；Colab 版 sf19_annotate_colab_runner.ipynb 支援 "val_pgn" / "all_val" / "both" / "zurichess" / "holdout_20m"）/ 重建 val_pgn
 python -m tuner.run status
 python -m tuner.data_pipeline.annotate_sf_labels --nodes 4000 --skip-holdout
 python -m tuner.data_pipeline.build_pgn_validation --min-median-nodes 150000 --workers 10
