@@ -22,7 +22,9 @@ Verification suite: `tests/test_texel_parameterization.py`.
 
 * Maintain noise-floored guards in `TexelTuningSession._gate_summary` against localized regressions masked by overall averages:
   * Holdout: `pure king+pawns` (`z > 3.5` & `delta > 2e-5` -> `REJECT`), `phase=0` (`z > 3.5` & `delta > 1e-5` -> `REJECT`).
-  * Independent (`val_pgn` / `val_zurichess`): `pure king+pawns` and extreme `castling!=0` collapses (`z > 4.0` & `delta > 2e-5` -> `REJECT`), keeping milder caution bounds.
+  * Independent (`val_pgn` / `val_zurichess`): `all @ K*` (`z > 2.5`), `broad-EG` (`z > 3.0 & delta > 1.5e-5`), `pure king+pawns` (`z > 4.0 & delta > 2e-5`), and extreme `castling!=0` collapses (`z > 4.0 & delta > 2e-5` -> `REJECT`, keeping milder caution bounds).
+  * Arbitration: when both `holdout` and `val_pgn` gain strongly overall & in `broad-EG` (`z < -3.0`) and only `val_pgn castling!=0` regresses moderately (not `z > 8.0 & delta > 3e-5`), it downgrades to `CAUTION` unless `val_zurichess` also triggers severe collapse; when both `val_pgn` and `val_zurichess` are present, `val_zurichess` serves as a tie-breaker/diagnostic arbiter rather than a unilateral veto over double-passing blocks.
+  * Validation gate targets (`holdout`, `val_pgn`, `val_zurichess`) always stay pure WDL (never mixed with `SF19` labels).
 
 ---
 

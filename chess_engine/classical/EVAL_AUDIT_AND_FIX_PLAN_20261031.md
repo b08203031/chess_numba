@@ -722,4 +722,28 @@ flowchart TD
 * 因 Phase 8 R3（`36d5ade` / `3996ccf`）仍完整保留於 Git 歷史，為讓修正後的 `USE_SF_LABELS = True` 調參自乾淨且無雜訊之基準重新起跑，本階段將 [`constants.py`](constants.py) 有效評估權重回退至 R2（`d59ebcd`），並經使用者明確確認後執行 `python tools/sync_classical_old.py --sync`。
 * 目前 `chess_engine/classical/` 與 `chess_engine/classical_old/` 雙目錄程式碼、搜尋常量與清潔後評估常數均 **100% 邏輯一致**，待執行新一輪 `USE_SF_LABELS = True` 調參後，即可直接與此清潔版 R2 基準展開 400k 對戰驗收。
 
+---
+
+### 十、Phase 10：修正後 `SF19` 第二輪調參、三驗證集交叉診斷與仲裁閘門升級 (2026-11-14)
+
+#### 1. `USE_SF_LABELS = True` (`lambda=0.25`) 第二輪調參表現與落地
+* **執行紀錄**：於 Colab 基於清潔 R2 基準執行完整 26 區塊流程（歸檔於 [`tuner/runs/classical_with_pgn_sf25/`](../../tuner/runs/classical_with_pgn_sf25/)，`RANDOM_SEED = True`, `USE_PGN_VAL = True`, `SF_LAMBDA = 0.25`, `dev_K* = 1.140`）。
+* **接納與靜態累積成效**：累計接納 11 個區塊（共變動 **30 組**常數）：
+  * **2M Unseen Holdout（純 WDL `@K*=1.245`）**：`delta = -8.1234e-05 (z = -35.783)`、`broad-EG z = -27.20`、`castling!=0 z = -10.55`。
+  * **1.59M `val_pgn`（純 WDL `@K*=1.153`）**：`delta = -5.0613e-05 (z = -27.735)`、`broad-EG z = -21.22`、`castling!=0 z = -12.008`。
+  * **1.08M `val_zurichess`（純 WDL `@K*=1.402`）**：`delta = -6.72e-05 (z = -26.94)`、`broad-EG z = -16.39`、`castling!=0 z = -16.88`。
+* **400,000 nodes/move 實戰檢定**：對陣清潔 R2 基準 `classical_old` 至 **824 對（1,648 局）**時取得 `833.0 / 1,648`（`306W - 1054D - 288L`, `50.5%`, **`+3.8 ± 10.1 Elo`**, `SPRT LLR = -0.50`），較首輪（`-8.2 ± 16.6 Elo`）明顯改善並穩定為正區間。
+* **基線接納策略**：將本輪結果（`classical_constants.py`）正式套用寫入 [`constants.py`](constants.py) 並同步 [`tuner/constants_snapshot.py`](../../tuner/constants_snapshot.py) 作為 Run 3 純 WDL 補調之新起點；**[`classical_old/constants.py`](../classical_old/constants.py) 刻意維持清潔 R2 不覆蓋**，留待後續補調後合併檢定 400k Elo 總增益。
+
+#### 2. 全區塊三驗證集 (`Holdout` vs `val_pgn` vs `val_zurichess`) 交叉剖析與閘門升級
+針對 Run 2 全部 26 個候選於本機進行同基準配對驗證後，釐清三資料集分佈差異（`epd_20m` 和局率 `40.9%` / `pieces_mean=18.68`、`val_pgn` 150k+ 自對局和局率 `51.0%` / `broad-EG=72.9%` / `hm_mean=7.2`、`val_zurichess` 和局率 `23.3%` / `castling!=0=13.53%` / `hm_mean=0.0`），並精確分類 11 個未自動套用區塊：
+1. **真實過擬合（`val_pgn` 與 `val_zurichess` 一致擋對）**：`block1c_passed_path_grid`（`PGN +9.83` / `Zuri +14.23`）、`block5a_king_danger_grid`（`PGN +19.04` / `Zuri +8.99`）、`block4a_pawn_structure`（`K+P` 三邊同惡化 `+3.90 / +6.25 / +4.47`）、`block5c_king_safety_output`（Holdout / PGN / Zuri `phase=0` 三邊同惡化 `+7.80 / +13.20 / +9.04`）。
+2. **弱棋 EPD 與深搜自對局分佈偏移**：`block2a_threats`（Hold `-20.38` / Zuri `-23.69` vs `PGN +10.12, EG +22.51`）、`block6e_pawn`（Hold `-21.20` / Zuri `-15.51` vs `PGN +2.87, p0 +7.79`）、`block7c_space_tempo_grid`（Zuri `-89.69` vs `PGN +52.73, p0 +72.02`）。
+3. **SF19 主動權與兵盾分歧**：`block7b_initiative`（下修 EG 主動權僅利低和局 Zuri `-10.62`，傷及 Hold `EG +7.32` 與 PGN `+6.69`）、`block5b_shelter_storm_king_pst`（EG 三邊大贏 `-11.14 / -14.12 / -7.62`，但 SF 混合下 `Cst` 偏離：`PGN +2.54` / `Zuri +5.75`）。
+4. **被單一 `val_pgn castling!=0` 誤殺之高價值殘局**：`block6b_bishop`（Hold `-13.64` / PGN `-6.64` / Zuri `-8.17`；`PGN Cst +5.97, +2.38e-5` 但 `Zuri Cst +3.68, +1.17e-5` 未觸發 `severe`）與 `block8_nbrq_joint_polish`（Hold `-20.14` / PGN `-6.67` / Zuri `-13.30`；`PGN Cst +5.18, +2.10e-5` 但 `Zuri Cst +4.52, +1.28e-5` 未觸發 `2e-5`）。
+
+據此已完成兩項調參管線升級：
+* [`tuner/notebook_session.py`](../../tuner/notebook_session.py)：重構 `_assess_independent_gate` 與 `_gate_summary`，使 `holdout` + `val_pgn` 整體與 `broad-EG` 皆大贏（`z < -3.0`）且僅 `val_pgn castling!=0` 中度退步（非 `z > 8.0 & delta > 3e-5`、且未獲 `val_zurichess` severe 佐證）時改判 **`CAUTION`** 而非硬性 `REJECT`；並使 `val_zurichess` 與 `val_pgn` 並存時專職診斷／仲裁而不單邊否決雙重 `PASS` 區塊。
+* [`tuner/validate_tuned.py`](../../tuner/validate_tuned.py)：補齊 `--zurichess-val` CLI 參數以支援單次三驗證集對照評估。
+* 驗證目標維持**純 WDL**：所有驗收閘門持續不混入 SF19 標籤，避免教師偏好自我強化並維持跨 `lambda` 實驗可比性。
 

@@ -343,6 +343,37 @@ def _terminate_proc(proc: subprocess.Popen) -> None:
             pass
 
 
+def compute_quiet_and_tactical_masks(
+    sf_cp: np.ndarray,
+    sf_d1_cp: np.ndarray | None = None,
+    *,
+    max_tactical_gap: int = 180,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Return ``(annotated_mask, quiet_mask, tactical_mask)`` from SF19 sidecar arrays.
+
+    Positions are marked tactical when both full-depth ``sf_cp`` and depth-1
+    ``sf_d1_cp`` exist, ``|sf_cp - sf_d1_cp| > max_tactical_gap``, and at least one
+    of the two evaluations is under ``800`` cp (not already decided).
+    """
+    annotated_mask = np.asarray(sf_cp != UNANNOTATED_CP, dtype=bool)
+    if sf_d1_cp is not None and max_tactical_gap and int(max_tactical_gap) > 0:
+        has_d1 = np.asarray(sf_d1_cp != UNANNOTATED_CP, dtype=bool)
+        cp_i32 = np.asarray(sf_cp, dtype=np.int32)
+        d1_i32 = np.asarray(sf_d1_cp, dtype=np.int32)
+        gap = np.abs(cp_i32 - d1_i32)
+        not_already_decided = (np.abs(cp_i32) < 800) | (np.abs(d1_i32) < 800)
+        tactical_mask = (
+            annotated_mask
+            & has_d1
+            & (gap > int(max_tactical_gap))
+            & not_already_decided
+        )
+    else:
+        tactical_mask = np.zeros(len(annotated_mask), dtype=bool)
+    quiet_mask = annotated_mask & (~tactical_mask)
+    return annotated_mask, quiet_mask, tactical_mask
+
+
 def build_priority_order(
     n_total: int,
     *,
@@ -350,10 +381,17 @@ def build_priority_order(
     holdout_sample: int = 2_000_000,
     skip_holdout: bool = False,
 ) -> np.ndarray:
-    """Order indices so partial runs cover ``1M dev`` + ``10M auto-RAM train`` first."""
+    """Order indices so partial runs cover ``1M dev`` + ``10M auto-RAM train`` first.
+
+    For standalone validation datasets smaller than ``eval_sample + holdout_sample``
+    (where ``hold_idx`` is empty/None), keep sequential ``[0, n_total)`` order.
+    """
     train_idx, dev_idx, hold_idx = split_dataset_indices(
         n_total, eval_sample=eval_sample, holdout_sample=holdout_sample
     )
+    if hold_idx is None or len(hold_idx) == 0:
+        return np.arange(n_total, dtype=np.int64)
+
     parts: list[np.ndarray] = []
     if dev_idx is not None and len(dev_idx) > 0:
         parts.append(dev_idx)

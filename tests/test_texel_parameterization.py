@@ -29,6 +29,9 @@ from tuner.constraint_manager import ConstraintManager
 from tuner.data_pipeline.annotate_sf_labels import (
     UNANNOTATED_CP,
     arrays_to_fen,
+    build_priority_order,
+    compute_quiet_and_tactical_masks,
+    default_sidecar_path,
     parse_sf_search_output,
 )
 from tuner.data_pipeline.preprocess_data import parse_fen_to_arrays
@@ -1044,6 +1047,281 @@ class TestSfMixedLabelsAndKStarGate(unittest.TestCase):
                 self.assertIsNotNone(cli_res["fitted_k"])
                 self.assertAlmostEqual(cli_res["k_factor"], cli_res["fitted_k"]["k_star"], places=6)
                 self.assertGreater(cli_res["k_factor"], 1.05)
+
+    def test_gate_arbitrates_moderate_pgn_castling_and_treats_zurichess_as_tiebreaker(self):
+        sess = TexelTuningSession.__new__(TexelTuningSession)
+        sess.use_pgn_val = True
+        sess.target_engine = "classical"
+        sess.train_path = Path("epd.npz")
+
+        pst_changes = [{"name": "PST_MG"}, {"name": "PST_EG"}]
+        strong_hold = {
+            "k_factor": 1.25,
+            "buckets": {
+                "all": {"n": 2_000_000, "delta": -1.5e-5, "z": -13.6},
+                "broad-EG phase<=64": {"n": 1_160_000, "delta": -1.6e-5, "z": -11.9},
+                "pure king+pawns": {"n": 23_458, "delta": 0.0, "z": 0.0},
+                "phase=0": {"n": 595_000, "delta": -8.4e-6, "z": -11.8},
+            },
+            "fitted_k": None,
+        }
+        pgn_mod_cst = {
+            "k_factor": 1.16,
+            "buckets": {
+                "all": {"n": 1_590_000, "delta": -5.0e-6, "z": -6.6},
+                "broad-EG phase<=64": {"n": 1_160_000, "delta": -6.0e-6, "z": -9.4},
+                "castling!=0": {"n": 104_000, "delta": 2.38e-5, "z": 5.97},
+                "pure king+pawns": {"n": 17_779, "delta": 0.0, "z": 0.0},
+            },
+            "fitted_k": None,
+        }
+        pgn_clean = {
+            "k_factor": 1.16,
+            "buckets": {
+                "all": {"n": 1_590_000, "delta": -5.0e-6, "z": -6.6},
+                "broad-EG phase<=64": {"n": 1_160_000, "delta": -6.0e-6, "z": -9.4},
+                "castling!=0": {"n": 104_000, "delta": -1.0e-5, "z": -4.0},
+                "pure king+pawns": {"n": 17_779, "delta": 0.0, "z": 0.0},
+            },
+            "fitted_k": None,
+        }
+        zuri_sub_severe_cst = {
+            "k_factor": 1.40,
+            "buckets": {
+                "all": {"n": 1_079_000, "delta": -5.6e-6, "z": -8.17},
+                "broad-EG phase<=64": {"n": 758_000, "delta": -5.9e-6, "z": -9.65},
+                "castling!=0": {"n": 146_000, "delta": 1.17e-5, "z": 3.68},
+                "pure king+pawns": {"n": 26_800, "delta": 0.0, "z": 0.0},
+            },
+            "fitted_k": None,
+        }
+        zuri_corroborate_cst = {
+            "k_factor": 1.40,
+            "buckets": {
+                "all": {"n": 1_079_000, "delta": -3.0e-6, "z": -4.0},
+                "broad-EG phase<=64": {"n": 758_000, "delta": -4.0e-6, "z": -5.0},
+                "castling!=0": {"n": 146_000, "delta": 2.4e-5, "z": 4.8},
+                "pure king+pawns": {"n": 26_800, "delta": 0.0, "z": 0.0},
+            },
+            "fitted_k": None,
+        }
+        zuri_mild_pos = {
+            "k_factor": 1.40,
+            "buckets": {
+                "all": {"n": 1_079_000, "delta": 2.5e-6, "z": 1.91},
+                "broad-EG phase<=64": {"n": 758_000, "delta": 6.6e-7, "z": 0.36},
+                "castling!=0": {"n": 146_000, "delta": 1.06e-5, "z": 7.45},
+                "pure king+pawns": {"n": 26_800, "delta": 0.0, "z": 0.0},
+            },
+            "fitted_k": None,
+        }
+        zuri_severe_all = {
+            "k_factor": 1.40,
+            "buckets": {
+                "all": {"n": 1_079_000, "delta": 7.3e-6, "z": 5.75},
+                "broad-EG phase<=64": {"n": 758_000, "delta": -7.5e-6, "z": -7.62},
+                "castling!=0": {"n": 146_000, "delta": 3.66e-5, "z": 5.70},
+                "pure king+pawns": {"n": 26_800, "delta": 0.0, "z": 0.0},
+            },
+            "fitted_k": None,
+        }
+
+        with patch("sys.stdout", new_callable=io.StringIO) as buf:
+            # 1) Block 6b/8-style moderate PGN castling!=0 regression with strong overall & EG -> CAUTION
+            self.assertEqual(
+                sess._gate_summary(pst_changes, strong_hold, pgn_mod_cst),
+                "CAUTION",
+            )
+            self.assertEqual(
+                sess._gate_summary(pst_changes, strong_hold, pgn_mod_cst, zuri_sub_severe_cst),
+                "CAUTION",
+            )
+            # 2) Both PGN and Zurichess crossing castling!=0 severe threshold -> REJECT
+            self.assertEqual(
+                sess._gate_summary(pst_changes, strong_hold, pgn_mod_cst, zuri_corroborate_cst),
+                "REJECT",
+            )
+            # 3) Mild Zurichess @ K* note must not downgrade clean double PASS to CAUTION
+            self.assertEqual(
+                sess._gate_summary(
+                    [{"name": "KING_PROXIMITY_MAX_DIST"}], strong_hold, pgn_clean, zuri_mild_pos
+                ),
+                "PASS",
+            )
+            self.assertIn("Info:", buf.getvalue())
+            # 4) Zurichess severe flags CAUTION when PGN+holdout pass, or REJECT when PGN is absent
+            self.assertEqual(
+                sess._gate_summary(pst_changes, strong_hold, pgn_clean, zuri_severe_all),
+                "CAUTION",
+            )
+            sess.use_pgn_val = False
+            self.assertEqual(
+                sess._gate_summary(pst_changes, strong_hold, None, zuri_severe_all),
+                "REJECT",
+            )
+
+    def test_compute_quiet_tactical_masks_and_validation_priority_order(self):
+        sf_cp = np.array(
+            [UNANNOTATED_CP, 45, 260, 1200, -1100, 150],
+            dtype=np.int16,
+        )
+        sf_d1 = np.array(
+            [UNANNOTATED_CP, 10, 40, 850, -820, 350],
+            dtype=np.int16,
+        )
+        ann, quiet, tactical = compute_quiet_and_tactical_masks(
+            sf_cp, sf_d1, max_tactical_gap=180
+        )
+        np.testing.assert_array_equal(ann, [False, True, True, True, True, True])
+        # row 1: gap=35 <=180 -> quiet; row 2: gap=220 >180 & <800 -> tactical;
+        # rows 3-4: both >=800 (already decided) -> quiet; row 5: gap=200 >180 & <800 -> tactical
+        np.testing.assert_array_equal(quiet, [False, True, False, True, True, False])
+        np.testing.assert_array_equal(tactical, [False, False, True, False, False, True])
+
+        _, quiet_nod1, tactical_nod1 = compute_quiet_and_tactical_masks(
+            sf_cp, None, max_tactical_gap=180
+        )
+        np.testing.assert_array_equal(quiet_nod1, ann)
+        np.testing.assert_array_equal(tactical_nod1, np.zeros(len(sf_cp), dtype=bool))
+
+        # Standalone validation sets (smaller than eval_sample + holdout_sample) iterate sequentially
+        order_true = build_priority_order(
+            500, eval_sample=1000, holdout_sample=2000, skip_holdout=True
+        )
+        order_false = build_priority_order(
+            500, eval_sample=1000, holdout_sample=2000, skip_holdout=False
+        )
+        np.testing.assert_array_equal(order_true, np.arange(500, dtype=np.int64))
+        np.testing.assert_array_equal(order_false, np.arange(500, dtype=np.int64))
+
+    def test_pure_wdl_sf_quiet_diagnostic_subbuckets_keep_wdl_targets(self):
+        rng = np.random.default_rng(7)
+        fens = [
+            "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
+            "r1bqkbnr/pppp1ppp/2n5/4p3/4P3/5N2/PPPP1PPP/RNBQKB1R w KQkq - 2 3",
+            "4k3/8/8/8/3P4/8/8/4K3 w - - 0 1",
+            "2r3k1/5ppp/p3p3/1p6/3P4/P3P3/1R3PPP/6K1 w - - 0 1",
+        ]
+        n_main = 120
+        n_zuri = 48
+        pb_list, ob_list, gs_list = [], [], []
+        for i in range(n_main):
+            pb, ob, gs = parse_fen_to_arrays(fens[i % len(fens)])
+            pb_list.append(pb)
+            ob_list.append(ob)
+            gs_list.append(gs)
+        main_wdl = rng.choice([0.0, 0.5, 1.0], size=n_main).astype(np.float32)
+
+        z_pb, z_ob, z_gs = [], [], []
+        for i in range(n_zuri):
+            pb, ob, gs = parse_fen_to_arrays(fens[(i + 1) % len(fens)])
+            z_pb.append(pb)
+            z_ob.append(ob)
+            z_gs.append(gs)
+        z_wdl = rng.choice([0.0, 0.5, 1.0], size=n_zuri).astype(np.float32)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_dir = Path(tmp)
+            main_npz = tmp_dir / "main.npz"
+            main_sf = default_sidecar_path(main_npz)
+            zuri_npz = tmp_dir / "val_zurichess.npz"
+            zuri_sf = default_sidecar_path(zuri_npz)
+            pgn_npz = tmp_dir / "val_pgn.npz"
+            const_copy = tmp_dir / "classical_constants.py"
+            shutil.copy2(CONSTANTS_PATH, const_copy)
+
+            np.savez(
+                main_npz,
+                piece_bbs=np.asarray(pb_list, dtype=np.uint64),
+                occupancy_bbs=np.asarray(ob_list, dtype=np.uint64),
+                game_states=np.asarray(gs_list, dtype=np.int32),
+                results=main_wdl,
+            )
+            # Annotate all 120 rows including holdout: half quiet, half tactical
+            main_cp = np.where(np.arange(n_main) % 2 == 0, 50, 260).astype(np.int16)
+            main_d1 = np.full(n_main, 20, dtype=np.int16)
+            np.savez(main_sf, sf_cp=main_cp, sf_d1_cp=main_d1)
+
+            np.savez(
+                pgn_npz,
+                piece_bbs=np.asarray(pb_list[:32], dtype=np.uint64),
+                occupancy_bbs=np.asarray(ob_list[:32], dtype=np.uint64),
+                game_states=np.asarray(gs_list[:32], dtype=np.int32),
+                results=main_wdl[:32],
+            )
+            np.savez(
+                zuri_npz,
+                piece_bbs=np.asarray(z_pb, dtype=np.uint64),
+                occupancy_bbs=np.asarray(z_ob, dtype=np.uint64),
+                game_states=np.asarray(z_gs, dtype=np.int32),
+                results=z_wdl,
+            )
+            # Zurichess: 36 quiet + 12 tactical
+            z_cp = np.where(np.arange(n_zuri) % 4 == 0, 300, 35).astype(np.int16)
+            z_d1 = np.full(n_zuri, 25, dtype=np.int16)
+            np.savez(zuri_sf, sf_cp=z_cp, sf_d1_cp=z_d1)
+
+            buf = io.StringIO()
+            with patch("sys.stdout", buf):
+                session = TexelTuningSession(
+                    train_npz=main_npz,
+                    pgn_val_npz=pgn_npz,
+                    zurichess_val_npz=zuri_npz,
+                    use_pgn_val=False,
+                    use_zurichess_val=True,
+                    eval_sample=30,
+                    holdout_sample=40,
+                    target_engine="classical",
+                    target_constants_path=const_copy,
+                    runs_dir=tmp_dir / "runs_diag",
+                    use_sf_labels=False,
+                    sf_labels_path=main_sf,
+                )
+                np.testing.assert_allclose(session.train_data["results"], main_wdl, atol=1e-7)
+                rep = session.baseline_report()
+                self.assertIn("holdout", rep)
+
+                cand = session.step_baseline_theta.copy()
+                p_idx, _ = session.pm.get_param_indices("INITIATIVE_MG_OFFSET")
+                cand[p_idx] += 15
+                rec = session.validate_candidate_theta("block_diag", cand)
+                hold_b = rec["holdout"]["buckets"]
+                zuri_b = rec["zurichess_val"]["buckets"]
+                self.assertIn("sf19-quiet (WDL)", hold_b)
+                self.assertIn("sf19-tactical (WDL)", hold_b)
+                self.assertEqual(hold_b["sf19-quiet (WDL)"]["n"] + hold_b["sf19-tactical (WDL)"]["n"], 40)
+
+                self.assertIn("sf19-quiet (WDL)", zuri_b)
+                self.assertIn("sf19-tactical (WDL)", zuri_b)
+                self.assertEqual(zuri_b["sf19-quiet (WDL)"]["n"], 36)
+                self.assertEqual(zuri_b["sf19-tactical (WDL)"]["n"], 12)
+
+                # CLI auto-discovery via default_sidecar_path produces identical bucket stats
+                cli_z = run_paired_validation(
+                    dataset=zuri_npz,
+                    baseline=session.step_baseline_theta,
+                    candidate=cand,
+                    pm=session.pm,
+                    split="all",
+                    sample=0,
+                    k_factor=rec["zurichess_val"]["k_factor"],
+                    verbose=False,
+                )
+                self.assertEqual(
+                    cli_z["buckets"]["sf19-quiet (WDL)"]["n"],
+                    zuri_b["sf19-quiet (WDL)"]["n"],
+                )
+                self.assertAlmostEqual(
+                    cli_z["buckets"]["sf19-quiet (WDL)"]["delta"],
+                    zuri_b["sf19-quiet (WDL)"]["delta"],
+                    places=12,
+                )
+
+                cum = session.cumulative_report()
+                self.assertIn("sf19-quiet (WDL)", cum["holdout"]["buckets"])
+                self.assertIn("sf19-quiet (WDL)", cum["zurichess_val"]["buckets"])
+
+            self.assertIn("sf19-quiet z=", buf.getvalue())
 
 
 if __name__ == "__main__":

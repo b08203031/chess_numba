@@ -21,6 +21,10 @@ from tuner.constants_snapshot import (
     PHASE_ENDGAME_RATIO_NUM,
     PHASE_MIDGAME,
 )
+from tuner.data_pipeline.annotate_sf_labels import (
+    compute_quiet_and_tactical_masks,
+    default_sidecar_path,
+)
 from tuner.parameters import ParameterManager
 from tuner.tuner import (
     compute_white_scores,
@@ -181,6 +185,102 @@ def _paired_summary_from_errors(base_err: np.ndarray, cand_err: np.ndarray) -> d
     }
 
 
+def _resolve_sf_diagnostic_masks(
+    dataset,
+    indices: np.ndarray,
+    n_total: int,
+    sf_sidecar,
+    max_tactical_gap: int,
+) -> tuple[np.ndarray, np.ndarray] | tuple[None, None]:
+    """Resolve optional pure-WDL ``sf19-quiet`` / ``sf19-tactical`` bool masks aligned to ``indices``."""
+    n_sel = len(indices)
+    if n_sel == 0:
+        return None, None
+
+    explicit = sf_sidecar is not None
+    src = sf_sidecar
+    if src is None:
+        if isinstance(dataset, (str, Path)):
+            sidecar_path = default_sidecar_path(Path(dataset))
+            if not sidecar_path.is_file():
+                return None, None
+            src = sidecar_path
+        elif isinstance(dataset, dict):
+            if "sf_quiet_mask" in dataset and "sf_tactical_mask" in dataset:
+                src = {
+                    "quiet": dataset["sf_quiet_mask"],
+                    "tactical": dataset["sf_tactical_mask"],
+                }
+            elif "sf_cp" in dataset:
+                src = {
+                    "sf_cp": dataset["sf_cp"],
+                    "sf_d1_cp": dataset.get("sf_d1_cp"),
+                }
+            else:
+                return None, None
+        else:
+            return None, None
+
+    def _align(arr: np.ndarray) -> np.ndarray | None:
+        if len(arr) == n_sel:
+            return arr
+        if len(arr) == n_total:
+            return arr[indices]
+        return None
+
+    if isinstance(src, (str, Path)):
+        src_path = Path(src)
+        if not src_path.is_file():
+            if explicit:
+                raise FileNotFoundError(f"SF sidecar not found: {src_path}")
+            return None, None
+        with np.load(src_path) as z:
+            raw_cp = np.asarray(z["sf_cp"], dtype=np.int16)
+            raw_d1 = (
+                np.asarray(z["sf_d1_cp"], dtype=np.int16)
+                if "sf_d1_cp" in z.files
+                else None
+            )
+        sf_cp_sel = _align(raw_cp)
+        if sf_cp_sel is None:
+            if explicit:
+                raise ValueError(
+                    f"SF sidecar length {len(raw_cp)} matches neither n_sel={n_sel} nor n_total={n_total}"
+                )
+            return None, None
+        sf_d1_sel = _align(raw_d1) if raw_d1 is not None else None
+        ann, quiet, tactical = compute_quiet_and_tactical_masks(
+            sf_cp_sel, sf_d1_sel, max_tactical_gap=max_tactical_gap
+        )
+        return (quiet, tactical) if np.any(ann) else (None, None)
+
+    if isinstance(src, dict):
+        if "quiet" in src and "tactical" in src:
+            q_sel = _align(np.asarray(src["quiet"], dtype=bool))
+            t_sel = _align(np.asarray(src["tactical"], dtype=bool))
+            if q_sel is None or t_sel is None:
+                raise ValueError(
+                    f"SF mask dict length matches neither n_sel={n_sel} nor n_total={n_total}"
+                )
+            return (q_sel, t_sel) if (np.any(q_sel) or np.any(t_sel)) else (None, None)
+        if "sf_cp" in src:
+            sf_cp_sel = _align(np.asarray(src["sf_cp"], dtype=np.int16))
+            if sf_cp_sel is None:
+                raise ValueError("SF dict 'sf_cp' length mismatch.")
+            raw_d1 = src.get("sf_d1_cp")
+            sf_d1_sel = (
+                _align(np.asarray(raw_d1, dtype=np.int16))
+                if raw_d1 is not None
+                else None
+            )
+            ann, quiet, tactical = compute_quiet_and_tactical_masks(
+                sf_cp_sel, sf_d1_sel, max_tactical_gap=max_tactical_gap
+            )
+            return (quiet, tactical) if np.any(ann) else (None, None)
+
+    return None, None
+
+
 def run_paired_validation(
     dataset,
     baseline: np.ndarray,
@@ -199,6 +299,8 @@ def run_paired_validation(
     seed: int = 2,
     cached_base_scores: np.ndarray | None = None,
     indices_override: np.ndarray | None = None,
+    sf_sidecar=None,
+    sf_max_tactical_gap: int = 180,
     verbose: bool = True,
 ) -> dict:
     """Evaluate paired candidate vs baseline MSE, SE, and z-scores across buckets."""
@@ -237,6 +339,11 @@ def run_paired_validation(
             data["piece_bbs"][indices[:1]], baseline, pm, game_states=dummy_gs
         )
     ]
+    sel_quiet_mask, sel_tactical_mask = _resolve_sf_diagnostic_masks(
+        dataset, indices, n_total, sf_sidecar, sf_max_tactical_gap
+    )
+    if sel_quiet_mask is not None and sel_tactical_mask is not None:
+        bucket_names.extend(["sf19-quiet (WDL)", "sf19-tactical (WDL)"])
     stats = {
         name: {"n": 0, "base": 0.0, "cand": 0.0, "d": 0.0, "d2": 0.0}
         for name in bucket_names
@@ -301,7 +408,15 @@ def run_paired_validation(
         diff = cand_err - base_err
 
         chunk_gs = states if has_castling else None
-        for b_name, mask in _bucket_masks(bbs, baseline, pm, game_states=chunk_gs):
+        chunk_buckets = list(_bucket_masks(bbs, baseline, pm, game_states=chunk_gs))
+        if sel_quiet_mask is not None and sel_tactical_mask is not None:
+            chunk_buckets.extend(
+                [
+                    ("sf19-quiet (WDL)", sel_quiet_mask[offset:end_off]),
+                    ("sf19-tactical (WDL)", sel_tactical_mask[offset:end_off]),
+                ]
+            )
+        for b_name, mask in chunk_buckets:
             count = int(np.count_nonzero(mask))
             if not count:
                 continue
@@ -421,6 +536,11 @@ def main() -> int:
         help="Optional independent PGN validation .npz (e.g. tuner/data/hce/val_pgn.npz)",
     )
     parser.add_argument(
+        "--zurichess-val",
+        default=None,
+        help="Optional independent Zurichess quiet EPD validation .npz (e.g. tuner/data/hce/val_zurichess.npz)",
+    )
+    parser.add_argument(
         "--override",
         action="append",
         default=[],
@@ -497,14 +617,16 @@ def main() -> int:
         verbose=True,
     )
 
-    if args.pgn_val:
+    for ext_path in (args.pgn_val, args.zurichess_val):
+        if not ext_path:
+            continue
         print()
         run_paired_validation(
-            dataset=args.pgn_val,
+            dataset=ext_path,
             baseline=baseline,
             candidate=candidate,
             pm=pm,
-            label=Path(args.pgn_val).name,
+            label=Path(ext_path).name,
             split="all",
             sample=0,
             chunk_size=args.chunk_size,
