@@ -174,6 +174,9 @@ def uci_loop():
                 global_search_context.last_iteration_pv_len = np.int32(0)
                 global_search_context.nodes_searched = np.uint64(0)
                 global_search_context.nodes_searched_array.fill(0)
+                global_search_context.pawn_table_keys.fill(np.uint64(0xFFFFFFFFFFFFFFFF))
+                global_search_context.pawn_table_w_king_sq.fill(-1)
+                global_search_context.pawn_table_b_king_sq.fill(-1)
                 global_search_context.stop_flag[0] = False
                 game_history = []
                 global_tt_generation = 0 # Reset generation on new game

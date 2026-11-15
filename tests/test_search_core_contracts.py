@@ -538,6 +538,118 @@ class TestSearchCoreContracts(unittest.TestCase):
         # At ply 4 with hmc=6, hist_to_check=2 checks only back to index 2 (not index 0) -> False
         self.assertFalse(bool(_is_repetition_jit(P0, np.int32(6), np.int32(4), ctx)))
 
+    def test_probe_tt_best_move_avoids_pure_python_record_boxing(self):
+        import numpy as np
+        from chess_engine.classical.constants import NO_MOVE
+        from chess_engine.classical.transposition_table import (
+            TT_FLAG_EXACT,
+            TT_FLAG_NONE,
+            create_transposition_table,
+            probe_tt_best_move,
+            store_tt,
+        )
+        from chess_engine.nnue.transposition_table import (
+            create_transposition_table as create_nnue_tt,
+            probe_tt_best_move as nnue_probe_tt_best_move,
+            store_tt as nnue_store_tt,
+        )
+
+        for create_fn, probe_fn, store_fn in (
+            (create_transposition_table, probe_tt_best_move, store_tt),
+            (create_nnue_tt, nnue_probe_tt_best_move, nnue_store_tt),
+        ):
+            tt = create_fn(1)
+            for key in (0, 123456789, 0x123456789ABCDEF0):
+                flag, bm = probe_fn(tt, np.uint64(key))
+                self.assertEqual((int(flag), int(bm)), (int(TT_FLAG_NONE), int(NO_MOVE)))
+            tiny = np.zeros(2, dtype=tt.dtype)
+            self.assertEqual(
+                tuple(int(x) for x in probe_fn(tiny, np.uint64(42))),
+                (int(TT_FLAG_NONE), int(NO_MOVE)),
+            )
+            hit_key = np.uint64(0x123456789ABCDEF0)
+            store_fn(tt, hit_key, 4, 42, 40, TT_FLAG_EXACT, 777, 1, True)
+            flag, bm = probe_fn(tt, hit_key)
+            self.assertEqual((int(flag), int(bm)), (int(TT_FLAG_EXACT), 777))
+
+        # Classical-only edge cases: raw Python uint64-range int, 0xFFFFFFFFFFFFFFFF, len=0 TT, TT_FLAG_NONE guard
+        c_tt = create_transposition_table(1)
+        for edge_key in (np.uint64(0xFFFFFFFFFFFFFFFF), 0xFFFFFFFFFFFFFFFF):
+            flag, bm = probe_tt_best_move(c_tt, edge_key)
+            self.assertEqual((int(flag), int(bm)), (int(TT_FLAG_NONE), int(NO_MOVE)))
+        empty_tt = np.zeros(0, dtype=c_tt.dtype)
+        flag, bm = probe_tt_best_move(empty_tt, np.uint64(0))
+        self.assertEqual((int(flag), int(bm)), (int(TT_FLAG_NONE), int(NO_MOVE)))
+        zero_low_key = np.uint64(0x1234567800000000)
+        store_tt(c_tt, zero_low_key, 4, 42, 40, TT_FLAG_EXACT, 777, 1, True)
+        c_tt['key'] = np.uint32(0)
+        c_tt['flag'] = np.uint8(TT_FLAG_NONE)
+        flag, bm = probe_tt_best_move(c_tt, zero_low_key)
+        self.assertEqual(int(flag), int(TT_FLAG_NONE))
+        self.assertEqual(int(bm), 777)
+
+        for filename in ('chess_engine/classical/search.py', 'chess_engine/nnue/search.py'):
+            source = (ROOT / filename).read_text(encoding='utf-8')
+            self.assertIn('probe_tt_best_move(transposition_table, _id_tt_key)', source)
+            self.assertNotIn('probe_tt(transposition_table, _id_tt_key)', source)
+
+    def test_pawn_table_resets_clear_king_squares(self):
+        import numpy as np
+        from chess_engine.classical.fen_parser import parse_fen
+        from chess_engine.classical.pawns import (
+            evaluate_pawn_structure,
+            evaluate_pawn_structure_cached,
+        )
+        from tools.match_core import _reset_context
+        from tune_eval_match.inprocess_match import make_search_context, reset_ctx_tables
+
+        main_src = (ROOT / 'main.py').read_text(encoding='utf-8')
+        ucinewgame_start = main_src.index('elif command == "ucinewgame":')
+        next_cmd = main_src.index('elif command == "position":', ucinewgame_start)
+        ucinewgame_block = main_src[ucinewgame_start:next_cmd]
+        self.assertIn('clear_transposition_table(transposition_table)', ucinewgame_block)
+        self.assertIn(
+            'global_search_context.pawn_table_keys.fill(np.uint64(0xFFFFFFFFFFFFFFFF))',
+            ucinewgame_block,
+        )
+        self.assertIn('global_search_context.pawn_table_w_king_sq.fill(-1)', ucinewgame_block)
+        self.assertIn('global_search_context.pawn_table_b_king_sq.fill(-1)', ucinewgame_block)
+
+        sentinel_key = np.uint64(0xFFFFFFFFFFFFFFFF)
+        adv_idx = int(sentinel_key & np.uint64(0x3FFFF))
+        pb_adv, _, gs_adv = parse_fen('r3k2r/ppp2ppp/8/8/8/8/PPP2PPP/R3K2R w KQkq - 0 1')
+        ctx = make_search_context(tt_mb=1)
+        expected_tuple = tuple(
+            int(x) for x in evaluate_pawn_structure(pb_adv, np.uint8(gs_adv[1]), ctx.eval_weights, True)
+        )
+        self.assertTrue(np.all(ctx.pawn_table_keys == sentinel_key))
+        self.assertTrue(np.all(ctx.pawn_table_w_king_sq == -1))
+        self.assertTrue(np.all(ctx.pawn_table_b_king_sq == -1))
+
+        for label, reset_fn in (
+            ('reset_ctx_tables', reset_ctx_tables),
+            ('_reset_context', _reset_context),
+        ):
+            with self.subTest(reset_fn=label):
+                ctx.pawn_table_keys[:] = np.uint64(0x123456789ABCDEF0)
+                ctx.pawn_table_w_king_sq[:] = 4
+                ctx.pawn_table_b_king_sq[:] = 60
+                ctx.pawn_table_mg[adv_idx] = np.int32(9999)
+                ctx.pawn_table_w_shield_mg[adv_idx] = np.int32(777)
+                reset_fn(ctx)
+                self.assertTrue(np.all(ctx.pawn_table_keys == sentinel_key))
+                self.assertTrue(np.all(ctx.pawn_table_w_king_sq == -1))
+                self.assertTrue(np.all(ctx.pawn_table_b_king_sq == -1))
+
+                # Ensure 0xFFFFFFFFFFFFFFFF pawn key cannot falsely match stale slot values post-reset
+                actual_tuple = tuple(
+                    int(x) for x in evaluate_pawn_structure_cached(pb_adv, sentinel_key, np.uint8(gs_adv[1]), ctx)
+                )
+                self.assertEqual(actual_tuple, expected_tuple)
+                self.assertEqual(int(ctx.pawn_table_w_king_sq[adv_idx]), 4)
+                self.assertEqual(int(ctx.pawn_table_b_king_sq[adv_idx]), 60)
+                self.assertNotEqual(int(ctx.pawn_table_mg[adv_idx]), 9999)
+
 
 if __name__ == '__main__':
     unittest.main()

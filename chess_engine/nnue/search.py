@@ -56,7 +56,7 @@ from chess_engine.nnue.board_operations import find_piece_type_for_square
 from chess_engine.nnue.debug_utils import log_info
 from chess_engine.nnue.see import see, see_ge, get_pinned_pieces
 from chess_engine.nnue.transposition_table import (
-    probe_tt, store_tt, numba_tt_entry_type,
+    probe_tt, probe_tt_best_move, store_tt, numba_tt_entry_type,
     TT_FLAG_NONE, TT_FLAG_EXACT, TT_FLAG_ALPHA, TT_FLAG_BETA
 )
 from chess_engine.nnue.zobrist import get_tt_key  # GHI protection: halfmove-aware TT key
@@ -1672,9 +1672,9 @@ def iterative_deepening_search(piece_bbs, occupancy_bbs, game_state, max_depth, 
         else:
             # GHI: use halfmove-aware key to match the key used inside the search
             _id_tt_key = np.uint64(get_tt_key(game_state[4], int(game_state[3])))
-            tt_entry = probe_tt(transposition_table, _id_tt_key)
-            if tt_entry['flag'] != TT_FLAG_NONE and tt_entry['best_move'] != NO_MOVE:
-                best_move_from_last_depth = tt_entry['best_move']
+            _id_tt_flag, _id_tt_best_move = probe_tt_best_move(transposition_table, _id_tt_key)
+            if _id_tt_flag != TT_FLAG_NONE and _id_tt_best_move != NO_MOVE:
+                best_move_from_last_depth = _id_tt_best_move
             elif search_context.pv_table[0, 0] != NO_MOVE:
                 best_move_from_last_depth = search_context.pv_table[0, 0]
         

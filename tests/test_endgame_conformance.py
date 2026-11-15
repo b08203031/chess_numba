@@ -264,39 +264,205 @@ class TestEndgameConformance(unittest.TestCase):
         self.assertEqual(int(sf), int(SCALE_FACTOR_DRAW))
 
     def test_pawn_hash_partial_hit_shelter_recompute(self):
-        from chess_engine.classical.constants import MAX_PLY
+        from chess_engine.classical.constants import MAX_PLY, PAWN_KEY_INDEX
         from chess_engine.classical.engine_types import SearchContext
-        from chess_engine.classical.evaluation import _evaluate_position_jit
+        from chess_engine.classical.evaluation import (
+            _evaluate_king_pawn_endgame,
+            _evaluate_position_jit,
+        )
+        from chess_engine.classical.pawns import (
+            evaluate_pawn_structure,
+            evaluate_pawn_structure_cached,
+        )
         from chess_engine.classical.transposition_table import create_transposition_table
 
-        tt = create_transposition_table(1)
-        ctx = SearchContext(
-            tt,
-            np.zeros(MAX_PLY * 2, dtype=np.uint16),
-            np.zeros((MAX_PLY, MAX_PLY), dtype=np.uint16),
-            np.zeros((12, 64), dtype=np.int32),
-            np.zeros((64, 64), dtype=np.int32),
-            np.zeros((5, 12, 64, 12, 64), dtype=np.int16),
-            np.zeros((12, 64, 6), dtype=np.int32),
-            np.full((8192, 12, 64), -1238, dtype=np.int16),
-            np.zeros(16384, dtype=np.int16),
-            np.zeros(16384, dtype=np.int16),
-            np.zeros(16384, dtype=np.int16),
-            np.zeros(16384, dtype=np.int16),
-            np.zeros((12, 64, 12, 64), dtype=np.int16),
-        )
-        # Same pawn structure across all 4 FENs, varying White/Black king squares and castling rights
-        fens = [
-            "r3k2r/ppp2ppp/8/8/8/8/PPP2PPP/R3K2R w KQkq - 0 1",
-            "r3k2r/ppp2ppp/8/8/8/8/PPP2PPP/R4K1R b kq - 1 1",   # White king moved + lost KQ rights
-            "r4k1r/ppp2ppp/8/8/8/8/PPP2PPP/R4K1R w - - 2 2",    # Black king moved + lost kq rights
-            "r3k2r/ppp2ppp/8/8/8/8/PPP2PPP/R3K2R w K - 0 1",    # White castling rights changed (K vs KQkq)
-        ]
-        for fen in fens:
+        def make_ctx():
+            return SearchContext(
+                create_transposition_table(1),
+                np.zeros(MAX_PLY * 2, dtype=np.uint16),
+                np.zeros((MAX_PLY, MAX_PLY), dtype=np.uint16),
+                np.zeros((12, 64), dtype=np.int32),
+                np.zeros((64, 64), dtype=np.int32),
+                np.zeros((5, 12, 64, 12, 64), dtype=np.int16),
+                np.zeros((12, 64, 6), dtype=np.int32),
+                np.full((8192, 12, 64), -1238, dtype=np.int16),
+                np.zeros(16384, dtype=np.int16),
+                np.zeros(16384, dtype=np.int16),
+                np.zeros(16384, dtype=np.int16),
+                np.zeros(16384, dtype=np.int16),
+                np.zeros((12, 64, 12, 64), dtype=np.int16),
+            )
+
+        def reset_pawn_table(c):
+            c.pawn_table_keys.fill(np.uint64(0xFFFFFFFFFFFFFFFF))
+            c.pawn_table_w_king_sq.fill(-1)
+            c.pawn_table_b_king_sq.fill(-1)
+
+        ctx = make_ctx()
+
+        def assert_full_parity(fen: str, note: str) -> tuple:
             pb, occ, gs = parse_fen(fen)
-            cached_val, _, _ = _evaluate_position_jit(pb, occ, gs, False, ctx)
-            uncached_val, _, _ = _evaluate_position_jit(pb, occ, gs, False, None)
-            self.assertEqual(int(cached_val), int(uncached_val), msg=f"Pawn hash shelter mismatch for {fen}")
+            pawn_key = np.uint64(gs[PAWN_KEY_INDEX])
+            cr = np.uint8(gs[1])
+            cached_tuple = evaluate_pawn_structure_cached(pb, pawn_key, cr, ctx)
+            uncached_tuple = evaluate_pawn_structure(pb, cr, ctx.eval_weights, True)
+            self.assertEqual(
+                tuple(int(x) for x in cached_tuple),
+                tuple(int(x) for x in uncached_tuple),
+                msg=f"Pawn structure 10-tuple mismatch ({note}) for {fen}",
+            )
+            for skip_tempo in (False, True):
+                cached_eval = _evaluate_position_jit(pb, occ, gs, skip_tempo, ctx)
+                uncached_eval = _evaluate_position_jit(pb, occ, gs, skip_tempo, None)
+                self.assertEqual(
+                    tuple(int(x) for x in cached_eval),
+                    tuple(int(x) for x in uncached_eval),
+                    msg=f"_evaluate_position_jit(skip_tempo={skip_tempo}) mismatch ({note}) for {fen}",
+                )
+            return pb, occ, gs, pawn_key, cr
+
+        # (a) White king movement only (plus KQ loss, then pure king move with cr constant)
+        base_fen = "r3k2r/ppp2ppp/8/8/8/8/PPP2PPP/R3K2R w KQkq - 0 1"
+        _, _, _, pawn_key, _ = assert_full_parity(base_fen, "cold populate")
+        idx = int(pawn_key & np.uint64(0x3FFFF))
+        self.assertEqual(int(ctx.pawn_table_w_king_sq[idx]), 4)
+        self.assertEqual(int(ctx.pawn_table_b_king_sq[idx]), 60)
+
+        assert_full_parity("r3k2r/ppp2ppp/8/8/8/8/PPP2PPP/R5KR w kq - 1 1", "white king e1->g1 + lost KQ")
+        self.assertEqual(int(ctx.pawn_table_w_king_sq[idx]), 6)
+        self.assertEqual(int(ctx.pawn_table_b_king_sq[idx]), 60)
+
+        assert_full_parity("r3k2r/ppp2ppp/8/8/8/8/PPP2PPP/R4K1R w kq - 2 2", "white king g1->f1 only")
+        self.assertEqual(int(ctx.pawn_table_w_king_sq[idx]), 5)
+        self.assertEqual(int(ctx.pawn_table_b_king_sq[idx]), 60)
+
+        # (b) Black king movement only (e8->f8 + lost kq, then pure f8->g8 with cr constant)
+        assert_full_parity("r4k1r/ppp2ppp/8/8/8/8/PPP2PPP/R4K1R w - - 3 3", "black king e8->f8 + lost kq")
+        self.assertEqual(int(ctx.pawn_table_w_king_sq[idx]), 5)
+        self.assertEqual(int(ctx.pawn_table_b_king_sq[idx]), 61)
+
+        assert_full_parity("r5kr/ppp2ppp/8/8/8/8/PPP2PPP/R4K1R w - - 4 4", "black king f8->g8 only")
+        self.assertEqual(int(ctx.pawn_table_w_king_sq[idx]), 5)
+        self.assertEqual(int(ctx.pawn_table_b_king_sq[idx]), 62)
+
+        # Verify partial-hit path genuinely reuses pawn mg/eg and opposite-side shelter
+        pb_w_move, _, gs_w_move = parse_fen("r3k2r/ppp2ppp/8/8/8/8/PPP2PPP/R5KR w kq - 1 1")
+        pb_b_move, _, gs_b_move = parse_fen("r5kr/ppp2ppp/8/8/8/8/PPP2PPP/R5KR w kq - 2 2")
+        reset_pawn_table(ctx)
+        assert_full_parity("r3k2r/ppp2ppp/8/8/8/8/PPP2PPP/R3K2R w kq - 0 1", "pre-sentinel white partial check")
+        ctx.pawn_table_mg[idx] = np.int32(1234)
+        ctx.pawn_table_b_shield_mg[idx] = np.int32(567)
+        w_partial = evaluate_pawn_structure_cached(pb_w_move, pawn_key, np.uint8(gs_w_move[1]), ctx)
+        w_uncached = evaluate_pawn_structure(pb_w_move, np.uint8(gs_w_move[1]), ctx.eval_weights, True)
+        self.assertEqual(int(w_partial[0]), 1234)
+        self.assertEqual(int(w_partial[4]), 567)
+        self.assertEqual(int(w_partial[2]), int(w_uncached[2]))
+        self.assertEqual(int(ctx.pawn_table_w_king_sq[idx]), 6)
+        self.assertEqual(int(ctx.pawn_table_b_king_sq[idx]), 60)
+
+        ctx.pawn_table_eg[idx] = np.int32(-432)
+        ctx.pawn_table_w_shield_mg[idx] = np.int32(321)
+        b_partial = evaluate_pawn_structure_cached(pb_b_move, pawn_key, np.uint8(gs_b_move[1]), ctx)
+        b_uncached = evaluate_pawn_structure(pb_b_move, np.uint8(gs_b_move[1]), ctx.eval_weights, True)
+        self.assertEqual(int(b_partial[1]), -432)
+        self.assertEqual(int(b_partial[2]), 321)
+        self.assertEqual(int(b_partial[4]), int(b_uncached[4]))
+        self.assertEqual(int(ctx.pawn_table_w_king_sq[idx]), 6)
+        self.assertEqual(int(ctx.pawn_table_b_king_sq[idx]), 62)
+
+        # (c) Castling rights bit changes with stationary kings (K/Q vs k/q)
+        reset_pawn_table(ctx)
+        for cr_str in ("KQkq", "Kkq", "kq", "k", "-", "Qq", "KQk"):
+            assert_full_parity(
+                f"r3k2r/ppp2ppp/8/8/8/8/PPP2PPP/R3K2R w {cr_str} - 0 1",
+                f"castling={cr_str}",
+            )
+
+        # (d) Post-reset re-evaluation (pawn-table reset and fresh SearchContext)
+        for label, mk_or_reset in (
+            ("reset_pawn_table", lambda c: (reset_pawn_table(c), c)[1]),
+            ("fresh_SearchContext", lambda _c: make_ctx()),
+        ):
+            ctx = mk_or_reset(ctx)
+            self.assertEqual(int(ctx.pawn_table_keys[idx]), 0xFFFFFFFFFFFFFFFF)
+            self.assertEqual(int(ctx.pawn_table_w_king_sq[idx]), -1)
+            self.assertEqual(int(ctx.pawn_table_b_king_sq[idx]), -1)
+            assert_full_parity(base_fen, f"post-{label} base")
+            assert_full_parity("r4k1r/ppp2ppp/8/8/8/8/PPP2PPP/R4K1R b - - 1 1", f"post-{label} moved")
+            self.assertEqual(int(ctx.pawn_table_w_king_sq[idx]), 5)
+            self.assertEqual(int(ctx.pawn_table_b_king_sq[idx]), 61)
+
+        # (e) King-Pawn endgame (_evaluate_king_pawn_endgame + _evaluate_position_jit) parity with SearchContext
+        kp_fens = (
+            "8/5k2/8/8/3P4/8/4K3/8 w - - 0 1",
+            "8/5k2/8/8/3P4/8/5K2/8 w - - 1 1",
+            "8/4k3/8/8/3P4/8/5K2/8 b - - 2 2",
+        )
+        reset_pawn_table(ctx)
+        for kp_fen in kp_fens:
+            pb_kp, occ_kp, gs_kp, _, _ = assert_full_parity(kp_fen, "KP endgame")
+            kp_cached = tuple(
+                int(x)
+                for x in _evaluate_king_pawn_endgame(
+                    pb_kp, occ_kp, gs_kp, np.uint8(gs_kp[1]), ctx, ctx.eval_weights, False
+                )
+            )
+            kp_uncached = tuple(
+                int(x)
+                for x in _evaluate_king_pawn_endgame(
+                    pb_kp, occ_kp, gs_kp, np.uint8(gs_kp[1]), None, ctx.eval_weights, False
+                )
+            )
+            self.assertEqual(kp_cached, kp_uncached, msg=f"KP endgame mismatch for {kp_fen}")
+
+        # (f) Adversarial pawn_key == 0xFFFFFFFFFFFFFFFF sentinel guards (both empty and asymmetric king sqs)
+        adv_key = np.uint64(0xFFFFFFFFFFFFFFFF)
+        adv_idx = int(adv_key & np.uint64(0x3FFFF))
+        pb_adv, occ_adv, gs_adv = parse_fen(base_fen)
+        gs_adv = gs_adv.copy()
+        gs_adv[PAWN_KEY_INDEX] = adv_key
+        expected_tuple = tuple(int(x) for x in evaluate_pawn_structure(pb_adv, np.uint8(gs_adv[1]), ctx.eval_weights, True))
+        expected_eval = tuple(int(x) for x in _evaluate_position_jit(pb_adv, occ_adv, gs_adv, False, None))
+
+        for label, wk_poison, bk_poison in (
+            ("both_unset", -1, -1),
+            ("w_set_b_unset", 4, -1),
+            ("w_unset_b_set", -1, 60),
+        ):
+            reset_pawn_table(ctx)
+            ctx.pawn_table_w_king_sq[adv_idx] = np.int8(wk_poison)
+            ctx.pawn_table_b_king_sq[adv_idx] = np.int8(bk_poison)
+            ctx.pawn_table_mg[adv_idx] = np.int32(9999)
+            ctx.pawn_table_eg[adv_idx] = np.int32(-9999)
+            ctx.pawn_table_w_shield_mg[adv_idx] = np.int32(777)
+            ctx.pawn_table_b_shield_mg[adv_idx] = np.int32(-777)
+            ctx.pawn_table_castling_rights[adv_idx] = np.uint8(15)
+
+            actual_eval = tuple(int(x) for x in _evaluate_position_jit(pb_adv, occ_adv, gs_adv, False, ctx))
+            self.assertEqual(actual_eval, expected_eval, msg=f"_evaluate_position_jit failed {label}")
+            self.assertEqual(int(ctx.pawn_table_w_king_sq[adv_idx]), 4)
+            self.assertEqual(int(ctx.pawn_table_b_king_sq[adv_idx]), 60)
+            self.assertNotEqual(int(ctx.pawn_table_mg[adv_idx]), 9999)
+
+            reset_pawn_table(ctx)
+            ctx.pawn_table_w_king_sq[adv_idx] = np.int8(wk_poison)
+            ctx.pawn_table_b_king_sq[adv_idx] = np.int8(bk_poison)
+            ctx.pawn_table_mg[adv_idx] = np.int32(8888)
+            ctx.pawn_table_w_shield_mg[adv_idx] = np.int32(666)
+            ctx.pawn_table_castling_rights[adv_idx] = np.uint8(15)
+
+            actual_tuple = tuple(int(x) for x in evaluate_pawn_structure_cached(pb_adv, adv_key, np.uint8(gs_adv[1]), ctx))
+            self.assertEqual(actual_tuple, expected_tuple, msg=f"cached tuple failed {label}")
+            self.assertEqual(int(ctx.pawn_table_w_king_sq[adv_idx]), 4)
+            self.assertEqual(int(ctx.pawn_table_b_king_sq[adv_idx]), 60)
+            self.assertNotEqual(int(ctx.pawn_table_mg[adv_idx]), 8888)
+
+            # Once legitimately populated with key == 0xFFFFFFFFFFFFFFFF, a 2nd call hits cleanly
+            ctx.pawn_table_mg[adv_idx] = np.int32(555)
+            reused = evaluate_pawn_structure_cached(pb_adv, adv_key, np.uint8(gs_adv[1]), ctx)
+            self.assertEqual(int(reused[0]), 555, msg=f"valid max-key 2nd call should reuse cache ({label})")
+            self.assertEqual(int(reused[2]), expected_tuple[2])
+            self.assertEqual(int(reused[4]), expected_tuple[4])
 
     def test_doubled_pawns_front_blocks_rear_unstoppable(self):
         # White has doubled pawns on a2 and a3, black king far away on h8 with irrelevant h7 pawn.
@@ -380,6 +546,37 @@ class TestEndgameConformance(unittest.TestCase):
         piece_bbs, occupancy_bbs, game_state = parse_fen(fen)
         val, _, _ = evaluate_position(piece_bbs, occupancy_bbs, game_state)
         self.assertGreater(val, 9000)
+
+    def test_kpkp_and_krpkb_black_mirror_and_kqkrps_multi_pawn(self):
+        # KPKP: Black-strong drawn vs winning + rule50 fall-through decay
+        p1, o1, g1 = parse_fen("4k3/7P/8/8/p7/8/8/4K3 w - - 0 1")
+        self.assertEqual(int(get_endgame_scale_factor(p1, o1, g1, np.int32(0), np.int32(-200))), int(SCALE_FACTOR_DRAW))
+        p2, o2, g2 = parse_fen("8/7P/1k6/8/8/p7/8/6K1 b - - 0 1")
+        self.assertEqual(int(get_endgame_scale_factor(p2, o2, g2, np.int32(0), np.int32(-200))), 43)
+        p3, o3, g3 = parse_fen("4k3/8/8/1P6/8/8/7p/4K3 w - - 52 1")
+        self.assertEqual(int(get_endgame_scale_factor(p3, o3, g3, np.int32(0), np.int32(200))), 33)
+
+        # KRPKB: Black-strong corner trap (48) vs non-trapped (24), and White H-file mirror trap (48)
+        for fen, eg_score, expected_sf in (
+            ("2B5/8/8/1r6/p7/k7/8/K7 b - - 0 1", -200, 48),
+            ("2B5/8/8/1r6/p7/1k6/8/K7 b - - 0 1", -200, 24),
+            ("7k/8/7K/7P/6R1/8/8/5b2 w - - 0 1", 200, 48),
+        ):
+            pb, ob, gs = parse_fen(fen)
+            self.assertEqual(int(get_endgame_scale_factor(pb, ob, gs, np.int32(0), np.int32(eg_score))), expected_sf)
+
+        # KQKRPs: multi-pawn where LSB pawn does not defend rook while later pawn does, plus Black-strong mirror
+        for fen, eg_score, is_draw in (
+            ("2k5/pp4p1/2r5/8/8/8/Q7/4K3 w - - 0 1", 500, True),
+            ("4k3/q7/8/8/8/2R5/PPP3P1/2K5 b - - 0 1", -500, True),
+            ("2k5/p3p1p1/2r5/8/8/8/Q7/4K3 w - - 0 1", 500, False),
+        ):
+            pb, ob, gs = parse_fen(fen)
+            sf = int(get_endgame_scale_factor(pb, ob, gs, np.int32(0), np.int32(eg_score)))
+            if is_draw:
+                self.assertEqual(sf, int(SCALE_FACTOR_DRAW), fen)
+            else:
+                self.assertNotEqual(sf, int(SCALE_FACTOR_DRAW), fen)
 
 
 if __name__ == "__main__":

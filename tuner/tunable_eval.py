@@ -643,7 +643,11 @@ def evaluate_pawn_structure_cached(piece_bbs, pawn_key, castling_rights, search_
     white_king_sq = get_lsb_index(piece_bbs[5])
     black_king_sq = get_lsb_index(piece_bbs[11])
 
-    if search_context.pawn_table_keys[idx] == pawn_key and search_context.pawn_table_w_king_sq[idx] >= 0:
+    if (
+        search_context.pawn_table_keys[idx] == pawn_key
+        and search_context.pawn_table_w_king_sq[idx] >= 0
+        and search_context.pawn_table_b_king_sq[idx] >= 0
+    ):
         old_wk = int(search_context.pawn_table_w_king_sq[idx])
         old_bk = int(search_context.pawn_table_b_king_sq[idx])
         old_cr = int(search_context.pawn_table_castling_rights[idx])

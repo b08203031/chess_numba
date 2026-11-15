@@ -27,7 +27,7 @@ from chess_engine.classical_old.pawns import (
     WHITE_FORWARD_RANKS, BLACK_FORWARD_RANKS,
     ADJACENT_FILES_MASKS, PHALANX_MASK, WHITE_SUPPORT_MASK, BLACK_SUPPORT_MASK,
     evaluate_pawn_structure, evaluate_pawn_structure_cached,
-    evaluate_piece_coordination, evaluate_shelter_aligned
+    evaluate_piece_coordination
 )
 from chess_engine.classical_old.material import compute_imbalance, _trunc_div
 
@@ -420,7 +420,7 @@ def _evaluate_king_attackers(king_sq, color, piece_bbs, occupancy_bbs, enemy_att
         + kd_block * pinned_count
         + flank_term
         + mg_mobility_diff
-        - (shelter_fb_num * mg_shield) // KING_SHELTER_FEEDBACK_DEN
+        - _trunc_div(shelter_fb_num * mg_shield, KING_SHELTER_FEEDBACK_DEN)
         - flank_def_term
         + kd_off
     )

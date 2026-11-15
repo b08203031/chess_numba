@@ -1125,22 +1125,6 @@ RANK_MASKS = np.array([np.uint64(0xFF) << np.uint64(i * 8) for i in range(8)], d
 DARK_SQUARES = np.uint64(0xAA55AA55AA55AA55)
 LIGHT_SQUARES = np.uint64(0x55AA55AA55AA55AA)
 
-# De Bruijn sequence for fast bit scanning / 用於快速位掃描的 De Bruijn 序列
-DE_BRUIJN_SEQUENCE = np.uint64(0x03f79d71b4cb0a89)
-
-# Lookup table for mapping the De Bruijn hash to a square index (0-63)
-# 將 De Bruijn 哈希映射到方格索引（0-63）的查找表
-DE_BRUIJN_INDEX = np.array([
-     0,  1, 48,  2, 57, 49, 28,  3,
-    61, 58, 50, 42, 38, 29, 17,  4,
-    62, 55, 59, 36, 53, 51, 43, 22,
-    45, 39, 33, 30, 24, 18, 12,  5,
-    63, 47, 56, 27, 60, 41, 37, 16,
-    54, 35, 52, 21, 44, 32, 23, 11,
-    46, 26, 40, 15, 34, 20, 31, 10,
-    25, 14, 19,  9, 13,  8,  7,  6
-], dtype=np.int32)
-
 
 # =============================================================================
 # --- Transposition Table Constants / 置換表常量 ---

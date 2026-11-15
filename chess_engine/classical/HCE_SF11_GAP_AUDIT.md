@@ -472,7 +472,8 @@ SF 係數在「pawn MG=128」空間與 SF mobility/shelter 共調。我們材質
 
 | 版本標籤 | 內容 |
 | :--- | :--- |
-| `classical` vs `classical_old`（現行清潔基線） | 經 `--sync` 完整對齊：兩目錄搜尋、HCE 程式碼與評估常數**邏輯完全一致**，皆維持 **R2（`d59ebcd`）有效權重**並移除 26 個未使用死碼常量（R3+Block 7b 參數仍留存於 Git `3996ccf` 歷史）；準備進行修正版 `USE_SF_LABELS = True` 調參 |
+| `classical` vs `classical_old`（現行 Phase 11 同步基線） | 經 `--sync` 完整對齊：兩目錄搜尋、HCE 程式碼、殘局修復、`probe_tt_best_move` 與去 `DE_BRUIJN_*` 之常數表**邏輯完全一致**，維持 Clean R2（`d59ebcd`）有效評估權重；詳見 [EVAL_AUDIT_AND_FIX_PLAN_20261031.md](EVAL_AUDIT_AND_FIX_PLAN_20261031.md) §十一 |
+| **Phase 11（`PAWN_ATTACKS` 反轉／殘局／Pawn Hash）vs Clean R2 (`400k`, 3,868 局)** | **1969.0 - 1899.0**（**686W 2566D 616L**，50.9%，淨勝 +70 局），**`+6.3 ± 6.4 Elo`**；`SPRT[-5, 0] = +4.324` 與 `SPRT[-3, +3] = +3.712` 均達 **`H1 Accepted`**（`SPRT[0, +5] = +1.864`、`SPRT[0, +10] = +1.268`）→ 已 `--sync` 接納為新基準（並疊加 `/boost` 雙邊國王格哨兵與純 Python TT 查找補強） |
 | **Phase 9 `SF19` 混合標籤首輪 vs R2 (`1edb352`/`23b640e`, `copy.ipynb`, 548 局)** | 267.5 - 280.5（83W 369D 96L，48.8%，淨勝 -13），**`-8.2 ± 16.6 Elo`**（`LLR = -2.05`）→ 回退至清潔 R2 基線並修復 `K_sf` 校準、`train_idx` 保留、柵格約束與 `broad-EG` 閘門；見 [EVAL_AUDIT_AND_FIX_PLAN_20261031.md](EVAL_AUDIT_AND_FIX_PLAN_20261031.md) Phase 9 |
 | **Phase 8 R3 vs R2 (`USE_PGN_VAL`, `copy.ipynb`, 3,630 局)** | **1851.0 - 1779.0**（**686W 2330D 614L**，51.0%，淨勝 +72），**`+6.89 ± 6.76 Elo`**（95% CI 下界 > 0；`LLR = +1.75`，1,497 對曾達 `+2.56`）；見 [EVAL_AUDIT_AND_FIX_PLAN_20261031.md](EVAL_AUDIT_AND_FIX_PLAN_20261031.md) Phase 8 |
 | **Phase 8 R3 剔除 Block 7b vs R2 (`copy 8.ipynb`, 750 局)** | 363.5 - 386.5（119W 489D 142L，48.5%，淨勝 -23），**`-10.66 ± 14.66 Elo`**（**H0 Accepted** `LLR = -2.99`）→ 跨測試差 `+17.55 Elo (z = 2.13)` 證實 Block 7b 應保留 |
@@ -487,7 +488,7 @@ SF 係數在「pawn MG=128」空間與 SF mobility/shelter 共調。我們材質
 | **搜尋 PR-A（64 局）** | **50% / Elo 0** |
 | **搜尋 PR-B+C（122 局）** | **50% / Elo 0** ← 搜尋護欄全套定稿 |
 | 評估 P3 整包 / 純 P3a | 負向或中性偏負 → 已回滾 |
-| 建議下一動 | `tuner/` 修復與 HCE 26 個死碼清理已完成並 `--sync` 至 R2 清潔基線；於 Colab 執行 `texel_tuner_runner.ipynb`（`USE_SF_LABELS = True`）新一輪調參，套用後直接與已同步之 `classical_old` 進行 400k 對戰驗收 |
+| 建議下一動 | Phase 11 修復與 `/boost` 加固已完成對戰驗收並 `--sync` 至 `classical_old/`；後續可在此同步基準上於 Colab 執行 `texel_tuner_runner.ipynb`（`USE_SF_LABELS = True`）新一輪靜態調參並直接與已同步之 `classical_old` 進行 400k 對戰驗收 |
 
 ---
 

@@ -119,6 +119,12 @@ def probe_tt(tt, zobrist_key):
     return _EMPTY_TT_ENTRY
 
 @nb.njit(cache=True)
+def probe_tt_best_move(tt, zobrist_key):
+    """Pure-Python-safe TT lookup returning scalar (flag, best_move) without np.record boxing."""
+    entry = probe_tt(tt, zobrist_key)
+    return np.uint8(entry['flag']), np.uint16(entry['best_move'])
+
+@nb.njit(cache=True)
 def store_tt(tt, zobrist_key, depth, score, static_eval, flag, best_move, current_generation, is_pv=False):
     """
     使用 Stockfish 風格的 4-Way Set Associative (四路組相聯) 策略存取置換表，並套用智能替換決策。

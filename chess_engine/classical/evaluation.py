@@ -27,7 +27,7 @@ from chess_engine.classical.pawns import (
     WHITE_FORWARD_RANKS, BLACK_FORWARD_RANKS,
     ADJACENT_FILES_MASKS, PHALANX_MASK, WHITE_SUPPORT_MASK, BLACK_SUPPORT_MASK,
     evaluate_pawn_structure, evaluate_pawn_structure_cached,
-    evaluate_piece_coordination, evaluate_shelter_aligned
+    evaluate_piece_coordination
 )
 from chess_engine.classical.material import compute_imbalance, _trunc_div
 

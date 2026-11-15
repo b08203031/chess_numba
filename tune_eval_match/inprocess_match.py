@@ -94,6 +94,8 @@ def reset_ctx_tables(ctx: SearchContext) -> None:
     ctx.diag_stats[:] = 0
     # Clear pawn structure TT
     ctx.pawn_table_keys[:] = np.uint64(0xFFFFFFFFFFFFFFFF)
+    ctx.pawn_table_w_king_sq[:] = -1
+    ctx.pawn_table_b_king_sq[:] = -1
 
 
 def load_openings(path: Optional[Path], limit: int) -> List[str]:
