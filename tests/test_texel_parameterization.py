@@ -333,7 +333,35 @@ class TestIntegerAwareTuningBands(unittest.TestCase):
                             seed_src,
                             msg=f"Cell {idx} hardcodes run_block seed={seed_src!r}, bypassing RANDOM_SEED toggle",
                         )
-        self.assertEqual(checked, 17)
+        self.assertEqual(checked, 18)
+
+    def test_block6_material_masks_match_coupled_and_standalone_dof(self):
+        n_mask = self.optimizer._create_mask(
+            include_list=["MG_MATERIAL_VALUES", "EG_MATERIAL_VALUES", "PST_MG", "PST_EG"],
+            pst_pieces="N",
+            static_only=True,
+        )
+        self.assertEqual(int(np.sum(n_mask)), 130)
+
+        p_mask = self.optimizer._create_mask(
+            include_list=["EG_MATERIAL_VALUES", "PST_MG", "PST_EG"],
+            pst_pieces="P",
+            static_only=True,
+        )
+        self.assertEqual(int(np.sum(p_mask)), 97)
+        mg_s, _ = self.pm.get_param_indices("MG_MATERIAL_VALUES")
+        eg_s, _ = self.pm.get_param_indices("EG_MATERIAL_VALUES")
+        self.assertEqual(p_mask[mg_s + 0], 0.0)
+        self.assertEqual(p_mask[eg_s + 0], 1.0)
+
+        mat_mask = self.optimizer._create_mask(
+            include_list=["MG_MATERIAL_VALUES", "EG_MATERIAL_VALUES"],
+            static_only=True,
+        )
+        self.assertEqual(int(np.sum(mat_mask)), 9)
+        self.assertEqual(mat_mask[mg_s + 0], 0.0)
+        self.assertEqual(mat_mask[mg_s + 5], 0.0)
+        self.assertEqual(mat_mask[eg_s + 5], 0.0)
 
 
 class TestSplitDatasetIndices(unittest.TestCase):
