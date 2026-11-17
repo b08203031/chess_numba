@@ -30,6 +30,7 @@ Apply on every development, refactor, debug, or documentation task.
   * During development, only read-only diffs (`--diff` / `--diff-code`) are permitted to observe divergence.
   * `classical_old/` is a **.py-only** battle baseline — **no markdown maintenance** there.
 * **Diff sanity check (MUST)**: Run `git diff --stat` before finishing. If a small logic fix results in hundreds or thousands of unexpected line insertions/deletions, inspect immediately for newline doubling or line-ending corruption (`\r\r\n`).
+* **Selective Git staging around active notebooks (MUST)**: Active/dirty Colab notebooks (`tournament_colab_runner_se_multicut.ipynb`, `tuner/texel_tuner_runner.ipynb`, `copy*.ipynb`) frequently reside in the workspace. Never use `git add -A` or `git add .` — stage code, test, and doc paths explicitly so multi-thousand-line notebook outputs are not committed unintentionally.
 
 ---
 
@@ -40,6 +41,10 @@ Apply on every development, refactor, debug, or documentation task.
 | Light unit tests (`unittest`) with little/no heavy JIT | Elo tournaments, long benchmarks, deep perft mass runs, SPSA games |
 
 * First JIT compile of search/eval can take **several minutes** (order-of-magnitude: cold ~2–3+ min after 2026-07 cache work; still long). Wait for completion; **MUST NOT** spam restarts or re-launch the same compile. Details and re-measure protocol: `chess_engine/classical/JIT_COMPILE_CACHE_REPORT.md`.
+* **Batching & environment isolation for `pytest`**:
+  * Run related engine/contract/tuner suites in **one** `pytest` process so `cache=False` search functions compile at most once (~5–6 min) instead of once per file.
+  * Keep Tkinter/GUI tests (`tests/test_vision_and_assistant.py` — fails with `_tkinter.TclError` in headless or Tk-less shells) and cache-wiping tests (`tests/test_search_param_sweep.py`) out of batch engine runs and report any excluded/env-specific suites explicitly.
+* **Small-gain SPRT evaluation**: When reviewing a small-magnitude fix against the default `SPRT[0, +10]` runner, compute `[-5, 0]` (non-regression) and `[-3, +3]` LLR alongside 95% Elo CI via `tools.match_core.SPRTTest` before proposing `--sync` acceptance.
 * When board/make/unmake/movegen change: **recommend** the user run perft (see `board-integrity` rule) rather than auto-running heavy perft.
 
 ---
@@ -58,6 +63,7 @@ Apply on every development, refactor, debug, or documentation task.
   * Verify clean file writes: `\r\r\n` must never be introduced into committed or modified files.
 * **Sidecar module synchronization**:
   * When `chess_engine/classical/constants.py` changes: run `python -m tuner.sync_constants_snapshot` to regenerate tuner snapshot and clear stale Numba cache.
+  * When `chess_engine/classical/{evaluation,pawns,material}.py` changes: run `python -m tuner.codegen.generate_tunable_eval` to regenerate `tuner/tunable_eval.py` and verify with `tests/test_tunable_eval_parity.py`.
 
 ---
 

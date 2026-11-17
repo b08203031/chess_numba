@@ -72,4 +72,6 @@ Then every transitive `cache=True` caller may also fail with
 
 * Keep UCI / GUI / PGN / file I/O in pure Python.
 * Keep make/unmake, movegen, search, eval, SEE, NNUE forward under `njit`.
+* **Do not return structured-array records across the Python/JIT boundary:** Calling a `@njit` function that returns a structured NumPy element (e.g. `probe_tt` returning `tt[idx]` / `_EMPTY_TT_ENTRY`) from pure Python triggers `np.record` boxing issues. Pure-Python callers must use a scalar-tuple `@njit` wrapper (e.g. `probe_tt_best_move`).
+* **Decouple non-search unit tests from `search.py`:** Because `_search` and `quiescence_search` use `cache=False`, importing modules that pull in `search.py` (such as `tools.match_core` or `tune_eval_match.inprocess_match`) adds ~5–6 minutes of cold LLVM compile time per Python process. Construct `SearchContext` directly from `engine_types` in fast eval/unit tests.
 * After JIT/cache-related changes: run cold+warm timing (see JIT report §5) and append numbers to that report §6 when results change.
