@@ -333,7 +333,7 @@ class TestIntegerAwareTuningBands(unittest.TestCase):
                             seed_src,
                             msg=f"Cell {idx} hardcodes run_block seed={seed_src!r}, bypassing RANDOM_SEED toggle",
                         )
-        self.assertEqual(checked, 18)
+        self.assertEqual(checked, 24)
 
     def test_block6_material_masks_match_coupled_and_standalone_dof(self):
         n_mask = self.optimizer._create_mask(
@@ -353,6 +353,25 @@ class TestIntegerAwareTuningBands(unittest.TestCase):
         eg_s, _ = self.pm.get_param_indices("EG_MATERIAL_VALUES")
         self.assertEqual(p_mask[mg_s + 0], 0.0)
         self.assertEqual(p_mask[eg_s + 0], 1.0)
+
+        p_mg_only = self.optimizer._create_mask(
+            include_list=["PST_MG"],
+            pst_pieces="P",
+            static_only=True,
+        )
+        self.assertEqual(int(np.sum(p_mg_only)), 48)
+        pst_eg_s, pst_eg_c = self.pm.get_param_indices("PST_EG")
+        self.assertEqual(int(np.sum(p_mg_only[pst_eg_s : pst_eg_s + pst_eg_c])), 0)
+
+        b_eg_only = self.optimizer._create_mask(
+            include_list=["EG_MATERIAL_VALUES", "PST_EG"],
+            pst_pieces="B",
+            static_only=True,
+        )
+        self.assertEqual(int(np.sum(b_eg_only)), 65)
+        pst_mg_s, pst_mg_c = self.pm.get_param_indices("PST_MG")
+        self.assertEqual(int(np.sum(b_eg_only[pst_mg_s : pst_mg_s + pst_mg_c])), 0)
+        self.assertEqual(b_eg_only[eg_s + 2], 1.0)
 
         mat_mask = self.optimizer._create_mask(
             include_list=["MG_MATERIAL_VALUES", "EG_MATERIAL_VALUES"],

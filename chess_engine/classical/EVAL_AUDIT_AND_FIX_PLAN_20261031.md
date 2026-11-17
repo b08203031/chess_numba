@@ -795,11 +795,11 @@ flowchart TD
    * **Colab `SF_LAMBDA=0.20`（`STATIC_FEATURES_ONLY=True`）**：3,420 局（1,710 對），`602W - 2249D - 569L`，Penta `[50, 355, 861, 400, 44]`，**`+3.35 ± 6.70 Elo`**（`[-3.34, +10.05]`，nElo `+5.83 ± 11.64`），`[0, 10] LLR = -1.41`、`[-5, 0] LLR = +2.51`（後半程回落；註：原 commit `d6d2c07` 訊息誤植為 `0.20通過sprt`，經核實 Notebook 輸出實為 `0.15` 過線）。
    * **本機 `SF20 vs SF15` 互打參考（`tournament_results_sf20_vs_sf15.pgn`）**：1,740 局（870 對），`287W - 1180D - 273L`，Penta `[23, 172, 466, 186, 23]`，`+2.80 ± 9.11 Elo`（`[-6.31, +11.91]`，`[-3, 3] LLR = +0.78`）；四場 GLS 聯合估計對 Old 仍以 **`sf15`** 為唯一全區間 `> 0` 領先者。
    * **本機純 WDL 全參數對照（`STATIC_FEATURES_ONLY=False`）**：3,748 局（1,874 對，`tournament_analysis/tournament_results.pgn`），`637W - 2502D - 609L`，Penta `[56, 379, 980, 399, 60]`，**`+2.60 ± 6.40 Elo`**（`[-3.81, +9.00]`），`[0, 10] LLR = -2.25`、`[0, 5] LLR = +0.04`、`[-5, 0] LLR = +2.39`；權重另備份於 `tuner/runs/classical_with_pgn/texel_tuned_classical_classical_with_pgn_20261116_114116.zip`。
-   * **正式落地**：已將 **`SF_LAMBDA=0.15`** 權重定案寫入 [`constants.py`](constants.py) 並同步 [`tuner/constants_snapshot.py`](../../tuner/constants_snapshot.py)（兩組消融原檔備份於 `tuner/archive/sf_lambda_ablation_20261117/`）；`classical_old/` 暫維持 `Phase 11` 基準，待使用者確認後再行同步。
+   * **正式落地與基準同步**：已將 **`SF_LAMBDA=0.15`** 權重定案寫入 [`constants.py`](constants.py)、同步 [`tuner/constants_snapshot.py`](../../tuner/constants_snapshot.py)，並經確認後執行 `python tools/sync_classical_old.py --sync` 將 [`classical_old/constants.py`](../classical_old/constants.py) 同步為最新對戰基準（兩組消融原檔另備份於 `tuner/archive/sf_lambda_ablation_20261117/`）。
 
-3. **文件／資料清理與 `nnue/transposition_table.py` 跨邊界回傳修復**：
+3. **文件／資料清理、`tuner.py` 單表隔離與 NNUE TT 修復**：
    * 將 10 份結案報告歸檔至 [`archive/closed_reports_2026/`](../../archive/closed_reports_2026/README.md)，刪除 11 份舊 `tournament_results_*`，新增 [`tournament_analysis/calc_sprt.py`](../../tournament_analysis/calc_sprt.py) 與 [`tests/test_calc_sprt.py`](../../tests/test_calc_sprt.py)；自已完成對戰 PGN 去重抽取 **`3,554,835` 筆不重疊靜止局面**至 `tuner/data/hce/pgn_new.npz`（純 WDL + `search_cp`，待後續按需補標 SF19）。
-   * 清空 [`tuner/texel_tuner_runner.ipynb`](../../tuner/texel_tuner_runner.ipynb) 輸出並移除主線 3 份重複 `copy*.ipynb`。
+   * 修復 [`tuner/tuner.py`](../../tuner/tuner.py) `_enable_pst_rows` 於指定單一 `PST_MG` 或 `PST_EG` 搭配 `pst_pieces` 時會強制開啟雙表之缺陷，並在 [`tuner/texel_tuner_runner.ipynb`](../../tuner/texel_tuner_runner.ipynb) 清空輸出、移除 3 份重複 `copy*.ipynb` 後，於 **Section 10** 另設基於 `0.15` 基準的一鍵補調拆分區塊（`block1a_passed_tables_mild`、`block4a_pawn_penalties`、`block4a_connected_mg`、`block6e_pawn_mg`、`block6b_bishop_eg` 與 `pgn_new.npz` 驗證）。
    * 修復 [`chess_engine/nnue/transposition_table.py`](../nnue/transposition_table.py) 的 `probe_tt` 缺少 `inline='always'` 導致 Numba `Record`（`_EMPTY_TT_ENTRY`）跨非內聯呼叫邊界回傳堆疊殘值之問題（補上 `@nb.njit(cache=True, boundscheck=False, fastmath=True, inline='always')` 與 `probe_tt_best_move` 對應裝飾器），使 `test_probe_tt_best_move_avoids_pure_python_record_boxing` 與 `probe_tt` 未命中路徑穩定回傳 `(0, 0)`。
 
 

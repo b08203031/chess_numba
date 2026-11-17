@@ -911,8 +911,15 @@ class SPSAOptimizer:
         def _enable_pst_rows(pieces: list) -> None:
             names = ["P", "N", "B", "R", "Q", "K"]
             label = ",".join(names[i] for i in pieces)
-            print(f"PST piece filter: [{label}] rows active on PST_MG/EG")
-            for table_name in ("PST_MG", "PST_EG"):
+            include_pst = (
+                [t for t in ("PST_MG", "PST_EG") if t in include_list]
+                if include_list
+                else []
+            )
+            tables = tuple(include_pst) if include_pst else ("PST_MG", "PST_EG")
+            tbl_desc = "PST_MG/EG" if len(tables) == 2 else tables[0]
+            print(f"PST piece filter: [{label}] rows active on {tbl_desc}")
+            for table_name in tables:
                 if table_name not in name_to_indices:
                     print(f"Warning: {table_name} not registered.")
                     continue
