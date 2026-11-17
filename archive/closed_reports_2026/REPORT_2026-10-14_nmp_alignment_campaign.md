@@ -1,12 +1,14 @@
 # Phase 8 戰役總結報告：空步剪枝 (NMP) SF19 極簡架構對齊、Numba 記憶體安全修復與實戰驗收 (+12.17 Elo)
 
+> 📦 **已結案歸檔（2026-11-16）**：Phase 8 NMP 戰役已結案（+12.17 Elo，已同步 `classical_old`）。（原路徑 `tournament_analysis/REPORT_2026-10-14_nmp_alignment_campaign.md`）
+
 **日期**：2026-10-14  
 **範圍**：Classical HCE 搜尋 — Null Move Pruning (NMP) 體系升級  
 **關聯文檔**：
-- [`chess_engine/classical/SEARCH_ANALYSIS.md`](../chess_engine/classical/SEARCH_ANALYSIS.md) §4.1, §16
-- [`chess_engine/classical/PHASE8_NMP_SF19_ALIGNMENT_PLAN.md`](../chess_engine/classical/PHASE8_NMP_SF19_ALIGNMENT_PLAN.md)
-- [`tournament_analysis/game_stats_report.txt`](game_stats_report.txt)
-- [`tournament_analysis/search_stats_report.txt`](search_stats_report.txt)
+- [`chess_engine/classical/SEARCH_ANALYSIS.md`](../../chess_engine/classical/SEARCH_ANALYSIS.md) §4.1, §16
+- [`archive/closed_reports_2026/PHASE8_NMP_SF19_ALIGNMENT_PLAN.md`](PHASE8_NMP_SF19_ALIGNMENT_PLAN.md)
+- `tournament_analysis/game_stats_report.txt`（當時報表已清理）
+- [`tournament_analysis/search_stats_report.txt`](../../tournament_analysis/search_stats_report.txt)
 
 ---
 
@@ -76,7 +78,7 @@ $$\text{nmp\_threshold} = \beta - (\text{DEPTH\_COEF} \times \text{depth}) - (\t
 
 ## 4. 對戰細部與執色統計 (Game-Level Statistics)
 
-資料來源：[`game_stats_report.txt`](game_stats_report.txt)
+資料來源：`tournament_analysis/game_stats_report.txt`（當時報表已清理）
 
 * **總對局數**：600 局 (Round 1 ~ 300 換先配對)
 * **得分率**：51.75% (310.5 / 600.0)
@@ -94,7 +96,7 @@ $$\text{nmp\_threshold} = \beta - (\text{DEPTH\_COEF} \times \text{depth}) - (\t
 
 ## 5. 搜尋指標統計 (Search Statistics)
 
-資料來源：[`search_stats_report.txt`](search_stats_report.txt)（主統計樣本：New 37,496 著步，Old 37,629 著步）
+資料來源：[`search_stats_report.txt`](../../tournament_analysis/search_stats_report.txt)（主統計樣本：New 37,496 著步，Old 37,629 著步）
 
 * **搜尋深度 (Depth)**：
   * New: Mean **19.10** ($\sigma = 16.40$, Median 16, Max 128)
@@ -125,6 +127,6 @@ $$\text{nmp\_threshold} = \beta - (\text{DEPTH\_COEF} \times \text{depth}) - (\t
    * 更新 `tests/test_search_param_registry.py` 中 `test_runtime_mode_defaults_are_explicit_constants` 之斷言期望值。
 3. **技術文檔與導覽更新**：
    * 更新 `chess_engine/classical/SEARCH_ANALYSIS.md` 第 4.1 節與第 16 節。
-   * 更新 `chess_engine/classical/PHASE8_NMP_SF19_ALIGNMENT_PLAN.md` 第 7 節結案成果。
+   * 更新 `archive/closed_reports_2026/PHASE8_NMP_SF19_ALIGNMENT_PLAN.md` 第 7 節結案成果。
    * 同步更新根目錄 `README.md`「專案文件導覽」索引。
 

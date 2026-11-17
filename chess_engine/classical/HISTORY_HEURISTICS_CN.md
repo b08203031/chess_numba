@@ -4,8 +4,8 @@
 | :--- | :--- |
 | **程式基線** | **Phase 1a 歷史啟發統一重構**（對齊 Stockfish 17/18 Step 21 走步統計更新架構） |
 | **Step 21 重構** | **通過**（移出 move loop，PV 節點與 Fail-High 均正確獲得 Bonus/Malus；對戰 +20.00 Elo） |
-| **full history 實驗** | 失敗（見下表）；檔案備份於 `search_heuristics_fullhist_backup.py` 等 |
-| **工程計畫** | [`HISTORY_REFORM_PLAN.md`](HISTORY_REFORM_PLAN.md)（結構債暫緩，先恢復強度） |
+| **full history 實驗** | 失敗（見下表）；備份檔已清理 |
+| **工程計畫** | [`HISTORY_REFORM_PLAN.md`](../../archive/closed_reports_2026/HISTORY_REFORM_PLAN.md)（結構債暫緩，先恢復強度） |
 | **P4 post-LMR** | 雙向／非對稱／reject-only n30k 均未通過，production 已回退；只保留 shadow diagnostics |
 | **P5 暖 history** | 連續局面 warm/fresh n30k 配對已完成；cont1 負尾是 prune 主要風險 |
 | **P6 cont1 保護** | production 僅在 history-prune 讀取時將 weighted cont1 下限設為 −4096；排序、LMR、寫入不變 |

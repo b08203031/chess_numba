@@ -496,7 +496,7 @@ DIAG_RAZOR_CUT = 8          # razoring cutoffs
 DIAG_LMP_SKIP = 9           # late-move prunes (quiet skips)
 DIAG_FP_SKIP = 10           # futility prunes (quiet skips)
 DIAG_PROBCUT = 11           # ProbCut cutoffs
-# NMP funnel (tournament_analysis/NMP_EXPERIMENT_PLAN.md)
+# NMP funnel (archive/closed_reports_2026/NMP_EXPERIMENT_PLAN.md)
 DIAG_NMP_ELIGIBLE = 12      # hard guards passed; about to evaluate gate
 DIAG_NMP_GATE_PASS = 13     # static gate passed
 DIAG_NMP_NULL_TRY = 14      # null-move child search launched

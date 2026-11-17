@@ -37,7 +37,7 @@ Endgame oracle: `chess_engine/classical/ENDGAME_SF_VERIFICATION.md`.
 ## 4. After changes (recommend)
 
 ```bash
-python -m unittest tests.test_phase_a_eval tests.test_endgame_conformance -v
+python -m unittest tests.test_endgame_conformance tests.test_phase4_sf11_alignment tests.test_runtime_eval_weights -v
 # Elo: only with user OK — tools/tournament.py vs main_old.py
 ```
 * Add the test to verify any new feature.

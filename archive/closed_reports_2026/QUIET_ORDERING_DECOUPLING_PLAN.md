@@ -1,5 +1,7 @@
 # 走步排序（MovePicker）與歷史剪枝（History Pruning）架構解耦計畫書
 
+> 📦 **已結案歸檔（2026-11-16）**：MovePicker 與歷史剪枝解耦已完成；其後 E54 排序權重平滑化已回滾（見 `tournament_analysis/SEARCH_EXP_LOG.md`）。（原路徑 `chess_engine/classical/QUIET_ORDERING_DECOUPLING_PLAN.md`）
+
 | 項目 | 內容 |
 | :--- | :--- |
 | **目標模組** | `chess_engine/classical/search_heuristics.py`、`constants.py`、`search.py` |

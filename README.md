@@ -57,20 +57,17 @@ python -m tests.benchmark        # NNUE 版：python -m tests.benchmark_nn_real
 
 ### 2. 現行系統分析、審計與專題報告
 * **[HCE 與 SF11 對齊審核](chess_engine/classical/HCE_SF11_GAP_AUDIT.md)**（HCE 對齊主文件）與 **[殘局 vs Stockfish 驗證](chess_engine/classical/ENDGAME_SF_VERIFICATION.md)**
-* **[2026-10-31 經典評估審計與修復計畫](chess_engine/classical/EVAL_AUDIT_AND_FIX_PLAN_20261031.md)**：`evaluation.py` Bug／死碼清理與多輪 WDL／`SF19` 調參、400k 對戰驗收及 R2 基線同步
+* **[2026-10-31 經典評估審計與修復計畫](chess_engine/classical/EVAL_AUDIT_AND_FIX_PLAN_20261031.md)**：`evaluation.py` Bug／死碼清理、Phase 11 殘局/防禦對齊、Phase 12 `SF_LAMBDA=0.15` 調參（+8.48 Elo `H1✅`）與 TT 修復
 * **[古典搜尋算法分析](chess_engine/classical/SEARCH_ANALYSIS.md)** 與 **[NNUE 搜尋分析](chess_engine/nnue/SEARCH_ANALYSIS.md)**：PVS、QS、剪枝及 Phase 18–29 調參結論
 * **[Numba JIT 編譯與快取報告](chess_engine/classical/JIT_COMPILE_CACHE_REPORT.md)**：1 MB 表上限、packed rook、StructRef 與冷/暖快取量測
 * **[搜尋 ↔ 評估介面](chess_engine/classical/SEARCH_EVAL_INTERFACE.md)**（KNOWN_WIN 護欄）、**[SEE 專題](chess_engine/classical/SEE_ANALYSIS.md)**、**[歷史啟發](chess_engine/classical/HISTORY_HEURISTICS_CN.md)**
 * **[Classical 搜尋單項實驗日誌](tournament_analysis/SEARCH_EXP_LOG.md)**（E1+ 連續 A/B 實驗流水紀錄）
 
-### 3. 已結案階段計畫與歷史戰役報告（歸檔候選）
-* **[搜尋演算法深度審計與 SF19 提案 (2026-10-19)](chess_engine/classical/SEARCH_AUDIT_AND_SF19_PROPOSALS_20261019.md)**、**[搜尋優化診斷 (2026-08-04)](chess_engine/classical/SEARCH_OPTIMIZATION_DIAGNOSTIC_20260804.md)**
-* **[歷史啟發重構工程計畫](chess_engine/classical/HISTORY_REFORM_PLAN.md)**、**[走步排序與歷史剪枝解耦計畫](chess_engine/classical/QUIET_ORDERING_DECOUPLING_PLAN.md)**
-* **[Phase 7 歷史動力鏈與 LMR 對齊計畫](chess_engine/classical/PHASE7_HISTORY_LMR_ALIGNMENT_PLAN.md)**、**[Phase 8 空步剪枝對齊計畫](chess_engine/classical/PHASE8_NMP_SF19_ALIGNMENT_PLAN.md)**
-* **[2026-07-15/16 搜尋戰役報告](tournament_analysis/REPORT_2026-07-15_16_search_campaign.md)**、**[2026-10-14 Phase 8 NMP 戰役報告](tournament_analysis/REPORT_2026-10-14_nmp_alignment_campaign.md)**、**[NMP 實驗計畫](tournament_analysis/NMP_EXPERIMENT_PLAN.md)**、**[搜尋候選提案 E47–E50](tournament_analysis/SEARCH_PROPOSALS_E47_E50.md)**
+### 3. 已結案報告（歸檔，不進日常維護）
+* **[結案報告總覽](archive/closed_reports_2026/README.md)**：10 份已結案的搜尋／歷史啟發／NMP 階段計畫與戰役報告，每份附最終結論與現行取代文件（Phase 7/8、E47–E50、歷史啟發重構、搜尋審計與 07 月戰役等）。
 
 ### 4. 隔離區（不進日常維護）
-* `archive/`、`tuner/archive/`：歷史分析稿、2026-07 舊戰役 PGN 與早期 tuned dumps。
+* `archive/`、`tuner/archive/`：歷史分析稿、已結案報告與早期 tuned dumps。
 * `stockfish_repo/`（SF 19）、`stockfish_11/`（SF 11）、`external/`：上游參考原始碼與執行檔。
 
 ---

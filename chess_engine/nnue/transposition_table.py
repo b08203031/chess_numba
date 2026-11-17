@@ -91,7 +91,7 @@ def mul_hi64(a, b):
     c3 = np.uint64(aL) * np.uint64(bH) + np.uint64(np.uint32(c2))
     return np.uint64(aH) * np.uint64(bH) + (c2 >> np.uint64(32)) + (c3 >> np.uint64(32))
 
-@nb.njit(cache=True)
+@nb.njit(cache=True, boundscheck=False, fastmath=True, inline='always')
 def probe_tt(tt, zobrist_key):
     """
     在置換表 (Bucket=4) 中查找項目。
@@ -118,7 +118,7 @@ def probe_tt(tt, zobrist_key):
             
     return _EMPTY_TT_ENTRY
 
-@nb.njit(cache=True)
+@nb.njit(cache=True, boundscheck=False, fastmath=True)
 def probe_tt_best_move(tt, zobrist_key):
     """Pure-Python-safe TT lookup returning scalar (flag, best_move) without np.record boxing."""
     entry = probe_tt(tt, zobrist_key)

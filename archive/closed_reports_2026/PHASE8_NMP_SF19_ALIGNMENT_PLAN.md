@@ -1,10 +1,12 @@
 # Phase 8 技術計畫書：空步剪枝 (NMP) 體系 SF19 結構對齊與分階段調參
 
+> 📦 **已結案歸檔（2026-11-16）**：Phase 8 已結案：SF19 NMP 極簡架構 600 局 `+12.17 Elo`，已同步 `classical_old`。（原路徑 `chess_engine/classical/PHASE8_NMP_SF19_ALIGNMENT_PLAN.md`）
+
 > **文檔屬性**：西洋棋引擎架構升級技術藍圖（供接續工程之 AI Agent 依循執行）  
 > **專案環境**：Python 3.10 / Numba `@njit` / NumPy Bitboards / Classical HCE  
 > **基準 Commit**：`1ed92f0`（Phase 6 Plan A 生產基線，經 Phase 7 千局驗證定錨）  
 > **參考來源**：官方 `stockfish_repo/src/search.cpp` (Stockfish 19 Step 10)  
-> **關聯技術文檔**：[`SEARCH_ANALYSIS.md`](SEARCH_ANALYSIS.md)、[`constants.py`](constants.py)、[`search.py`](search.py)
+> **關聯技術文檔**：[`SEARCH_ANALYSIS.md`](../../chess_engine/classical/SEARCH_ANALYSIS.md)、[`constants.py`](../../chess_engine/classical/constants.py)、[`search.py`](../../chess_engine/classical/search.py)
 
 ---
 
@@ -22,7 +24,7 @@
 ## 1. 現狀診斷與技術債審計 (Current Audit & Technical Debt)
 
 ### 1.1 現行 NMP 實作剖析
-檢查 [`chess_engine/classical/search.py`](search.py#L1801-L1920)，現行 NMP 充斥著過時的實驗殘留：
+檢查 [`chess_engine/classical/search.py`](../../chess_engine/classical/search.py#L1801-L1920)，現行 NMP 充斥著過時的實驗殘留：
 1. **Scope 模式分岐**：`TUNE_NMP_SCOPE`（0=cut_node, 1=all non-PV, 2=non-PV deep, 3=cut OR non-PV deep）。歷史對局（N1 實驗）已證實 non-PV 嘗試空步剪枝無效且傷害戰術，生產預設實質上只有 `cut_node`。
 2. **Gate 模式分岐**：`TUNE_NMP_GATE`（0=Legacy, 1=SF raw, 2=SF\*78, 3=Custom）。
    - **重大死碼缺陷**：當 `_nmp_gate == 0`（生產預設）時，代碼**直接寫死讀取模組常數** `NMP_LEGACY_*`，完全繞過運行時槽位 `TUNE_NMP_G_*`，導致先前的 runtime tune 機制形同虛設。
@@ -265,21 +267,21 @@ graph TD
 接手的 AI Agent 請依序嚴格執行以下 5 個步驟：
 
 ### Step 1: 常數與槽位清理
-1. 編輯 [`chess_engine/classical/constants.py`](constants.py)：
+1. 編輯 [`chess_engine/classical/constants.py`](../../chess_engine/classical/constants.py)：
    - 更新 `NMP_BASE = 365`, `NMP_DEPTH_COEF = 13`, `NMP_IMP_COEF = 47`, `NMP_EVAL_MARGIN_DIV = 256`, `NMP_VERIFICATION_DEPTH = 12`。
    - 更新 `TUNE_NMP_*` 槽位常數。
-2. 編輯 [`chess_engine/classical/engine_types.py`](engine_types.py)：
+2. 編輯 [`chess_engine/classical/engine_types.py`](../../chess_engine/classical/engine_types.py)：
    - 同步 `_initialize_tune_array()` 預設陣列賦值。
-3. 同步 [`tuner/constants_snapshot.py`](tuner/constants_snapshot.py)。
+3. 同步 [`tuner/constants_snapshot.py`](../../tuner/constants_snapshot.py)。
 
 ### Step 2: 搜尋核心熱路徑重構
-1. 編輯 [`chess_engine/classical/search.py`](search.py)：
+1. 編輯 [`chess_engine/classical/search.py`](../../chess_engine/classical/search.py)：
    - 替換行 1801–1950 的 Step 10 NMP 區塊為第 3.1 節之重構代碼原型。
    - 確保無任何 `_nmp_scope` / `_nmp_gate` / `_nmp_r_mode` 殘留。
    - 確保完全符合 Numba `@njit` 約束（無動態型別、無 try-except）。
 
 ### Step 3: 調參註冊表更新與測試驗證
-1. 編輯 [`tune_search/search_param_registry.py`](tune_search/search_param_registry.py)：
+1. 編輯 [`tune_search/search_param_registry.py`](../../tune_search/search_param_registry.py)：
    - 將 4 個連續軸註冊為 `runtime` 軸。
    - 移除已廢棄之離散參數標籤。
 2. 執行輕量單元測試：
@@ -335,7 +337,7 @@ graph TD
 * 經實測驗證，SF19 NMP 極簡架構與修復後的記憶體安全隔離機制大獲成功。
 * 正式透過 `tools/sync_classical_old.py --sync` 將成果同步至 `chess_engine/classical_old/`，確立為新一代戰鬥基線。
 * 同步更新 `tuner/constants_snapshot.py` 與 `tests/test_search_param_registry.py`。
-* 完整對戰與搜尋指標見 [`tournament_analysis/REPORT_2026-10-14_nmp_alignment_campaign.md`](../../tournament_analysis/REPORT_2026-10-14_nmp_alignment_campaign.md)。
+* 完整對戰與搜尋指標見 [`archive/closed_reports_2026/REPORT_2026-10-14_nmp_alignment_campaign.md`](REPORT_2026-10-14_nmp_alignment_campaign.md)。
 
 ---
 *(本計畫書於 2026-10-14 全面實施完成並通過實戰驗收結案)*

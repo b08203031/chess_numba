@@ -533,7 +533,7 @@ flowchart TD
   * **換先配對**：雙勝（WW）20 對 vs 雙敗（LL）僅 10 對；單勝單和（WD+DW）達 86 對。
 
 ##### 🔬 錦標賽 B：新引擎＋新參數 vs 新引擎＋舊參數（純調參消融對決）
-* **測試筆記本**：[`tournament_colab_runner_se_multicut copy 9.ipynb`](../../tournament_colab_runner_se_multicut%20copy%209.ipynb)（代碼相同，僅差異 62 組 Texel 參數）。
+* **測試筆記本**：`tournament_colab_runner_se_multicut copy 9.ipynb`（已移除）（代碼相同，僅差異 62 組 Texel 參數）。
 * **對局數**：完整跑滿 **500 對換先（1,000 局）**。
 * **戰績統計**：新參數 **526.0 - 474.0**（**272 勝 / 508 和 / 220 負**），勝率 **52.60%**，淨勝 **+52 局**。
 * **Elo 表現**：**+18.08 ± 15.10 Elo**（95% 信心區間：`[+2.98, +33.18]`）。
@@ -608,13 +608,13 @@ flowchart TD
 
 | 對決戰役 | PGN 檔案 | 對陣雙方 (New vs Old) | 局數 (對數) | 總戰績 (W-D-L) | 勝率 / 淨勝 | Elo 增益 (95% CI) | 核心結論 |
 | :--- | :--- | :--- | :---: | :---: | :---: | :---: | :--- |
-| **驗證實驗對比** | [`USE_PGN_VAL_vs_HOLDOUT_ONLY.pgn`](../../tournament_analysis/USE_PGN_VAL_vs_HOLDOUT_ONLY.pgn) | **R2 (`USE_PGN_VAL`, `20261109_162326`)** vs **Holdout-Only R2 (`20261109_193207`)** | 3,674 (1,837) | 717 - 2,329 - 628 | 51.21% (+89) | **+8.42** `[+1.75, +15.09]` | `USE_PGN_VAL` 顯著勝出；惟 `>80` 步長局 `43-189-53 (0.482)` 與 `Pure B+P 40-219-47 (-7)` 顯露純殘局隱憂 |
-| **同架構雙輪遞進 (主驗收)** | [`tournament_results_USE_PGN_VAL_NEWvsOLD.pgn`](../../tournament_analysis/tournament_results_USE_PGN_VAL_NEWvsOLD.pgn) | **R2 (`New`)** vs **R1 (`91e5cb3`)**（均用 `USE_PGN_VAL=True`，代碼對等） | **2,094 (1,047)** | **389 - 1,377 - 328** | **51.46% (+61)** | **+10.12** **`[+1.96, +18.30]`** | **多調一輪 R2 顯著勝過 R1**；中長殘局與車馬類殘局全面改善，但殘局高分未轉化比率依然偏高（`131 vs 104`） |
+| **驗證實驗對比** | `USE_PGN_VAL_vs_HOLDOUT_ONLY.pgn`（已整理併入 `tuner/data/hce/pgn_new.npz`） | **R2 (`USE_PGN_VAL`, `20261109_162326`)** vs **Holdout-Only R2 (`20261109_193207`)** | 3,674 (1,837) | 717 - 2,329 - 628 | 51.21% (+89) | **+8.42** `[+1.75, +15.09]` | `USE_PGN_VAL` 顯著勝出；惟 `>80` 步長局 `43-189-53 (0.482)` 與 `Pure B+P 40-219-47 (-7)` 顯露純殘局隱憂 |
+| **同架構雙輪遞進 (主驗收)** | `tournament_results_USE_PGN_VAL_NEWvsOLD.pgn`（已整理併入 `tuner/data/hce/pgn_new.npz`） | **R2 (`New`)** vs **R1 (`91e5cb3`)**（均用 `USE_PGN_VAL=True`，代碼對等） | **2,094 (1,047)** | **389 - 1,377 - 328** | **51.46% (+61)** | **+10.12** **`[+1.96, +18.30]`** | **多調一輪 R2 顯著勝過 R1**；中長殘局與車馬類殘局全面改善，但殘局高分未轉化比率依然偏高（`131 vs 104`） |
 
 #### 4. `tournament_results_USE_PGN_VAL_NEWvsOLD.pgn`（R2 vs R1，2,094 局）深度紀錄（2026-11-10）
 
 ##### (1) 對局條件、配對品質與搜尋對等性
-* **配對檢查**（[`tournament_analysis/game_stats_report.txt`](../../tournament_analysis/game_stats_report.txt)、[`search_stats_report.txt`](../../tournament_analysis/search_stats_report.txt)）：共 **2,094 局**（日期 `2026.11.10`，嚴格 **1,047 對**同 FEN 換先配對，無重複局；Lag-1 自相關 `0.0056`，游程檢定 `p = 0.9173`）。
+* **配對檢查**（`tournament_analysis/game_stats_report.txt`〔當時即時報表，已於清理時移除〕、[`search_stats_report.txt`](../../tournament_analysis/search_stats_report.txt)）：共 **2,094 局**（日期 `2026.11.10`，嚴格 **1,047 對**同 FEN 換先配對，無重複局；Lag-1 自相關 `0.0056`，游程檢定 `p = 0.9173`）。
 * **終局判定分佈**：
   * `New` 勝（389 局）：白優裁定 230、黑優裁定 158、正常將死 1。
   * 和局（1,377 局，和局率 **65.76%**）：正常和棋（三次重複／五十步／子力不足）1,068、第 40 回合後 `±8 cp` 連續 12 半步裁定和 309。
@@ -703,7 +703,7 @@ flowchart TD
 ### 九、Phase 9：`USE_SF_LABELS` 首輪調參診斷、HCE 死碼清理與乾淨 R2 基線同步
 
 #### 1. `SF19` 首輪調參實戰回歸與根因診斷（Commit `1edb352` / `23b640e`）
-* **實戰測試結果**：於 [`tournament_colab_runner_se_multicut copy.ipynb`](../../tournament_colab_runner_se_multicut%20copy.ipynb) 在 **400,000 nodes/move**、64 MB TT 下對戰 R2（`classical_old` `d59ebcd`），至 **274 對（548 局）**時戰績為 **`267.5 / 548`（83W - 369D - 96L，48.8%），`-8.2 ± 16.6 Elo`，`SPRT LLR = -2.05`**（早期 350 局曾達 `-12.9 ± 20.8 Elo`），顯示混合標籤首輪結果不如純 WDL 基線。
+* **實戰測試結果**：於 `tournament_colab_runner_se_multicut copy.ipynb`（已移除） 在 **400,000 nodes/move**、64 MB TT 下對戰 R2（`classical_old` `d59ebcd`），至 **274 對（548 局）**時戰績為 **`267.5 / 548`（83W - 369D - 96L，48.8%），`-8.2 ± 16.6 Elo`，`SPRT LLR = -2.05`**（早期 350 局曾達 `-12.9 ± 20.8 Elo`），顯示混合標籤首輪結果不如純 WDL 基線。
 * **調參系統根因與修復（詳見 [`tuner/README.md`](../../tuner/README.md)）**：
   1. **離群值壓縮 `K_sf` 與訓練集分佈偏移**：[`build_blended_labels`](../../tuner/notebook_session.py) 原未對 `quiet_annotated_mask & (|sf_cp| <= 1000)` 過濾即校準 `K_sf`，易受極端殘局/大優評分壓縮斜率；[`_apply_label_mode`](../../tuner/notebook_session.py) 現於 `self.train_idx` 保留全部 `annotated_mask` 列（戰術劇烈波動列退回純 WDL 標籤），消除 train/dev 分佈落差。
   2. **獨立閘門與網格約束缺口**：[`_eval_independent_gate`](../../tuner/notebook_session.py) 補齊 `val_pgn` / `val_zurichess` 的 `broad-EG (phase<=64)` 守衛（`severe_z=3.0, severe_delta=1.5e-5`；`warn_z=2.0, warn_delta=1.0e-5`）；[`scan_scalar_grid.py`](../../tuner/scan_scalar_grid.py) 新增 `_clip_grids_to_constraints`（`respect_constraints=True`）與 `indices_override`，避免網格掃描越過 `SPSAOptimizer` 約束；[`scan_grid`](../../tuner/notebook_session.py) 同步傳入 `dev_idx`。
@@ -779,5 +779,29 @@ flowchart TD
 6. **驗證與基準接納（2026-11-15）**：
    * **測試套件與 UCI 實測**：重編 [`tuner/tunable_eval.py`](../../tuner/tunable_eval.py) 後，古典評估／搜尋／調參／對戰工具 19 支 `pytest` 測試檔通過 **189 項測試**（另有 `test_nnue_validation` 7/7 通過，並排除無關預先失敗之 `test_tune_stats` 與本機無 Tcl/Tk 之 GUI 測試），且通過 `main.py` UCI 子程序（`ucinewgame`、`go depth 1`、僵局根節點）實測。
    * **400k 實戰驗收與基準同步**：Phase 11 vs Clean R2（`classical_old/`）於 Colab 400k nodes/move 累積對戰至 **1,934 對（3,868 局）**：`1969.0 / 3868`（**`686W - 2566D - 616L`**，淨勝 `+70` 局，得分率 `50.9%`，**`+6.3 ± 6.4 Elo`**）；五項式 SPRT 於 **`SPRT[-5.0, 0.0]` 達 `+4.324` (`H1 Accepted`)**、**`SPRT[-3.0, +3.0]` 達 `+3.712` (`H1 Accepted`)**（`SPRT[0.0, +5.0] = +1.864`、`SPRT[0.0, +10.0] = +1.268`）。經確認接納並執行 `python tools/sync_classical_old.py --sync` 將 `classical_old/` 同步為新對戰基準。
+
+---
+
+### 十二、Phase 12：Block 6f 獨立校準、`SF_LAMBDA=0.15` 定案採納（`SPRT H1` +8.48 Elo）、報告整併與 NNUE TT 修復 (2026-11-16 ~ 2026-11-17)
+
+1. **Tuner 流程升級（[`tuner/README.md`](../../tuner/README.md)）**：
+   * Block `6a–6d` 納入對應棋種 `MG/EG_MATERIAL_VALUES` 耦合（130 維），`6e_pawn` 納入 `EG_MATERIAL_VALUES`（97 維），新增純 9 維 `block6f_material` 獨立校準，並微調 SPSA 衰退視野與步數；補充 [`tests/test_texel_parameterization.py`](../../tests/test_texel_parameterization.py)。
+
+2. **400k nodes/move 實戰 `SF_LAMBDA` 消融、`calc_sprt.py` 檢驗與定案採納（對戰 `Phase 11` 基準）**：
+   * **Colab `SF_LAMBDA=0`（純 WDL, `STATIC_FEATURES_ONLY=True`）**：1,242 局（621 對），`226W - 772D - 244L`，Penta `[20, 146, 302, 138, 15]`，**`-5.04 ± 11.29 Elo`**（`[-16.33, +6.25]`），`SPRT[0, 10]` `LLR = -3.03` 觸發 **`H0 Accepted`** ❌ 否決。
+   * **Colab `SF_LAMBDA=0.10`（`STATIC_FEATURES_ONLY=True`）**：3,510 局（1,755 對），`590W - 2352D - 568L`，Penta `[45, 370, 905, 388, 47]`，**`+2.18 ± 6.51 Elo`**（`[-4.33, +8.69]`，nElo `+3.85 ± 11.49`），`[0, 10] LLR = -2.56`、`[-5, 0] LLR = +2.12`。
+   * **Colab `SF_LAMBDA=0.15`（`STATIC_FEATURES_ONLY=True`，正式勝出 🏆）**：**3,360 局（1,680 對）**，`612W - 2218D - 530L`（淨勝 `+82` 局，得分率 `51.22%`，和棋率 `66.01%`），Penta `[40, 334, 861, 394, 51]`，**`+8.48 ± 6.69 Elo`**（`95% CI [+1.79, +15.17]`，nElo **`+14.90 ± 11.75`**），**`SPRT[0, 10]` 達 `LLR = +2.99` 觸發 `H1 Accepted` ✅**（另 `[-3, 1] LLR = +3.26`、`[-5, 0] LLR = +4.72` 過線、`[0, 5] LLR = +2.57`、`[-2, 2] LLR = +2.92`）。四局數分桶全勝（`≤25: 0.506`、`26–50: 0.506`、`51–80: 0.524`、`>80: 0.503`），前後半程穩定（`0.510 -> 0.515`），節點/深度中立（`mean_d 16.84 vs 16.83`）。
+     * **純 WDL 靜態累積成績（16 組常數變動，vs `Phase 11`）**：`2M Holdout` `z = -46.31`（`broad-EG -44.54`, `K+P -4.57`, `sf19-quiet -43.30`）、`1.59M val_pgn` `z = -26.24`（`castling!=0 -9.03`）、`1.08M val_zurichess` `z = -25.82`；共通過 `block1d`, `3`, `4b`, `5b`, `6a`, `6c`, `6d`, `6f`, `8`（`block1a` 因 `val_pgn castling!=0 z=+2.64` 獲 `CAUTION` 未自動套用；`block4a`/`6e` 因 `Holdout K+P`、 `block6b` 因 `PGN/Zuri castling!=0`、`block7b` 因整體泛化遭 `REJECT`；`block2b` 為 `NO-OP`）。
+   * **Colab `SF_LAMBDA=0.20`（`STATIC_FEATURES_ONLY=True`）**：3,420 局（1,710 對），`602W - 2249D - 569L`，Penta `[50, 355, 861, 400, 44]`，**`+3.35 ± 6.70 Elo`**（`[-3.34, +10.05]`，nElo `+5.83 ± 11.64`），`[0, 10] LLR = -1.41`、`[-5, 0] LLR = +2.51`（後半程回落；註：原 commit `d6d2c07` 訊息誤植為 `0.20通過sprt`，經核實 Notebook 輸出實為 `0.15` 過線）。
+   * **本機 `SF20 vs SF15` 互打參考（`tournament_results_sf20_vs_sf15.pgn`）**：1,740 局（870 對），`287W - 1180D - 273L`，Penta `[23, 172, 466, 186, 23]`，`+2.80 ± 9.11 Elo`（`[-6.31, +11.91]`，`[-3, 3] LLR = +0.78`）；四場 GLS 聯合估計對 Old 仍以 **`sf15`** 為唯一全區間 `> 0` 領先者。
+   * **本機純 WDL 全參數對照（`STATIC_FEATURES_ONLY=False`）**：3,748 局（1,874 對，`tournament_analysis/tournament_results.pgn`），`637W - 2502D - 609L`，Penta `[56, 379, 980, 399, 60]`，**`+2.60 ± 6.40 Elo`**（`[-3.81, +9.00]`），`[0, 10] LLR = -2.25`、`[0, 5] LLR = +0.04`、`[-5, 0] LLR = +2.39`；權重另備份於 `tuner/runs/classical_with_pgn/texel_tuned_classical_classical_with_pgn_20261116_114116.zip`。
+   * **正式落地**：已將 **`SF_LAMBDA=0.15`** 權重定案寫入 [`constants.py`](constants.py) 並同步 [`tuner/constants_snapshot.py`](../../tuner/constants_snapshot.py)（兩組消融原檔備份於 `tuner/archive/sf_lambda_ablation_20261117/`）；`classical_old/` 暫維持 `Phase 11` 基準，待使用者確認後再行同步。
+
+3. **文件／資料清理與 `nnue/transposition_table.py` 跨邊界回傳修復**：
+   * 將 10 份結案報告歸檔至 [`archive/closed_reports_2026/`](../../archive/closed_reports_2026/README.md)，刪除 11 份舊 `tournament_results_*`，新增 [`tournament_analysis/calc_sprt.py`](../../tournament_analysis/calc_sprt.py) 與 [`tests/test_calc_sprt.py`](../../tests/test_calc_sprt.py)；自已完成對戰 PGN 去重抽取 **`3,554,835` 筆不重疊靜止局面**至 `tuner/data/hce/pgn_new.npz`（純 WDL + `search_cp`，待後續按需補標 SF19）。
+   * 清空 [`tuner/texel_tuner_runner.ipynb`](../../tuner/texel_tuner_runner.ipynb) 輸出並移除主線 3 份重複 `copy*.ipynb`。
+   * 修復 [`chess_engine/nnue/transposition_table.py`](../nnue/transposition_table.py) 的 `probe_tt` 缺少 `inline='always'` 導致 Numba `Record`（`_EMPTY_TT_ENTRY`）跨非內聯呼叫邊界回傳堆疊殘值之問題（補上 `@nb.njit(cache=True, boundscheck=False, fastmath=True, inline='always')` 與 `probe_tt_best_move` 對應裝飾器），使 `test_probe_tt_best_move_avoids_pure_python_record_boxing` 與 `probe_tt` 未命中路徑穩定回傳 `(0, 0)`。
+
+
 
 

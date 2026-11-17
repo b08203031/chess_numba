@@ -11,6 +11,8 @@
 
 **結論摘要：** 核心結構與 SF11 **高度對齊**。本文為 HCE 對齊**唯一主文件**（舊 `EVALUATION_ANALYSIS` / `PAWN_EVALUATION_DIFFERENCES` / `RESEARCH_REPORT` 已刪除；`classical_old/` 亦不維護 markdown）。
 
+> **檔案現況（2026-11-16 校對）**：本文提及的 `tests/test_phase_a_eval.py`、`tests/test_p3_eval.py`、`tests/test_kpk_golden.py`、`tools/verify_kpk_golden.py`、`tools/verify_endgame_vs_sf.py`、`tools/kpk_sf11_reference.py` 與 `tournament_analysis/PHASE_{A,B,B4}_TOURNAMENT_ANALYSIS.md` 已於 2026-09-26（commit `ae30946`）清理；現行殘局回歸以 `tests/test_endgame_conformance.py` 為準，其餘僅為歷史紀錄，可用 `git show ae30946^:<path>` 取回。
+
 **對戰摘要：**
 
 | 測試 | 結果 | 文件 |
@@ -207,8 +209,7 @@ Classical HCE 是 **以 Stockfish 11 為藍本、維持 ~100cp 人類可讀尺�
 ### 已具備
 
 ```bash
-python -m unittest tests.test_phase_a_eval tests.test_endgame_conformance -v
-python tools/verify_endgame_vs_sf.py           # 可選 SF 搜尋 oracle（勿當 CI）
+python -m unittest tests.test_endgame_conformance tests.test_phase4_sf11_alignment tests.test_runtime_eval_weights -v
 python tools/sync_classical_old.py --diff       # 確認 old 基準
 python tournament_analysis/統計數據.py          # 對戰 PGN 分析
 ```

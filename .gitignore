@@ -35,7 +35,8 @@ stockfish*/
 
 # Archive & historical dumps
 *.zip
-archive/
+archive/*
+!archive/closed_reports_2026/
 scratch/
 tuner/archive/
 tuner/data/

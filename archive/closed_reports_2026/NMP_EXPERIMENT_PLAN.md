@@ -1,5 +1,7 @@
 # NMP 節點效率診斷與實驗計畫
 
+> 📦 **已結案歸檔（2026-11-16）**：本計畫已被 Phase 8（SF19 極簡 NMP）取代；文內「實驗計畫待執行」為 2026-07-16 歷史快照。（原路徑 `tournament_analysis/NMP_EXPERIMENT_PLAN.md`）
+
 **日期：** 2026-07-16  
 **範圍：** Classical HCE 搜尋 — Null Move Pruning  
 **相關文件：** `SEARCH_ANALYSIS.md` §9.3、`struct_ab_once_results.json`、`REPORT_2026-07-15_16_search_campaign.md`  

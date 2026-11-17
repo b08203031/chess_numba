@@ -1,5 +1,7 @@
 # 搜尋 / 評估戰役報告（2026-07-15～16）
 
+> 📦 **已結案歸檔（2026-11-16）**：2026-07 戰役已結案：剪枝 margin 座標下降已達平台，後續改走有診斷的結構中間態與 eval。（原路徑 `tournament_analysis/REPORT_2026-07-15_16_search_campaign.md`）
+
 **範圍：** Classical HCE 搜尋樹效率、剪枝係數、結構 A/B、LMR 表係數、eval 對照、New vs Old 固定節點對戰。  
 **對戰控制：** `--nodes 200000`（每步固定節點）。  
 **統計快照：** 雙對戰約 **66 局** 時完整統計；其後續打至約 72–74 局後**手動中止**（SPRT 仍 Continue、方向無優勢）。
@@ -273,7 +275,7 @@ LMR_BAD_CAPTURE_BONUS   = 1536
 
 | 類型 | 路徑 |
 | :--- | :--- |
-| 本報告 | `tournament_analysis/REPORT_2026-07-15_16_search_campaign.md` |
+| 本報告 | `archive/closed_reports_2026/REPORT_2026-07-15_16_search_campaign.md` |
 | 搜尋分析累積 | `chess_engine/classical/SEARCH_ANALYSIS.md` §9 |
 | R1/R2/R3 | `scratch/coord_descent_*` |
 | S1/S2 | `scratch/struct_ab_once.*` |

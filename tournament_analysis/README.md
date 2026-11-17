@@ -23,6 +23,10 @@ python tournament_analysis/統計數據.py --target New --peek      # 僅看 PGN
 
 # 4) 產出著法級搜尋指標報告與圖表
 python tournament_analysis/parse_search_stats.py --name1 New --name2 Old
+
+# 5) 計算多模型 / 多區間 SPRT 統計結果（Pentanomial / Exact MLE / nElo / WDL 與軌跡推估）
+python tournament_analysis/calc_sprt.py
+python tournament_analysis/calc_sprt.py --bounds "0:10,0:5,0:3,-3:1" --plot tournament_analysis/sprt_trajectory.png
 ```
 
 * 系統預設關閉開局書（`OwnBook false`）、使用 `data/openings.epd` 成對換先、並啟用 Cutechess/CCRL 等級的提前裁決（`--adjudicate`：連續差距 $\ge 500\text{ cp}$ 判勝；第 40 回合後連 12 plies 在 $\pm 8\text{ cp}$ 內判和）。若對戰發生 crash 寫入 `Failure` header，統計時應剔除該組換先配對。
@@ -35,6 +39,7 @@ python tournament_analysis/parse_search_stats.py --name1 New --name2 Old
 | :--- | :--- | :--- |
 | [`統計數據.py`](統計數據.py) | `game_stats_report.txt` | `cumulative_wins.png`、`cumulative_score.png`、`elo_ci.png`（以完整換先對為獨立樣本計算 95% CI）、`wdl_by_color.png`、`pair_outcomes.png`、`score_by_length.png`、`length_by_result.png`、`openings_score.png`、`promotions_by_result.png`、`score_halves.png` |
 | [`parse_search_stats.py`](parse_search_stats.py) | `search_stats_report.txt` | `depth_per_move.png`、`nodes_per_move.png`、`time_per_move.png`、`nps_per_move.png`、`avg_nodes_vs_depth.png`、`same_depth_node_ratio.png`、`depth_histogram.png`、`nps_histogram.png`、`nodes_histogram.png`、`depth_by_color.png`、`depth_cdf.png` |
+| [`calc_sprt.py`](calc_sprt.py) | 終端機輸出 / `--json` | `--plot` 選配產出 `sprt_trajectory.png`（多區間與多模型 SPRT：Penta 常態/精確 MLE、nElo、WDL 常態/精確 MLE、早停與 Wald 預估） |
 
 ---
 

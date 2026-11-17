@@ -607,7 +607,7 @@ S1a 證實 non-PV NMP 可略瘦樹，但戰術 pass 代價過大。
 
 - 3s half（scale=70）：244/250  
 - **2026-07-16 決策：生產 `LMR_TABLE_SCALE_PERCENT = 100`（後續 E59 推進至 113；2026-10-27 E97 雙向實測驗證 113 勝 108 與 118，確立 113 為最優基準）**  
-- 完整戰役報告：[`tournament_analysis/REPORT_2026-07-15_16_search_campaign.md`](../../tournament_analysis/REPORT_2026-07-15_16_search_campaign.md)
+- 完整戰役報告：[`archive/closed_reports_2026/REPORT_2026-07-15_16_search_campaign.md`](../../archive/closed_reports_2026/REPORT_2026-07-15_16_search_campaign.md)
 
 **2026-07-16 搜尋參數對齊 classical_old：**  
 `FP` 180/130、`LMP_SCALE` 100、`LMR_HISTORY` 150、`LMR_TABLE_SCALE` 100、  
@@ -691,7 +691,7 @@ NPS 熱路徑與可觀測性：
 3. **診斷改為 opt-in：** `SearchContext(..., enable_diagnostics=False)` 為正式預設；
    benchmark/diagnostic 工具明確啟用。新增 qsearch、SEE 與 extension funnel。
 4. **清理：** 移除未被引用的 `search.py` imports、重複 terminal 分支，以及 package
-   內兩份 `search_heuristics_fullhist_backup.py` 暫存備份。
+   內兩份 `search_heuristics_fullhist_backup.py` 暫存備份（已清理）。
 
 Kiwipete d14（同一棵樹）驗證：`901,038` total nodes、score `-87`、best `e2a6`、
 PV 完全一致。三組同進程中位數：diag on 約 **529k NPS**、off 約 **549k NPS**
@@ -793,7 +793,7 @@ in-place compaction 排除明確非法候選；P0 v1/v2 的 1000 個 FEN 完全 
 已回到 scorer／排序後 legality，三者只保留 shadow diagnostics。後續仍以 n30k 為正式搜尋診斷，
 並由新舊引擎對戰決定接納。回退後 500+500 n30k 與同步前 baseline 逐盤的 total nodes、qsearch
 nodes、完成深度均 1000/1000 完全一致，確認 production 搜尋樹已精確還原。完整數據、
-SF11/SF18 對照、風險與測試流程見 [`SEARCH_OPTIMIZATION_DIAGNOSTIC_20260804.md`](SEARCH_OPTIMIZATION_DIAGNOSTIC_20260804.md)。
+SF11/SF18 對照、風險與測試流程見 [`SEARCH_OPTIMIZATION_DIAGNOSTIC_20260804.md`](../../archive/closed_reports_2026/SEARCH_OPTIMIZATION_DIAGNOSTIC_20260804.md)。
 
 ### 14.1 P4 每節點品質診斷（2026-08-04）
 
@@ -908,7 +908,7 @@ NMP gate/R、ProbCut style、NMP beta requirement 的預設值也由常量明確
 * **生產定論與裁決**：
   * 嚴格遵守「No gain, no change」原則，**維持 Plan A 生產常數不作更動**。
   * 實測千局證實 Plan A 基準已處於全局最優解平原中心，阻尼與除數設定高度穩健。
-  * 技術細節與完整數據見 [`PHASE7_HISTORY_LMR_ALIGNMENT_PLAN.md`](PHASE7_HISTORY_LMR_ALIGNMENT_PLAN.md) §6。
+  * 技術細節與完整數據見 [`PHASE7_HISTORY_LMR_ALIGNMENT_PLAN.md`](../../archive/closed_reports_2026/PHASE7_HISTORY_LMR_ALIGNMENT_PLAN.md) §6。
 
 ---
 
@@ -942,7 +942,7 @@ NMP gate/R、ProbCut style、NMP beta requirement 的預設值也由常量明確
 * **生產基線確立與同步**：
   * 正式透過 `tools/sync_classical_old.py --sync` 同步至 `chess_engine/classical_old/`，確立為新一代戰鬥基線。
   * 同步更新 `tuner/constants_snapshot.py`、`tests/test_search_param_registry.py`。
-  * 詳細戰報與圖表請參見 [`tournament_analysis/REPORT_2026-10-14_nmp_alignment_campaign.md`](../../tournament_analysis/REPORT_2026-10-14_nmp_alignment_campaign.md)。
+  * 詳細戰報與圖表請參見 [`archive/closed_reports_2026/REPORT_2026-10-14_nmp_alignment_campaign.md`](../../archive/closed_reports_2026/REPORT_2026-10-14_nmp_alignment_campaign.md)。
 
 ---
 

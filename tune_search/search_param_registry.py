@@ -150,7 +150,7 @@ _RUNTIME_SPECS = [
     _spec("HISTORY_BONUS_SCALE", "HISTORY_BONUS_SCALE", 40, 240, 10, "history", runtime_attr="TUNE_HIST_BONUS_SCALE", spsa_r_end=0.8),
     _spec("HISTORY_BONUS_CAP", "HISTORY_BONUS_CAP", 800, 3000, 100, "history", runtime_attr="TUNE_HIST_BONUS_CAP", spsa_r_end=0.8),
     # Phase 7: band narrowed after the Phase 6 SPSA@100k pushed this cap to 1788
-    # and it regressed at 300k nodes (see PHASE7_HISTORY_LMR_ALIGNMENT_PLAN.md).
+    # and it regressed at 300k nodes (see archive/closed_reports_2026/PHASE7_HISTORY_LMR_ALIGNMENT_PLAN.md).
     _spec("HISTORY_MALUS_CAP", "HISTORY_MALUS_CAP", 1200, 2000, 50, "history", runtime_attr="TUNE_HIST_MALUS_CAP", spsa_r_end=0.8),
     _spec("QUIET_ORDER_KILLER_1", "QUIET_ORDER_KILLER_1", 100000, 600000, 10000, "ordering", runtime_attr="TUNE_ORDER_KILLER_1", spsa_r_end=0.5),
     _spec("QUIET_ORDER_COUNTER", "QUIET_ORDER_COUNTER", 100000, 500000, 10000, "ordering", runtime_attr="TUNE_ORDER_COUNTER", spsa_r_end=0.5),

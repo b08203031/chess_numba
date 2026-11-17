@@ -1,5 +1,7 @@
 # 搜尋歷史啟發重構工程計畫書（HCE）
 
+> 📦 **已結案歸檔（2026-11-16）**：歷史啟發重構已結案：現用基線凍結於 Phase 1a，P2 已回退、P3–5 暫緩；現況見 `chess_engine/classical/HISTORY_HEURISTICS_CN.md`。文內「待對戰校準」之狀態列為歷史快照。（原路徑 `chess_engine/classical/HISTORY_REFORM_PLAN.md`）
+
 | 項目 | 內容 |
 | :--- | :--- |
 | 狀態 | **2026-07-16：Phase 2–5 結構一次落地（full history）· 待對戰校準係數** |
@@ -8,7 +10,7 @@
 | 評估約束 | **評估為已調參 HCE**；搜尋係數必須按本引擎分數尺度調整，禁止直接貼 SF18 SPSA 原值當真理 |
 | 基線策略 | 每階段結束後 vs `classical_old`（`main_old.py`）對戰；**顯著優勢才同步基線並進下一階段** |
 | 目前程式基線 | **Phase 1a 已在 `classical/`**；**未**因 history 改革 sync `classical_old`（Old 仍為對戰對照） |
-| 相關現況文件 | [`HISTORY_HEURISTICS_CN.md`](HISTORY_HEURISTICS_CN.md)、[`SEARCH_ANALYSIS.md`](SEARCH_ANALYSIS.md) |
+| 相關現況文件 | [`HISTORY_HEURISTICS_CN.md`](../../chess_engine/classical/HISTORY_HEURISTICS_CN.md)、[`SEARCH_ANALYSIS.md`](../../chess_engine/classical/SEARCH_ANALYSIS.md) |
 
 ### 0.0 決策凍結（2026-07-13）
 

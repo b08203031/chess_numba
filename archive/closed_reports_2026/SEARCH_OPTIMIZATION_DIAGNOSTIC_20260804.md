@@ -1,5 +1,7 @@
 # Classical 搜尋優化診斷與交接報告（2026-08-04）
 
+> 📦 **已結案歸檔（2026-11-16）**：P0–P6 診斷／回滾與 shadow diagnostics 已定案；現行搜尋說明見 `chess_engine/classical/SEARCH_ANALYSIS.md`。（原路徑 `chess_engine/classical/SEARCH_OPTIMIZATION_DIAGNOSTIC_20260804.md`）
+
 ## 1. 範圍與結論
 
 本報告先完成 **搜尋診斷、SF11/SF18 對照與交接**，後續曾依報告實作 P0、P1、P2 與 P3。

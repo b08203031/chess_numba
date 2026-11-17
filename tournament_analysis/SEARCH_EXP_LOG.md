@@ -3226,7 +3226,7 @@ LMP skip 體積 ≫ RFP ≈ FP/Razor/hist-prune 帶 ≫ NMP ≫ ProbCut
 
 * **背景與動機：**
 
-  * 在完成走步排序（MovePicker）與歷史剪枝的架構解耦（詳見 [`QUIET_ORDERING_DECOUPLING_PLAN.md`](../chess_engine/classical/QUIET_ORDERING_DECOUPLING_PLAN.md)）後，走步排序權重已不再受到剪枝門檻的綁架。
+  * 在完成走步排序（MovePicker）與歷史剪枝的架構解耦（詳見 [`QUIET_ORDERING_DECOUPLING_PLAN.md`](../archive/closed_reports_2026/QUIET_ORDERING_DECOUPLING_PLAN.md)）後，走步排序權重已不再受到剪枝門檻的綁架。
 
   * 舊版 `ORDERING_WEIGHT_CONT_1 = 5` 為歷史 Phase 1a 遺留的極端放大權重，容易造成開局與中局在特定延續步上局部過度偏好，干擾全域走步排序。
 

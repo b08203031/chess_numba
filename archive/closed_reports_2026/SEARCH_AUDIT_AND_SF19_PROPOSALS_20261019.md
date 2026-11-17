@@ -1,13 +1,15 @@
 # 經典搜尋演算法深度審計與 Stockfish 19 對齊優化報告 (2026-10-19)
 
-本報告針對經典搜尋模組（[`chess_engine/classical/search.py`](search.py)、[`search_heuristics.py`](search_heuristics.py)、[`constants.py`](constants.py)、[`transposition_table.py`](transposition_table.py)）進行全檔逐行審計，梳理 SPSA 參數調優現狀、記錄程式碼中發現的潛在邏輯缺陷與重大 Bug，並對照 **Stockfish 19**（[`stockfish_repo/src/search.cpp`](../../stockfish_repo/src/search.cpp)、[`movepick.cpp`](../../stockfish_repo/src/movepick.cpp)）提出下一階段旨在提升 Elo 分數的架構與演算法優化方案。
+> 📦 **已結案歸檔（2026-11-16）**：Bug 診斷與 SF19 對齊路線圖已全數落地（含 E84 採納）；現行搜尋結論見 `chess_engine/classical/SEARCH_ANALYSIS.md`。（原路徑 `chess_engine/classical/SEARCH_AUDIT_AND_SF19_PROPOSALS_20261019.md`）
+
+本報告針對經典搜尋模組（[`chess_engine/classical/search.py`](../../chess_engine/classical/search.py)、[`search_heuristics.py`](../../chess_engine/classical/search_heuristics.py)、[`constants.py`](../../chess_engine/classical/constants.py)、[`transposition_table.py`](../../chess_engine/classical/transposition_table.py)）進行全檔逐行審計，梳理 SPSA 參數調優現狀、記錄程式碼中發現的潛在邏輯缺陷與重大 Bug，並對照 **Stockfish 19**（[`stockfish_repo/src/search.cpp`](../../stockfish_repo/src/search.cpp)、[`movepick.cpp`](../../stockfish_repo/src/movepick.cpp)）提出下一階段旨在提升 Elo 分數的架構與演算法優化方案。
 
 ---
 
 ## 1. SPSA 調優現況與近期演進總結
 
 ### 1.1 SPSA 架構與參數調優協定
-* **單次編譯 In-Process 架構**：[`search_param_registry.py`](../../tune_search/search_param_registry.py) 管理 114+ 個搜尋參數，其中 **42 個熱路徑參數** 映射至 [`SearchContext.tune[0..41]`](engine_types.py)，支援 `--backend inprocess --scale-mode integer`，完全避免多進程重複 JIT 編譯開銷。
+* **單次編譯 In-Process 架構**：[`search_param_registry.py`](../../tune_search/search_param_registry.py) 管理 114+ 個搜尋參數，其中 **42 個熱路徑參數** 映射至 [`SearchContext.tune[0..41]`](../../chess_engine/classical/engine_types.py)，支援 `--backend inprocess --scale-mode integer`，完全避免多進程重複 JIT 編譯開銷。
 * **兩階段驗證流程**：
   1. **L1 SPSA**：Colab GPU/CPU 叢集 50k–200k nodes，採 Polyak-Ruppert 尾部平均（`--tail 0.30`）。
   2. **一維流形阻尼（1D Manifold Damping）**：若全量更新向量 $\vec{v} = \vec{\theta}_{\text{tail30}} - \vec{\theta}_{\text{start}}$ 在長局數出現過度剪枝，透過 $\vec{\theta}(\alpha) = \text{round}(\vec{\theta}_{\text{start}} + \alpha \vec{v})$ 沿梯度主軸進行線搜尋。
@@ -41,7 +43,7 @@
 ## 2. 搜尋演算法審計：發現的 4 個關鍵邏輯缺陷與 Bug
 
 ### 🔴 Bug 1：Fail-Low (ALL-Node) 強制回退 `best_move = moves[0]`，覆寫並嚴重污染置換表
-* **檔案與行號**：[`chess_engine/classical/search.py:3275-3280`](search.py#L3275-L3280) 與 [`chess_engine/classical/transposition_table.py:180-184`](transposition_table.py#L180-L184)
+* **檔案與行號**：[`chess_engine/classical/search.py:3275-3280`](../../chess_engine/classical/search.py#L3275-L3280) 與 [`chess_engine/classical/transposition_table.py:180-184`](../../chess_engine/classical/transposition_table.py#L180-L184)
 * **原始程式碼**：
   ```python
   if best_move == NO_MOVE and search_context.mp_captures_end[ply] + search_context.mp_quiets_end[ply] > 0:
@@ -53,7 +55,7 @@
   ```
 * **問題機制分析**：
   1. **破壞置換表中已有的合法 `best_move`**：
-     在 [`store_tt()`](transposition_table.py#L181-L183) 中，原設計包含標準 Stockfish 保護邏輯：
+     在 [`store_tt()`](../../chess_engine/classical/transposition_table.py#L181-L183) 中，原設計包含標準 Stockfish 保護邏輯：
      ```python
      final_best_move = np.uint16(best_move)
      if final_best_move == 0:
@@ -64,17 +66,17 @@
      當一個曾有合法 `tt_move` 的局面在更深層搜尋或不同視窗下 Fail-Low 時，第 3278 行把 `best_move` 設為 `moves[0]`（非 0），使得 `store_tt` 認為找到了新最佳步，**直接將原本的正確 `best_move` 覆寫摧毀，換成一個隨機失敗的 `moves[0]`**！
   2. **污染全新 ALL-Node，導致多項啟發與剪枝機制失常**：
      在 Stockfish 19（[`search.cpp:1505`](../../stockfish_repo/src/search.cpp#L1505)）中，ALL-Node 存入 TT 的最佳步一律為 `Move::none()`（`0`）。而本專案中所有 Fail-Low 節點都被強行塞入了 `moves[0]`，在後續造訪該局面時引發嚴重連鎖反應：
-     * **IIR 完全失效**：[`search.py:1948`](search.py#L1948) 的 `if tt_move == NO_MOVE:` 在該節點永遠為 `False`，無法發揮 IIR 的自適應深度調節功能。
-     * **RFP 被異常阻擋**：[`search.py:1619`](search.py#L1619) 的 `and (tt_move == NO_MOVE or tt_capture)`，因被塞入偽造的安靜步 `moves[0]`，導致 RFP 遭到錯誤攔截無法剪枝。
-     * **LMR 獎懲失真**：[`search.py:2735`](search.py#L2735) `TUNE_LMR_NO_TTMOVE` 懲罰無法觸發；若 `moves[0]` 剛好是吃子步，還會誤判為 `tt_capture = True`，對所有安靜步錯誤加罰。
-     * **緩衝區索引越界風險**：[`search.py:1105`](search.py#L1105) 中 `mp_quiets_end[ply]` 已是 `captures_end + num_quiets`，第 3275 行計算上限寫成 `mp_captures_end + mp_quiets_end` 導致雙重計算，可能讀取到未初始化的記憶體區間。
+     * **IIR 完全失效**：[`search.py:1948`](../../chess_engine/classical/search.py#L1948) 的 `if tt_move == NO_MOVE:` 在該節點永遠為 `False`，無法發揮 IIR 的自適應深度調節功能。
+     * **RFP 被異常阻擋**：[`search.py:1619`](../../chess_engine/classical/search.py#L1619) 的 `and (tt_move == NO_MOVE or tt_capture)`，因被塞入偽造的安靜步 `moves[0]`，導致 RFP 遭到錯誤攔截無法剪枝。
+     * **LMR 獎懲失真**：[`search.py:2735`](../../chess_engine/classical/search.py#L2735) `TUNE_LMR_NO_TTMOVE` 懲罰無法觸發；若 `moves[0]` 剛好是吃子步，還會誤判為 `tt_capture = True`，對所有安靜步錯誤加罰。
+     * **緩衝區索引越界風險**：[`search.py:1105`](../../chess_engine/classical/search.py#L1105) 中 `mp_quiets_end[ply]` 已是 `captures_end + num_quiets`，第 3275 行計算上限寫成 `mp_captures_end + mp_quiets_end` 導致雙重計算，可能讀取到未初始化的記憶體區間。
 * **修復方案**：
-  移除 `ply > 0` 的 fallback 邏輯；`ply == 0`（Root）已有 [`iterative_deepening_search:4365-4375`](search.py#L4365-L4375) 的安全保底機制。
+  移除 `ply > 0` 的 fallback 邏輯；`ply == 0`（Root）已有 [`iterative_deepening_search:4365-4375`](../../chess_engine/classical/search.py#L4365-L4375) 的安全保底機制。
 
 ---
 
 ### 🔴 Bug 2：未執行 LMR (`lmr == 0`) 的全深度零視窗搜尋硬編碼 `cut_node = True` 且無重搜
-* **檔案與行號**：[`chess_engine/classical/search.py:2827-2854`](search.py#L2827-L2854) 對照 SF19 [`stockfish_repo/src/search.cpp:1372-1404`](../../stockfish_repo/src/search.cpp#L1372-L1404)
+* **檔案與行號**：[`chess_engine/classical/search.py:2827-2854`](../../chess_engine/classical/search.py#L2827-L2854) 對照 SF19 [`stockfish_repo/src/search.cpp:1372-1404`](../../stockfish_repo/src/search.cpp#L1372-L1404)
 * **原始程式碼**：
   ```python
   # 2.1 Zero-window search (with optional LMR)
@@ -97,7 +99,7 @@
 ---
 
 ### 🟠 Bug 3：Continuation Correction History 更新區塊完全重複執行兩次
-* **檔案與行號**：[`chess_engine/classical/search.py:3344-3374`](search.py#L3344-L3374) 與 [`search.py:3375-3403`](search.py#L3375-L3403)
+* **檔案與行號**：[`chess_engine/classical/search.py:3344-3374`](../../chess_engine/classical/search.py#L3344-L3374) 與 [`search.py:3375-3403`](../../chess_engine/classical/search.py#L3375-L3403)
 * **問題機制分析**：
   第 3375–3403 行重複執行了第 3344–3374 行對 `continuation_correction_history`（`ply - 2` 與 `ply - 4`）的更新。這使得每個節點的延續修正值飽和速度異常倍增，且浪費熱路徑 CPU 週期。
 * **修復方案**：刪除重複的 3375–3403 行區塊。
@@ -105,7 +107,7 @@
 ---
 
 ### 🟠 Bug 4：ProbCut TT Defense 未校驗置換表邊界標誌與深度
-* **檔案與行號**：[`chess_engine/classical/search.py:1687-1698`](search.py#L1687-L1698)
+* **檔案與行號**：[`chess_engine/classical/search.py:1687-1698`](../../chess_engine/classical/search.py#L1687-L1698)
 * **問題機制分析**：
   程式碼註解載明「若 TT 紀錄為 Upper Bound (`TT_FLAG_ALPHA`) 且分數低於 `probcut_beta` 則跳過 ProbCut」，但實際程式碼僅判斷 `if tt_score_pc < probcut_beta:`，未檢查 `tt_flag` 與 `tt_depth`。如果 TT 存放的是一個低深度的下界分數（`TT_FLAG_BETA`），其真實分數很可能大於等於 `probcut_beta`，卻會被誤判跳過 ProbCut。
 * **修復方案**：補齊 `tt_flag == TT_FLAG_ALPHA` 與深度有效性檢查。
@@ -179,7 +181,7 @@
 ## 6. Step 2 實測驗證成果（Bug 2 修復之 600 局 LTC 錦標賽對抗）
 
 ### 6.1 測試背景與對抗設定
-* **改動項目**：修復 **Bug 2**（[`chess_engine/classical/search.py:2827`](search.py#L2827)）。
+* **改動項目**：修復 **Bug 2**（[`chess_engine/classical/search.py:2827`](../../chess_engine/classical/search.py#L2827)）。
   在 Non-LMR（`lmr == 0`）之全深度零視窗搜尋中，原代碼硬編碼傳入 `cut_node = True`，導致子樹中的防守 ALL-Node 被誤當成進攻 CUT-Node，進而在王兵殘局與狹窄防守局面中誤觸發空步剪枝（NMP），產生致命的強迫走步（Zugzwang）盲點。
   修復為傳遞正確狀態：
   ```python
@@ -241,8 +243,8 @@
 
 ### 7.1 測試背景與對抗設定
 * **改動項目**：
-  1. 修復 Bug 1（[`chess_engine/classical/search.py:3276`](search.py#L3276)）：移除 Fail-Low ALL-Node 強制回退 `best_move = moves[0]` 的代碼。
-  2. 實作提案 B（[`chess_engine/classical/search.py:1946`](search.py#L1946)）：IIR 補齊 `(is_pv or cut_node)` 守衛，對齊 SF19 Step 11（`!allNode` 規範）。
+  1. 修復 Bug 1（[`chess_engine/classical/search.py:3276`](../../chess_engine/classical/search.py#L3276)）：移除 Fail-Low ALL-Node 強制回退 `best_move = moves[0]` 的代碼。
+  2. 實作提案 B（[`chess_engine/classical/search.py:1946`](../../chess_engine/classical/search.py#L1946)）：IIR 補齊 `(is_pv or cut_node)` 守衛，對齊 SF19 Step 11（`!allNode` 規範）。
 * **測試環境與規格**：
   * 對戰環境：Google Colab（AMD EPYC 7B12 8 vCPU，7 個並行 Worker），`inprocess` 後端。
   * 規模：**1,000 局**（500 對成對換先開局）。
@@ -276,7 +278,7 @@
 3. **生態系平衡反噬**：如同先前修復 Bug 3 導致參數重力失衡，引擎現有 RFP、LMR 與 History 常數均是在舊有「Fail-Low 暫存第一步 + 全域 IIR 快速收斂」的拓撲下達成之最優點，打破平衡引發連鎖失真。
 
 ### 7.4 處置結論
-* **立即回滾 (REVERTED)**：依專案規範，嚴格撤銷本次改動，將 [`chess_engine/classical/search.py`](search.py) 完整還原至 E72 生產基線，維持基線 100% 穩固。
+* **立即回滾 (REVERTED)**：依專案規範，嚴格撤銷本次改動，將 [`chess_engine/classical/search.py`](../../chess_engine/classical/search.py) 完整還原至 E72 生產基線，維持基線 100% 穩固。
 * **後續策略調整**：不再動 Bug 1 與 IIR 守衛，轉向對樹結構干擾較小、消除純粹浪費的架構重構（如 **提案 A：前向剪枝順序重構，NMP/IIR 前置於 ProbCut**）。
 
 
@@ -314,7 +316,7 @@
 
 ### 9.1 設計與實作規格
 * **對齊依據**：Stockfish 19 Step 9（`search.cpp:1007` `return (661 * beta + 363 * eval) / 1024;`）。
-* **實作位置**：[`chess_engine/classical/search.py:1643`](search.py#L1643) 與 [`constants.py:1053`](constants.py#L1053)。
+* **實作位置**：[`chess_engine/classical/search.py:1643`](../../chess_engine/classical/search.py#L1643) 與 [`constants.py:1053`](../../chess_engine/classical/constants.py#L1053)。
 * **物理機理與 HCE 差異探索**：
   * 在 Classical HCE 下，靜態評估分偶爾會因局部陣型優勢而虛高。直接回傳過高的靜態分會衝擊父節點的抱負視窗（Aspiration Window），引發不必要的 Fail-High 重搜。
   * **E75.0（SF19 原生權重：661 $\beta$ + 363 eval）**：實測**顯著落敗**。在 HCE 下，過度重壓 $\beta$（拉向 $\beta$ 達 64.5%）過度削弱了真實局面的優勢訊號，導致父節點排序品質受損。
@@ -400,7 +402,7 @@
   * **回滾 (REVERTED)**：撤銷實驗 A 全部改動，還原 `chess_engine/classical/search.py` 至 Stage 1 基線，並推進至 **實驗 D（修復 ProbCut TT Defense 漏檢，Bug 4）**。
 
 ### 10.4 實驗 D：修復 ProbCut TT Defense 漏檢實測分析（E81，採納進生產基線）
-* **實驗設計**：修復 [`chess_engine/classical/search.py:1724-1727`](search.py#L1724-L1727) 中 ProbCut TT Defense 未檢查 `tt_flag` 與 `tt_depth` 的邏輯缺陷，補齊 `(tt_flag == TT_FLAG_ALPHA or tt_flag == TT_FLAG_EXACT) and tt_depth >= depth - probcut_r`。
+* **實驗設計**：修復 [`chess_engine/classical/search.py:1724-1727`](../../chess_engine/classical/search.py#L1724-L1727) 中 ProbCut TT Defense 未檢查 `tt_flag` 與 `tt_depth` 的邏輯缺陷，補齊 `(tt_flag == TT_FLAG_ALPHA or tt_flag == TT_FLAG_EXACT) and tt_depth >= depth - probcut_r`。
 * **實測戰績（Colab 600 局 LTC 400k nodes，300 對換先平衡）**：
   * **戰績**：Candidate **119 勝 364 和 117 負**（得分率 **50.17%**，淨勝 **+2 局**）。
   * **相對 Elo**：**+1.16 ± 17.33 Elo**（95% CI: `[-16.17, +18.49]`）。
@@ -435,11 +437,11 @@
 * **處置結論**：**回滾 (REVERTED)**，100% 還原至 E81 生產基線，正式進入第三階段 SPSA 調參。
 
 ### 10.7 SEE 靜態交換評估全套漏洞修補與 Step 14 前置合法性預檢實測分析（E84，+10.43 Elo 正式採納）
-* **修補項目**（詳見 [`SEE_ANALYSIS.md`](SEE_ANALYSIS.md)）：
-  1. **動態牽制過濾與牽制線反吃**（[`see.py`](see.py) `filter_pinned_attackers`）：支援被牽制子沿 `LINE_BB[king_sq, to_sq]` 反吃，並在交換過程中牽制線上有棋子移開時動態驗證是否解除牽制。
+* **修補項目**（詳見 [`SEE_ANALYSIS.md`](../../chess_engine/classical/SEE_ANALYSIS.md)）：
+  1. **動態牽制過濾與牽制線反吃**（[`see.py`](../../chess_engine/classical/see.py) `filter_pinned_attackers`）：支援被牽制子沿 `LINE_BB[king_sq, to_sq]` 反吃，並在交換過程中牽制線上有棋子移開時動態驗證是否解除牽制。
   2. **升變與欠升變完整計分及底線重吃升變保護**：`_see_jit` 與 `_see_ge_jit` 支援 `promo_type`，並在交換迴圈內處理底線後續兵重吃升變與提前截斷守衛；同步修正 QSearch Delta Pruning 欠升變增益。
   3. **過路兵自包含判定與 `-2` 哨兵安全防護**：直接由 `(initial_occ & BB_SQUARES[to_sq]) == 0` 判定過路兵並更新 `occupied`，修正 `_see_jit` 與 MovePicker Fast Path 對 `victim_type = -2` 的處理。
-  4. **王車易位將軍/SEE 分流與 Step 14 前置 $O(1)$ 合法性預檢**（[`search.py`](search.py)）：以易位後城堡落點精確判定將軍、豁免易位進入 SEE，並於 Step 14 淺層剪枝前先執行 $O(1)$ 合法性檢查，保護 `pruned_moves` 不受非法偽合法走法污染而影響逼和（Stalemate）判定。
+  4. **王車易位將軍/SEE 分流與 Step 14 前置 $O(1)$ 合法性預檢**（[`search.py`](../../chess_engine/classical/search.py)）：以易位後城堡落點精確判定將軍、豁免易位進入 SEE，並於 Step 14 淺層剪枝前先執行 $O(1)$ 合法性檢查，保護 `pruned_moves` 不受非法偽合法走法污染而影響逼和（Stalemate）判定。
 * **實測戰績（Colab 600 局 LTC 400k nodes，300 對換先平衡）**：
   * **戰績**：Candidate **123 勝 372 和 105 負**（得分率 **51.50%**，淨勝 **+18 局**）。
   * **相對 Elo**：**+10.43 Elo**（95% CI: `[-5.69, +26.59]`；持白 `52.83%`、持黑 **`50.17%`**，各盤長區間勝率全數 $\ge 50.4\%$）。

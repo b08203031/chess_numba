@@ -1,5 +1,7 @@
 # Classical 搜尋優化候選提案 (E47–E50)
 
+> 📦 **已結案歸檔（2026-11-16）**：E47（ProbCut 自適應）、E48（LMR ALL-Node）、E50（廢除將軍延伸）均已採納；後續實驗見 `tournament_analysis/SEARCH_EXP_LOG.md`。（原路徑 `tournament_analysis/SEARCH_PROPOSALS_E47_E50.md`）
+
 > **建立日期：** 2026-09-25  
 > **最後更新：** 2026-09-26  
 > **基準狀態：** **E50 已採納進生產基線**（廢除將軍延伸，400@n300k, 53.25%, Elo +22.62 ±20.50, 淨勝 +26 局, 深度 +1.20 ply, 耗時 -13.4ms）  

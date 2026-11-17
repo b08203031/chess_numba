@@ -1,5 +1,7 @@
 # Phase 7 技術計畫書：歷史動力鏈、LMR 聯動體系與 SF19 結構對齊
 
+> 📦 **已結案歸檔（2026-11-16）**：Phase 7 已結案：1,000 局 `+0.7 ± 14.0 Elo`（`inconclusive_at_cap`），維持 Plan A 生產常數；42 槽位調參架構保留供後續使用。（原路徑 `chess_engine/classical/PHASE7_HISTORY_LMR_ALIGNMENT_PLAN.md`）
+
 > **文檔屬性**：引擎架構進化計畫書（供 AI Agent 與架構師同行評審）  
 > **專案環境**：Python 3.10 / Numba `@njit` / NumPy Bitboards / Classical HCE  
 > **當前基線 Commit**：`1ed92f0`（Phase 6 Plan A 生產基線）  
@@ -141,12 +143,12 @@ Phase 7 鎖定**「衰減阻尼與深層保護」**核心鏈。原案 5 軸經�
 | **`HISTORY_QUIET_MALUS_SCALE_NUM`** | `[768, 1280]` | `32` | `1024` | 41 | 失敗安靜步初始 malus 倍率（/1024），與 DECAY 共同決定幾何總懲罰。 |
 
 **自原案剔除 / 固定：**
-* `HISTORY_REFUTE_SCALE_NUM`：**死常數**。[`search.py`](search.py) 的 Refutation Penalty 直接使用 `malus`（`refute_malus = malus`），該常數未被任何搜尋路徑讀取，調它無任何效果。若要「修復」＝讓 refutation 套用 `NUM/DEN` 折扣，屬行為改動，需另開 A/B，不納入本輪 SPSA。
+* `HISTORY_REFUTE_SCALE_NUM`：**死常數**。[`search.py`](../../chess_engine/classical/search.py) 的 Refutation Penalty 直接使用 `malus`（`refute_malus = malus`），該常數未被任何搜尋路徑讀取，調它無任何效果。若要「修復」＝讓 refutation 套用 `NUM/DEN` 折扣，屬行為改動，需另開 A/B，不納入本輪 SPSA。
 * `LMR_DIVISOR_MIN_DEPTH`：固定為 10。它與 `DEPTH_STEP` 構成同一條斜坡 `max(0, d - MIN) * STEP`，兩者同調不可辨識；且 [7,12] 的整數範圍使 SPSA 的 ±1 擾動幾乎沒有訊號。
 
 ### 4.3 免重編譯 Runtime 擴展架構（已實作）
-* 新增 `SearchContext.tune[]` 槽位：`TUNE_HIST_MALUS_DECAY=39`、`TUNE_LMR_DIV_STEP=40`、`TUNE_HIST_MALUS_SCALE=41`，`TUNE_SIZE` 由 39 → **42**（[`constants.py`](constants.py)、[`engine_types.py`](engine_types.py)）。
-* [`search.py`](search.py) 三處讀取點改讀 `search_context.tune[...]`：LMR 淺層預估 `dyn_div`、主搜尋 `dyn_div`、failed-quiet malus 的初始倍率與逐步衰減。預設值與原常數完全相同，不改變預設行為。
+* 新增 `SearchContext.tune[]` 槽位：`TUNE_HIST_MALUS_DECAY=39`、`TUNE_LMR_DIV_STEP=40`、`TUNE_HIST_MALUS_SCALE=41`，`TUNE_SIZE` 由 39 → **42**（[`constants.py`](../../chess_engine/classical/constants.py)、[`engine_types.py`](../../chess_engine/classical/engine_types.py)）。
+* [`search.py`](../../chess_engine/classical/search.py) 三處讀取點改讀 `search_context.tune[...]`：LMR 淺層預估 `dyn_div`、主搜尋 `dyn_div`、failed-quiet malus 的初始倍率與逐步衰減。預設值與原常數完全相同，不改變預設行為。
 * 在 `tune_search/search_param_registry.py` 註冊上述 3 個新軸，並將 `HISTORY_MALUS_CAP` 範圍收窄為 `[1200, 2000]`、步長 50。四軸以 `--params` 明確列出（不另建 profile）。
 * 搜尋函式 `cache=False`，新增槽位不會有舊 disk cache 殘留風險。
 
