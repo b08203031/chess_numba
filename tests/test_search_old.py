@@ -2,6 +2,7 @@ import sys
 import os
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
+import argparse
 import time
 import numpy as np
 import shutil
@@ -9,16 +10,12 @@ import io
 import chess.pgn
 from pathlib import Path
 
-# --- Transposition Table Setup ---
-from chess_engine.classical_old.transposition_table import (
-    TT_SIZE_MB, create_transposition_table, clear_transposition_table
-)
-from chess_engine.classical_old.engine_types import SearchContext
-transposition_table = create_transposition_table(TT_SIZE_MB)
-
 from chess_engine.classical_old.debug_utils import log_info
 
+
 def make_search_context(tt):
+    from chess_engine.classical_old.engine_types import SearchContext
+
     MAX_PLY = 128
     killer_moves = np.zeros(MAX_PLY * 2, dtype=np.uint16)
     pv_table = np.zeros((MAX_PLY, MAX_PLY), dtype=np.uint16)
@@ -41,26 +38,20 @@ def make_search_context(tt):
         continuation_correction_history
     )
 
+
 def clear_numba_cache():
     """
     Finds and removes all __pycache__ directories in the project.
     """
     log_info("--- Clearing Numba Cache ---")
-    project_root = Path(__file__).parent
+    project_root = Path(__file__).resolve().parents[1]
     cache_dirs = list(project_root.rglob("__pycache__"))
-    
+
     for cache_dir in cache_dirs:
         if cache_dir.is_dir():
             log_info(f"Removing cache directory: {cache_dir}")
-            shutil.rmtree(cache_dir)
+            shutil.rmtree(cache_dir, ignore_errors=True)
     log_info("--- Cache Cleared ---")
-
-# Clear cache before importing the engine to avoid stale cache issues
-clear_numba_cache()
-
-from chess_engine.classical_old.fen_parser import parse_fen
-from chess_engine.classical_old.search import iterative_deepening_search, format_score_for_uci
-from chess_engine.classical_old.move import move_to_uci
 
 GAME_PGN = """
 1. d4 Nf6 2. c4 e6 3. Nc3 Bb4 4. Qc2 c5 5. dxc5 O-O 6. a3 Bxc5 7. Nf3 b6 8. b4 $6
@@ -112,6 +103,15 @@ def run_search_test():
     Runs 1-second search tests across all positions from 15. Be2 to 95... Kf2 in the game PGN.
     Displays only the deepest search info for each move, and outputs summary statistics at the end.
     """
+    from chess_engine.classical_old.transposition_table import (
+        TT_SIZE_MB, create_transposition_table, clear_transposition_table
+    )
+    from chess_engine.classical_old.fen_parser import parse_fen
+    from chess_engine.classical_old.search import iterative_deepening_search, format_score_for_uci
+    from chess_engine.classical_old.move import move_to_uci
+
+    transposition_table = create_transposition_table(TT_SIZE_MB)
+
     # 1. Warm-up (triggers JIT compilation with Kiwipete Depth 12)
     print("--- WARMING UP (Compiling JIT functions with Kiwipete Depth 12) ---")
     kiwipete_fen = "r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1"
@@ -185,5 +185,28 @@ def run_search_test():
     print(f"每步深度中位數   (Median Depth):      {median_depth:14.2f}")
     print("==========================================================================")
 
-if __name__ == "__main__":
+
+def build_parser():
+    parser = argparse.ArgumentParser(description="Search benchmark for classical_old")
+    parser.add_argument(
+        "--clear-cache",
+        action="store_true",
+        help="explicitly clear Numba caches before startup",
+    )
+    parser.add_argument("--no-clear-cache", action="store_true", help=argparse.SUPPRESS)
+    return parser
+
+
+def main(argv=None):
+    parser = build_parser()
+    args = parser.parse_args(argv)
+    if args.clear_cache and args.no_clear_cache:
+        parser.error("--clear-cache conflicts with --no-clear-cache")
+    if args.clear_cache:
+        clear_numba_cache()
     run_search_test()
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

@@ -2,14 +2,14 @@ import sys
 import os
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
 
+import argparse
 import time
 import numpy as np
 import shutil
 from pathlib import Path
 
-# --- Transposition Table Setup ---
-from chess_engine.classical.transposition_table import TT_SIZE_MB, create_transposition_table, clear_transposition_table
-transposition_table = create_transposition_table(TT_SIZE_MB)
+from chess_engine.classical.constants import MAX_PLY
+from chess_engine.classical.debug_utils import log_info
 
 
 def clear_numba_cache():
@@ -17,26 +17,12 @@ def clear_numba_cache():
     Finds and removes all __pycache__ directories under chess_engine/classical/
     to avoid stale Numba JIT cache issues.
     """
-    classical_dir = Path(__file__).parent.parent / "chess_engine" / "classical"
+    classical_dir = Path(__file__).resolve().parents[1] / "chess_engine" / "classical"
     cache_dirs = list(classical_dir.rglob("__pycache__"))
 
     for cache_dir in cache_dirs:
         if cache_dir.is_dir():
-            shutil.rmtree(cache_dir)
-
-from chess_engine.classical.debug_utils import log_info
-
-# Clear cache before importing the engine to avoid stale cache issues
-clear_numba_cache()
-
-
-from chess_engine.classical.fen_parser import parse_fen
-from chess_engine.classical.search import iterative_deepening_search
-from chess_engine.classical.move import move_to_uci
-from chess_engine.classical.core import SQUARE_TO_ALGEBRAIC
-
-# Maximum search depth (Ply) for arrays like killer moves
-from chess_engine.classical.constants import MAX_PLY
+            shutil.rmtree(cache_dir, ignore_errors=True)
 
 puzzles = [
         {
@@ -3546,8 +3532,17 @@ def run_puzzle_test():
     """
     Runs a search test for each puzzle and prints statistics.
     """
+    from chess_engine.classical.transposition_table import (
+        TT_SIZE_MB,
+        create_transposition_table,
+        clear_transposition_table,
+    )
     from chess_engine.classical.engine_types import create_search_context
+    from chess_engine.classical.fen_parser import parse_fen
+    from chess_engine.classical.search import iterative_deepening_search
+    from chess_engine.classical.move import move_to_uci
 
+    transposition_table = create_transposition_table(TT_SIZE_MB)
 
     # 1. Warm-up (triggers JIT compilation)
     print("--- WARMING UP (Compiling JIT functions) ---")
@@ -3705,5 +3700,27 @@ def run_puzzle_test():
         print("Failed puzzles saved to failed_puzzles.json")
 
 
-if __name__ == "__main__":
+def build_parser():
+    parser = argparse.ArgumentParser(description="Run Classical puzzle test suite")
+    parser.add_argument(
+        "--clear-cache",
+        action="store_true",
+        help="explicitly clear Numba caches before startup",
+    )
+    parser.add_argument("--no-clear-cache", action="store_true", help=argparse.SUPPRESS)
+    return parser
+
+
+def main(argv=None):
+    parser = build_parser()
+    args = parser.parse_args(argv)
+    if args.clear_cache and args.no_clear_cache:
+        parser.error("--clear-cache conflicts with --no-clear-cache")
+    if args.clear_cache:
+        clear_numba_cache()
     run_puzzle_test()
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

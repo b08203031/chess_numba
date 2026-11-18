@@ -63,7 +63,7 @@ Then every transitive `cache=True` caller may also fail with
 
 * Use `inline='always'` on tiny helpers (e.g. piece-on-square lookups).
 * **Do not** `inline='always'` helpers whose sole job is to **kill literals** (`_b_false` / `_i32` style) — inlining re-materializes `Literal[...]` and multiplies IR.
-* **Exception — recursive search** (`chess_engine/classical/search.py`: `_search`, `quiescence_search`): use **`cache=False`** until disk reload is proven safe (Numba unresolved-symbol crash with large StructRef signatures). Document next to the decorator.
+* **Recursive search & Lazy SMP** (`chess_engine/classical/search.py`: `_search`, `quiescence_search`, `_lazy_smp_helper_loop_jit`): use **`cache=True`** with explicit signatures and strict call-site signature convergence (`_i32` / `_u16` / `_b_true` / `_b_false` + `SearchContextType.preprocess_fields` `types.unliteral`) so recursive lowering emits `call_internal` with `0` `.numba.unresolved$` symbols. Whenever recursive signatures or call sites change, re-verify `0` `.numba.unresolved$` and a clean cross-process warm reload before merging (Numba `CPUCodeLibrary._unserialize` skips `RuntimeLinker` scanning on cached `'object'` reloads, so any signature divergence re-introducing `.numba.unresolved$` aborts on warm load).
 * **Exception — NNUE weight-backed inference** (`chess_engine/nnue/ml_eval/inference.py` and similar): prefer `cache=False` when functions close over or bind reloadable global weight arrays, so stale disk caches cannot pin old nets. Document any new exception next to the decorator.
 
 ---
@@ -73,5 +73,5 @@ Then every transitive `cache=True` caller may also fail with
 * Keep UCI / GUI / PGN / file I/O in pure Python.
 * Keep make/unmake, movegen, search, eval, SEE, NNUE forward under `njit`.
 * **Do not return structured-array records across the Python/JIT boundary:** Calling a `@njit` function that returns a structured NumPy element (e.g. `probe_tt` returning `tt[idx]` / `_EMPTY_TT_ENTRY`) from pure Python triggers `np.record` boxing issues. Pure-Python callers must use a scalar-tuple `@njit` wrapper (e.g. `probe_tt_best_move`).
-* **Decouple non-search unit tests from `search.py`:** Because `_search` and `quiescence_search` use `cache=False`, importing modules that pull in `search.py` (such as `tools.match_core` or `tune_eval_match.inprocess_match`) adds ~5–6 minutes of cold LLVM compile time per Python process. Construct `SearchContext` directly from `engine_types` in fast eval/unit tests.
+* **Decouple non-search unit tests from `search.py`:** Even though `classical/` search, QS, and Lazy SMP now use `cache=True` (~8.9 s warm import), cold compilation after invalidating `search.py` or `engine_types.py` still takes several minutes (and `classical_old/` / `nnue/` paths differ). Construct `SearchContext` directly from `engine_types` in fast eval/unit tests instead of pulling in `search.py` via `tools.match_core` or `tune_eval_match.inprocess_match`.
 * After JIT/cache-related changes: run cold+warm timing (see JIT report §5) and append numbers to that report §6 when results change.

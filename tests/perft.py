@@ -2,26 +2,51 @@ import sys
 import os
 import shutil
 
-# Clear Numba cache in chess_engine/classical/__pycache__ before importing
-classical_cache_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "chess_engine", "classical", "__pycache__"))
-if os.path.exists(classical_cache_dir):
-    try:
-        shutil.rmtree(classical_cache_dir)
-        print(f"Cleared Numba cache: {classical_cache_dir}")
-    except Exception as e:
-        print(f"Warning: Failed to clear Numba cache: {e}")
-
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 import argparse
 import numpy as np
 import time
+from types import SimpleNamespace
 
-from chess_engine.classical.fen_parser import parse_fen
-from chess_engine.classical.move_generator import generate_legal_moves
-from chess_engine.classical.board_operations import make_move, unmake_move
-from chess_engine.classical.move import get_from_square, get_to_square
-from chess_engine.classical.core import perft, _jit_perft_divide, SQUARE_TO_ALGEBRAIC, PERFT_RESULTS
+
+def clear_numba_cache():
+    """Clear Numba cache in chess_engine/classical/__pycache__."""
+    classical_cache_dir = os.path.abspath(
+        os.path.join(os.path.dirname(__file__), "..", "chess_engine", "classical", "__pycache__")
+    )
+    if os.path.exists(classical_cache_dir):
+        try:
+            shutil.rmtree(classical_cache_dir, ignore_errors=True)
+            print(f"Cleared Numba cache: {classical_cache_dir}")
+        except Exception as e:
+            print(f"Warning: Failed to clear Numba cache: {e}")
+
+
+def _load_engine():
+    from chess_engine.classical.fen_parser import parse_fen
+    from chess_engine.classical.move_generator import generate_legal_moves
+    from chess_engine.classical.board_operations import make_move, unmake_move
+    from chess_engine.classical.move import get_from_square, get_to_square
+    from chess_engine.classical.core import (
+        perft,
+        _jit_perft_divide,
+        SQUARE_TO_ALGEBRAIC,
+        PERFT_RESULTS,
+    )
+    return SimpleNamespace(
+        parse_fen=parse_fen,
+        generate_legal_moves=generate_legal_moves,
+        make_move=make_move,
+        unmake_move=unmake_move,
+        get_from_square=get_from_square,
+        get_to_square=get_to_square,
+        perft=perft,
+        _jit_perft_divide=_jit_perft_divide,
+        SQUARE_TO_ALGEBRAIC=SQUARE_TO_ALGEBRAIC,
+        PERFT_RESULTS=PERFT_RESULTS,
+    )
+
 
 POSITIONS = {
     "startpos": "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
@@ -62,6 +87,7 @@ def do_run_tests(args):
 
 def test_perft_suite():
     """Run a series of perft tests to verify move generator"""
+    eng = _load_engine()
     print("--- Running Perft Test Suite ---")
     
     suite_depths = {
@@ -80,10 +106,10 @@ def test_perft_suite():
         print("-" * 40)
         max_depth = suite_depths.get(name, 3)
         
-        piece_bbs, occupancy_bbs, game_state = parse_fen(fen)
+        piece_bbs, occupancy_bbs, game_state = eng.parse_fen(fen)
         
         # Warm-up JIT
-        perft(piece_bbs.copy(), occupancy_bbs.copy(), game_state.copy(), 1)
+        eng.perft(piece_bbs.copy(), occupancy_bbs.copy(), game_state.copy(), 1)
         
         for depth in range(1, max_depth + 1):
             nodes_runs = []
@@ -96,7 +122,7 @@ def test_perft_suite():
                 g_state_copy = game_state.copy()
                 
                 start_time = time.perf_counter()
-                nodes = perft(p_bbs_copy, o_bbs_copy, g_state_copy, depth)
+                nodes = eng.perft(p_bbs_copy, o_bbs_copy, g_state_copy, depth)
                 end_time = time.perf_counter()
                 
                 elapsed = end_time - start_time
@@ -112,7 +138,7 @@ def test_perft_suite():
             avg_nps = sum(sorted_nps[1:4]) / 3.0
             
             nodes = nodes_runs[0]
-            expected = PERFT_RESULTS.get(name, {}).get(depth, -1)
+            expected = eng.PERFT_RESULTS.get(name, {}).get(depth, -1)
             
             status = "OK" if nodes == expected or expected == -1 else "MISMATCH!"
             
@@ -129,6 +155,7 @@ def test_perft_suite():
 
 def run_perft_test(fen_string: str, max_depth: int, divide_on_mismatch: bool = False):
     """Run perft test for given FEN string"""
+    eng = _load_engine()
     print("--- Starting Perft Test ---")
     print(f"FEN: {fen_string}")
     print(f"Max Depth: {max_depth}")
@@ -139,11 +166,11 @@ def run_perft_test(fen_string: str, max_depth: int, divide_on_mismatch: bool = F
     test_key = get_test_key(fen_string)
 
     # Initial parse
-    piece_bbs, occupancy_bbs, game_state = parse_fen(fen_string)
+    piece_bbs, occupancy_bbs, game_state = eng.parse_fen(fen_string)
 
     # Warm-up JIT compilation
     if max_depth > 0:
-        perft(piece_bbs.copy(), occupancy_bbs.copy(), game_state.copy(), 1)
+        eng.perft(piece_bbs.copy(), occupancy_bbs.copy(), game_state.copy(), 1)
 
     for depth in range(1, max_depth + 1):
         times = []
@@ -157,7 +184,7 @@ def run_perft_test(fen_string: str, max_depth: int, divide_on_mismatch: bool = F
             g_state_copy = game_state.copy()
 
             start_time = time.perf_counter()
-            nodes = perft(p_bbs_copy, o_bbs_copy, g_state_copy, depth)
+            nodes = eng.perft(p_bbs_copy, o_bbs_copy, g_state_copy, depth)
             end_time = time.perf_counter()
 
             elapsed = end_time - start_time
@@ -175,7 +202,7 @@ def run_perft_test(fen_string: str, max_depth: int, divide_on_mismatch: bool = F
         total_nodes += nodes
         total_time += avg_time
 
-        expected = PERFT_RESULTS.get(test_key, {}).get(depth, -1)
+        expected = eng.PERFT_RESULTS.get(test_key, {}).get(depth, -1)
         status = "OK" if nodes == expected or expected == -1 else "MISMATCH!"
 
         print(f"Depth {depth}: Nodes: {nodes:<10} Time: {avg_time:.6f}s, NPS: {int(avg_nps):<10} Expected: {expected:<10} -> {status}")
@@ -194,17 +221,18 @@ def run_perft_test(fen_string: str, max_depth: int, divide_on_mismatch: bool = F
 
 def perft_divide(fen_string: str, depth: int):
     """Show node count for each move at given depth"""
+    eng = _load_engine()
     print(f"--- Perft Divide for Depth {depth} ---")
-    piece_bbs, occupancy_bbs, game_state = parse_fen(fen_string)
+    piece_bbs, occupancy_bbs, game_state = eng.parse_fen(fen_string)
 
     # Pass copies as the function will mutate them
-    results = _jit_perft_divide(piece_bbs.copy(), occupancy_bbs.copy(), game_state.copy(), depth)
+    results = eng._jit_perft_divide(piece_bbs.copy(), occupancy_bbs.copy(), game_state.copy(), depth)
 
     total_nodes = 0
     for i in range(len(results)):
         move, nodes = results[i]
-        from_sq_alg = SQUARE_TO_ALGEBRAIC[get_from_square(np.uint16(move))]
-        to_sq_alg = SQUARE_TO_ALGEBRAIC[get_to_square(np.uint16(move))]
+        from_sq_alg = eng.SQUARE_TO_ALGEBRAIC[eng.get_from_square(np.uint16(move))]
+        to_sq_alg = eng.SQUARE_TO_ALGEBRAIC[eng.get_to_square(np.uint16(move))]
         print(f"{from_sq_alg}{to_sq_alg}: {nodes}")
         total_nodes += nodes
 
@@ -212,20 +240,21 @@ def perft_divide(fen_string: str, depth: int):
 
 def test_make_unmake_for_fen(fen: str):
     """Test if make_move and unmake_move are completely reversible"""
+    eng = _load_engine()
     print(f"--- Testing make/unmake for FEN: {fen} ---")
 
-    p_bbs, o_bbs, g_state = parse_fen(fen)
+    p_bbs, o_bbs, g_state = eng.parse_fen(fen)
 
     original_p_bbs = p_bbs.copy()
     original_o_bbs = o_bbs.copy()
     original_g_state = g_state.copy()
 
-    legal_moves = generate_legal_moves(p_bbs, o_bbs, g_state)
+    legal_moves = eng.generate_legal_moves(p_bbs, o_bbs, g_state)
 
     failures = []
     for move in legal_moves:
-        unmake_info = make_move(p_bbs, o_bbs, g_state, move)
-        unmake_move(p_bbs, o_bbs, g_state, move, unmake_info)
+        unmake_info = eng.make_move(p_bbs, o_bbs, g_state, move)
+        eng.unmake_move(p_bbs, o_bbs, g_state, move, unmake_info)
 
         is_equal = (
             np.array_equal(p_bbs, original_p_bbs) and
@@ -234,8 +263,8 @@ def test_make_unmake_for_fen(fen: str):
         )
 
         if not is_equal:
-            from_sq_alg = SQUARE_TO_ALGEBRAIC[get_from_square(move)]
-            to_sq_alg = SQUARE_TO_ALGEBRAIC[get_to_square(move)]
+            from_sq_alg = eng.SQUARE_TO_ALGEBRAIC[eng.get_from_square(move)]
+            to_sq_alg = eng.SQUARE_TO_ALGEBRAIC[eng.get_to_square(move)]
             failures.append(f"{from_sq_alg}{to_sq_alg}")
 
             p_bbs, o_bbs, g_state = original_p_bbs.copy(), original_o_bbs.copy(), original_g_state.copy()
@@ -246,8 +275,15 @@ def test_make_unmake_for_fen(fen: str):
         print("--- FAILURE ---")
         print(f"The following moves failed to revert the board state: {failures}")
 
-if __name__ == "__main__":
+
+def build_parser():
     parser = argparse.ArgumentParser(description="A command-line interface for the chess engine.")
+    parser.add_argument(
+        "--clear-cache",
+        action="store_true",
+        help="explicitly clear Numba caches before startup",
+    )
+    parser.add_argument("--no-clear-cache", action="store_true", help=argparse.SUPPRESS)
     subparsers = parser.add_subparsers(dest="command", required=True, help="Available commands")
 
     parser_perft = subparsers.add_parser("perft", help="Run a performance test to a certain depth.")
@@ -266,6 +302,19 @@ if __name__ == "__main__":
 
     parser_run_tests = subparsers.add_parser("run-tests", help="Run the full test suite.")
     parser_run_tests.set_defaults(func=do_run_tests)
+    return parser
 
-    args = parser.parse_args()
+
+def main(argv=None):
+    parser = build_parser()
+    args = parser.parse_args(argv)
+    if args.clear_cache and args.no_clear_cache:
+        parser.error("--clear-cache conflicts with --no-clear-cache")
+    if args.clear_cache:
+        clear_numba_cache()
     args.func(args)
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

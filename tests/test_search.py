@@ -65,13 +65,13 @@ def clear_numba_cache():
     Finds and removes all __pycache__ directories in the project.
     """
     print("--- Clearing Numba Cache ---")
-    project_root = Path(__file__).parent
+    project_root = Path(__file__).resolve().parents[1]
     cache_dirs = list(project_root.rglob("__pycache__"))
-    
+
     for cache_dir in cache_dirs:
         if cache_dir.is_dir():
             print(f"Removing cache directory: {cache_dir}")
-            shutil.rmtree(cache_dir)
+            shutil.rmtree(cache_dir, ignore_errors=True)
     print("--- Cache Cleared ---")
 
 GAME_PGN = """
@@ -119,15 +119,13 @@ def extract_benchmark_positions():
         
     return positions
 
-def run_search_test(engine_name="new"):
+def run_search_test(engine_name="new", clear_cache=False):
     """
     Runs fixed-depth 13 search tests across all positions from 15. Be2 to 95... Kf2
     in the game PGN. Displays each move's depth-13 result and summary statistics.
     """
-    # Purge caches before importing the selected engine.  Run ``new`` and
-    # ``old`` in separate processes so their Numba specializations cannot
-    # affect one another.
-    clear_numba_cache()
+    if clear_cache:
+        clear_numba_cache()
     engine = load_engine(engine_name)
     transposition_table = engine.create_transposition_table(engine.TT_SIZE_MB)
 
@@ -216,7 +214,8 @@ def run_search_test(engine_name="new"):
     print(f"每步深度中位數   (Median Depth):      {median_depth:14.2f}")
     print("==========================================================================")
 
-if __name__ == "__main__":
+
+def build_parser():
     parser = argparse.ArgumentParser(
         description="Fixed-depth-13 search benchmark for the new or old engine"
     )
@@ -224,5 +223,23 @@ if __name__ == "__main__":
         "--engine", choices=("new", "old"), default="new",
         help="engine package to benchmark (default: new)",
     )
-    args = parser.parse_args()
-    run_search_test(args.engine)
+    parser.add_argument(
+        "--clear-cache",
+        action="store_true",
+        help="explicitly clear Numba caches before startup",
+    )
+    parser.add_argument("--no-clear-cache", action="store_true", help=argparse.SUPPRESS)
+    return parser
+
+
+def main(argv=None):
+    parser = build_parser()
+    args = parser.parse_args(argv)
+    if args.clear_cache and args.no_clear_cache:
+        parser.error("--clear-cache conflicts with --no-clear-cache")
+    run_search_test(args.engine, clear_cache=args.clear_cache)
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

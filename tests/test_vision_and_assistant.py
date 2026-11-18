@@ -538,6 +538,486 @@ class TestUniversalRecognizerAndAssistant(unittest.TestCase):
         finally:
             root.destroy()
 
+    def test_10_fixed_depth_go_cmd_and_mutual_exclusion(self):
+        """
+        Fixed search depth limit:
+        - `limit_by_depth_var` emits `go depth <N>` with `depth_limit_var` clamped to `1..128` (default 12 on invalid).
+        - `on_toggle_limit_depth` and `on_toggle_limit_nodes` enforce mutual exclusion and refresh `_ui_state`.
+        - Disabling both falls back to `go movetime <ms>`.
+        """
+        import inspect
+        import tkinter as tk
+
+        ui_src = inspect.getsource(assistant.ChessVisionApp._create_ui)
+        self.assertIn("self.on_toggle_limit_depth", ui_src)
+        self.assertIn("self.on_toggle_limit_nodes", ui_src)
+        self.assertIn("self.cb_depth_limit", ui_src)
+
+        root = tk.Tk()
+        root.withdraw()
+        try:
+            app = object.__new__(assistant.ChessVisionApp)
+            app.limit_by_depth_var = tk.BooleanVar(master=root, value=False)
+            app.depth_limit_var = tk.StringVar(master=root, value="12")
+            app.limit_by_nodes_var = tk.BooleanVar(master=root, value=False)
+            app.nodes_limit_var = tk.StringVar(master=root, value="50000")
+            app.time_var = tk.StringVar(master=root, value="2.5")
+
+            # 1. Default fallback to movetime
+            self.assertEqual(app._build_go_cmd(), "go movetime 2500")
+            app.time_var.set("0.01")
+            self.assertEqual(app._build_go_cmd(), "go movetime 50")
+            app.time_var.set("bad")
+            self.assertEqual(app._build_go_cmd(), "go movetime 10000")
+            app.time_var.set("2.5")
+
+            # 2. Fixed depth enabled + clamping [1..128] + invalid fallback
+            app.limit_by_depth_var.set(True)
+            self.assertEqual(app._build_go_cmd(), "go depth 12")
+
+            for raw, expected in (
+                ("1", "go depth 1"),
+                ("16", "go depth 16"),
+                ("128", "go depth 128"),
+                ("0", "go depth 1"),
+                ("-5", "go depth 1"),
+                ("129", "go depth 128"),
+                ("999", "go depth 128"),
+                ("", "go depth 12"),
+                ("abc", "go depth 12"),
+            ):
+                app.depth_limit_var.set(raw)
+                self.assertEqual(app._build_go_cmd(), expected, f"Failed for raw={raw!r}")
+
+            # 3. Mutual exclusion between limit_by_depth_var and limit_by_nodes_var
+            app.depth_limit_var.set("14")
+            app.limit_by_depth_var.set(True)
+            app.limit_by_nodes_var.set(False)
+            app._refresh_ui_snapshot()
+            self.assertEqual(app._ui_state["go_cmd"], "go depth 14")
+
+            # Checking nodes turns off depth
+            app.limit_by_nodes_var.set(True)
+            app.on_toggle_limit_nodes()
+            self.assertTrue(app.limit_by_nodes_var.get())
+            self.assertFalse(app.limit_by_depth_var.get())
+            self.assertEqual(app._build_go_cmd(), "go nodes 50000")
+            self.assertEqual(app._ui_state["go_cmd"], "go nodes 50000")
+            self.assertFalse(app._ui_state["limit_by_depth"])
+            self.assertTrue(app._ui_state["limit_by_nodes"])
+
+            # Checking depth turns off nodes
+            app.limit_by_depth_var.set(True)
+            app.on_toggle_limit_depth()
+            self.assertTrue(app.limit_by_depth_var.get())
+            self.assertFalse(app.limit_by_nodes_var.get())
+            self.assertEqual(app._build_go_cmd(), "go depth 14")
+            self.assertEqual(app._ui_state["go_cmd"], "go depth 14")
+            self.assertTrue(app._ui_state["limit_by_depth"])
+            self.assertFalse(app._ui_state["limit_by_nodes"])
+
+            # Unchecking depth leaves both off -> movetime fallback
+            app.limit_by_depth_var.set(False)
+            app.on_toggle_limit_depth()
+            self.assertFalse(app.limit_by_depth_var.get())
+            self.assertFalse(app.limit_by_nodes_var.get())
+            self.assertEqual(app._build_go_cmd(), "go movetime 2500")
+            self.assertEqual(app._ui_state["go_cmd"], "go movetime 2500")
+        finally:
+            root.destroy()
+
+    def test_11_search_when_side_differs_from_my_color(self):
+        """
+        Thinking from the opponent's perspective (`side_var != my_color_var`):
+        a) `build_uci_position_cmd` emits `position fen ...` when `board.turn` overrides `move_stack` parity,
+           while preserving `position startpos moves ...` when parity matches.
+        b) `start_analysis_thread` and `_run_analysis` analyze `side_var` directly instead of hijacking into `_auto_detect_loop`,
+           even when `auto_detect_opponent_var=True`.
+        c) `bestmove` arriving when `side_var != my_color_var` draws `best_move_arrow` without auto-clicking or mutating `self.board`,
+           even if `auto_play_var=True` (fixed mode).
+        """
+        import tkinter as tk
+        from unittest.mock import MagicMock
+
+        # (a) build_uci_position_cmd turn parity check
+        b_consistent = chess.Board()
+        b_consistent.push_uci("e2e4")
+        b_consistent.push_uci("c7c5")
+        self.assertEqual(
+            assistant.ChessVisionApp.build_uci_position_cmd(b_consistent),
+            "position startpos moves e2e4 c7c5",
+        )
+
+        b_overridden = b_consistent.copy(stack=True)
+        b_overridden.turn = chess.BLACK  # Manual override vs 2-ply parity
+        self.assertEqual(
+            assistant.ChessVisionApp.build_uci_position_cmd(b_overridden),
+            f"position fen {b_overridden.fen()}",
+        )
+
+        b_one_ply = chess.Board()
+        b_one_ply.push_uci("e2e4")
+        self.assertEqual(
+            assistant.ChessVisionApp.build_uci_position_cmd(b_one_ply),
+            "position startpos moves e2e4",
+        )
+        b_one_ply.turn = chess.WHITE
+        self.assertEqual(
+            assistant.ChessVisionApp.build_uci_position_cmd(b_one_ply),
+            f"position fen {b_one_ply.fen()}",
+        )
+
+        b_start_black = chess.Board()
+        b_start_black.turn = chess.BLACK
+        self.assertEqual(
+            assistant.ChessVisionApp.build_uci_position_cmd(b_start_black),
+            f"position fen {b_start_black.fen()}",
+        )
+
+        root = tk.Tk()
+        root.withdraw()
+        try:
+            app = object.__new__(assistant.ChessVisionApp)
+            app.board = chess.Board()
+            app.game_pgn = chess.pgn.Game.from_board(app.board)
+            app.game_node = app.game_pgn
+            app.message_queue = queue.Queue()
+            app._recognizer_lock = assistant.threading.Lock()
+            app.analyzing = False
+            app.warming_up = False
+            app.is_first_analysis = True
+            app.current_search_id = 0
+            app.auto_detecting_opponent = True
+            app._auto_detect_token = 5
+            app._active_board_tab = 0
+            app._search_origin_tabs = {}
+            app.best_move_arrow = None
+
+            app.side_var = tk.StringVar(master=root, value="b")
+            app.my_color_var = tk.StringVar(master=root, value="w")
+            app.auto_play_var = tk.BooleanVar(master=root, value=False)
+            app.autoplay_mode_var = tk.StringVar(master=root, value="fixed")
+            app.auto_detect_opponent_var = tk.BooleanVar(master=root, value=True)
+            app.auto_detect_var = tk.BooleanVar(master=root, value=True)
+            app.use_book_var = tk.BooleanVar(master=root, value=True)
+            app.castling_var = tk.StringVar(master=root, value="KQkq")
+            app.ep_var = tk.StringVar(master=root, value="-")
+            app.limit_by_depth_var = tk.BooleanVar(master=root, value=False)
+            app.depth_limit_var = tk.StringVar(master=root, value="12")
+            app.limit_by_nodes_var = tk.BooleanVar(master=root, value=False)
+            app.nodes_limit_var = tk.StringVar(master=root, value="100000")
+            app.time_var = tk.StringVar(master=root, value="10")
+
+            app.lbl_bestmove = MagicMock()
+            app.lbl_status = MagicMock()
+            app.lbl_score = MagicMock()
+            app.lbl_pv = MagicMock()
+            app.btn_analyze = MagicMock()
+            app.btn_stop = MagicMock()
+            app.notebook = MagicMock()
+            app.notebook.index.return_value = 0
+            app.draw_board = MagicMock()
+            app.log_search_info = MagicMock()
+            app.engine = MagicMock()
+            app.after = lambda delay, fn=None, *a: (fn(*a) if (fn and delay == 0) else None)
+
+            # (b1) start_analysis_thread launches _run_analysis (not _auto_detect_loop)
+            run_done = assistant.threading.Event()
+            run_calls = []
+            orig_run_analysis = app._run_analysis
+
+            def spy_run_analysis(precomputed_fen=None, search_id=0):
+                run_calls.append((precomputed_fen, search_id))
+                run_done.set()
+
+            app._run_analysis = spy_run_analysis
+            app._auto_detect_loop = MagicMock()
+
+            app.start_analysis_thread()
+            self.assertTrue(run_done.wait(timeout=2.0), "_run_analysis thread must start")
+            self.assertEqual(run_calls, [(None, 1)])
+            self.assertTrue(app.analyzing)
+            self.assertFalse(app.auto_detecting_opponent)
+            self.assertGreater(app._auto_detect_token, 5)
+            app._auto_detect_loop.assert_not_called()
+
+            # (b2) Full _run_analysis with mocked screen recognizer must search Black ('b') at startpos,
+            #      not hijack into _auto_detect_loop even with auto_detect_opponent_var=True
+            app._run_analysis = orig_run_analysis
+            mock_rec = MagicMock()
+            mock_rec.identify_board_pieces.return_value = {}
+            mock_rec.detect_starting_orientation.return_value = "w"
+            mock_rec.get_fen_from_board_image.return_value = (
+                "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR b - - 0 1"
+            )
+            app.recognizer = mock_rec
+            app._capture_warped_board_safe = MagicMock(return_value=np.zeros((8, 8, 3), dtype=np.uint8))
+            app._refresh_ui_snapshot()
+
+            t = assistant.threading.Thread(target=app._run_analysis, args=(None, 1), daemon=True)
+            t.start()
+            deadline = assistant.time.time() + 3.0
+            while t.is_alive() and assistant.time.time() < deadline:
+                app._process_queue()
+                assistant.time.sleep(0.01)
+            t.join(timeout=1.0)
+            app._process_queue()
+
+            self.assertFalse(t.is_alive())
+            app._auto_detect_loop.assert_not_called()
+            app.engine.start_search.assert_called_once()
+            call_kwargs = app.engine.start_search.call_args.kwargs
+            self.assertEqual(
+                call_kwargs["position_cmd"],
+                "position fen rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR b KQkq - 0 1",
+            )
+            self.assertEqual(app.side_var.get(), "b")
+
+            # (c) bestmove arriving when side_var != my_color_var draws arrow without auto-clicking or mutating board
+            app.board = chess.Board()
+            app.board.push_uci("e2e4")
+            app.game_pgn = chess.pgn.Game.from_board(app.board)
+            app.game_node = app.game_pgn
+            app.side_var.set("b")
+            app.my_color_var.set("w")
+            app.auto_play_var.set(True)
+            app.autoplay_mode_var.set("fixed")
+            app.auto_detect_opponent_var.set(False)
+            app.analyzing = True
+            app.current_search_id = 10
+            app._search_origin_tabs[10] = 0
+            app.best_move_arrow = None
+            app.execute_auto_play = MagicMock()
+            app.draw_board.reset_mock()
+
+            expected_fen_before = app.board.fen()
+            app.message_queue.put({"type": "bestmove", "move": "c7c5", "search_id": 10})
+            app._process_queue()
+
+            self.assertEqual(app.best_move_arrow, chess.Move.from_uci("c7c5"))
+            self.assertEqual(app.board.fen(), expected_fen_before)
+            self.assertEqual([m.uci() for m in app.board.move_stack], ["e2e4"])
+            app.execute_auto_play.assert_not_called()
+            app.draw_board.assert_called()
+            self.assertFalse(app.analyzing)
+        finally:
+            root.destroy()
+
+    def test_12_switching_to_console_tab_does_not_stop_search(self):
+        """
+        Console tab (Tab 2) preservation & origin_tab bestmove routing:
+        a) Switching Tab 0/1 -> Tab 2 (Console) -> back to origin Tab 0/1 does NOT call stop_analysis(),
+           keeps `analyzing == True`, and preserves `best_move_arrow`.
+        b) Switching between Tab 0 and Tab 1 DOES stop active search/detection cleanly.
+        c) `bestmove` arriving while on Tab 2 routes by `origin_tab` (Manual -> ready; Auto -> Tab 0 completion).
+        """
+        import tkinter as tk
+        from unittest.mock import MagicMock
+
+        root = tk.Tk()
+        root.withdraw()
+        try:
+            app = object.__new__(assistant.ChessVisionApp)
+            app.board = chess.Board()
+            app.game_pgn = chess.pgn.Game.from_board(app.board)
+            app.game_node = app.game_pgn
+            app.message_queue = queue.Queue()
+            app._recognizer_lock = assistant.threading.Lock()
+            app.analyzing = False
+            app.warming_up = False
+            app.current_search_id = 0
+            app.auto_detecting_opponent = False
+            app._auto_detect_token = 0
+            app._active_board_tab = 0
+            app._search_origin_tabs = {}
+            app.redo_stack = []
+            app.selected_square = None
+            app.best_move_arrow = None
+
+            app.side_var = tk.StringVar(master=root, value="w")
+            app.my_color_var = tk.StringVar(master=root, value="w")
+            app.auto_play_var = tk.BooleanVar(master=root, value=False)
+            app.autoplay_mode_var = tk.StringVar(master=root, value="fixed")
+            app.auto_detect_opponent_var = tk.BooleanVar(master=root, value=False)
+            app.auto_detect_var = tk.BooleanVar(master=root, value=True)
+            app.use_book_var = tk.BooleanVar(master=root, value=True)
+            app.castling_var = tk.StringVar(master=root, value="KQkq")
+            app.ep_var = tk.StringVar(master=root, value="-")
+            app.manual_fen_var = tk.StringVar(master=root, value=app.board.fen())
+            app.limit_by_depth_var = tk.BooleanVar(master=root, value=False)
+            app.depth_limit_var = tk.StringVar(master=root, value="12")
+            app.limit_by_nodes_var = tk.BooleanVar(master=root, value=False)
+            app.nodes_limit_var = tk.StringVar(master=root, value="100000")
+            app.time_var = tk.StringVar(master=root, value="10")
+
+            app.canvas = MagicMock()
+            app.bind = MagicMock()
+            app.unbind = MagicMock()
+            app.notebook = MagicMock()
+            app.notebook.index.return_value = 0
+            app.lbl_bestmove = MagicMock()
+            app.lbl_status = MagicMock()
+            app.lbl_score = MagicMock()
+            app.lbl_pv = MagicMock()
+            app.btn_analyze = MagicMock()
+            app.btn_stop = MagicMock()
+            app.draw_board = MagicMock()
+            app.log_search_info = MagicMock()
+            app.engine = MagicMock()
+            app.after = lambda delay, fn=None, *a: (fn(*a) if (fn and delay == 0) else None)
+
+            stop_calls = []
+            orig_stop = app.stop_analysis
+
+            def spy_stop():
+                stop_calls.append(app._active_board_tab)
+                orig_stop()
+
+            app.stop_analysis = spy_stop
+
+            # (a1) Tab 0 search -> Tab 2 (Console) -> back to Tab 0 preserves analyzing & arrow
+            run_done = assistant.threading.Event()
+            app._run_analysis = lambda precomputed_fen=None, search_id=0: run_done.set()
+            app.start_analysis_thread()
+            self.assertTrue(run_done.wait(timeout=2.0))
+            self.assertTrue(app.analyzing)
+            self.assertEqual(app._search_origin_tabs[app.current_search_id], 0)
+
+            arrow_tab0 = chess.Move.from_uci("e2e4")
+            app.best_move_arrow = arrow_tab0
+
+            app.notebook.index.return_value = 2
+            app.on_tab_changed(None)
+            self.assertEqual(stop_calls, [])
+            self.assertTrue(app.analyzing)
+            self.assertEqual(app.best_move_arrow, arrow_tab0)
+            self.assertEqual(app._active_board_tab, 0)
+            app.engine.stop_calculation.assert_not_called()
+
+            app.notebook.index.return_value = 0
+            app.on_tab_changed(None)
+            self.assertEqual(stop_calls, [])
+            self.assertTrue(app.analyzing)
+            self.assertEqual(app.best_move_arrow, arrow_tab0)
+            self.assertEqual(app._active_board_tab, 0)
+
+            # (b1) Switching Tab 0 -> Tab 1 DOES stop active search cleanly
+            app.notebook.index.return_value = 1
+            app.on_tab_changed(None)
+            self.assertEqual(len(stop_calls), 1)
+            self.assertFalse(app.analyzing)
+            self.assertEqual(app._active_board_tab, 1)
+            self.assertIsNone(app.best_move_arrow)
+            app.engine.stop_calculation.assert_called_once()
+
+            # (a2) Tab 1 Manual search -> Tab 2 (Console) -> back to Tab 1 preserves analyzing, arrow & redo_stack
+            app.engine.stop_calculation.reset_mock()
+            stop_calls.clear()
+            app.start_manual_analysis()
+            self.assertTrue(app.analyzing)
+            self.assertEqual(app._search_origin_tabs[app.current_search_id], 1)
+
+            arrow_tab1 = chess.Move.from_uci("d2d4")
+            redo_mv = chess.Move.from_uci("g1f3")
+            app.best_move_arrow = arrow_tab1
+            app.redo_stack = [redo_mv]
+
+            app.canvas.unbind.reset_mock()
+            app.notebook.index.return_value = 2
+            app.on_tab_changed(None)
+            self.assertEqual(stop_calls, [])
+            self.assertTrue(app.analyzing)
+            self.assertEqual(app.best_move_arrow, arrow_tab1)
+            self.assertEqual(app._active_board_tab, 1)
+            app.canvas.unbind.assert_called()
+
+            app.canvas.bind.reset_mock()
+            app.notebook.index.return_value = 1
+            app.on_tab_changed(None)
+            self.assertEqual(stop_calls, [])
+            self.assertTrue(app.analyzing)
+            self.assertEqual(app.best_move_arrow, arrow_tab1)
+            self.assertEqual(app.redo_stack, [redo_mv])
+            app.canvas.bind.assert_called()
+
+            # (b2) Switching Tab 1 -> Tab 0 stops active search, and Tab 0 (detecting) -> Tab 1 stops detection
+            app.notebook.index.return_value = 0
+            app.on_tab_changed(None)
+            self.assertEqual(len(stop_calls), 1)
+            self.assertFalse(app.analyzing)
+            self.assertEqual(app._active_board_tab, 0)
+
+            app.auto_detecting_opponent = True
+            prev_token = app._auto_detect_token
+            app.auto_play_var.set(True)
+            app.auto_detect_opponent_var.set(True)
+            app.notebook.index.return_value = 1
+            app.on_tab_changed(None)
+            self.assertEqual(len(stop_calls), 2)
+            self.assertFalse(app.auto_detecting_opponent)
+            self.assertGreater(app._auto_detect_token, prev_token)
+            self.assertFalse(app.auto_play_var.get())
+            self.assertFalse(app.auto_detect_opponent_var.get())
+            self.assertEqual(app._active_board_tab, 1)
+
+            # (c1) bestmove arriving while viewing Tab 2 (Console) for a Tab 1 Manual search
+            app.board = chess.Board()
+            app.game_pgn = chess.pgn.Game.from_board(app.board)
+            app.game_node = app.game_pgn
+            app.start_manual_analysis()
+            manual_sid = app.current_search_id
+            self.assertEqual(app._search_origin_tabs[manual_sid], 1)
+
+            app.notebook.index.return_value = 2
+            app.on_tab_changed(None)
+            app.execute_auto_play = MagicMock()
+
+            app.message_queue.put({"type": "bestmove", "move": "e2e4", "search_id": manual_sid})
+            app._process_queue()
+
+            self.assertFalse(app.analyzing)
+            self.assertEqual(app.best_move_arrow, chess.Move.from_uci("e2e4"))
+            self.assertEqual(app.board.fen(), chess.STARTING_FEN)
+            app.execute_auto_play.assert_not_called()
+            self.assertIn("手動分析完成", app.lbl_status.config.call_args.kwargs["text"])
+
+            # (c2) bestmove arriving while viewing Tab 2 (Console) for a Tab 0 Auto search
+            app.notebook.index.return_value = 0
+            app.on_tab_changed(None)
+            app.auto_play_var.set(True)
+            app.autoplay_mode_var.set("fixed")
+            app.side_var.set("w")
+            app.my_color_var.set("w")
+
+            run_done2 = assistant.threading.Event()
+            app._run_analysis = lambda precomputed_fen=None, search_id=0: run_done2.set()
+            app.start_analysis_thread()
+            self.assertTrue(run_done2.wait(timeout=2.0))
+            auto_sid = app.current_search_id
+            self.assertEqual(app._search_origin_tabs[auto_sid], 0)
+
+            app.notebook.index.return_value = 2
+            app.on_tab_changed(None)
+
+            clicked_ev = assistant.threading.Event()
+            clicked_args = []
+
+            def fake_execute_auto_play(mv_uci, p_color=None, is_self=None):
+                clicked_args.append((mv_uci, p_color, is_self))
+                clicked_ev.set()
+
+            app.execute_auto_play = fake_execute_auto_play
+            app.message_queue.put({"type": "bestmove", "move": "e2e4", "search_id": auto_sid})
+            app._process_queue()
+
+            self.assertTrue(clicked_ev.wait(timeout=2.0), "Tab 0 auto-play must run even while on Console tab")
+            self.assertEqual(clicked_args, [("e2e4", "w", False)])
+            self.assertEqual(app.best_move_arrow, chess.Move.from_uci("e2e4"))
+            self.assertEqual([m.uci() for m in app.board.move_stack], ["e2e4"])
+            self.assertIn("自動落子 e2e4", app.lbl_status.config.call_args.kwargs["text"])
+        finally:
+            root.destroy()
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -9,7 +9,7 @@ from chess_engine.classical_old.evaluation import _evaluate_position_jit
 from chess_engine.classical_old.move_generator import (
     _is_in_check_jit, has_sufficient_material,
     generate_pseudo_legal_moves_buffer, generate_pseudo_legal_captures_buffer,
-    generate_pseudo_legal_quiets_buffer,
+    generate_pseudo_legal_quiets_buffer, generate_legal_moves,
     is_square_attacked, is_square_attacked_with_occ, is_move_pseudo_legal,
     get_blockers_for_king,
     PAWN_ATTACKS, KNIGHT_ATTACKS, KING_ATTACKS, get_bishop_attacks, get_rook_attacks
@@ -169,14 +169,14 @@ from chess_engine.classical_old.bitboard_utils import find_piece_type_on_square_
 from chess_engine.classical_old.debug_utils import log_info
 from chess_engine.classical_old.see import _see_ge_jit, get_pinned_pieces, SEE_PIECE_VALUES
 from chess_engine.classical_old.transposition_table import (
-    probe_tt, probe_tt_best_move, store_tt,
+    probe_tt, probe_tt_snapshot, probe_tt_best_move, store_tt,
     TT_FLAG_NONE, TT_FLAG_EXACT, TT_FLAG_ALPHA, TT_FLAG_BETA,
     hashfull, penalize_tt
 )
 from chess_engine.classical_old.zobrist import get_tt_key  # GHI protection: halfmove-aware TT key
 from chess_engine.classical_old.engine_types import (
     piece_bbs_signature, occupancy_bbs_signature, game_state_signature,
-    SearchContext, search_context_type
+    SearchContext, search_context_type, create_smp_helper_context
 )
 from chess_engine.classical_old.move import move_to_uci
 
@@ -495,10 +495,9 @@ def _classify_and_diag_main_in_check_move(
     return classification
 
 
-# cache=False: recursive + StructRef disk reload aborts (LLVM unresolved).
-# Explicit signature forces one specialization (faster than multi-overload lazy).
+# Explicit signature forces one specialization and enables safe disk caching.
 # See JIT_COMPILE_CACHE_REPORT.md.
-@numba.njit(quiescence_search_return_type(piece_bbs_signature, occupancy_bbs_signature, game_state_signature, numba.int32, numba.int32, numba.int32, search_context_type, numba.int32), cache=False, nogil=True, boundscheck=False, fastmath=True)
+@numba.njit(quiescence_search_return_type(piece_bbs_signature, occupancy_bbs_signature, game_state_signature, numba.int32, numba.int32, numba.int32, search_context_type, numba.int32), cache=True, nogil=True, boundscheck=False, fastmath=True)
 def quiescence_search(piece_bbs, occupancy_bbs, game_state, alpha, beta, ply, search_context, q_ply):
     q_nodes = np.uint64(1)
     search_context.nodes_searched += 1
@@ -539,18 +538,20 @@ def quiescence_search(piece_bbs, occupancy_bbs, game_state, alpha, beta, ply, se
     # M4: TT Probe in QSearch — avoids re-evaluating positions already in TT
     zobrist_key = game_state[4]
     tt_key = get_tt_key(zobrist_key, int(game_state[3]))  # GHI: halfmove-aware key for TT
-    tt_entry = probe_tt(search_context.transposition_table, tt_key)
-    if tt_entry['flag'] != TT_FLAG_NONE:
-        qs_tt_score = np.int32(tt_entry['score'])
+    qs_tt_flag, _qs_tt_depth, qs_tt_score_raw, qs_tt_static_eval, _qs_tt_is_pv, qs_tt_best_move = probe_tt_snapshot(
+        search_context.transposition_table, tt_key
+    )
+    if qs_tt_flag != TT_FLAG_NONE:
+        qs_tt_score = np.int32(min(max(qs_tt_score_raw, -MATE_SCORE), MATE_SCORE))
         if qs_tt_score > MATE_IN_MAX_PLY: qs_tt_score -= ply
         elif qs_tt_score < -MATE_IN_MAX_PLY: qs_tt_score += ply
         
         should_cutoff = False
-        if tt_entry['flag'] == TT_FLAG_EXACT:
+        if qs_tt_flag == TT_FLAG_EXACT:
             should_cutoff = True
-        elif tt_entry['flag'] == TT_FLAG_ALPHA and qs_tt_score <= alpha:
+        elif qs_tt_flag == TT_FLAG_ALPHA and qs_tt_score <= alpha:
             should_cutoff = True
-        elif tt_entry['flag'] == TT_FLAG_BETA and qs_tt_score >= beta:
+        elif qs_tt_flag == TT_FLAG_BETA and qs_tt_score >= beta:
             should_cutoff = True
         if should_cutoff:
             _diag_add(search_context, DIAG_Q_TT_CUT)
@@ -604,8 +605,8 @@ def quiescence_search(piece_bbs, occupancy_bbs, game_state, alpha, beta, ply, se
             return np.int32(eval_score), q_nodes
 
         # --- QSearch TT static_eval probe ---
-        if tt_entry['flag'] != TT_FLAG_NONE and tt_entry['static_eval'] != 32767:
-            stand_pat = np.int32(tt_entry['static_eval'])
+        if qs_tt_flag != TT_FLAG_NONE and qs_tt_static_eval != 32767:
+            stand_pat = np.int32(qs_tt_static_eval)
         else:
             stand_pat_val, p_w, p_b = _evaluate_position_jit(piece_bbs, occupancy_bbs, game_state, False, search_context)
             stand_pat = np.int32(stand_pat_val)
@@ -645,7 +646,7 @@ def quiescence_search(piece_bbs, occupancy_bbs, game_state, alpha, beta, ply, se
     scores = search_context.move_scores[ply]
 
     # B1: Use TT best move for QSearch ordering (since we already probe TT above)
-    qs_tt_move = tt_entry['best_move'] if tt_entry['flag'] != TT_FLAG_NONE else NO_MOVE
+    qs_tt_move = qs_tt_best_move if qs_tt_flag != TT_FLAG_NONE else NO_MOVE
 
     # P0 shadow diagnostics: classify the full pseudo-evasion set before
     # scoring, but never compact or reorder the production buffer.
@@ -1193,7 +1194,9 @@ search_return_type = numba.types.Tuple([
 ])
 
 
-@numba.njit(search_return_type(piece_bbs_signature, occupancy_bbs_signature, game_state_signature, numba.int32, numba.int32, numba.int32, search_context_type, numba.int32, numba.uint16, numba.boolean, numba.boolean), cache=False, nogil=True, boundscheck=False, fastmath=True)
+# Explicit signature forces one specialization and enables safe disk caching;
+# recursive/root calls pass _i32/_u16/_b_true/_b_false to prevent Literal leaks.
+@numba.njit(search_return_type(piece_bbs_signature, occupancy_bbs_signature, game_state_signature, numba.int32, numba.int32, numba.int32, search_context_type, numba.int32, numba.uint16, numba.boolean, numba.boolean), cache=True, nogil=True, boundscheck=False, fastmath=True)
 def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_context, ply, excluded_move, is_pv, cut_node):
     # ==========================================
     # PHASE 1: Initialize and Base Cases
@@ -1308,14 +1311,13 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
 
     tt_move = NO_MOVE
     tt_key = get_tt_key(zobrist_key, halfmove_clock)  # GHI: halfmove-aware key for TT
-    tt_entry = probe_tt(search_context.transposition_table, tt_key)
-    tt_flag = np.uint8(tt_entry['flag'])
+    tt_flag, tt_depth, tt_score_raw, tt_static_eval_raw, tt_is_pv, tt_move_raw = probe_tt_snapshot(
+        search_context.transposition_table, tt_key
+    )
     tt_hit = tt_flag != TT_FLAG_NONE
-    tt_depth = np.int32(tt_entry['depth'])
-    tt_score_raw = np.int32(tt_entry['score'])
-    tt_static_eval_raw = np.int16(tt_entry['static_eval'])
-    tt_is_pv = bool(tt_entry['is_pv']) if tt_hit else False
-    tt_move = tt_entry['best_move'] if tt_hit else NO_MOVE
+    tt_score_raw = np.int32(min(max(tt_score_raw, -MATE_SCORE), MATE_SCORE))
+    tt_is_pv = bool(tt_is_pv) if tt_hit else False
+    tt_move = tt_move_raw if tt_hit else NO_MOVE
     search_context.tt_hit_stack[ply] = tt_hit
 
     # Initialize tt_pv flag (TT-PV Memory Heuristic)
@@ -1387,11 +1389,13 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                                     child_zobrist_key = game_state[4]
                                     child_halfmove_clock = int(game_state[3])
                                     child_tt_key = get_tt_key(child_zobrist_key, child_halfmove_clock)
-                                    child_tt_entry = probe_tt(search_context.transposition_table, child_tt_key)
+                                    child_tt_flag, _child_tt_depth, child_tt_score_raw, _child_tt_se, _child_tt_pv, _child_tt_move = probe_tt_snapshot(
+                                        search_context.transposition_table, child_tt_key
+                                    )
                                     unmake_move(piece_bbs, occupancy_bbs, game_state, tt_move, unmake_info)
                                     
-                                    if child_tt_entry['flag'] != TT_FLAG_NONE:
-                                        child_score = np.int32(child_tt_entry['score'])
+                                    if child_tt_flag != TT_FLAG_NONE:
+                                        child_score = np.int32(min(max(child_tt_score_raw, -MATE_SCORE), MATE_SCORE))
                                         if child_score > MATE_IN_MAX_PLY: child_score -= (ply + 1)
                                         elif child_score < -MATE_IN_MAX_PLY: child_score += (ply + 1)
                                         
@@ -4144,9 +4148,269 @@ def format_search_diagnostics(search_context, total_nodes=0, q_nodes=0) -> str:
     return "\n".join(lines)
 
 
+@numba.njit(cache=True, nogil=True, boundscheck=False, fastmath=True)
+def _prepare_search_context_jit(search_context, game_history_arr, game_history_count, tt_generation):
+    """Prepare a thread-local SearchContext for a new root search completely inside nogil JIT."""
+    ht = search_context.history_table
+    for i in range(ht.shape[0]):
+        for j in range(ht.shape[1]):
+            ht[i, j] = np.int32(trunc_div(ht[i, j], 2))
+
+    bh = search_context.butterfly_history
+    for i in range(bh.shape[0]):
+        for j in range(bh.shape[1]):
+            bh[i, j] = np.int32(trunc_div(bh[i, j], 2))
+
+    ch = search_context.capture_history
+    for i in range(ch.shape[0]):
+        for j in range(ch.shape[1]):
+            for k in range(ch.shape[2]):
+                ch[i, j, k] = np.int32(trunc_div(ch[i, j, k], 2))
+
+    ph = search_context.pawn_history
+    for i in range(ph.shape[0]):
+        for j in range(ph.shape[1]):
+            for k in range(ph.shape[2]):
+                ph[i, j, k] = np.int16(trunc_div(ph[i, j, k], 2))
+
+    conth = search_context.continuation_history
+    for i0 in range(conth.shape[0]):
+        for i1 in range(conth.shape[1]):
+            for i2 in range(conth.shape[2]):
+                for i3 in range(conth.shape[3]):
+                    for i4 in range(conth.shape[4]):
+                        conth[i0, i1, i2, i3, i4] = np.int16(
+                            trunc_div(conth[i0, i1, i2, i3, i4], 2)
+                        )
+
+    lph = search_context.low_ply_history
+    for i in range(lph.shape[0]):
+        for j in range(lph.shape[1]):
+            lph[i, j] = np.int16(trunc_div(lph[i, j], 2))
+
+    if search_context.diag_enabled:
+        search_context.diag_stats.fill(0)
+        search_context.diag_stats[DIAG_HIST_AGE] += np.uint64(1)
+
+    limit = min(int(game_history_count), 1024)
+    for i in range(limit):
+        search_context.game_history[i] = game_history_arr[i]
+    search_context.game_history_count = np.int32(limit)
+    search_context.tt_generation = np.uint8(tt_generation)
+    search_context.move_stack.fill(NO_MOVE)
+    search_context.piece_stack.fill(-1)
+    search_context.nmp_min_ply = np.int32(0)
+    search_context.last_iteration_pv_len = np.int32(0)
+    search_context.nodes_searched = np.uint64(0)
+    search_context.nodes_searched_array[0] = np.uint64(0)
+    search_context.nodes_searched_array[1] = np.uint64(0)
+
+
+lazy_smp_helper_return_type = numba.types.Tuple([
+    numba.uint16, numba.int32, numba.uint64, numba.uint64, numba.uint64, numba.int32
+])
+
+
+# Explicit signature forces one specialization matching warmup_search_jit and
+# _helper_worker, and enables safe disk caching alongside _search.
+@numba.njit(
+    lazy_smp_helper_return_type(
+        piece_bbs_signature,
+        occupancy_bbs_signature,
+        game_state_signature,
+        numba.int32,
+        search_context_type,
+        numba.int32,
+        numba.uint64[::1],
+        numba.int32,
+        numba.uint8,
+    ),
+    cache=True,
+    nogil=True,
+    boundscheck=False,
+    fastmath=True,
+)
+def _lazy_smp_helper_loop_jit(
+    piece_bbs,
+    occupancy_bbs,
+    game_state,
+    max_depth,
+    search_context,
+    thread_idx,
+    game_history_arr,
+    game_history_count,
+    tt_generation,
+):
+    """
+    Full Iterative Deepening + Aspiration Window loop for Lazy SMP helper threads.
+    Executes 100% inside nogil LLVM machine code without returning to the Python
+    interpreter until stop_flag[0] is set or max_depth is reached.
+    """
+    _prepare_search_context_jit(
+        search_context, game_history_arr, game_history_count, tt_generation
+    )
+
+    last_score = np.int32(0)
+    last_completed_depth = np.int32(0)
+    best_move_from_last_depth = np.uint16(NO_MOVE)
+    total_search_nodes = np.uint64(0)
+    total_q_nodes = np.uint64(0)
+    total_tt_hits = np.uint64(0)
+    asp_base = ASPIRATION_WINDOW_BASE + (int(thread_idx) & 3) * 4
+
+    for current_depth in range(1, max_depth + 1):
+        if search_context.stop_flag[0]:
+            break
+
+        # Stockfish-style Lazy SMP depth diversification: stagger helper threads
+        # so half of the helpers push deeper into the shared TT ahead of Thread 0.
+        if (
+            thread_idx > 0
+            and current_depth >= 4
+            and current_depth < max_depth
+            and ((current_depth + thread_idx) % 2 == 0)
+            and (thread_idx % 3 != 0)
+        ):
+            continue
+
+        alpha = -INFINITY
+        beta = INFINITY
+        delta = ASPIRATION_WINDOW_MIN
+        if current_depth > 1 and last_completed_depth > 0:
+            delta = max(
+                ASPIRATION_WINDOW_MIN,
+                asp_base + abs(int(last_score)) // ASPIRATION_WINDOW_SCALE_DIV,
+            )
+            alpha = max(-INFINITY, int(last_score) - delta)
+            beta = min(INFINITY, int(last_score) + delta)
+
+        failed_high_cnt = 0
+        score = np.int32(0)
+        best_move_iter = np.uint16(NO_MOVE)
+
+        while True:
+            search_context.reduction_stack[0] = 0
+            adjusted_depth = max(1, current_depth - failed_high_cnt)
+            res = _search(
+                piece_bbs,
+                occupancy_bbs,
+                game_state,
+                _i32(adjusted_depth),
+                _i32(alpha),
+                _i32(beta),
+                search_context,
+                _i32(0),
+                _u16(NO_MOVE),
+                _b_true(),
+                _b_false(),
+            )
+            score = res[0]
+            best_move_iter = res[1]
+            total_search_nodes += res[2]
+            total_q_nodes += res[3]
+            total_tt_hits += res[4]
+            search_context.nodes_searched_array[0] = total_search_nodes + total_q_nodes
+
+            if search_context.stop_flag[0]:
+                break
+
+            if score <= alpha:
+                beta = alpha
+                alpha = max(-INFINITY, int(score) - delta)
+                failed_high_cnt = 0
+                delta += max(1, 44 * delta // 128)
+            elif score >= beta:
+                alpha = max(beta - delta, alpha)
+                beta = min(INFINITY, int(score) + delta)
+                failed_high_cnt += 1
+                delta += max(1, 44 * delta // 128)
+            else:
+                break
+
+        if search_context.stop_flag[0]:
+            break
+
+        last_completed_depth = np.int32(current_depth)
+        last_score = np.int32(score)
+        if best_move_iter != NO_MOVE:
+            best_move_from_last_depth = best_move_iter
+        elif search_context.pv_table[0, 0] != NO_MOVE:
+            best_move_from_last_depth = search_context.pv_table[0, 0]
+
+        lpv_len = 0
+        for i in range(MAX_PLY):
+            m = search_context.pv_table[0, i]
+            if m == NO_MOVE:
+                break
+            search_context.last_iteration_pv[i] = m
+            lpv_len += 1
+        search_context.last_iteration_pv_len = np.int32(lpv_len)
+
+    return (
+        best_move_from_last_depth,
+        np.int32(last_score),
+        total_search_nodes,
+        total_q_nodes,
+        total_tt_hits,
+        np.int32(last_completed_depth),
+    )
+
+
+_SMP_HELPER_CONTEXT_CACHE = {}
+
+
+def _get_or_create_helper_contexts(search_context, needed_count, provided_helpers=None):
+    """Return `needed_count` initialized Lazy SMP helper contexts synced to `search_context`."""
+    if needed_count <= 0:
+        return []
+    main_tt_ptr = search_context.transposition_table.ctypes.data
+    main_tt_len = len(search_context.transposition_table)
+    main_stop_ptr = search_context.stop_flag.ctypes.data
+
+    if provided_helpers is not None:
+        pool = provided_helpers
+    else:
+        ctx_id = id(search_context)
+        pool = _SMP_HELPER_CONTEXT_CACHE.get(ctx_id)
+        if pool is None:
+            pool = []
+            _SMP_HELPER_CONTEXT_CACHE[ctx_id] = pool
+
+    for idx in range(min(len(pool), needed_count)):
+        hc = pool[idx]
+        if (
+            hc.transposition_table.ctypes.data != main_tt_ptr
+            or len(hc.transposition_table) != main_tt_len
+            or hc.stop_flag.ctypes.data != main_stop_ptr
+        ):
+            pool[idx] = create_smp_helper_context(search_context)
+
+    while len(pool) < needed_count:
+        pool.append(create_smp_helper_context(search_context))
+
+    active_helpers = pool[:needed_count]
+    for hc in active_helpers:
+        hc.tune[:] = search_context.tune[:]
+        hc.eval_weights[:] = search_context.eval_weights[:]
+        hc.enable_nmp = bool(search_context.enable_nmp)
+        hc.enable_rfp = bool(search_context.enable_rfp)
+        hc.enable_razoring = bool(search_context.enable_razoring)
+        hc.enable_lmr = bool(search_context.enable_lmr)
+        hc.enable_see_pruning = bool(search_context.enable_see_pruning)
+        hc.enable_lmp = bool(search_context.enable_lmp)
+        hc.enable_fp = bool(search_context.enable_fp)
+        hc.enable_probcut = bool(search_context.enable_probcut)
+        hc.enable_multicut = bool(search_context.enable_multicut)
+        hc.diag_enabled = False
+        hc.nodes_searched = np.uint64(0)
+        hc.nodes_searched_array[0] = np.uint64(0)
+        hc.nodes_searched_array[1] = np.uint64(0)
+    return active_helpers
+
+
 def warmup_search_jit(search_context=None):
     """
-    Force-compile recursive search/QS (lazy njit) on a tiny position.
+    Warm up search/QS/Lazy SMP wrappers and lazy Python accessors on a tiny position.
     Call from UCI `isready` or tournament harness so the first timed go is hot.
     """
     from chess_engine.classical_old.fen_parser import parse_fen
@@ -4158,7 +4422,7 @@ def warmup_search_jit(search_context=None):
     )
     if search_context is None:
         MAX_PLY_L = 128
-        tt = create_transposition_table(16)
+        tt = create_transposition_table(1)
         search_context = SearchContext(
             tt,
             np.zeros(MAX_PLY_L * 2, dtype=np.uint16),
@@ -4174,6 +4438,17 @@ def warmup_search_jit(search_context=None):
             np.zeros(16384, dtype=np.int16),
             np.zeros((12, 64, 12, 64), dtype=np.int16),
         )
+    _lazy_smp_helper_loop_jit(
+        p_bbs.copy(),
+        o_bbs.copy(),
+        g_state.copy(),
+        np.int32(1),
+        search_context,
+        np.int32(1),
+        search_context.game_history,
+        np.int32(0),
+        np.uint8(0),
+    )
     iterative_deepening_search(
         p_bbs, o_bbs, g_state, 1,
         {"optimum_time": 0, "maximum_time": 0},
@@ -4183,7 +4458,19 @@ def warmup_search_jit(search_context=None):
     return True
 
 
-def iterative_deepening_search(piece_bbs, occupancy_bbs, game_state, max_depth, time_config, search_context, game_history_list=None, tt_generation=0, verbose=True):
+def iterative_deepening_search(
+    piece_bbs,
+    occupancy_bbs,
+    game_state,
+    max_depth,
+    time_config,
+    search_context,
+    game_history_list=None,
+    tt_generation=0,
+    verbose=True,
+    num_threads=1,
+    helper_contexts=None,
+):
     start_time = time.time()
     
     # --- Age history tables (Phase 1a: ÷2; Phase 2 soft-age rolled back) ---
@@ -4278,6 +4565,41 @@ def iterative_deepening_search(piece_bbs, occupancy_bbs, game_state, max_depth, 
     search_context.piece_stack.fill(-1)
     search_context.nmp_min_ply = np.int32(0)
 
+    # --- Spawn Lazy SMP Helper Threads (when num_threads > 1) ---
+    active_helpers = []
+    helper_threads = []
+    helper_results = []
+    if num_threads > 1 and max_depth >= 1:
+        active_helpers = _get_or_create_helper_contexts(
+            search_context, int(num_threads) - 1, helper_contexts
+        )
+        helper_results = [None] * len(active_helpers)
+        gh_arr = search_context.game_history.copy()
+        gh_cnt = np.int32(search_context.game_history_count)
+        tt_gen_u8 = np.uint8(tt_generation)
+        for idx, hc in enumerate(active_helpers):
+            p_copy = piece_bbs.copy()
+            o_copy = occupancy_bbs.copy()
+            g_copy = game_state.copy()
+            t_idx = np.int32(idx + 1)
+
+            def _helper_worker(slot=idx, p_b=p_copy, o_b=o_copy, g_s=g_copy, h_ctx=hc, tid=t_idx):
+                helper_results[slot] = _lazy_smp_helper_loop_jit(
+                    p_b,
+                    o_b,
+                    g_s,
+                    np.int32(max_depth),
+                    h_ctx,
+                    tid,
+                    gh_arr,
+                    gh_cnt,
+                    tt_gen_u8,
+                )
+
+            t = threading.Thread(target=_helper_worker, daemon=True)
+            helper_threads.append(t)
+            t.start()
+
     for current_depth in range(1, max_depth + 1):
         # Aspiration Window Logic
         alpha = -INFINITY
@@ -4309,7 +4631,12 @@ def iterative_deepening_search(piece_bbs, occupancy_bbs, game_state, max_depth, 
         # timer counter must start at zero for this new iteration.
         nodes_searched_array[0] = np.uint64(0)
         if nodes_limit > 0:
-            remaining_nodes = int(nodes_limit) - int(total_nodes)
+            helper_nodes_so_far = (
+                sum(int(hc.nodes_searched_array[0]) for hc in active_helpers)
+                if active_helpers
+                else 0
+            )
+            remaining_nodes = int(nodes_limit) - (int(total_nodes) + helper_nodes_so_far)
             nodes_searched_array[1] = np.uint64(max(1, remaining_nodes))
         else:
             nodes_searched_array[1] = np.uint64(0)
@@ -4385,8 +4712,13 @@ def iterative_deepening_search(piece_bbs, occupancy_bbs, game_state, max_depth, 
                 break
         
         total_nodes += search_context.nodes_searched
+        helper_nodes_now = (
+            sum(int(hc.nodes_searched_array[0]) for hc in active_helpers)
+            if active_helpers
+            else 0
+        )
 
-        if nodes_limit > 0 and total_nodes >= nodes_limit:
+        if nodes_limit > 0 and (int(total_nodes) + helper_nodes_now) >= nodes_limit:
             search_context.stop_flag[0] = True
 
         if search_context.stop_flag[0]:
@@ -4429,9 +4761,10 @@ def iterative_deepening_search(piece_bbs, occupancy_bbs, game_state, max_depth, 
         uci_score_string = format_score_for_uci(score)
 
         if verbose:
-            nps = int(total_nodes / (elapsed_time_ms / 1000)) if elapsed_time_ms > 0 else 0
+            combined_nodes = int(total_nodes) + helper_nodes_now
+            nps = int(combined_nodes / (elapsed_time_ms / 1000)) if elapsed_time_ms > 0 else 0
             hashfull_val = hashfull(transposition_table, search_context.tt_generation)
-            print(f"info depth {current_depth} score {uci_score_string} nodes {total_nodes} nps {nps} hashfull {hashfull_val / 10:.1f}% time {int(elapsed_time_ms)} pv {pv_string}")
+            print(f"info depth {current_depth} score {uci_score_string} nodes {combined_nodes} nps {nps} hashfull {hashfull_val / 10:.1f}% time {int(elapsed_time_ms)} pv {pv_string}")
 
         # Predictive soft time limit
         if maximum_time_ms > 0:
@@ -4444,13 +4777,45 @@ def iterative_deepening_search(piece_bbs, occupancy_bbs, game_state, max_depth, 
                     log_info(f"Predictive termination at depth {current_depth} to avoid timeout.")
                 break
 
-    # Signal timer thread to stop and clean up
+    # Signal timer thread and Lazy SMP helper threads to stop and clean up
     search_context.stop_flag[0] = True
     nodes_searched_array[1] = np.uint64(0)
     if timer_thread is not None:
         timer_thread.join()
+    for t in helper_threads:
+        t.join()
+
+    for h_res in helper_results:
+        if h_res is not None:
+            total_search_nodes += h_res[2]
+            total_q_nodes += h_res[3]
+            total_tt_hits += h_res[4]
 
     final_best_move = best_move_from_last_depth
+    if active_helpers:
+        for h_res in helper_results:
+            if h_res is None:
+                continue
+            h_move, h_score, _, _, _, h_depth = h_res
+            if h_move != NO_MOVE and int(h_depth) >= int(last_completed_depth) and int(h_depth) > 0:
+                if final_best_move == NO_MOVE or (
+                    int(h_depth) > int(last_completed_depth) and int(h_score) > int(last_score)
+                ):
+                    final_best_move = h_move
+                    last_score = int(h_score)
+                    last_completed_depth = int(h_depth)
+
+    if max_depth >= 1:
+        legal_moves = generate_legal_moves(piece_bbs, occupancy_bbs, game_state)
+        if len(legal_moves) > 0:
+            is_legal = False
+            for lm in legal_moves:
+                if lm == final_best_move:
+                    is_legal = True
+                    break
+            if not is_legal:
+                final_best_move = legal_moves[0]
+
     return (final_best_move, last_score, total_search_nodes, total_q_nodes, total_tt_hits, last_completed_depth)
 
 def format_score_for_uci(score):

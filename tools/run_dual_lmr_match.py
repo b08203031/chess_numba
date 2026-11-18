@@ -18,7 +18,7 @@ PGNs:
 
 Usage (repo root):
   python tools/run_dual_lmr_match.py --nodes 200000 --games 100
-  python tools/run_dual_lmr_match.py --nodes 200000 --games 100 --no-clear-cache
+  python tools/run_dual_lmr_match.py --nodes 200000 --games 100 --clear-cache
 """
 from __future__ import annotations
 
@@ -96,7 +96,7 @@ def _run_match_side(
     def worker(local_id: int, global_id: int):
         nonlocal total_matches, status, llr
         verbose = global_id == 0  # only first global worker prints init/warmup detail
-        # Unique process names for NUMBA_CACHE_DIR; rename for PGN after start.
+        # Unique worker names during startup; rename for PGN after start.
         e1 = Engine(
             f"{engine1_name}_w{global_id}",
             engine1_path,
@@ -263,8 +263,16 @@ def main():
     ap.add_argument("--time", type=int, default=1000, help="Unused if --nodes set")
     ap.add_argument("--depth", type=int, default=None)
     ap.add_argument("--c-per-match", type=int, default=2, help="Workers per match (default 2 → 4 total)")
-    ap.add_argument("--no-clear-cache", action="store_true")
+    ap.add_argument(
+        "--clear-cache",
+        action="store_true",
+        help="explicitly clear Numba caches before startup",
+    )
+    ap.add_argument("--no-clear-cache", action="store_true", help=argparse.SUPPRESS)
     args = ap.parse_args()
+
+    if args.clear_cache and args.no_clear_cache:
+        ap.error("--clear-cache conflicts with --no-clear-cache")
 
     if args.games % 2 != 0:
         print("--games must be even", file=sys.stderr)
@@ -276,7 +284,7 @@ def main():
         print("need at least 1 worker per match", file=sys.stderr)
         sys.exit(1)
 
-    if not args.no_clear_cache:
+    if args.clear_cache:
         clear_numba_cache(str(ROOT))
 
     engine1 = str(ROOT / "main.py")

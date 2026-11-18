@@ -3,7 +3,7 @@ import numba
 import numpy as np
 from numba import types
 from numba.experimental import structref
-from chess_engine.classical.transposition_table import numba_tt_entry_type
+from chess_engine.classical.transposition_table import tt_entry_dtype, numba_tt_entry_type
 from chess_engine.classical.constants import (
     MAX_PLY, CORRECTION_HISTORY_SIZE, DIAG_SIZE, TUNE_SIZE,
     ENABLE_NMP, ENABLE_RFP, ENABLE_RAZORING,
@@ -169,6 +169,8 @@ class SearchContextProxy(structref.StructRefProxy):
     """
 
     def __new__(cls, *args):
+        if cls is SearchContextProxy and len(args) == len(_SEARCH_CONTEXT_FIELD_NAMES):
+            return _construct_search_context_proxy(*args)
         return structref.StructRefProxy.__new__(cls, *args)
 
 
@@ -184,8 +186,60 @@ structref.define_proxy(SearchContextProxy, SearchContextType, _SEARCH_CONTEXT_FI
 # Fixed type used in @njit signatures (stable across processes).
 search_context_type = SearchContextType(tuple(search_context_spec))
 
+
+@numba.njit(cache=True)
+def _construct_search_context_proxy(
+    transposition_table, killer_moves, pv_table, history_table, nodes_searched,
+    nodes_searched_array, end_time, stop_flag, game_history, game_history_count,
+    ply_path_stack, tt_generation, counter_moves, move_stack, piece_stack,
+    static_eval_stack, move_scores, moves_buffer, quiet_moves_tried,
+    quiet_pieces_tried, aggressor_cache, victim_cache, bad_captures, mp_stage,
+    mp_current_idx, mp_captures_end, mp_quiets_end, mp_bad_captures_count,
+    mp_bad_captures_idx, continuation_history, low_ply_history, pawn_history,
+    pawn_correction_history, minor_correction_history,
+    non_pawn_correction_history_white, non_pawn_correction_history_black,
+    continuation_correction_history, butterfly_history, capture_history,
+    capture_moves_tried, capture_aggressor_tried, capture_victim_tried,
+    capture_tosq_tried, enable_nmp, nmp_min_ply, enable_rfp, enable_razoring,
+    enable_lmr, enable_see_pruning, enable_lmp, enable_fp, enable_probcut,
+    enable_multicut, cutoff_cnt, move_count_stack, tt_hit_stack,
+    move_is_capture_stack, reduction_stack, tt_pv_stack, follow_pv_stack,
+    last_iteration_pv, last_iteration_pv_len, pawn_table_keys,
+    pawn_table_w_king_sq, pawn_table_b_king_sq, pawn_table_castling_rights,
+    pawn_table_mg, pawn_table_eg, pawn_table_w_shield_mg,
+    pawn_table_w_shield_eg, pawn_table_b_shield_mg, pawn_table_b_shield_eg,
+    pawn_table_w_passed, pawn_table_b_passed, pawn_table_w_attacks_span,
+    pawn_table_b_attacks_span, diag_stats, tune, eval_weights, diag_enabled,
+):
+    """Disk-cached StructRef constructor matching search_context_spec field order."""
+    return SearchContextProxy(
+        transposition_table, killer_moves, pv_table, history_table, nodes_searched,
+        nodes_searched_array, end_time, stop_flag, game_history, game_history_count,
+        ply_path_stack, tt_generation, counter_moves, move_stack, piece_stack,
+        static_eval_stack, move_scores, moves_buffer, quiet_moves_tried,
+        quiet_pieces_tried, aggressor_cache, victim_cache, bad_captures, mp_stage,
+        mp_current_idx, mp_captures_end, mp_quiets_end, mp_bad_captures_count,
+        mp_bad_captures_idx, continuation_history, low_ply_history, pawn_history,
+        pawn_correction_history, minor_correction_history,
+        non_pawn_correction_history_white, non_pawn_correction_history_black,
+        continuation_correction_history, butterfly_history, capture_history,
+        capture_moves_tried, capture_aggressor_tried, capture_victim_tried,
+        capture_tosq_tried, enable_nmp, nmp_min_ply, enable_rfp, enable_razoring,
+        enable_lmr, enable_see_pruning, enable_lmp, enable_fp, enable_probcut,
+        enable_multicut, cutoff_cnt, move_count_stack, tt_hit_stack,
+        move_is_capture_stack, reduction_stack, tt_pv_stack, follow_pv_stack,
+        last_iteration_pv, last_iteration_pv_len, pawn_table_keys,
+        pawn_table_w_king_sq, pawn_table_b_king_sq, pawn_table_castling_rights,
+        pawn_table_mg, pawn_table_eg, pawn_table_w_shield_mg,
+        pawn_table_w_shield_eg, pawn_table_b_shield_mg, pawn_table_b_shield_eg,
+        pawn_table_w_passed, pawn_table_b_passed, pawn_table_w_attacks_span,
+        pawn_table_b_attacks_span, diag_stats, tune, eval_weights, diag_enabled,
+    )
+
+
 # --- Pure-Python field accessors (required by UCI / iterative_deepening aging) ---
-# Generated once: each getter/setter is a tiny njit that reads/writes the field.
+# Static typed getters/setters grouped by Numba field type keep real source
+# locators for disk caching (cache=True) while avoiding 96 separate .nbc blobs.
 _SCALAR_FIELDS = {
     "nodes_searched", "end_time", "game_history_count", "tt_generation", "diag_enabled",
     "enable_nmp", "nmp_min_ply", "enable_rfp", "enable_razoring", "enable_lmr",
@@ -195,40 +249,436 @@ _SCALAR_FIELDS = {
 }
 
 
-def _install_python_field_accessors():
-    g = globals()
-    for name in _SEARCH_CONTEXT_FIELD_NAMES:
-        # Getter
-        # cache=False: these are exec()'d helpers (no source locator for disk cache).
-        # They only run from pure-Python UCI / setup paths, not the hot search loop.
-        getter_src = (
-            f"@numba.njit(cache=False)\n"
-            f"def _sc_get_{name}(self):\n"
-            f"    return self.{name}\n"
+@numba.njit(cache=True, nogil=True)
+def _sc_get_u64(self):
+    return self.nodes_searched
+
+
+@numba.njit(cache=True, nogil=True)
+def _sc_set_u64(self, value):
+    self.nodes_searched = value
+
+
+@numba.njit(cache=True, nogil=True)
+def _sc_get_f64(self):
+    return self.end_time
+
+
+@numba.njit(cache=True, nogil=True)
+def _sc_set_f64(self, value):
+    self.end_time = value
+
+
+@numba.njit(cache=True, nogil=True)
+def _sc_get_u8(self):
+    return self.tt_generation
+
+
+@numba.njit(cache=True, nogil=True)
+def _sc_set_u8(self, value):
+    self.tt_generation = value
+
+
+@numba.njit(cache=True, nogil=True)
+def _sc_get_i32(self, idx):
+    if idx == 0:
+        return self.game_history_count
+    elif idx == 1:
+        return self.nmp_min_ply
+    else:
+        return self.last_iteration_pv_len
+
+
+@numba.njit(cache=True, nogil=True)
+def _sc_set_i32(self, idx, value):
+    if idx == 0:
+        self.game_history_count = value
+    elif idx == 1:
+        self.nmp_min_ply = value
+    else:
+        self.last_iteration_pv_len = value
+
+
+@numba.njit(cache=True, nogil=True)
+def _sc_get_bool(self, idx):
+    if idx == 0:
+        return self.enable_nmp
+    elif idx == 1:
+        return self.enable_rfp
+    elif idx == 2:
+        return self.enable_razoring
+    elif idx == 3:
+        return self.enable_lmr
+    elif idx == 4:
+        return self.enable_see_pruning
+    elif idx == 5:
+        return self.enable_lmp
+    elif idx == 6:
+        return self.enable_fp
+    elif idx == 7:
+        return self.enable_probcut
+    elif idx == 8:
+        return self.enable_multicut
+    else:
+        return self.diag_enabled
+
+
+@numba.njit(cache=True, nogil=True)
+def _sc_set_bool(self, idx, value):
+    if idx == 0:
+        self.enable_nmp = value
+    elif idx == 1:
+        self.enable_rfp = value
+    elif idx == 2:
+        self.enable_razoring = value
+    elif idx == 3:
+        self.enable_lmr = value
+    elif idx == 4:
+        self.enable_see_pruning = value
+    elif idx == 5:
+        self.enable_lmp = value
+    elif idx == 6:
+        self.enable_fp = value
+    elif idx == 7:
+        self.enable_probcut = value
+    elif idx == 8:
+        self.enable_multicut = value
+    else:
+        self.diag_enabled = value
+
+
+@numba.njit(cache=True, nogil=True)
+def _sc_get_tt(self):
+    return self.transposition_table
+
+
+@numba.njit(cache=True, nogil=True)
+def _sc_get_u8_1d(self):
+    return self.pawn_table_castling_rights
+
+
+@numba.njit(cache=True, nogil=True)
+def _sc_get_i8_1d(self, idx):
+    if idx == 0:
+        return self.piece_stack
+    elif idx == 1:
+        return self.pawn_table_w_king_sq
+    else:
+        return self.pawn_table_b_king_sq
+
+
+@numba.njit(cache=True, nogil=True)
+def _sc_get_i8_2d(self, idx):
+    if idx == 0:
+        return self.quiet_pieces_tried
+    elif idx == 1:
+        return self.aggressor_cache
+    elif idx == 2:
+        return self.victim_cache
+    elif idx == 3:
+        return self.capture_aggressor_tried
+    elif idx == 4:
+        return self.capture_victim_tried
+    else:
+        return self.capture_tosq_tried
+
+
+@numba.njit(cache=True, nogil=True)
+def _sc_get_u16_1d(self, idx):
+    if idx == 0:
+        return self.killer_moves
+    elif idx == 1:
+        return self.move_stack
+    else:
+        return self.last_iteration_pv
+
+
+@numba.njit(cache=True, nogil=True)
+def _sc_get_u16_2d(self, idx):
+    if idx == 0:
+        return self.pv_table
+    elif idx == 1:
+        return self.counter_moves
+    elif idx == 2:
+        return self.moves_buffer
+    elif idx == 3:
+        return self.quiet_moves_tried
+    elif idx == 4:
+        return self.bad_captures
+    else:
+        return self.capture_moves_tried
+
+
+@numba.njit(cache=True, nogil=True)
+def _sc_get_i16_1d(self, idx):
+    if idx == 0:
+        return self.pawn_correction_history
+    elif idx == 1:
+        return self.minor_correction_history
+    elif idx == 2:
+        return self.non_pawn_correction_history_white
+    else:
+        return self.non_pawn_correction_history_black
+
+
+@numba.njit(cache=True, nogil=True)
+def _sc_get_i16_2d(self):
+    return self.low_ply_history
+
+
+@numba.njit(cache=True, nogil=True)
+def _sc_get_i16_3d(self):
+    return self.pawn_history
+
+
+@numba.njit(cache=True, nogil=True)
+def _sc_get_i16_4d(self):
+    return self.continuation_correction_history
+
+
+@numba.njit(cache=True, nogil=True)
+def _sc_get_i16_5d(self):
+    return self.continuation_history
+
+
+@numba.njit(cache=True, nogil=True)
+def _sc_get_i32_1d(self, idx):
+    if idx == 0:
+        return self.static_eval_stack
+    elif idx == 1:
+        return self.mp_stage
+    elif idx == 2:
+        return self.mp_current_idx
+    elif idx == 3:
+        return self.mp_captures_end
+    elif idx == 4:
+        return self.mp_quiets_end
+    elif idx == 5:
+        return self.mp_bad_captures_count
+    elif idx == 6:
+        return self.mp_bad_captures_idx
+    elif idx == 7:
+        return self.cutoff_cnt
+    elif idx == 8:
+        return self.move_count_stack
+    elif idx == 9:
+        return self.reduction_stack
+    elif idx == 10:
+        return self.pawn_table_mg
+    elif idx == 11:
+        return self.pawn_table_eg
+    elif idx == 12:
+        return self.pawn_table_w_shield_mg
+    elif idx == 13:
+        return self.pawn_table_w_shield_eg
+    elif idx == 14:
+        return self.pawn_table_b_shield_mg
+    elif idx == 15:
+        return self.pawn_table_b_shield_eg
+    elif idx == 16:
+        return self.tune
+    else:
+        return self.eval_weights
+
+
+@numba.njit(cache=True, nogil=True)
+def _sc_get_i32_2d(self, idx):
+    if idx == 0:
+        return self.history_table
+    elif idx == 1:
+        return self.move_scores
+    else:
+        return self.butterfly_history
+
+
+@numba.njit(cache=True, nogil=True)
+def _sc_get_i32_3d(self):
+    return self.capture_history
+
+
+@numba.njit(cache=True, nogil=True)
+def _sc_get_u64_1d(self, idx):
+    if idx == 0:
+        return self.nodes_searched_array
+    elif idx == 1:
+        return self.game_history
+    elif idx == 2:
+        return self.ply_path_stack
+    elif idx == 3:
+        return self.pawn_table_keys
+    elif idx == 4:
+        return self.pawn_table_w_passed
+    elif idx == 5:
+        return self.pawn_table_b_passed
+    elif idx == 6:
+        return self.pawn_table_w_attacks_span
+    elif idx == 7:
+        return self.pawn_table_b_attacks_span
+    else:
+        return self.diag_stats
+
+
+@numba.njit(cache=True, nogil=True)
+def _sc_get_bool_1d(self, idx):
+    if idx == 0:
+        return self.stop_flag
+    elif idx == 1:
+        return self.tt_hit_stack
+    elif idx == 2:
+        return self.move_is_capture_stack
+    elif idx == 3:
+        return self.tt_pv_stack
+    else:
+        return self.follow_pv_stack
+
+
+def _coerce_u64(value):
+    return value if type(value) is np.uint64 else np.uint64(int(value) & 0xFFFFFFFFFFFFFFFF)
+
+
+def _coerce_f64(value):
+    return value if type(value) is float else float(value)
+
+
+def _coerce_i32(value):
+    if type(value) is np.int32:
+        return value
+    return np.int32(((int(value) + 0x80000000) & 0xFFFFFFFF) - 0x80000000)
+
+
+def _coerce_u8(value):
+    return value if type(value) is np.uint8 else np.uint8(int(value) & 0xFF)
+
+
+def _coerce_bool(value):
+    return value if type(value) is bool else bool(value)
+
+
+_SCALAR_ACCESSOR_GROUPS = (
+    (_sc_get_u64, _sc_set_u64, _coerce_u64, ("nodes_searched",)),
+    (_sc_get_f64, _sc_set_f64, _coerce_f64, ("end_time",)),
+    (_sc_get_u8, _sc_set_u8, _coerce_u8, ("tt_generation",)),
+    (_sc_get_i32, _sc_set_i32, _coerce_i32, ("game_history_count", "nmp_min_ply", "last_iteration_pv_len")),
+    (
+        _sc_get_bool,
+        _sc_set_bool,
+        _coerce_bool,
+        (
+            "enable_nmp", "enable_rfp", "enable_razoring", "enable_lmr",
+            "enable_see_pruning", "enable_lmp", "enable_fp", "enable_probcut",
+            "enable_multicut", "diag_enabled",
+        ),
+    ),
+)
+
+_ARRAY_ACCESSOR_GROUPS = (
+    (_sc_get_tt, ("transposition_table",)),
+    (_sc_get_u8_1d, ("pawn_table_castling_rights",)),
+    (_sc_get_i8_1d, ("piece_stack", "pawn_table_w_king_sq", "pawn_table_b_king_sq")),
+    (
+        _sc_get_i8_2d,
+        (
+            "quiet_pieces_tried", "aggressor_cache", "victim_cache",
+            "capture_aggressor_tried", "capture_victim_tried", "capture_tosq_tried",
+        ),
+    ),
+    (_sc_get_u16_1d, ("killer_moves", "move_stack", "last_iteration_pv")),
+    (
+        _sc_get_u16_2d,
+        (
+            "pv_table", "counter_moves", "moves_buffer",
+            "quiet_moves_tried", "bad_captures", "capture_moves_tried",
+        ),
+    ),
+    (
+        _sc_get_i16_1d,
+        (
+            "pawn_correction_history", "minor_correction_history",
+            "non_pawn_correction_history_white", "non_pawn_correction_history_black",
+        ),
+    ),
+    (_sc_get_i16_2d, ("low_ply_history",)),
+    (_sc_get_i16_3d, ("pawn_history",)),
+    (_sc_get_i16_4d, ("continuation_correction_history",)),
+    (_sc_get_i16_5d, ("continuation_history",)),
+    (
+        _sc_get_i32_1d,
+        (
+            "static_eval_stack", "mp_stage", "mp_current_idx", "mp_captures_end",
+            "mp_quiets_end", "mp_bad_captures_count", "mp_bad_captures_idx",
+            "cutoff_cnt", "move_count_stack", "reduction_stack",
+            "pawn_table_mg", "pawn_table_eg", "pawn_table_w_shield_mg",
+            "pawn_table_w_shield_eg", "pawn_table_b_shield_mg", "pawn_table_b_shield_eg",
+            "tune", "eval_weights",
+        ),
+    ),
+    (_sc_get_i32_2d, ("history_table", "move_scores", "butterfly_history")),
+    (_sc_get_i32_3d, ("capture_history",)),
+    (
+        _sc_get_u64_1d,
+        (
+            "nodes_searched_array", "game_history", "ply_path_stack",
+            "pawn_table_keys", "pawn_table_w_passed", "pawn_table_b_passed",
+            "pawn_table_w_attacks_span", "pawn_table_b_attacks_span", "diag_stats",
+        ),
+    ),
+    (
+        _sc_get_bool_1d,
+        ("stop_flag", "tt_hit_stack", "move_is_capture_stack", "tt_pv_stack", "follow_pv_stack"),
+    ),
+)
+
+
+def _make_prop(getter, idx=None, setter=None, coercer=None):
+    if idx is None:
+        if setter is None:
+            return property(lambda self, _g=getter: _g(self))
+        return property(
+            lambda self, _g=getter: _g(self),
+            lambda self, value, _s=setter, _c=coercer: _s(self, _c(value)),
         )
-        exec(getter_src, g)
-        getter = g[f"_sc_get_{name}"]
+    idx_i32 = np.int32(idx)
+    if setter is None:
+        return property(lambda self, _g=getter, _i=idx_i32: _g(self, _i))
+    return property(
+        lambda self, _g=getter, _i=idx_i32: _g(self, _i),
+        lambda self, value, _s=setter, _i=idx_i32, _c=coercer: _s(self, _i, _c(value)),
+    )
 
-        def _make_prop(get_fn, set_fn=None):
-            if set_fn is None:
-                return property(lambda self, _g=get_fn: _g(self))
-            return property(
-                lambda self, _g=get_fn: _g(self),
-                lambda self, value, _s=set_fn: _s(self, value),
+
+def _install_python_field_accessors():
+    """Bind cached StructRef property accessors onto SearchContextProxy."""
+    registered_scalars = set()
+    registered_arrays = set()
+
+    for getter, setter, coercer, names in _SCALAR_ACCESSOR_GROUPS:
+        use_index = len(names) > 1
+        for idx, name in enumerate(names):
+            registered_scalars.add(name)
+            setattr(
+                SearchContextProxy,
+                name,
+                _make_prop(getter, idx if use_index else None, setter, coercer),
             )
 
-        if name in _SCALAR_FIELDS:
-            setter_src = (
-                f"@numba.njit(cache=False)\n"
-                f"def _sc_set_{name}(self, value):\n"
-                f"    self.{name} = value\n"
+    for getter, names in _ARRAY_ACCESSOR_GROUPS:
+        use_index = len(names) > 1
+        for idx, name in enumerate(names):
+            registered_arrays.add(name)
+            # Arrays: return live reference so in-place mutation works from Python.
+            setattr(
+                SearchContextProxy,
+                name,
+                _make_prop(getter, idx if use_index else None),
             )
-            exec(setter_src, g)
-            setter = g[f"_sc_set_{name}"]
-            setattr(SearchContextProxy, name, _make_prop(getter, setter))
-        else:
-            # Arrays: return reference so in-place mutation works from Python.
-            setattr(SearchContextProxy, name, _make_prop(getter))
+
+    if registered_scalars != _SCALAR_FIELDS:
+        raise RuntimeError(f"Scalar accessor mismatch: {registered_scalars ^ _SCALAR_FIELDS}")
+    all_fields = set(_SEARCH_CONTEXT_FIELD_NAMES)
+    if (registered_scalars | registered_arrays) != all_fields:
+        raise RuntimeError(
+            f"SearchContext accessor mismatch: {(registered_scalars | registered_arrays) ^ all_fields}"
+        )
 
 
 _install_python_field_accessors()
@@ -238,7 +688,7 @@ def SearchContext(
     transposition_table, killer_moves, pv_table, history_table, butterfly_history,
     continuation_history, capture_history, pawn_history, pawn_correction_history,
     minor_correction_history, non_pawn_correction_history_white, non_pawn_correction_history_black,
-    continuation_correction_history=None, enable_diagnostics=False
+    continuation_correction_history=None, enable_diagnostics=False, stop_flag=None
 ):
     """
     Build a SearchContext StructRef. Allocation stays in pure Python so construction
@@ -274,7 +724,10 @@ def SearchContext(
     # in-JIT node budget for this iteration (0 disables fixed-node stopping).
     nodes_searched_array = np.zeros(2, dtype=np.uint64)
     end_time = 0.0
-    stop_flag = np.array([False], dtype=np.bool_)
+    if stop_flag is None:
+        stop_flag = np.array([False], dtype=np.bool_)
+    else:
+        stop_flag = np.ascontiguousarray(stop_flag)
 
     game_history = np.zeros(1024, dtype=np.uint64)
     game_history_count = np.int32(0)
@@ -477,3 +930,95 @@ def SearchContext(
         diag_enabled,
     )
     return ctx
+
+
+def create_smp_helper_context(main_context):
+    """
+    Create a thread-private SearchContext for a Lazy SMP helper worker.
+    Wraps main_context.transposition_table and main_context.stop_flag via np.frombuffer
+    so the helper thread owns an independent Numba NRT_MemInfo header (preventing
+    atomic refcount contention across CPU cores) while sharing physical memory.
+    """
+    main_tt = main_context.transposition_table
+    main_stop = main_context.stop_flag
+    shared_tt = np.frombuffer(main_tt.data, dtype=tt_entry_dtype)
+    shared_stop_flag = np.frombuffer(main_stop.data, dtype=np.bool_)
+
+    killer_moves = np.zeros(MAX_PLY * 2, dtype=np.uint16)
+    pv_table = np.zeros((MAX_PLY, MAX_PLY), dtype=np.uint16)
+    history_table = np.zeros((12, 64), dtype=np.int32)
+    butterfly_history = np.zeros((64, 64), dtype=np.int32)
+    continuation_history = np.zeros((5, 12, 64, 12, 64), dtype=np.int16)
+    capture_history = np.zeros((12, 64, 6), dtype=np.int32)
+    pawn_history = np.full((8192, 12, 64), -1238, dtype=np.int16)
+    pawn_correction_history = np.zeros(CORRECTION_HISTORY_SIZE, dtype=np.int16)
+    minor_correction_history = np.zeros(CORRECTION_HISTORY_SIZE, dtype=np.int16)
+    non_pawn_correction_history_white = np.zeros(CORRECTION_HISTORY_SIZE, dtype=np.int16)
+    non_pawn_correction_history_black = np.zeros(CORRECTION_HISTORY_SIZE, dtype=np.int16)
+    continuation_correction_history = np.zeros((12, 64, 12, 64), dtype=np.int16)
+
+    helper_ctx = SearchContext(
+        shared_tt,
+        killer_moves,
+        pv_table,
+        history_table,
+        butterfly_history,
+        continuation_history,
+        capture_history,
+        pawn_history,
+        pawn_correction_history,
+        minor_correction_history,
+        non_pawn_correction_history_white,
+        non_pawn_correction_history_black,
+        continuation_correction_history,
+        enable_diagnostics=False,
+        stop_flag=shared_stop_flag,
+    )
+    helper_ctx.tune[:] = main_context.tune[:]
+    helper_ctx.eval_weights[:] = main_context.eval_weights[:]
+    helper_ctx.enable_nmp = bool(main_context.enable_nmp)
+    helper_ctx.enable_rfp = bool(main_context.enable_rfp)
+    helper_ctx.enable_razoring = bool(main_context.enable_razoring)
+    helper_ctx.enable_lmr = bool(main_context.enable_lmr)
+    helper_ctx.enable_see_pruning = bool(main_context.enable_see_pruning)
+    helper_ctx.enable_lmp = bool(main_context.enable_lmp)
+    helper_ctx.enable_fp = bool(main_context.enable_fp)
+    helper_ctx.enable_probcut = bool(main_context.enable_probcut)
+    helper_ctx.enable_multicut = bool(main_context.enable_multicut)
+    helper_ctx.diag_enabled = False
+    return helper_ctx
+
+
+def reset_search_context(ctx):
+    """
+    Reset all thread-local history tables, stacks, pawn hash tables, and counters on ctx
+    (used on ucinewgame for both main and Lazy SMP helper contexts).
+    """
+    ctx.killer_moves.fill(0)
+    ctx.pv_table.fill(0)
+    ctx.history_table.fill(0)
+    ctx.butterfly_history.fill(0)
+    ctx.continuation_history.fill(0)
+    ctx.capture_history.fill(0)
+    ctx.pawn_history.fill(-1238)
+    ctx.pawn_correction_history.fill(0)
+    ctx.minor_correction_history.fill(0)
+    ctx.non_pawn_correction_history_white.fill(0)
+    ctx.non_pawn_correction_history_black.fill(0)
+    ctx.continuation_correction_history.fill(0)
+    ctx.counter_moves.fill(0)
+    ctx.low_ply_history.fill(0)
+    ctx.move_stack.fill(0)
+    ctx.piece_stack.fill(-1)
+    ctx.static_eval_stack.fill(0)
+    ctx.reduction_stack.fill(0)
+    ctx.tt_pv_stack.fill(False)
+    ctx.follow_pv_stack.fill(False)
+    ctx.last_iteration_pv.fill(0)
+    ctx.last_iteration_pv_len = np.int32(0)
+    ctx.nodes_searched = np.uint64(0)
+    ctx.nodes_searched_array.fill(0)
+    ctx.pawn_table_keys.fill(np.uint64(0xFFFFFFFFFFFFFFFF))
+    ctx.pawn_table_w_king_sq.fill(-1)
+    ctx.pawn_table_b_king_sq.fill(-1)
+    ctx.stop_flag[0] = False

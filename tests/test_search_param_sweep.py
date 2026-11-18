@@ -2,6 +2,7 @@ import sys
 import os
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
+import argparse
 import time
 import numpy as np
 import shutil
@@ -9,19 +10,17 @@ import io
 import chess.pgn
 from pathlib import Path
 
-from chess_engine.classical.transposition_table import (
-    TT_SIZE_MB, create_transposition_table, clear_transposition_table
-)
-from chess_engine.classical.engine_types import SearchContext
 from chess_engine.classical.constants import (
     TUNE_FP_MULT, TUNE_RFP_MULT, TUNE_LMR_BASE_OFFSET,
     FP_MULTIPLIER, RFP_BASE_MULT, LMR_BASE_OFFSET
 )
 from chess_engine.classical.debug_utils import log_info
+from tests.test_search import GAME_PGN, extract_benchmark_positions
 
-transposition_table = create_transposition_table(TT_SIZE_MB)
 
 def make_search_context(tt):
+    from chess_engine.classical.engine_types import SearchContext
+
     MAX_PLY = 128
     killer_moves = np.zeros(MAX_PLY * 2, dtype=np.uint16)
     pv_table = np.zeros((MAX_PLY, MAX_PLY), dtype=np.uint16)
@@ -44,24 +43,27 @@ def make_search_context(tt):
         continuation_correction_history
     )
 
+
 def clear_numba_cache():
-    project_root = Path(__file__).parent
+    project_root = Path(__file__).resolve().parents[1]
     cache_dirs = list(project_root.rglob("__pycache__"))
     for cache_dir in cache_dirs:
         if cache_dir.is_dir():
-            shutil.rmtree(cache_dir)
+            shutil.rmtree(cache_dir, ignore_errors=True)
 
-clear_numba_cache()
-
-from chess_engine.classical.fen_parser import parse_fen
-from chess_engine.classical.search import iterative_deepening_search
-from chess_engine.classical.move import move_to_uci
-from tests.test_search import GAME_PGN, extract_benchmark_positions
 
 def run_param_sweep(param_name, tune_index, candidate_values):
     """
     Runs the 162-position search benchmark for each value in candidate_values.
     """
+    from chess_engine.classical.transposition_table import (
+        TT_SIZE_MB, create_transposition_table, clear_transposition_table
+    )
+    from chess_engine.classical.fen_parser import parse_fen
+    from chess_engine.classical.search import iterative_deepening_search
+    from chess_engine.classical.move import move_to_uci
+
+    transposition_table = create_transposition_table(TT_SIZE_MB)
     positions = extract_benchmark_positions()
     
     # 1. Warm-up JIT compilation
@@ -147,7 +149,26 @@ def run_param_sweep(param_name, tune_index, candidate_values):
         )
     print("=" * 95)
 
-if __name__ == "__main__":
+
+def build_parser():
+    parser = argparse.ArgumentParser(description="Run search parameter sweeps on classical")
+    parser.add_argument(
+        "--clear-cache",
+        action="store_true",
+        help="explicitly clear Numba caches before startup",
+    )
+    parser.add_argument("--no-clear-cache", action="store_true", help=argparse.SUPPRESS)
+    return parser
+
+
+def main(argv=None):
+    parser = build_parser()
+    args = parser.parse_args(argv)
+    if args.clear_cache and args.no_clear_cache:
+        parser.error("--clear-cache conflicts with --no-clear-cache")
+    if args.clear_cache:
+        clear_numba_cache()
+
     # 1. FP_MULTIPLIER sweep centered at 125 (step 10)
     fp_mult_values = [105, 115, 125, 135, 145]
     run_param_sweep("FP_MULTIPLIER", TUNE_FP_MULT, fp_mult_values)
@@ -159,3 +180,8 @@ if __name__ == "__main__":
     # 3. LMR_BASE_OFFSET sweep centered at 460 (step 20)
     lmr_offset_values = [420, 440, 460, 480, 500]
     run_param_sweep("LMR_BASE_OFFSET", TUNE_LMR_BASE_OFFSET, lmr_offset_values)
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

@@ -13,7 +13,6 @@ import queue
 import shutil
 import subprocess
 import sys
-import tempfile
 import threading
 import time
 from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
@@ -164,6 +163,11 @@ def extract_score_from_info(info: str) -> Optional[int]:
     return None
 
 
+_UCI_CACHE_LOCK = threading.Lock()
+_UCI_WARMED_KEYS: set[tuple[str, str]] = set()
+_UCI_KEY_LOCKS: dict[tuple[str, str], threading.Lock] = {}
+
+
 class UciEngine:
     """Long-lived UCI subprocess with a non-blocking stdout reader."""
 
@@ -188,25 +192,27 @@ class UciEngine:
         self._reader: Optional[threading.Thread] = None
         self._moves: list[str] = []
         self._start_fen: Optional[str] = None
-        self._cache_dir: Optional[str] = None
         self.last_score_cp: Optional[int] = None
 
-    def start(self) -> None:
-        if self.process is not None:
-            return
-        is_python = self.path.lower().endswith(".py")
-        command = [sys.executable, "-u", self.path] if is_python else [self.path]
+    def _build_env(self) -> tuple[dict[str, str], str]:
         env = os.environ.copy()
         env.update({str(key): str(value) for key, value in self.env_extra.items()})
-        # UCI fallback processes cannot share the recursive search compilation.
-        # Isolate their writable cache directories to avoid cross-worker locks.
-        if is_python:
-            self._cache_dir = tempfile.mkdtemp(prefix=f"numba_match_{self.name}_")
-            env["NUMBA_CACHE_DIR"] = self._cache_dir
+        raw_cache_dir = env.get("NUMBA_CACHE_DIR", "").strip()
+        if not raw_cache_dir:
+            env.pop("NUMBA_CACHE_DIR", None)
         env.setdefault("NUMBA_NUM_THREADS", "1")
         env.setdefault("OMP_NUM_THREADS", "1")
         env.setdefault("MKL_NUM_THREADS", "1")
         env.setdefault("OPENBLAS_NUM_THREADS", "1")
+        return env, raw_cache_dir
+
+    def _spawn_and_handshake(
+        self,
+        command: list[str],
+        env: dict[str, str],
+        *,
+        is_python: bool,
+    ) -> None:
         self.process = subprocess.Popen(
             command,
             stdin=subprocess.PIPE,
@@ -220,10 +226,44 @@ class UciEngine:
         self._reader = threading.Thread(target=self._reader_loop, daemon=True)
         self._reader.start()
         self._send("uci")
-        self._wait_for("uciok", timeout_s=30.0, phase="UCI initialization")
+        init_timeout_s = max(30.0, self.search_timeout_s) if is_python else 30.0
+        self._wait_for("uciok", timeout_s=init_timeout_s, phase="UCI initialization")
         for option, value in self.options.items():
             self._send(f"setoption name {option} value {str(value).lower() if isinstance(value, bool) else value}")
         self._ready(timeout_s=max(30.0, self.search_timeout_s))
+
+    def start(self) -> None:
+        if self.process is not None:
+            return
+        is_python = self.path.lower().endswith(".py")
+        command = [sys.executable, "-u", self.path] if is_python else [self.path]
+        env, raw_cache_dir = self._build_env()
+        if not is_python:
+            self._spawn_and_handshake(command, env, is_python=False)
+            return
+
+        # Reuse the persistent Numba disk cache (or caller-provided NUMBA_CACHE_DIR)
+        # across Python UCI workers, coordinating only the first cold startup per
+        # (script, cache_dir) so concurrent workers do not race writing .nbi/.nbc.
+        cache_key = (
+            os.path.normcase(self.path),
+            os.path.normcase(os.path.abspath(raw_cache_dir)) if raw_cache_dir else "",
+        )
+        with _UCI_CACHE_LOCK:
+            already_warmed = cache_key in _UCI_WARMED_KEYS
+            key_lock = None if already_warmed else _UCI_KEY_LOCKS.setdefault(cache_key, threading.Lock())
+        if key_lock is None:
+            self._spawn_and_handshake(command, env, is_python=True)
+            return
+        with key_lock:
+            with _UCI_CACHE_LOCK:
+                already_warmed = cache_key in _UCI_WARMED_KEYS
+            if not already_warmed:
+                self._spawn_and_handshake(command, env, is_python=True)
+                with _UCI_CACHE_LOCK:
+                    _UCI_WARMED_KEYS.add(cache_key)
+                return
+        self._spawn_and_handshake(command, env, is_python=True)
 
     def _reader_loop(self) -> None:
         assert self.process is not None and self.process.stdout is not None
@@ -354,9 +394,6 @@ class UciEngine:
                 if process.poll() is None:
                     process.kill()
                     process.wait(timeout=3.0)
-        if self._cache_dir:
-            shutil.rmtree(self._cache_dir, ignore_errors=True)
-            self._cache_dir = None
 
 
 class UciEngineFactory:
@@ -1254,3 +1291,5 @@ def clear_numba_cache(root_dir: str) -> None:
     for cache_dir in root.rglob("__pycache__"):
         if cache_dir.is_dir():
             shutil.rmtree(cache_dir, ignore_errors=True)
+    with _UCI_CACHE_LOCK:
+        _UCI_WARMED_KEYS.clear()

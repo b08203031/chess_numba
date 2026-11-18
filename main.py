@@ -19,7 +19,11 @@ from chess_engine.classical.transposition_table import (
     TT_SIZE_MB,
 )
 from chess_engine.classical.opening_book import OpeningBook
-from chess_engine.classical.engine_types import SearchContext
+from chess_engine.classical.engine_types import (
+    SearchContext,
+    create_smp_helper_context,
+    reset_search_context,
+)
 
 # Maximum search depth (Ply) for arrays like killer moves
 # 殺手步等陣列的最大搜尋深度（層數）
@@ -100,6 +104,8 @@ def uci_loop():
     board_state = None
     game_history = []  # List to track Zobrist keys for repetition detection
     own_book = True
+    num_threads = 1
+    helper_search_contexts = []
 
     while True:
         try:
@@ -121,6 +127,7 @@ def uci_loop():
                 print("id name MyChessEngine")
                 print("id author YourName")
                 print("option name OwnBook type check default true")
+                print("option name Threads type spin default 1 min 1 max 64")
                 print("uciok", flush=True)
             elif command == "setoption":
                 try:
@@ -131,6 +138,14 @@ def uci_loop():
                     if opt_name == "OwnBook":
                         own_book = opt_val.lower() == "true"
                         print(f"info string OwnBook set to {own_book}", flush=True)
+                    elif opt_name.lower() == "threads":
+                        num_threads = max(1, min(64, int(opt_val)))
+                        needed_helpers = num_threads - 1
+                        while len(helper_search_contexts) < needed_helpers:
+                            helper_search_contexts.append(create_smp_helper_context(global_search_context))
+                        if len(helper_search_contexts) > needed_helpers:
+                            helper_search_contexts = helper_search_contexts[:needed_helpers]
+                        print(f"info string Threads set to {num_threads}", flush=True)
                 except ValueError:
                     pass
             elif command == "isready":
@@ -178,6 +193,8 @@ def uci_loop():
                 global_search_context.pawn_table_w_king_sq.fill(-1)
                 global_search_context.pawn_table_b_king_sq.fill(-1)
                 global_search_context.stop_flag[0] = False
+                for hc in helper_search_contexts:
+                    reset_search_context(hc)
                 game_history = []
                 global_tt_generation = 0 # Reset generation on new game
             elif command == "position":
@@ -298,7 +315,8 @@ def uci_loop():
                 def search_worker():
                     best_move, _, _, _, _, _ = iterative_deepening_search(
                         board_state[0], board_state[1], board_state[2], max_depth, time_config, global_search_context,
-                        game_history_list=current_game_history, tt_generation=global_tt_generation
+                        game_history_list=current_game_history, tt_generation=global_tt_generation,
+                        num_threads=num_threads, helper_contexts=helper_search_contexts,
                     )
                     print(f"bestmove {move_to_uci(best_move)}", flush=True)
 

@@ -60,7 +60,24 @@ def create_transposition_table(size_mb):
     transposition_table['static_eval'] = 32767
     return transposition_table
 
-@nb.njit(cache=True)
+@nb.njit(cache=True, nogil=True, boundscheck=False, fastmath=True, inline='always')
+def _compute_tt_checksum(key32, score, static_eval, depth, flag, best_move, is_pv):
+    """
+    Compute 16-bit lockless XOR checksum for a TT entry.
+    Stored in padding[0] (low byte) and padding[1] (high byte) to detect torn reads
+    under concurrent Lazy SMP access without changing the 16-byte entry layout.
+    """
+    k = np.uint32(key32)
+    k_fold = np.uint16(k & np.uint32(0xFFFF)) ^ np.uint16(k >> np.uint32(16))
+    s_u16 = np.uint16(np.int16(score))
+    se_u16 = np.uint16(np.int16(static_eval))
+    df_u16 = np.uint16(np.uint8(depth)) | (np.uint16(np.uint8(flag)) << np.uint16(8))
+    bm_u16 = np.uint16(best_move)
+    pv_u16 = np.uint16(1) if is_pv else np.uint16(0)
+    return k_fold ^ s_u16 ^ se_u16 ^ df_u16 ^ bm_u16 ^ pv_u16 ^ np.uint16(0x9E37)
+
+
+@nb.njit(cache=True, nogil=True)
 def clear_transposition_table(tt):
     """
     清除置換表中的所有項目，將每個欄位設置為零。
@@ -77,8 +94,10 @@ def clear_transposition_table(tt):
         tt[i]['generation'] = np.uint8(0)
         tt[i]['best_move'] = np.uint16(0)
         tt[i]['is_pv'] = False
+        tt[i]['padding'][0] = np.uint8(0)
+        tt[i]['padding'][1] = np.uint8(0)
 
-@nb.njit(cache=True, boundscheck=False, fastmath=True)
+@nb.njit(cache=True, nogil=True, boundscheck=False, fastmath=True)
 def hashfull(tt, current_generation):
     """
     計算置換表的使用率（以千分比表示，0 到 1000）。
@@ -101,7 +120,7 @@ def hashfull(tt, current_generation):
                     
     return (cnt * 1000) // (scan_buckets << 2)
 
-@nb.njit(cache=True, boundscheck=False, fastmath=True)
+@nb.njit(cache=True, nogil=True, boundscheck=False, fastmath=True)
 def penalize_tt(tt, zobrist_key, penalty):
     """
     降低與 zobrist_key 匹配的置換表項目的深度。
@@ -114,11 +133,22 @@ def penalize_tt(tt, zobrist_key, penalty):
     for i in range(4):
         idx = base_index + i
         if tt[idx]['key'] == key32:
-            new_depth = max(int(tt[idx]['depth']) - penalty, 0)
-            tt[idx]['depth'] = np.uint8(new_depth)
+            new_depth = np.uint8(max(int(tt[idx]['depth']) - penalty, 0))
+            tt[idx]['depth'] = new_depth
+            chk = _compute_tt_checksum(
+                key32,
+                tt[idx]['score'],
+                tt[idx]['static_eval'],
+                new_depth,
+                tt[idx]['flag'],
+                tt[idx]['best_move'],
+                tt[idx]['is_pv'],
+            )
+            tt[idx]['padding'][0] = np.uint8(chk & np.uint16(0xFF))
+            tt[idx]['padding'][1] = np.uint8(chk >> np.uint16(8))
             break
 
-@nb.njit(cache=True, boundscheck=False, fastmath=True, inline='always')
+@nb.njit(cache=True, nogil=True, boundscheck=False, fastmath=True, inline='always')
 def probe_tt(tt, zobrist_key):
     """
     在置換表 (Bucket=4) 中查找項目。
@@ -144,17 +174,80 @@ def probe_tt(tt, zobrist_key):
     for i in range(4):
         entry = tt[base_index + i]
         if entry['key'] == key32:
+            flag = entry['flag']
+            if flag == TT_FLAG_NONE:
+                return entry
+            if flag > TT_FLAG_BETA:
+                return _EMPTY_TT_ENTRY
+            stored_chk = np.uint16(entry['padding'][0]) | (np.uint16(entry['padding'][1]) << np.uint16(8))
+            expected_chk = _compute_tt_checksum(
+                key32,
+                entry['score'],
+                entry['static_eval'],
+                entry['depth'],
+                flag,
+                entry['best_move'],
+                entry['is_pv'],
+            )
+            if stored_chk != expected_chk:
+                return _EMPTY_TT_ENTRY
             return entry
 
     return _EMPTY_TT_ENTRY
 
-@nb.njit(cache=True, boundscheck=False, fastmath=True)
+
+@nb.njit(cache=True, nogil=True, boundscheck=False, fastmath=True, inline='always')
+def probe_tt_snapshot(tt, zobrist_key):
+    """
+    Lockless thread-safe TT probe that snapshots entry fields into local scalar registers
+    and verifies the 16-bit XOR checksum before returning.
+    Returns (flag, depth, score, static_eval, is_pv, best_move).
+    """
+    if len(tt) < 4:
+        return np.uint8(TT_FLAG_NONE), np.int32(0), np.int32(0), np.int16(32767), False, np.uint16(0)
+
+    num_buckets_minus_1 = np.uint64((len(tt) >> 2) - 1)
+    base_index = np.int64(((zobrist_key >> np.uint64(32)) & num_buckets_minus_1) << np.uint64(2))
+    key32 = np.uint32(zobrist_key)
+
+    for i in range(4):
+        idx = base_index + i
+        e_key = np.uint32(tt[idx]['key'])
+        if e_key == key32:
+            e_score = np.int16(tt[idx]['score'])
+            e_static_eval = np.int16(tt[idx]['static_eval'])
+            e_depth = np.uint8(tt[idx]['depth'])
+            e_flag = np.uint8(tt[idx]['flag'])
+            e_best_move = np.uint16(tt[idx]['best_move'])
+            e_is_pv = bool(tt[idx]['is_pv'])
+            p0 = np.uint8(tt[idx]['padding'][0])
+            p1 = np.uint8(tt[idx]['padding'][1])
+            if e_flag == TT_FLAG_NONE or e_flag > TT_FLAG_BETA:
+                return np.uint8(TT_FLAG_NONE), np.int32(0), np.int32(0), np.int16(32767), False, np.uint16(0)
+            stored_chk = np.uint16(p0) | (np.uint16(p1) << np.uint16(8))
+            expected_chk = _compute_tt_checksum(
+                key32,
+                e_score,
+                e_static_eval,
+                e_depth,
+                e_flag,
+                e_best_move,
+                e_is_pv,
+            )
+            if stored_chk != expected_chk:
+                return np.uint8(TT_FLAG_NONE), np.int32(0), np.int32(0), np.int16(32767), False, np.uint16(0)
+            return e_flag, np.int32(e_depth), np.int32(e_score), e_static_eval, e_is_pv, e_best_move
+
+    return np.uint8(TT_FLAG_NONE), np.int32(0), np.int32(0), np.int16(32767), False, np.uint16(0)
+
+
+@nb.njit(cache=True, nogil=True, boundscheck=False, fastmath=True)
 def probe_tt_best_move(tt, zobrist_key):
     """Pure-Python-safe TT lookup returning scalar (flag, best_move) without np.record boxing."""
     entry = probe_tt(tt, zobrist_key)
     return np.uint8(entry['flag']), np.uint16(entry['best_move'])
 
-@nb.njit(cache=True, boundscheck=False, fastmath=True)
+@nb.njit(cache=True, nogil=True, boundscheck=False, fastmath=True)
 def store_tt(tt, zobrist_key, depth, score, static_eval, flag, best_move, current_generation, is_pv=False):
     """
     使用 Stockfish 風格的 4-Way Set Associative (四路組相聯) 策略存取置換表，並套用智能替換決策。
@@ -202,15 +295,24 @@ def store_tt(tt, zobrist_key, depth, score, static_eval, flag, best_move, curren
                     replace = True
                 
             if replace:
+                d_u8 = np.uint8(depth)
+                s_i16 = np.int16(score)
+                se_i16 = np.int16(static_eval) if static_eval != 32767 else existing_entry['static_eval']
+                f_u8 = np.uint8(flag)
+                gen_u8 = np.uint8(current_generation)
+                pv_b = bool(is_pv)
+                chk = _compute_tt_checksum(key32, s_i16, se_i16, d_u8, f_u8, final_best_move, pv_b)
                 tt[idx]['key'] = key32
-                tt[idx]['depth'] = np.uint8(depth)
-                tt[idx]['score'] = np.int16(score)
+                tt[idx]['depth'] = d_u8
+                tt[idx]['score'] = s_i16
                 if static_eval != 32767:
-                    tt[idx]['static_eval'] = np.int16(static_eval)
-                tt[idx]['flag'] = np.uint8(flag)
-                tt[idx]['generation'] = np.uint8(current_generation)
+                    tt[idx]['static_eval'] = se_i16
+                tt[idx]['flag'] = f_u8
+                tt[idx]['generation'] = gen_u8
                 tt[idx]['best_move'] = final_best_move
-                tt[idx]['is_pv'] = is_pv
+                tt[idx]['is_pv'] = pv_b
+                tt[idx]['padding'][0] = np.uint8(chk & np.uint16(0xFF))
+                tt[idx]['padding'][1] = np.uint8(chk >> np.uint16(8))
             else:
                 if static_eval != 32767 and existing_entry['static_eval'] == 32767:
                     tt[idx]['static_eval'] = np.int16(static_eval)
@@ -219,6 +321,17 @@ def store_tt(tt, zobrist_key, depth, score, static_eval, flag, best_move, curren
                     existing_score = existing_entry['score']
                     if abs(existing_score) >= MATE_IN_MAX_PLY:
                         tt[idx]['depth'] = np.uint8(max(int(existing_entry['depth']) - 1, 0))
+                chk = _compute_tt_checksum(
+                    key32,
+                    tt[idx]['score'],
+                    tt[idx]['static_eval'],
+                    tt[idx]['depth'],
+                    tt[idx]['flag'],
+                    tt[idx]['best_move'],
+                    tt[idx]['is_pv'],
+                )
+                tt[idx]['padding'][0] = np.uint8(chk & np.uint16(0xFF))
+                tt[idx]['padding'][1] = np.uint8(chk >> np.uint16(8))
             return # 找到並處理完相符局面，直接退出
             
     # 2. 如果沒有找到完全相同的局面 (雜湊碰撞 Collision)，進入替換評估 (Replacement Strategy)
@@ -251,16 +364,26 @@ def store_tt(tt, zobrist_key, depth, score, static_eval, flag, best_move, curren
             replace_idx = idx
 
     # 執行最終替換 (因為非吻合點，不保留舊的最佳步)
+    d_u8 = np.uint8(depth)
+    s_i16 = np.int16(score)
+    se_i16 = np.int16(static_eval)
+    f_u8 = np.uint8(flag)
+    gen_u8 = np.uint8(current_generation)
+    bm_u16 = np.uint16(best_move)
+    pv_b = bool(is_pv)
+    chk = _compute_tt_checksum(key32, s_i16, se_i16, d_u8, f_u8, bm_u16, pv_b)
     tt[replace_idx]['key'] = key32
-    tt[replace_idx]['depth'] = np.uint8(depth)
-    tt[replace_idx]['score'] = np.int16(score)
-    tt[replace_idx]['static_eval'] = np.int16(static_eval)
-    tt[replace_idx]['flag'] = np.uint8(flag)
-    tt[replace_idx]['generation'] = np.uint8(current_generation)
-    tt[replace_idx]['best_move'] = np.uint16(best_move)
-    tt[replace_idx]['is_pv'] = is_pv
+    tt[replace_idx]['depth'] = d_u8
+    tt[replace_idx]['score'] = s_i16
+    tt[replace_idx]['static_eval'] = se_i16
+    tt[replace_idx]['flag'] = f_u8
+    tt[replace_idx]['generation'] = gen_u8
+    tt[replace_idx]['best_move'] = bm_u16
+    tt[replace_idx]['is_pv'] = pv_b
+    tt[replace_idx]['padding'][0] = np.uint8(chk & np.uint16(0xFF))
+    tt[replace_idx]['padding'][1] = np.uint8(chk >> np.uint16(8))
 
-@nb.njit(cache=True)
+@nb.njit(cache=True, nogil=True)
 def estimate_tt_occupancy_percentage(tt):
     """
     使用 Stockfish 的 1000 個 bucket 抽樣法，快速估算置換表歷史總使用率（百分比 %）。
