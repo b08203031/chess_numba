@@ -818,13 +818,13 @@ flowchart TD
    * **全開凍結區塊＋「2/3 驗證集負 Z 即收」**（疊加 `block2a ×2`、`block5a`、`block5c`、`IMBALANCE_DIVISOR=19`、`block7a ×3`）：兩套同源性質的靜態 EPD（`holdout -37.22`、`val_zurichess -41.84`）聯手壓過 `val_pgn`（累積退步至 `z=+9.45`、`broad-EG +13.69`、`queenless +20.18`）；實戰 `1,826` 局（`913` 對，`319W-1182D-325L`）為 **`-1.14 ± 9.27 Elo`**（`[0, 10] LLR=-2.74`）。
    * **乾淨 `0.15` 單獨重跑並組合 `block5c_king_safety_output`（`113/17960/113`）+ `IMBALANCE_DIVISOR=19`**：雖三集總分皆負（`holdout -3.51`、`val_pgn -23.80`、`Zurichess -16.28`），但 **`sf19-tactical`（`val_pgn +3.62`、`Zurichess +4.59`）與 `holdout phase=0 (+8.57)` 顯著惡化**；實戰 `600` 局（`300` 對，`93W-391D-116L`）於第 299 對觸 **`SPRT[0,10] H0 ❌`（`-13.32 ± 15.22 Elo`, `LLR=-3.05`）**（持黑 `43.50%`、`51-80m 0.441`），確認削弱 MG 王安全與調整不平衡除數不利實戰後退回乾淨 `0.15` 基準。
 
-3. **最新突破：乾淨 `0.15` 基準單獨套用 `Block 7a`（第 1 輪 `IMBALANCE_*`）實戰領先（2026-11-18）**：
+3. **最新突破：乾淨 `0.15` 基準單獨套用 `Block 7a`（第 1 輪 `IMBALANCE_*`）通過雙 SPRT `H1✅` 並同步新基準（2026-11-18）**：
    * 退回乾淨 `0.15` 後，單獨套用 **第 1 輪 `block7a_imbalance`** 至 [`constants.py`](constants.py) 並同步 [`tuner/constants_snapshot.py`](../../tuner/constants_snapshot.py)：僅調整 `IMBALANCE_QUADRATIC_OURS`（如 `[0][0] 1246→1221`、`[2][1] 174→160`、`[3][1] 68→66`）、`IMBALANCE_QUADRATIC_THEIRS`（如 `[2][1] 104→109`、`[5][1] 170→187`、`[5][4] 407→430`）與 `IMBALANCE_SCALE_EG`（`75→79`）；其餘 `IMBALANCE_DIVISOR=20`、`IMBALANCE_SCALE_MG=53` 及靜態／威脅／王安全權重維持 `0.15` 原值。
-   * **對戰 `classical_old`（`0.15` 基準）進行中實況**（[`tournament_analysis/tournament_results.pgn`](../../tournament_analysis/tournament_results.pgn)，243k nodes/move，`calc_sprt.py` 截至 `1,450` 局 / `725` 對；`統計數據.py` 截至 `1,454` 局）：
-     * 戰績 `281W - 938D - 231L`（`1,454` 局統計為 `282W - 940D - 232L`，得分率 `51.72%`，和棋率 `64.65%`），**`+11.99 ± 10.44 Elo`**（**`95% CI [+1.56, +22.43]`**，`nElo = +20.56 ± 17.88`）。
-     * **`SPRT[-3, 3]`（新增「新舊對戰」預設）`LLR = +2.54`**、**`SPRT[0, 10] LLR = +2.47`**（盤中最高 `+2.86`）、**`SPRT[-5, 0] LLR = +2.56`**；四手數區間全勝（`≤25: 0.511`、`26–50: 0.518`、`51–80: 0.519`、`>80: 0.514`），節點與深度維持中立（`1,456` 局 `mean_d 16.83 vs 16.81`、`mean_n 243,079 vs 243,001`）。
-   * **第 2 輪續調 `block7a_imbalance`（維持未採用）**：基於 R1 續調（`OURS[0][0] 1221→1191`、`IMBALANCE_SCALE_EG 79→82`）雖使 `holdout (-15.45)` 與 `Zurichess (-30.25)` 續降，但 `val_pgn` 整體反轉惡化至 **`z = +5.59`**（`phase=64..95 +15.28`、`sf19-quiet +5.25`、`sf19-tactical +2.59`），已保留未採用（候選檔存於 `tuner/runs/classical_with_pgn_sf15/block7a_imbalance.py`）。
-   * **目前同步政策**：對戰尚未正式觸 `+2.94` 收線，[`classical_old/`](../classical_old/) 持續保留 `SF_LAMBDA=0.15` 凍結基準，待續跑正式 `H1 Accepted` 後再決定 `--sync`。
+   * **對戰 `classical_old`（`0.15` 基準）最終完賽驗收**（[`tournament_analysis/tournament_results.pgn`](../../tournament_analysis/tournament_results.pgn)，243k nodes/move，共 **`1,550` 局 / `775` 對**）：
+     * 戰績 **`303W - 1,002D - 245L`**（`804.0 / 1,550`，淨勝 `+58` 局，得分率 `51.87%`，和棋率 `64.65%`；持白 `186W-488D-101L, 55.48%`、持黑 `117W-514D-144L, 48.26%`），Penta `[21, 142, 401, 180, 31]`，**`+13.01 ± 10.09 Elo`**（**`95% CI [+2.93, +23.11]`**，`nElo = +22.32 ± 17.30`）。
+     * **雙線 `H1 Accepted` ✅**：**`SPRT[0, 10]` 達 `LLR = +3.03`（Penta 精確 `+3.01`，`@773 對 / 1,546 局` 觸線）**、**`SPRT[-3, 3]`（新舊對戰）達 `LLR = +2.95`（`@773 對 / 1,546 局` 觸線）**（`SPRT[-5, 0] LLR = +2.93`）。四手數區間全勝（`≤25: 0.510`、`26–50: 0.518`、`51–80: 0.524`、`>80: 0.508`），前後半程穩定走高（`0.511 → 0.526`），節點與深度維持中立（`mean_d 16.83 vs 16.81`、`mean_n 243,114 vs 243,030`）。
+   * **第 2 輪續調 `block7a_imbalance`（維持未採用）**：基於 R1 續調（`OURS[0][0] 1221→1191`、`IMBALANCE_SCALE_EG 79→82`）雖使 `holdout (-15.45)` 與 `Zurichess (-30.25)` 續降，但 `val_pgn` 整體反轉惡化至 **`z = +5.59`**（`phase=64..95 +15.28`、`sf19-quiet +5.25`、`sf19-tactical +2.59`），保留未採用（候選檔存於 `tuner/runs/classical_with_pgn_sf15/block7a_imbalance.py`）。
+   * **基準同步完成**：經 `SPRT[0, 10]` 與 `SPRT[-3, 3]` 雙線 `H1 Accepted` 並獲確認，已執行 `python tools/sync_classical_old.py --sync` 將 [`classical_old/`](../classical_old/) 同步為 **`SF_LAMBDA=0.15 + Block 7a Imbalance R1`** 新對戰基準（`--diff` 驗證雙目錄 100% 邏輯一致）。
 
 
 
