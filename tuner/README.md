@@ -49,6 +49,7 @@
 * **`val_pgn castling!=0` 相關性校正與 `val_zurichess` 仲裁**：
   * `val_pgn` 同局開局有易位權局面約連續 ~10 plies 共用結果，會膨脹 i.i.d. Z 值。當 `holdout` 與 `val_pgn` 全體及 `broad-EG` 皆顯著改善（`z < -3.0`），且 **僅** `val_pgn castling!=0` 出現中度退步（不同時超過極端門檻 `z > 8.0` 且 `delta > 3e-5`）時：若有 `val_zurichess` 交叉檢查且未同步觸發 severe，或未啟用 `val_zurichess` 時，將降級為 `CAUTION`（保留警告但不一刀 `REJECT`）。
   * 啟用 `USE_PGN_VAL=True` 與 `USE_ZURICHESS_VAL=True` 時，`val_zurichess` 扮演**診斷／仲裁角色**（不單方面對雙重 `PASS` 區塊投否決票，僅於 `castling!=0` 與 `val_pgn` 共同觸發 severe 時強化為 `REJECT`，或觸發單邊警告為 `CAUTION`；輕微正 Z 僅印出 `Info:`）。只有停用 `USE_PGN_VAL` 時，`val_zurichess` 才作為唯一外部閘門。
+  * **實戰教訓（2026-11-18）**：`dataset_epd_wdl_20m` holdout 與 `val_zurichess` 同屬靜態 EPD 來源，於 `THREAT_*`、`KING_DANGER_*`、`IMBALANCE_*` 等非靜態權重常出現同向靜態偏差；**切勿以「3 驗證集任 2 個 Z < 0 即放行」投票壓過 `val_pgn`（亦須注意 `sf19-tactical` 是否同步惡化）**，且對同一非靜態區塊連續疊調多輪極易在 EPD 上過擬合並拉壞實戰中局。
 
 ### (3) `SPSAOptimizer` 的 `scales^2` 座標步幅效應
 * `SPSAOptimizer` 透過 `u = theta / scales` 進行 `auto_scale=True` 縮放：`pert = ck * scales * delta` 且更新步幅再乘 `scales`，使等效座標學習率正比於 **`scales^2`**；同時啟用整數擾動保底 `c_floor = 1.0~1.25` 與 EMA 平滑候選追蹤。

@@ -36,6 +36,7 @@ DEFAULT_PGN = HERE / "tournament_results.pgn"
 
 # Default SPRT hypothesis presets: (label, elo0, elo1)
 DEFAULT_BOUNDS: List[Tuple[str, float, float]] = [
+    ("新舊對戰", -3.0, 3.0),
     ("Tournament預設", 0.0, 10.0),
     ("中等增益", 0.0, 5.0),
     ("細微增益", 0.0, 3.0),

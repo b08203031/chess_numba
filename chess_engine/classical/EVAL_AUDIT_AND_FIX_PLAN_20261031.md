@@ -802,6 +802,30 @@ flowchart TD
    * 修復 [`tuner/tuner.py`](../../tuner/tuner.py) `_enable_pst_rows` 於指定單一 `PST_MG` 或 `PST_EG` 搭配 `pst_pieces` 時會強制開啟雙表之缺陷，並在 [`tuner/texel_tuner_runner.ipynb`](../../tuner/texel_tuner_runner.ipynb) 清空輸出、移除 3 份重複 `copy*.ipynb` 後，於 **Section 10** 另設基於 `0.15` 基準的一鍵補調拆分區塊（`block1a_passed_tables_mild`、`block4a_pawn_penalties`、`block4a_connected_mg`、`block6e_pawn_mg`、`block6b_bishop_eg` 與 `pgn_new.npz` 驗證）。
    * 修復 [`chess_engine/nnue/transposition_table.py`](../nnue/transposition_table.py) 的 `probe_tt` 缺少 `inline='always'` 導致 Numba `Record`（`_EMPTY_TT_ENTRY`）跨非內聯呼叫邊界回傳堆疊殘值之問題（補上 `@nb.njit(cache=True, boundscheck=False, fastmath=True, inline='always')` 與 `probe_tt_best_move` 對應裝飾器），使 `test_probe_tt_best_move_avoids_pure_python_record_boxing` 與 `probe_tt` 未命中路徑穩定回傳 `(0, 0)`。
 
+---
+
+### 十三、Phase 13：`SF_LAMBDA=0.15` 後續調優消融、非靜態參數對戰教訓與 `Block 7a` Imbalance（2026-11-17 ~ 2026-11-18）
+
+在 [`classical_old/constants.py`](../classical_old/constants.py) 鎖定 `SF_LAMBDA=0.15` 對戰基準後，針對 Section 10 靜態小區塊與 `STATIC_ONLY_FROZEN_PARAMS`（47 組非靜態／搜尋耦合參數）完成以下實戰交叉檢驗：
+
+1. **Section 10 靜態補調飽和確認（2026-11-17）**：
+   * 僅 `block4a_connected_mg`（`CONNECTED_BONUS[5] 35→34`）與 `block6b_bishop_eg`（`EG Bishop 439→440`、`PST_EG[B]` 10 格 `±1 cp`）通過 `PASS`。
+   * `block1a_passed_tables_mild`（`K+P` 三集皆改善 `z=-11.2~-22.3`，但 `minor-only EG` 反向惡化並把 `val_zurichess` 推至 `+15.77`）判 `CAUTION`；`block4a_pawn_penalties` 因三集 `pure king+pawns` 同時崩潰（`z=+8.70~+13.48`）判 `REJECT`；`block6e_pawn_mg` 因 `val_pgn z=+2.67` 判 `REJECT`。
+   * 實證顯示純靜態 HCE 在 `SF_LAMBDA=0.15` 後已達表達飽和區，兵殘局常數只在 `K+P` 與 `minor-only EG` 間以 `±1 cp` 互相拉鋸，不建議放寬 `K+P` 守門硬擠。
+
+2. **非靜態參數（`STATIC_FEATURES_ONLY=False`）與「兩靜態 EPD 多數決」實戰否決（2026-11-17 ~ 2026-11-18）**：
+   * **單套 `block2a_threats`**（強制套用；`holdout -24.48` / `Zurichess -21.93` vs `val_pgn REJECT +15.58 / broad-EG +23.88`）：對 `0.15` 實戰 `1,406` 局（`703` 對，`227W-941D-238L`），**`-2.72 ± 9.94 Elo` (`SPRT[0,10] H0 ❌`, `LLR=-3.00`)**，於 `long(51-80m 0.488)` 與 `very_long(>80m 0.465)` 失分，印證 `val_pgn broad-EG` 守門精準。
+   * **全開凍結區塊＋「2/3 驗證集負 Z 即收」**（疊加 `block2a ×2`、`block5a`、`block5c`、`IMBALANCE_DIVISOR=19`、`block7a ×3`）：兩套同源性質的靜態 EPD（`holdout -37.22`、`val_zurichess -41.84`）聯手壓過 `val_pgn`（累積退步至 `z=+9.45`、`broad-EG +13.69`、`queenless +20.18`）；實戰 `1,826` 局（`913` 對，`319W-1182D-325L`）為 **`-1.14 ± 9.27 Elo`**（`[0, 10] LLR=-2.74`）。
+   * **乾淨 `0.15` 單獨重跑並組合 `block5c_king_safety_output`（`113/17960/113`）+ `IMBALANCE_DIVISOR=19`**：雖三集總分皆負（`holdout -3.51`、`val_pgn -23.80`、`Zurichess -16.28`），但 **`sf19-tactical`（`val_pgn +3.62`、`Zurichess +4.59`）與 `holdout phase=0 (+8.57)` 顯著惡化**；實戰 `600` 局（`300` 對，`93W-391D-116L`）於第 299 對觸 **`SPRT[0,10] H0 ❌`（`-13.32 ± 15.22 Elo`, `LLR=-3.05`）**（持黑 `43.50%`、`51-80m 0.441`），確認削弱 MG 王安全與調整不平衡除數不利實戰後退回乾淨 `0.15` 基準。
+
+3. **最新突破：乾淨 `0.15` 基準單獨套用 `Block 7a`（第 1 輪 `IMBALANCE_*`）實戰領先（2026-11-18）**：
+   * 退回乾淨 `0.15` 後，單獨套用 **第 1 輪 `block7a_imbalance`** 至 [`constants.py`](constants.py) 並同步 [`tuner/constants_snapshot.py`](../../tuner/constants_snapshot.py)：僅調整 `IMBALANCE_QUADRATIC_OURS`（如 `[0][0] 1246→1221`、`[2][1] 174→160`、`[3][1] 68→66`）、`IMBALANCE_QUADRATIC_THEIRS`（如 `[2][1] 104→109`、`[5][1] 170→187`、`[5][4] 407→430`）與 `IMBALANCE_SCALE_EG`（`75→79`）；其餘 `IMBALANCE_DIVISOR=20`、`IMBALANCE_SCALE_MG=53` 及靜態／威脅／王安全權重維持 `0.15` 原值。
+   * **對戰 `classical_old`（`0.15` 基準）進行中實況**（[`tournament_analysis/tournament_results.pgn`](../../tournament_analysis/tournament_results.pgn)，243k nodes/move，`calc_sprt.py` 截至 `1,450` 局 / `725` 對；`統計數據.py` 截至 `1,454` 局）：
+     * 戰績 `281W - 938D - 231L`（`1,454` 局統計為 `282W - 940D - 232L`，得分率 `51.72%`，和棋率 `64.65%`），**`+11.99 ± 10.44 Elo`**（**`95% CI [+1.56, +22.43]`**，`nElo = +20.56 ± 17.88`）。
+     * **`SPRT[-3, 3]`（新增「新舊對戰」預設）`LLR = +2.54`**、**`SPRT[0, 10] LLR = +2.47`**（盤中最高 `+2.86`）、**`SPRT[-5, 0] LLR = +2.56`**；四手數區間全勝（`≤25: 0.511`、`26–50: 0.518`、`51–80: 0.519`、`>80: 0.514`），節點與深度維持中立（`1,456` 局 `mean_d 16.83 vs 16.81`、`mean_n 243,079 vs 243,001`）。
+   * **第 2 輪續調 `block7a_imbalance`（維持未採用）**：基於 R1 續調（`OURS[0][0] 1221→1191`、`IMBALANCE_SCALE_EG 79→82`）雖使 `holdout (-15.45)` 與 `Zurichess (-30.25)` 續降，但 `val_pgn` 整體反轉惡化至 **`z = +5.59`**（`phase=64..95 +15.28`、`sf19-quiet +5.25`、`sf19-tactical +2.59`），已保留未採用（候選檔存於 `tuner/runs/classical_with_pgn_sf15/block7a_imbalance.py`）。
+   * **目前同步政策**：對戰尚未正式觸 `+2.94` 收線，[`classical_old/`](../classical_old/) 持續保留 `SF_LAMBDA=0.15` 凍結基準，待續跑正式 `H1 Accepted` 後再決定 `--sync`。
+
 
 
 
