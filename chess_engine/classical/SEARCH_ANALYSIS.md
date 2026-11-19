@@ -1241,9 +1241,9 @@ NMP gate/R、ProbCut style、NMP beta requirement 的預設值也由常量明確
 
 ---
 
-## 18. 多執行緒平行搜尋架構：無鎖 Lazy SMP (Lockless Lazy SMP, 2026-11-18)
+## 18. 多執行緒平行搜尋架構：無鎖 Lazy SMP (Lockless Lazy SMP, 2026-11-18；2026-11-19 對齊 SF19)
 
-本節記錄在 Numba `@njit(nogil=True)` 架構下實現多核心 **Lazy SMP (Symmetric Multiprocessing)** 平行搜尋的完整設計、過去在 Python/Numba 多執行緒實驗中遭遇的底層效能陷阱根因分析，以及 1 / 2 / 4 / 8 執行緒實測擴展數據。
+本節記錄在 Numba `@njit(nogil=True)` 架構下實現多核心 **Lazy SMP (Symmetric Multiprocessing)** 平行搜尋的完整設計、過去在 Python/Numba 多執行緒實驗中遭遇的底層效能陷阱根因分析，2026-11-19 與 **Stockfish 19 (SF19)** 對齊後的根節點保守機制與加權投票遴選規則，以及早期 1 / 2 / 4 / 8 執行緒基線擴展數據。
 
 ### 18.1 Python / Numba 多執行緒三大效能與正確性陷阱根因分析
 
@@ -1254,7 +1254,8 @@ NMP gate/R、ProbCut style、NMP beta requirement 的預設值也由常量明確
    * **解法（`np.frombuffer` 獨立標頭包裝）**：在 `engine_types.py` 的 `create_smp_helper_context(main_context)` 中，透過 `np.frombuffer(main_tt.data, dtype=tt_entry_dtype)` 與 `np.frombuffer(main_stop.data, dtype=np.bool_)` 為每個 Helper 執行緒建立**各自獨立的 Python `ndarray` 包裝物件**。如此一來，每個執行緒擁有完全私有的 Numba `NRT_MemInfo` 引用計數標頭（消除跨核 `lock xadd` 爭用），同時底層 `ctypes.data` 指向完全相同的實體記憶體位址，達成零拷貝、零原子爭用的實體記憶體共享。
 2. **迭代加深與歷史表老化的 GIL 切換瓶頸（GIL Transitions in Iterative Deepening）**：
    * **根因**：若 Helper 執行緒在 Python 層執行迭代加深迴圈、抱負視窗（Aspiration Window）重搜或 `np.divide` 歷史表老化，每次深度推進與 Fail-Low / Fail-High 重搜都必須重返 Python 直譯器爭搶 GIL，造成執行緒同步延遲與啟動開銷。
-   * **解法（全 `nogil=True` 機器碼閉環）**：在 `search.py` 新增 `_prepare_search_context_jit` 與 `_lazy_smp_helper_loop_jit`（皆標註 `@numba.njit(..., nogil=True)`）。Helper 執行緒一旦啟動進入 `_lazy_smp_helper_loop_jit`，從歷史表向零減半老化、迭代加深、Stockfish 式深度跳躍（Depth Skipping：`((current_depth + thread_idx) % 2 == 0) and (thread_idx % 3 != 0)` 於 `current_depth >= 4`）與錯開抱負視窗（`ASPIRATION_WINDOW_BASE + (thread_idx & 3) * 4`），直到 `stop_flag[0]` 觸發或抵達 `max_depth` 為止，**100% 運行於原生 LLVM 機器碼中，中途零 GIL 轉換**。
+   * **解法（全 `nogil=True` 機器碼閉環與 SF19 多樣化）**：在 `search.py` 新增 `_prepare_search_context_jit` 與 `_lazy_smp_helper_loop_jit`（皆標註 `@numba.njit(..., cache=True, nogil=True)`）。Helper 執行緒一旦啟動進入 `_lazy_smp_helper_loop_jit`，從歷史表向零減半老化（`trunc_div`）、逐層迭代加深、SF19 式抱負視窗錯開（`asp_base = ASPIRATION_WINDOW_BASE + (int(thread_idx) & 7)`，以 `threadIdx & 7` 微調各執行緒初始視窗半寬）到根節點候選保存、回滾防護與 `last_iteration_pv` 快照更新，直到 `stop_flag[0]` 觸發或抵達 `max_depth` 為止，**100% 運行於原生 LLVM 機器碼中，中途零 GIL 轉換**，並以 10 元組 `lazy_smp_helper_return_type` 回傳給主執行緒進行投票決選。
+   * **移除偶/奇深度跳躍（Depth Skipping Removal）**：2026-11-18 初版曾於 `current_depth >= 4` 對部分執行緒套用 `((current_depth + thread_idx) % 2 == 0) and (thread_idx % 3 != 0)` 跳層；但跳層會使不同執行緒落在不一致的前沿深度，進而在投票階段失真。2026-11-19 對齊 SF19 後已移除深度跳躍，所有執行緒依序搜尋 `1..max_depth` 每一層，改靠執行緒私有的搜尋狀態與 `threadIdx & 7` 抱負視窗差異產生多樣化，同時保持跨執行緒投票可比性。
 3. **無鎖共享置換表的撕裂讀（Torn Reads）與可變紀錄別名（Mutable Record Aliasing）**：
    * **根因**：多個執行緒同時非原子地讀寫 16-byte TT 條目時，可能讀到「前半是舊局面、後半是新局面」的撕裂資料（Torn Read），例如讀出偽造的極端分數、非法 `flag` 或不屬於該局面的 `best_move`；此外，若像單執行緒般直接傳回 `tt[idx]` 結構化視圖，其他執行緒的並發寫入會在同一節點執行期間竄改該視圖欄位。
    * **解法（16-bit XOR Checksum + 純量快照 `probe_tt_snapshot`）**：
@@ -1262,19 +1263,37 @@ NMP gate/R、ProbCut style、NMP beta requirement 的預設值也由常量明確
      * 在 `store_tt`（含完全匹配覆寫、非覆寫靜態分更新與碰撞替換）及 `penalize_tt` 寫入時同步更新 `padding[0..1]`。
      * 新增 `probe_tt_snapshot(tt, zobrist_key)`，在命中 `key32` 當下立即將所有欄位快照（Snapshot）至區域純量暫存器，檢驗 `flag != TT_FLAG_NONE`、`flag <= TT_FLAG_BETA` 且 16-bit XOR 校驗和完全吻合後才回傳純量 tuple；若遭遇並發撕裂讀導致校驗失敗，立即安全視為未命中（Miss）。搜尋端 `_search` 與 `quiescence_search` 全面改用 `probe_tt_snapshot` 並對 `tt_score_raw` 施加 `[-MATE_SCORE, MATE_SCORE]` 夾限保護。
 
-### 18.2 架構整合與 UCI / GUI 介面
+### 18.2 架構整合、SF19 投票遴選與 UCI / GUI 介面
 
 * **執行緒私有與共享狀態劃分（`create_smp_helper_context` / `reset_search_context`）**：
   * **跨執行緒共享實體記憶體（獨立 `NRT_MemInfo`）**：`transposition_table`、`stop_flag`。
-  * **執行緒完全私有（Thread-Local）**：所有走法排序與評估歷史表（`killer_moves`、`pv_table`、`history_table`、`butterfly_history`、`continuation_history`、`capture_history`、`pawn_history`、五張 `correction_history`、`counter_moves`、`low_ply_history`）、搜尋堆疊（`move_stack`、`piece_stack`、`ply_path_stack`、`cutoff_cnt` 等）與兵結構雜湊表（`pawn_table_*`）。
-* **即時節點匯總、最佳執行緒遴選與根節點合法性守衛（`iterative_deepening_search`）**：
+  * **執行緒完全私有（Thread-Local）**：所有走法排序與評估歷史表（`killer_moves`、`pv_table`、`history_table`、`butterfly_history`、`continuation_history`、`capture_history`、`pawn_history`、五張 `correction_history`、`counter_moves`、`low_ply_history`）、搜尋堆疊（`move_stack`、`piece_stack`、`ply_path_stack`、`cutoff_cnt` 等）、`last_iteration_pv` / `last_iteration_pv_len` 與兵結構雜湊表（`pawn_table_*`）。
+* **根節點部分迭代保存、PV 與邊界精確度追蹤（`_search` + `iterative_deepening_search` / `_lazy_smp_helper_loop_jit`）**：
+  * 在 `_search` 根節點（`ply == 0`）：入口檢查 `stop_flag[0]` 即提早返回；將 Mate Distance Pruning 限縮於 `ply > 0`，防止根層被將死邊界提前截斷；若 `tt_move == NO_MOVE` 且 `last_iteration_pv_len > 0` 則補上 `last_iteration_pv[0]` 作為著法排序提示；各著法搜畢後若 `stop_flag[0]` 已立起，跳過後續全視窗 PVS 重搜。
+  * 在 `ply == 0` 每當合法首著（`searched_legal_moves == 1`）或提升 `alpha`（`evaluation > alpha`）於未停止前完成時，即時保存 `root_cand_valid`、`root_cand_move`、`root_cand_score` 並將子節點 PV 寫入 `pv_table[0, :]`。若後續根著搜尋中途遇 `stop_flag[0]`，`_search` 回傳 `(root_cand_score, root_cand_move, ...)` 保留該輪部分迭代已驗證的最佳著，而非整輪作廢。
+  * Thread 0 與各 Helper 在每次 `_search`（含 Aspiration 重搜與中斷返回）後，只要 `best_move_iter != NO_MOVE`，即更新 `cand_move`、`cand_score`、`cand_depth`、`cand_pv` 與界限精確度標記：若 `score >= beta` 設 `inexact_lower = True`（`uci_score = beta`），若 `score <= alpha` 設 `inexact_upper = True`（`uci_score = alpha`），否則兩者皆 `False`（`uci_score = score`）；若在 `stop_flag[0]` 觸發下回傳 `NO_MOVE`，則保留既有的有效 `cand_*` 候選不被覆蓋。
+* **SF19 回滾防護守衛（`forgotten_mate` 與 `aborted_loss_search`）**：
+  * `apply_root_iteration_guards`（Thread 0）與 `_lazy_smp_helper_loop_jit` 內建等價邏輯於每層迴圈結束後執行兩道防護：
+    * **`forgotten_mate`**：若先前已完成且通過防護的層數曾找到將死（`last_best_valid` 且 `abs(last_best_score) >= MATE_IN_MAX_PLY`，本引擎 `MATE_IN_MAX_PLY = 30000 - 128 = 29872`），而本輪候選無效、將死距離變長／退化（`abs(cand_score) < abs(last_best_score)`）或帶有 `inexact_lower`/`inexact_upper`，則視為將死遺失。
+    * **`aborted_loss_search`**：若本輪於搜尋中途停止（`stopped_in_iter`），候選有效且分數落入敗勢門檻（`cand_score <= -VALUE_KNOWN_WIN`，即 `-10000`）同時未標記 `inexact_lower`/`inexact_upper`，則視為中斷未確認的假性敗著。
+  * 一旦命中 `aborted_loss_search` 或 `(cand_valid and forgotten_mate)`，若有先前穩定解 `last_best_valid`，即回滾至 `last_best_*`（清除 `inexact` 旗標，完整層採 `current_depth`、中斷層退回 `last_best_depth`，並重設 `uci_pv_sent = False`）；若連第一層都尚未完成即觸發 `aborted_loss_search`，則強制標記 `cand_inexact_lower = True`，避免該未確認敗著影響投票。
+* **SF19 `select_best_thread` 分數加權投票與決選（對齊 `stockfish_repo/src/thread.cpp` `get_best_thread`）**：
+  * 透過 `RootThreadResult` 匯集 Thread 0 與所有 Helper 結果（`move != NO_MOVE` 且 `score > -INFINITY`）。
+  * **分數加權投票**：計算 `min_score = min(th.score)`，對每個有效執行緒的根著法累加 `votes[move] += (score - min_score + 14)`。
+  * **精確決定性優勢優先（`is_exact_decisive()`）**：`is_decisive()` 判定為 `abs(score) >= MATE_IN_MAX_PLY`，`is_win()` / `is_loss()` 判定為 `±VALUE_KNOWN_WIN`（`±10000`），而 `is_exact_decisive()` 必須同時滿足 `not is_inexact()`（阻擋 fail-high / fail-low 未收斂的假將死）。若存在 `is_exact_decisive()` 候選，優先勝過非決定性結果；若雙方皆為 `is_exact_decisive()`，精確勝勢優於精確敗勢，否則較大 `abs(score)` 勝出（優先更短步數的將死），同 `abs(score)` 時再依 `votes[move]` 與 `(pv_len, score, depth)` 決勝。
+  * **一般分數投票與平手打破**：非決定性局面下先拒斥任何 `th.is_loss()`（`score <= -VALUE_KNOWN_WIN`）的著法覆蓋非敗勢候選，其餘依 `votes[move]` 高者勝出；若票數相同，依 `(pv_len, score, depth)` 決勝（優先較長 PV）。
+* **固定深度 vs 限時／限節點模式，以及 Helper 勝出 UCI `info` 輸出**：
+  * `iterative_deepening_search` 計算 `is_fixed_depth = (max_depth < MAX_PLY and maximum_time_ms <= 0 and optimum_time_ms <= 0 and nodes_limit <= 0)`（對齊 SF19 `!limits.depth`）：純固定深度模式下只要 `thread0_result.is_valid()`，直接採用 Thread 0 在指定深度的決策（僅在 `NO_MOVE` 時退回 `select_best_thread`）；在限時或限節點搜尋下，則啟動完整的 `select_best_thread` 多執行緒投票。
+  * 當 `verbose=True` 且最終選中 Helper（`best_thread.thread_id != 0`）或主執行緒尚未印出該狀態 `info`（如部分迭代中斷／回滾導致 `not uci_pv_sent`），會在返回前補發最終 UCI `info depth ... score ... [lowerbound|upperbound] nodes ... nps ... hashfull ... time ... pv ...` 行，最後通過 `generate_legal_moves` 合法性守衛並保持 6 元組回傳格式相容。
+* **即時節點匯總、UCI / GUI 與對戰工具介面**：
   * 每個 Helper 在完成每次 `_search` 呼叫後將累計節點發佈至自身 `nodes_searched_array[0]`；Thread 0 在 UCI `info` 輸出與 `nodes_limit` 檢查時即時加總所有活躍 Helper 的節點數，真實反映多核總吞吐量（Combined Nodes & NPS）。
-  * 搜尋結束並 `join()` 所有 Helper 後，將各 Helper 的 `(search_nodes, q_nodes, tt_hits)` 匯入總計，並執行 **Best-Thread Selection**（若某 Helper 完成深度更高且分數更優，或主執行緒因極短時控未完成深度，則採用該 Helper 的最佳著法），最後以 `generate_legal_moves` 進行 **Root Move Legality Guard** 確保回傳著法 100% 合法。
-* **UCI 與螢幕輔助 GUI 支援**：
-  * `main.py`：支援標準 UCI `option name Threads type spin default 1 min 1 max 64`，於 `setoption name Threads value <N>` 時動態配置 `N - 1` 個 Helper Context，並於 `ucinewgame` 時同步重置。
-  * `assistant.py`：於自動分頁新增「執行緒數 (CPU Threads)」下拉選單（`1, 2, 4, 6, 8, 12, 16`），支援熱切換並在引擎 JIT 預熱完成（`readyok`）且執行完 `ucinewgame` 與 `OwnBook` 還原後自動同步執行緒設定。
+  * `main.py`：支援 UCI `Hash`（`1..4096` MB，預設 `128`，變更時重建 `SearchContext` 與對應 Helper）、`OwnBook` 與 `Threads`（`1..64`，預設 `1`），並於 `ucinewgame` 時同步重置所有主／副 Context。
+  * `assistant.py`：於自動分頁提供「執行緒數 (CPU Threads)」下拉選單（`1, 2, 4, 6, 8, 12, 16`），於 `readyok` 與 `ucinewgame` 後自動同步 `Hash`（預設 `512` MB）、`OwnBook` 與 `Threads`。
+  * `tools/tournament.py` / `tools/match_runner.py` / `tools/match_core.py`：支援 `--threads`、`--threads1`、`--threads2` 與 `--engine-threads`（`inprocess` 配置 Helper Context、`uci` 轉發 `Hash` 與 `Threads`），操作範例見 `tools/TOURNAMENT_TUTORIAL.md`。
 
-### 18.3 1 / 2 / 4 / 8 執行緒 Lazy SMP 實測效能擴展數據
+### 18.3 1 / 2 / 4 / 8 執行緒 Lazy SMP 實測效能擴展數據（Pre-SF19-Voting 歷史基線）
+
+> **基線範圍說明**：以下數據量測於 **2026-11-18**（SF19 投票與全深度對齊之前，當時 Helper 仍啟用 Depth Skipping 且採用舊版 `h_depth > last_completed_depth` 遴選規則），保留作為無鎖 TT 與 `nogil` 硬體吞吐量擴展的歷史基線參考。
 
 在單一 Python 行程內完成 JIT 預熱後（測試套件 `tests/test_lazy_smp.py` 驗證無鎖 TT Checksum、記憶體隔離與多執行緒正確性全數通過），以 4 個具代表性的標準局面（`Startpos`、`Kiwipete`、`Middlegame`、`Endgame`，TT = 64 MB）量測 1、2、4、8 執行緒的吞吐量與搜尋深度擴展：
 
@@ -1287,7 +1306,7 @@ NMP gate/R、ProbCut style、NMP beta requirement 的預設值也由常量明確
 | **4 Threads** | 12,114,896 | 4.00s | **3,027,444** | **5.07x** | 5,032,251 | 18.25 (+2.75 ply) |
 | **8 Threads** | 19,308,020 | 3.73s | **5,169,641** | **8.66x** | **8,361,611** | 17.50 (+2.00 ply) |
 
-> **超線性 NPS 擴展機理說明**：在固定時控下，Helper 執行緒採用 Depth Skipping 提前向深層探索並將高品質截斷著法寫入共享置換表，使所有執行緒的 TT Hit 率與走法排序品質同步躍升（更多節點在淺層或 QSearch 即快速截斷，減少昂貴的完整展開），加上消除 `NRT_MemInfo` 原子爭用與全 `nogil` 閉環，使綜合 NPS 達到 **5.17M NPS（8 執行緒，殘局峰值 8.36M NPS）**，平均搜尋深度提升達 **+2.0 ~ +2.75 ply**。
+> **超線性 NPS 擴展機理說明（2026-11-18 歷史實測時註記）**：在固定時控下，Helper 執行緒當時採用 Depth Skipping 提前向深層探索並將高品質截斷著法寫入共享置換表，使所有執行緒的 TT Hit 率與走法排序品質同步躍升（更多節點在淺層或 QSearch 即快速截斷，減少昂貴的完整展開），加上消除 `NRT_MemInfo` 原子爭用與全 `nogil` 閉環，使綜合 NPS 達到 **5.17M NPS（8 執行緒，殘局峰值 8.36M NPS）**，平均搜尋深度提升達 **+2.0 ~ +2.75 ply**。
 
 #### B. 固定搜尋深度基準（Fixed Depth = 12，共 4 局面）
 

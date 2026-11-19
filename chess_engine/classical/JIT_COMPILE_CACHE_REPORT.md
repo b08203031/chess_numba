@@ -429,7 +429,7 @@ Warm 剩餘 **~85 s** 當時幾乎全是 **每 process 重編 `_search` + `quies
 
 - [ ] `quiescence_search`、`_search`、`_lazy_smp_helper_loop_jit` 均維持 **顯式簽名 + `cache=True`**；其他熱路徑預設 **`cache=True`**。
 - [ ] 遞迴呼叫禁止直接傳 Python `True`/`False` 字面量進會特化的參數；用 `_b_true`/`_b_false` 或已是 `bool` 的變數（且 **不要** 把 false 常量 helper `inline='always'`）。
-- [ ] 深度 / αβ / ply 進 `_search` 前經 **`_i32`**；走子編碼經 **`_u16`**；`_lazy_smp_helper_loop_jit` 呼叫點維持 `(..., int32, search_context_type, int32, uint64[::1], int32, uint8)`。
+- [ ] 深度 / αβ / ply 進 `_search` 前經 **`_i32`**；走子編碼經 **`_u16`**；`_lazy_smp_helper_loop_jit` 呼叫點維持 9 參數顯式簽名 `(..., int32, search_context_type, int32, uint64[::1], int32, uint8)`，並回傳 10 純量元組 `lazy_smp_helper_return_type`（`uint16, int32, uint64, uint64, uint64, int32, int32, boolean, boolean, int32`）。
 - [ ] **不可回退防護**：每次更動遞迴函式簽名或呼叫點後，必須確認 LLVM IR 中 **0** `.numba.unresolved$` 且 §7.4 warm load 通過。
 
 ### 7.4 `_search` / QS / SMP disk cache 驗證閘門（2026-11-19 已全部通過；改動遞迴簽名後必重驗）
@@ -501,6 +501,7 @@ Warm 剩餘 **~85 s** 當時幾乎全是 **每 process 重編 `_search` + `quies
 | 2026-07-18 | **回退 iterative QS** | 對戰持平但 **NPS 偏低**；`classical` / `classical_old` / `main` / `main_old` **統一還原**為 `archive/jit_backup_20260718_001523/`（遞迴 QS + `cache=False`） |
 | 2026-07-30 | 搜尋診斷 opt-in | `SearchContext` 尾端新增 `diag_enabled`；正式搜尋不再寫診斷 counters，工具明確啟用。StructRef schema 變更會使既有相關 cache 失效一次；遞迴 `_search` / QS 仍為 `cache=False`。 |
 | 2026-11-19 | **全鏈 disk cache 啟用（`classical/`）** | `search.py`（QS / `_search` / `_lazy_smp_helper_loop_jit` 顯式簽名 + `cache=True`，`0` `.numba.unresolved$`）、`engine_types.py`（26 靜態 `cache=True` 存取子 + `_construct_search_context_proxy`）、`tools/match_core.py` 與 `tests/` 快取衛生；高負載 warm import **8.91 s**、含 warmup **9.34 s**；閒置複測 warm import **5.77 s**（warmup **0.25 s**）、`main.py` UCI `readyok` **5.93 s**、`bench_nps_perft.py` **548,276 NPS**；同步 `classical_old/` 並通過 `test_sync_classical_old`。 |
+| 2026-11-19 | **SF19 Lazy SMP 對齊（`classical/search.py`）** | `lazy_smp_helper_return_type` 擴充為 10 純量元組（`_lazy_smp_helper_loop_jit` 裝飾器移至第 `4259` 行、維持 9 參數顯式簽名與 `cache=True`）；冷編譯驗證 `n_overloads=1`、`0` `.numba.unresolved`（未另測冷編譯耗時）；跨進程 Warm 複測 `warm_import_s=6.038–6.188 s`、`warm_warmup_s=0.256–0.327 s`、`n_overloads=1`、`cache_hits=1`、`warnings=0`；`classical_old/` 未動。 |
 
 ### 6.8 Iterative QSearch（2026-07-18）— 已回退
 
@@ -546,7 +547,7 @@ Warm 剩餘 **~85 s** 當時幾乎全是 **每 process 重編 `_search` + `quies
 
 | 模組 | 變更摘要 |
 | :--- | :--- |
-| `chess_engine/classical/search.py` | `quiescence_search`、`_search`、`_lazy_smp_helper_loop_jit` 全面啟用 `cache=True`；新增 `lazy_smp_helper_return_type` 與 `_lazy_smp_helper_loop_jit` 9 參數顯式簽名（對齊 `warmup_search_jit` 與 `_helper_worker`）；20 個 `@numba.njit` 裝飾器 `cache=False` 計數降為 `0`；`warmup_search_jit` fallback TT 改為 `1` MB。 |
+| `chess_engine/classical/search.py` | `quiescence_search`、`_search`、`_lazy_smp_helper_loop_jit` 全面啟用 `cache=True`；新增 `lazy_smp_helper_return_type` 與 `_lazy_smp_helper_loop_jit` 9 參數顯式簽名（對齊 `warmup_search_jit` 與 `_helper_worker`；後於同日 SF19 Lazy SMP 對齊將 `lazy_smp_helper_return_type` 由 6 元組擴充為 10 純量元組，9 輸入參數簽名不變）；20 個 `@numba.njit` 裝飾器 `cache=False` 計數降為 `0`；`warmup_search_jit` fallback TT 改為 `1` MB。 |
 | `chess_engine/classical/engine_types.py` | 維持 80 欄 `search_context_spec` 順序/型別/C-連續不變；以 26 個靜態型別分組 `@numba.njit(cache=True, nogil=True)` 存取子（5 組純量 getter/setter + `_coerce_*` 強制 1 overload，與 16 個回傳 live ndarray 的陣列 getter）取代 `exec()` `cache=False` 屬性；新增 `@numba.njit(cache=True)` `_construct_search_context_proxy` 消除每進程 ~5.8–6.7 s `StructRefProxy.__new__` 未快取重編。 |
 | `tools/match_core.py`、`tools/run_dual_lmr_match.py`、`tests/{perft,test_puzzle,test_search,test_search_old,test_search_param_sweep}.py` | 移除 `UciEngine` 強制建立/刪除空 `tempfile.mkdtemp()` `NUMBA_CACHE_DIR` 的行為，改為共享持久 `__pycache__` 並對 `.py` 首次冷啟動做 per-`(script_path, cache_dir)` 序列化協調（`init_timeout_s = max(30.0, self.search_timeout_s)`）；清除無條件/預設清快取呼叫，統一收斂至 `--clear-cache` 顯式參數並延遲重型 JIT import。 |
 
@@ -568,7 +569,7 @@ Warm 剩餘 **~85 s** 當時幾乎全是 **每 process 重編 `_search` + `quies
 | **Cold**（`task-90`） | 成功產出 `quiescence_search`（3.80 MB `.nbc`）、`_search`（6.86 MB `.nbc`）、`_lazy_smp_helper_loop_jit`（5.11 MB `.nbc`）及 25/27 `engine_types` dispatchers；上述 3 函式 LLVM IR **`.numba.unresolved` = 0**；`ROOK_ATTACKS.nbytes=819200`（`<= 1_000_000`）、`BISHOP_ATTACKS.nbytes=262144`。（注：`task-90` 因驗證腳本在讀取最後 2 個未觸發陣列前斷言 25 vs 27 `.nbi` 而結束；剩餘 2 個 getter 於 Warm-1 補齊。） |
 | **Warm-1**（`task-138`） | `import_s=10.9941s`、`warmup_s=1.1974s`（補齊剩餘 2 個 `engine_types` getter）。 |
 | **Pure Warm-2**（`task-147`，新 process，`0` misses） | `import_s=8.9087s`、`ctx_s=0.0571s`、`warmup_s=0.4323s`、`search1_s=0.0457s`、`search2_s=0.0503s`；`cannot_cache_count=0`、`numba_warning_count=0`、`all_warning_count=0`、`typeof(ctx) == search_context_type` OK。 |
-| **On-disk `.nbi` & Hit/Miss** | `search.quiescence_search-500.py310.nbi`、`search._search-1199.py310.nbi`、`search._lazy_smp_helper_loop_jit-4216.py310.nbi` 及全部 27 個 `engine_types.*.nbi` 皆為 **`n_overloads == 1`**；`et_total_hits=27, et_total_misses=0`；`quiescence_search` / `_search` / `_lazy_smp_helper_loop_jit` / `_construct_search_context_proxy` 皆 `hits=1, misses=0`。 |
+| **On-disk `.nbi` & Hit/Miss** | `search.quiescence_search-500.py310.nbi`、`search._search-1199.py310.nbi`、`search._lazy_smp_helper_loop_jit-4216.py310.nbi`（SF19 Lazy SMP 對齊後行號更新為 `-4259`：`search._lazy_smp_helper_loop_jit-4259.py310.nbi` / `.nbc`）及全部 27 個 `engine_types.*.nbi` 皆為 **`n_overloads == 1`**；`et_total_hits=27, et_total_misses=0`；`quiescence_search` / `_search` / `_lazy_smp_helper_loop_jit` / `_construct_search_context_proxy` 皆 `hits=1, misses=0`。 |
 | **搜尋語義與 Lazy SMP 一致性** | `startpos` depth-6（`task-138 == task-147`）：`e2e3`、`score=46`、`s_nodes=4153`、`q_nodes=2428`、`tt_hits=440`、`comp_depth=6`（`0.0523s`）；Lazy SMP `num_threads=2`：`startpos` 合法走步（`e2e4`/`g1f3`, `comp_depth=6`），`mate_in_2` 解出 `d5f6`（`score=29997`, `comp_depth=6`）。 |
 | **`main.py` UCI 端到端 Warm**（`task-151`） | `OwnBook=true`：`uciok=10.8047s`、`readyok=11.2306s`（`0.4259s`）、`bestmove e2e4` @ `11.4362s`（`rc=0`）；`OwnBook=false` `go depth 5`：`uciok=11.2022s`、`readyok=11.659s`（`0.4568s`）、`bestmove g1f3`（`2096` nodes, `cp 31`）@ `12.1499s`（`rc=0`）。 |
 | **並發 `UciEngine` Warm**（`tools/match_core.py`, `task-171`） | 2 worker 並發啟動耗時 `19.237s`，雙雙回傳 `g1f3`（`2096` nodes），`.nbi` 數量不變（`131 -> 131`）。 |
@@ -589,5 +590,6 @@ Warm 剩餘 **~85 s** 當時幾乎全是 **每 process 重編 `_search` + `quies
 | **閒置 NPS 基準**（`tools/bench_nps_perft.py` d15, 5 runs/pos） | `Total Time: 3.8321s | Total Nodes: 2101072 | Overall NPS: 548,276`（`startpos` `568,145`, `kiwipete` `503,414`, Pos3 `868,996`, Pos4 `489,751`, Pos5 `506,536`, Pos6 `578,728`）。 |
 | **同步前對戰驗證**（`tools/tournament.py --games 20 --nodes 30000 --concurrency 6`） | Kiwipete d14 暖身節點完全一致：**`340,166 == 340,166`**（`New: 2.0s / 215,803 nps` vs `Old: 21.4s / 76,237 nps`）；10/10 對稱局 **`10.0 - 10.0`**（`6W 8D 6L`, `Elo difference: -0.00 ±117.95`, `LLR=0.00`）。 |
 | **`classical_old/` 同步** | 已執行 `python tools/sync_classical_old.py --sync`（更新 `engine_types.py`、`search.py`）、`--diff` 確認邏輯一致，且 `python -m unittest tests.test_sync_classical_old` 通過。（依使用者指示跳過額外冗長測試與 `classical_old` 完整暖啟動複測，直接完成文件更新與提交。） |
+| **SF19 Lazy SMP 對齊複測**（同日稍晚，僅更新 `classical/search.py`） | `lazy_smp_helper_return_type` 擴充為 10 純量元組（`_lazy_smp_helper_loop_jit` 裝飾器行號 `4259`，維持 9 參數顯式簽名與 `cache=True`）；冷編譯驗證 `_search` / `quiescence_search` / `_lazy_smp_helper_loop_jit` 皆 **`n_overloads=1`**、LLVM IR **`.numba.unresolved` = 0**、`warnings=0`（該輪未另測冷編譯總耗時）；兩次獨立新進程 Warm 複測：`warm_import_s = 6.038–6.188 s`、`warm_warmup_s = 0.256–0.327 s`、`n_overloads=1`、`cache_hits=1`、`cache_misses=0`、`warnings=0`、`ROOK_ATTACKS.nbytes=819200`；磁碟 `.nbc`（`search.quiescence_search-500.py310.nbc`、`search._search-1199.py310.nbc`、`search._lazy_smp_helper_loop_jit-4259.py310.nbc`）均 `0` `.numba.unresolved`；`classical_old/` 維持凍結未同步。 |
 
 （後續請在表格**追加**列，勿覆寫歷史數字；若方法變更請在 §5 註明。）

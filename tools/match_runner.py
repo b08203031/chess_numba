@@ -133,6 +133,18 @@ def _engine_backend(requested: str, engine_path: str) -> str:
     return "inprocess" if Path(engine_path).resolve() == DEFAULT_ENGINE.resolve() else "uci"
 
 
+def _validate_positive_int(value: object, label: str) -> int:
+    if isinstance(value, bool):
+        raise ValueError(f"{label} must be an integer >= 1, got {value!r}")
+    try:
+        parsed = int(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{label} must be an integer >= 1, got {value!r}") from exc
+    if parsed < 1:
+        raise ValueError(f"{label} must be >= 1")
+    return parsed
+
+
 def run_match_stages(
     engine_path: str,
     sf_path: str,
@@ -147,6 +159,7 @@ def run_match_stages(
     engine_module: str = "chess_engine.classical",
     tt_mb: int = DEFAULT_TT_MB,
     sf_hash_mb: Optional[int] = None,
+    engine_threads: int = 1,
     sf_threads: int = 1,
     engine_env: Optional[Mapping[str, object]] = None,
     use_openings: bool = True,
@@ -160,11 +173,27 @@ def run_match_stages(
     early_trash: bool = False,
     early_trash_min_games: int = 80,
     early_trash_max_score_pct: float = 40.0,
+    adjudicate: bool = True,
+    adjudicate_win_score: int = 500,
+    adjudicate_win_plies: int = 10,
+    adjudicate_draw_score: int = 8,
+    adjudicate_draw_min_move: int = 40,
+    adjudicate_draw_plies: int = 12,
 ) -> list[StageResult]:
-    if concurrency <= 0:
-        raise ValueError("concurrency must be >= 1")
-    if tt_mb <= 0 or (sf_hash_mb is not None and sf_hash_mb <= 0) or sf_threads <= 0:
-        raise ValueError("TT/Hash/Threads values must be positive")
+    concurrency = _validate_positive_int(concurrency, "concurrency")
+    tt_mb = _validate_positive_int(tt_mb, "tt_mb")
+    if sf_hash_mb is not None:
+        sf_hash_mb = _validate_positive_int(sf_hash_mb, "sf_hash_mb")
+    engine_threads = _validate_positive_int(engine_threads, "engine_threads")
+    sf_threads = _validate_positive_int(sf_threads, "sf_threads")
+    max_plies = _validate_positive_int(max_plies, "max_plies")
+    if float(search_timeout_s) <= 0.0:
+        raise ValueError("search_timeout_s must be > 0")
+    if adjudicate_win_score < 0 or adjudicate_draw_score < 0:
+        raise ValueError("adjudicate scores must be >= 0")
+    _validate_positive_int(adjudicate_win_plies, "adjudicate_win_plies")
+    _validate_positive_int(adjudicate_draw_min_move, "adjudicate_draw_min_move")
+    _validate_positive_int(adjudicate_draw_plies, "adjudicate_draw_plies")
     if not os.path.exists(sf_path):
         raise FileNotFoundError(sf_path)
     normalized: list[dict[str, object]] = []
@@ -189,7 +218,11 @@ def run_match_stages(
     selected = _engine_backend(engine_backend, engine_path)
     if selected == "inprocess":
         engine_factory = InProcessEngineFactory(
-            engine_name, engine_module, tt_mb=tt_mb, env_extra=engine_env
+            engine_name,
+            engine_module,
+            tt_mb=tt_mb,
+            env_extra=engine_env,
+            threads=engine_threads,
         )
     else:
         if not os.path.exists(engine_path):
@@ -197,7 +230,7 @@ def run_match_stages(
         engine_factory = UciEngineFactory(
             engine_name,
             engine_path,
-            options={"OwnBook": False},
+            options={"OwnBook": False, "Hash": tt_mb, "Threads": engine_threads},
             env_extra=engine_env,
             search_timeout_s=search_timeout_s,
         )
@@ -221,11 +254,30 @@ def run_match_stages(
     max_pairs = max(int(stage["games"]) // 2 for stage in normalized)
     actual_concurrency = min(concurrency, max_pairs)
     print(
-        f"Local backend: {selected}; workers={actual_concurrency}; local TT={tt_mb} MB/context; "
-        f"Stockfish Hash={sf_hash_mb if sf_hash_mb is not None else 'engine default'}, "
-        f"Threads={sf_threads}/process",
+        f"Local backend: {selected}; workers={actual_concurrency}; "
+        f"{engine_name} Threads={engine_threads}, TT={tt_mb} MB/context; "
+        f"{sf_name} Threads={sf_threads}/process, "
+        f"Hash={sf_hash_mb if sf_hash_mb is not None else 'engine default'}",
         flush=True,
     )
+    cpu_count = os.cpu_count()
+    peak_active_threads = actual_concurrency * max(engine_threads, sf_threads)
+    total_allocated_threads = actual_concurrency * (engine_threads + sf_threads)
+    if cpu_count is not None and peak_active_threads > cpu_count:
+        print(
+            f"[warning] Peak active search threads ({actual_concurrency} * max({engine_threads}, {sf_threads}) = "
+            f"{peak_active_threads}; total allocated {total_allocated_threads}) exceeds available CPU count "
+            f"({cpu_count}); CPU contention may affect timing and NPS.",
+            flush=True,
+        )
+    if adjudicate:
+        print(
+            f"Adjudication: win >= {adjudicate_win_score} cp ({adjudicate_win_plies} plies), "
+            f"draw <= {adjudicate_draw_score} cp ({adjudicate_draw_plies} plies after move {adjudicate_draw_min_move})",
+            flush=True,
+        )
+    else:
+        print("Adjudication: disabled (games play until game-over or max plies)", flush=True)
     if selected == "inprocess":
         print(
             f"Process plan: one local Python/Numba process + {actual_concurrency} long-lived Stockfish processes.",
@@ -266,6 +318,12 @@ def run_match_stages(
                 early_trash_min_games=early_trash_min_games,
                 early_trash_max_score_pct=early_trash_max_score_pct,
                 max_plies=max_plies,
+                adjudicate=adjudicate,
+                adjudicate_win_score=adjudicate_win_score,
+                adjudicate_win_plies=adjudicate_win_plies,
+                adjudicate_draw_score=adjudicate_draw_score,
+                adjudicate_draw_min_move=adjudicate_draw_min_move,
+                adjudicate_draw_plies=adjudicate_draw_plies,
             )
             results.append(result)
             _print_result(result, engine_name, sf_name)
@@ -348,6 +406,12 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="set Stockfish Hash MB/process (default: keep Stockfish's own default)",
     )
+    parser.add_argument(
+        "--engine-threads",
+        type=int,
+        default=1,
+        help="local engine search threads (default: 1)",
+    )
     parser.add_argument("--sf-threads", type=int, default=1, help="Stockfish threads/process; keep 1 with -c > 1")
     parser.add_argument("--engine-env", action="append", default=[], metavar="KEY=VALUE")
     parser.add_argument("--pgn", help="PGN filename/path; multi-stage adds a stage suffix")
@@ -364,6 +428,42 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--max-plies", type=int, default=400)
     parser.add_argument("--search-timeout", type=float, default=300.0, metavar="SECONDS")
     parser.add_argument("--clear-cache", action="store_true")
+    parser.add_argument(
+        "--adjudicate",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="toggle early adjudication (default: enabled; --no-adjudicate disables)",
+    )
+    parser.add_argument(
+        "--adjudicate-win-score",
+        type=int,
+        default=500,
+        help="centipawn threshold for win adjudication (default: 500)",
+    )
+    parser.add_argument(
+        "--adjudicate-win-moves",
+        type=int,
+        default=5,
+        help="consecutive full moves for win adjudication (default: 5, i.e. 10 plies)",
+    )
+    parser.add_argument(
+        "--adjudicate-draw-score",
+        type=int,
+        default=8,
+        help="centipawn threshold for draw adjudication (default: 8)",
+    )
+    parser.add_argument(
+        "--adjudicate-draw-min-move",
+        type=int,
+        default=40,
+        help="minimum move number to enable draw adjudication (default: 40)",
+    )
+    parser.add_argument(
+        "--adjudicate-draw-moves",
+        type=int,
+        default=6,
+        help="consecutive full moves for draw adjudication (default: 6, i.e. 12 plies)",
+    )
     return parser
 
 
@@ -419,6 +519,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             engine_module=args.engine_module,
             tt_mb=args.tt_mb,
             sf_hash_mb=args.sf_hash_mb,
+            engine_threads=args.engine_threads,
             sf_threads=args.sf_threads,
             engine_env=_parse_env(args.engine_env),
             use_openings=not args.no_openings,
@@ -432,6 +533,12 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             early_trash=args.early_trash,
             early_trash_min_games=args.early_trash_min_games,
             early_trash_max_score_pct=args.early_trash_max_score_pct,
+            adjudicate=args.adjudicate,
+            adjudicate_win_score=args.adjudicate_win_score,
+            adjudicate_win_plies=args.adjudicate_win_moves * 2,
+            adjudicate_draw_score=args.adjudicate_draw_score,
+            adjudicate_draw_min_move=args.adjudicate_draw_min_move,
+            adjudicate_draw_plies=args.adjudicate_draw_moves * 2,
         )
         return 0
     except (OSError, RuntimeError, ValueError) as exc:

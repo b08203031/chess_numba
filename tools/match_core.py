@@ -7,6 +7,7 @@ for external engines and as a compatibility fallback.
 from __future__ import annotations
 
 import importlib
+import inspect
 import math
 import os
 import queue
@@ -97,7 +98,7 @@ def parse_limit_token(token: str) -> SearchLimit:
 
 def parse_info_line(line: str) -> str:
     """Convert a UCI info line to a compact PGN comment."""
-    if not line:
+    if not line or line.startswith("info string"):
         return ""
     tokens = line.split()
     info: dict[str, str] = {}
@@ -168,6 +169,51 @@ _UCI_WARMED_KEYS: set[tuple[str, str]] = set()
 _UCI_KEY_LOCKS: dict[tuple[str, str], threading.Lock] = {}
 
 
+def _validate_positive_int(value: object, label: str) -> int:
+    if isinstance(value, bool):
+        raise ValueError(f"{label} must be an integer >= 1, got {value!r}")
+    try:
+        parsed = int(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{label} must be an integer >= 1, got {value!r}") from exc
+    if parsed < 1:
+        raise ValueError(f"{label} must be >= 1, got {parsed}")
+    return parsed
+
+
+def _normalize_uci_options(
+    options: Optional[Mapping[str, object]],
+    *,
+    threads: Optional[int] = None,
+    hash_mb: Optional[int] = None,
+) -> dict[str, object]:
+    normalized = dict(options or {})
+    if hash_mb is not None:
+        hash_val = _validate_positive_int(hash_mb, "hash_mb")
+        if not any(str(k).strip().lower() == "hash" for k in normalized):
+            normalized["Hash"] = hash_val
+    if threads is not None:
+        threads_val = _validate_positive_int(threads, "threads")
+        if not any(str(k).strip().lower() == "threads" for k in normalized):
+            normalized["Threads"] = threads_val
+    for opt_key, opt_val in normalized.items():
+        if opt_val is None:
+            continue
+        low = str(opt_key).strip().lower()
+        if low == "threads":
+            _validate_positive_int(opt_val, "Threads")
+        elif low == "hash":
+            _validate_positive_int(opt_val, "Hash")
+    return normalized
+
+
+def _extract_uci_threads(options: Mapping[str, object]) -> Optional[int]:
+    for opt_key, opt_val in options.items():
+        if opt_val is not None and str(opt_key).strip().lower() == "threads":
+            return _validate_positive_int(opt_val, "Threads")
+    return None
+
+
 class UciEngine:
     """Long-lived UCI subprocess with a non-blocking stdout reader."""
 
@@ -180,10 +226,13 @@ class UciEngine:
         env_extra: Optional[Mapping[str, object]] = None,
         verbose: bool = False,
         search_timeout_s: float = 300.0,
+        threads: Optional[int] = None,
+        hash_mb: Optional[int] = None,
     ) -> None:
         self.name = name
         self.path = os.path.abspath(path)
-        self.options = dict(options or {})
+        self.options = _normalize_uci_options(options, threads=threads, hash_mb=hash_mb)
+        self.threads = _extract_uci_threads(self.options)
         self.env_extra = dict(env_extra or {})
         self.verbose = verbose
         self.search_timeout_s = float(search_timeout_s)
@@ -193,6 +242,7 @@ class UciEngine:
         self._moves: list[str] = []
         self._start_fen: Optional[str] = None
         self.last_score_cp: Optional[int] = None
+        self.advertised_options: set[str] = set()
 
     def _build_env(self) -> tuple[dict[str, str], str]:
         env = os.environ.copy()
@@ -225,11 +275,41 @@ class UciEngine:
         )
         self._reader = threading.Thread(target=self._reader_loop, daemon=True)
         self._reader.start()
+        self.advertised_options.clear()
         self._send("uci")
         init_timeout_s = max(30.0, self.search_timeout_s) if is_python else 30.0
-        self._wait_for("uciok", timeout_s=init_timeout_s, phase="UCI initialization")
-        for option, value in self.options.items():
-            self._send(f"setoption name {option} value {str(value).lower() if isinstance(value, bool) else value}")
+        self._wait_for(
+            "uciok",
+            timeout_s=init_timeout_s,
+            phase="UCI initialization",
+            record_options=True,
+        )
+        if (
+            self.threads is not None
+            and self.threads > 1
+            and self.advertised_options
+            and "threads" not in self.advertised_options
+        ):
+            print(
+                f"[warning] {self.name} did not advertise UCI option 'Threads'; "
+                f"requested Threads={self.threads} may be ignored.",
+                flush=True,
+            )
+        # Apply Hash/OwnBook/other options before Threads so engines resize TT once
+        # before allocating SMP helper state.
+        non_thread_opts = [
+            (option, value)
+            for option, value in self.options.items()
+            if value is not None and str(option).strip().lower() != "threads"
+        ]
+        thread_opts = [
+            (option, value)
+            for option, value in self.options.items()
+            if value is not None and str(option).strip().lower() == "threads"
+        ]
+        for option, value in non_thread_opts + thread_opts:
+            formatted = str(value).lower() if isinstance(value, bool) else value
+            self._send(f"setoption name {option} value {formatted}")
         self._ready(timeout_s=max(30.0, self.search_timeout_s))
 
     def start(self) -> None:
@@ -297,7 +377,14 @@ class UciEngine:
             raise EngineError(f"{self.name} closed its output (exit code {code})")
         return line
 
-    def _wait_for(self, expected: str, *, timeout_s: float, phase: str) -> None:
+    def _wait_for(
+        self,
+        expected: str,
+        *,
+        timeout_s: float,
+        phase: str,
+        record_options: bool = False,
+    ) -> None:
         deadline = time.monotonic() + timeout_s
         while True:
             try:
@@ -306,6 +393,11 @@ class UciEngine:
                 raise EngineError(f"{self.name} timed out during {phase}") from exc
             if self.verbose and line:
                 print(f"[{self.name} {phase}] {line}", flush=True)
+            if record_options and line.startswith("option name "):
+                opt_rest = line[len("option name "):]
+                opt_name = opt_rest.split(" type ", 1)[0].strip().lower()
+                if opt_name:
+                    self.advertised_options.add(opt_name)
             if line == expected:
                 return
 
@@ -350,11 +442,23 @@ class UciEngine:
                     deadline = time.monotonic() + 5.0
                     continue
                 raise EngineError(f"{self.name} exceeded the search timeout")
-            if line.startswith("info ") and " depth " in f" {line} " and " score " in f" {line} ":
+            if (
+                line.startswith("info ")
+                and not line.startswith("info string ")
+                and " depth " in f" {line} "
+                and " score " in f" {line} "
+            ):
+                tokens = line.split()
+                is_primary_pv = True
+                for idx, token in enumerate(tokens):
+                    if token == "multipv" and idx + 1 < len(tokens):
+                        is_primary_pv = tokens[idx + 1] == "1"
+                        break
+                if not is_primary_pv:
+                    continue
                 if show_info:
                     print(f"[warmup {self.name}] {line}", flush=True)
                 last_info = line
-                tokens = line.split()
                 for idx, token in enumerate(tokens):
                     if token == "score" and idx + 2 < len(tokens):
                         kind, val = tokens[idx + 1], tokens[idx + 2]
@@ -384,6 +488,8 @@ class UciEngine:
     def terminate(self) -> None:
         process = self.process
         self.process = None
+        reader = self._reader
+        self._reader = None
         if process is not None:
             try:
                 if process.poll() is None and process.stdin is not None:
@@ -394,6 +500,15 @@ class UciEngine:
                 if process.poll() is None:
                     process.kill()
                     process.wait(timeout=3.0)
+            finally:
+                for pipe in (process.stdin, process.stdout):
+                    if pipe is not None:
+                        try:
+                            pipe.close()
+                        except Exception:
+                            pass
+                if reader is not None and reader.is_alive():
+                    reader.join(timeout=1.0)
 
 
 class UciEngineFactory:
@@ -402,7 +517,15 @@ class UciEngineFactory:
     def __init__(self, name: str, path: str, **kwargs: object) -> None:
         self.name = name
         self.path = path
-        self.kwargs = kwargs
+        normalized_kwargs = dict(kwargs)
+        options = _normalize_uci_options(
+            normalized_kwargs.get("options"),  # type: ignore[arg-type]
+            threads=normalized_kwargs.pop("threads", None),  # type: ignore[arg-type]
+            hash_mb=normalized_kwargs.pop("hash_mb", None),  # type: ignore[arg-type]
+        )
+        if options or "options" in normalized_kwargs:
+            normalized_kwargs["options"] = options
+        self.kwargs = normalized_kwargs
         self.requires_per_instance_warmup = str(path).lower().endswith(".py")
 
     def create(self, worker_id: int) -> UciEngine:
@@ -433,23 +556,29 @@ class UciEngineFactory:
 _ENV_LOCK = threading.Lock()
 
 
-def _reset_context(ctx: object, clear_tt: Optional[Callable[[object], None]] = None) -> None:
-    tt = ctx.transposition_table
-    if clear_tt is not None:
-        clear_tt(tt)
-    else:
-        try:
-            tt.view(np.uint8).fill(0)
-            tt["static_eval"] = np.int16(32767)
-        except Exception:
-            tt["key"] = np.uint32(0)
-            tt["score"] = np.int16(0)
-            tt["static_eval"] = np.int16(32767)
-            tt["depth"] = np.uint8(0)
-            tt["flag"] = np.uint8(0)
-            tt["generation"] = np.uint8(0)
-            tt["best_move"] = np.uint16(0)
-            tt["is_pv"] = False
+def _reset_context(
+    ctx: object,
+    clear_tt: Optional[Callable[[object], None]] = None,
+    *,
+    reset_tt: bool = True,
+) -> None:
+    if reset_tt:
+        tt = ctx.transposition_table
+        if clear_tt is not None:
+            clear_tt(tt)
+        else:
+            try:
+                tt.view(np.uint8).fill(0)
+                tt["static_eval"] = np.int16(32767)
+            except Exception:
+                tt["key"] = np.uint32(0)
+                tt["score"] = np.int16(0)
+                tt["static_eval"] = np.int16(32767)
+                tt["depth"] = np.uint8(0)
+                tt["flag"] = np.uint8(0)
+                tt["generation"] = np.uint8(0)
+                tt["best_move"] = np.uint16(0)
+                tt["is_pv"] = False
     for field in (
         "history_table", "butterfly_history", "continuation_history",
         "capture_history", "pawn_correction_history", "minor_correction_history",
@@ -466,16 +595,58 @@ def _reset_context(ctx: object, clear_tt: Optional[Callable[[object], None]] = N
     ctx.tt_generation = 0
     ctx.nodes_searched = np.uint64(0)
     ctx.nodes_searched_array[0] = 0
+    if len(ctx.nodes_searched_array) > 1:
+        ctx.nodes_searched_array[1] = 0
     ctx.stop_flag[0] = False
+
+
+def _sync_helper_context(main_context: object, helper_context: object) -> None:
+    if hasattr(main_context, "tune") and hasattr(helper_context, "tune"):
+        helper_context.tune[:] = main_context.tune[:]
+    if hasattr(main_context, "eval_weights") and hasattr(helper_context, "eval_weights"):
+        helper_context.eval_weights[:] = main_context.eval_weights[:]
+    for attr in (
+        "enable_nmp",
+        "enable_rfp",
+        "enable_razoring",
+        "enable_lmr",
+        "enable_see_pruning",
+        "enable_lmp",
+        "enable_fp",
+        "enable_probcut",
+        "enable_multicut",
+    ):
+        if hasattr(main_context, attr) and hasattr(helper_context, attr):
+            setattr(helper_context, attr, bool(getattr(main_context, attr)))
 
 
 class InProcessEngine:
     """One independent context using an already imported Numba backend."""
 
-    def __init__(self, factory: "InProcessEngineFactory", context: object) -> None:
+    def __init__(
+        self,
+        factory: "InProcessEngineFactory",
+        context: object,
+        *,
+        threads: Optional[int] = None,
+        helper_contexts: Optional[Sequence[object]] = None,
+    ) -> None:
         self.factory = factory
         self.name = factory.name
         self.context = context
+        resolved_threads = getattr(factory, "threads", 1) if threads is None else threads
+        self.threads = _validate_positive_int(resolved_threads, "threads")
+        if helper_contexts is not None:
+            self.helper_contexts = list(helper_contexts)
+            if self.threads > 1 and len(self.helper_contexts) != self.threads - 1:
+                raise ValueError(
+                    f"Expected {self.threads - 1} helper contexts for threads={self.threads}, "
+                    f"got {len(self.helper_contexts)}"
+                )
+        elif self.threads > 1 and hasattr(factory, "_make_helper_contexts"):
+            self.helper_contexts = list(factory._make_helper_contexts(context))
+        else:
+            self.helper_contexts = []
         self.piece_bbs = None
         self.occupancy_bbs = None
         self.game_state = None
@@ -490,6 +661,12 @@ class InProcessEngine:
 
     def new_game(self, start_fen: Optional[str]) -> None:
         _reset_context(self.context, getattr(self.factory, "clear_tt", None))
+        reset_helper = getattr(self.factory, "reset_search_context", None)
+        for helper_ctx in self.helper_contexts:
+            if callable(reset_helper):
+                reset_helper(helper_ctx)
+            else:
+                _reset_context(helper_ctx, clear_tt=None, reset_tt=False)
         fen = start_fen or START_FEN
         self.piece_bbs, self.occupancy_bbs, self.game_state = self.factory.parse_fen(fen)
         self.game_history = [int(self.game_state[4])]
@@ -569,6 +746,10 @@ class InProcessEngine:
             }
         self.tt_generation = (self.tt_generation + 1) & 0xFF
         started = time.perf_counter()
+        smp_kwargs: dict[str, object] = {}
+        if self.threads > 1:
+            smp_kwargs["num_threads"] = self.threads
+            smp_kwargs["helper_contexts"] = self.helper_contexts
         result = self.factory.search(
             self.piece_bbs,
             self.occupancy_bbs,
@@ -579,6 +760,7 @@ class InProcessEngine:
             game_history_list=list(self.game_history),
             tt_generation=self.tt_generation,
             verbose=show_info,
+            **smp_kwargs,
         )
         elapsed_ms = max(1, int((time.perf_counter() - started) * 1000.0))
         if not isinstance(result, (tuple, list)) or len(result) < 6:
@@ -620,10 +802,12 @@ class InProcessEngineFactory:
         *,
         tt_mb: int = 128,
         env_extra: Optional[Mapping[str, object]] = None,
+        threads: int = 1,
     ) -> None:
         self.name = name
         self.namespace = namespace.rstrip(".")
-        self.tt_mb = int(tt_mb)
+        self.tt_mb = _validate_positive_int(tt_mb, "tt_mb")
+        self.threads = _validate_positive_int(threads, "threads")
         self.env_extra = dict(env_extra or {})
         constants = importlib.import_module(f"{self.namespace}.constants")
         engine_types = importlib.import_module(f"{self.namespace}.engine_types")
@@ -637,15 +821,66 @@ class InProcessEngineFactory:
         self.constants = constants
         self.no_move = int(constants.NO_MOVE)
         self.SearchContext = engine_types.SearchContext
+        self.create_smp_helper_context = getattr(engine_types, "create_smp_helper_context", None)
+        self.reset_search_context = getattr(engine_types, "reset_search_context", None)
         self.parse_fen = fen_parser.parse_fen
         self.generate_legal_moves = core.generate_legal_moves
         self.make_move = board_ops.make_move
         self.move_to_uci = move.move_to_uci
         self.search = search.iterative_deepening_search
+        self.warmup_search_jit = getattr(search, "warmup_search_jit", None)
         self.create_tt = tt.create_transposition_table
         self.clear_tt = getattr(tt, "clear_transposition_table", None)
+        if self.threads > 1:
+            self._validate_smp_support()
 
-    def _make_context(self) -> object:
+    def _validate_smp_support(self) -> None:
+        sig = inspect.signature(self.search)
+        params = sig.parameters
+        has_var_kw = any(p.kind == inspect.Parameter.VAR_KEYWORD for p in params.values())
+        missing_params = [
+            param_name
+            for param_name in ("num_threads", "helper_contexts")
+            if not has_var_kw
+            and (
+                param_name not in params
+                or params[param_name].kind == inspect.Parameter.POSITIONAL_ONLY
+            )
+        ]
+        if missing_params:
+            raise ValueError(
+                f"Backend {self.namespace!r} does not support threads={self.threads}: "
+                f"iterative_deepening_search is missing keyword parameter(s) {', '.join(missing_params)}"
+            )
+        missing_helpers = [
+            attr_name
+            for attr_name, attr_val in (
+                ("create_smp_helper_context", self.create_smp_helper_context),
+                ("reset_search_context", self.reset_search_context),
+            )
+            if not callable(attr_val)
+        ]
+        if missing_helpers:
+            raise ValueError(
+                f"Backend {self.namespace!r} does not support threads={self.threads}: "
+                f"{self.namespace}.engine_types is missing {', '.join(missing_helpers)}"
+            )
+
+    def _make_helper_contexts(self, main_context: object) -> list[object]:
+        if self.threads <= 1:
+            return []
+        if not callable(self.create_smp_helper_context):
+            raise ValueError(
+                f"Backend {self.namespace!r} does not provide create_smp_helper_context"
+            )
+        helpers: list[object] = []
+        for _ in range(self.threads - 1):
+            helper_ctx = self.create_smp_helper_context(main_context)
+            _sync_helper_context(main_context, helper_ctx)
+            helpers.append(helper_ctx)
+        return helpers
+
+    def _make_contexts(self) -> tuple[object, list[object]]:
         max_ply = self.max_ply
         args = (
             self.create_tt(self.tt_mb),
@@ -665,7 +900,8 @@ class InProcessEngineFactory:
         if not self.env_extra:
             context = self.SearchContext(*args)
             self._set_namespace_eval_weights(context)
-            return context
+            helpers = self._make_helper_contexts(context)
+            return context, helpers
         # SearchContext currently reads optional runtime tuning overrides from
         # os.environ. Context allocation is sequential, so temporarily applying
         # the side-specific values is safe and does not leak to worker threads.
@@ -676,13 +912,17 @@ class InProcessEngineFactory:
                 context = self.SearchContext(*args)
                 self._set_namespace_eval_weights(context)
                 self._apply_runtime_search_overrides(context)
-                return context
+                helpers = self._make_helper_contexts(context)
+                return context, helpers
             finally:
                 for key, value in previous.items():
                     if value is None:
                         os.environ.pop(key, None)
                     else:
                         os.environ[key] = value
+
+    def _make_context(self) -> object:
+        return self._make_contexts()[0]
 
     def _apply_runtime_search_overrides(self, context: object) -> None:
         """Apply any recognized SearchParamSpec runtime tuning overrides."""
@@ -710,7 +950,13 @@ class InProcessEngineFactory:
             return
 
     def create(self, worker_id: int) -> InProcessEngine:
-        return InProcessEngine(self, self._make_context())
+        context, helper_contexts = self._make_contexts()
+        return InProcessEngine(
+            self,
+            context,
+            threads=self.threads,
+            helper_contexts=helper_contexts,
+        )
 
     def prepare(self, engine: InProcessEngine, worker_id: int) -> None:
         """Compile/fault-in this namespace with the historical Kiwipete d14 search."""
@@ -718,6 +964,15 @@ class InProcessEngineFactory:
             return
         print(f"[warmup] {self.name}: Kiwipete depth=14...", flush=True)
         started = time.perf_counter()
+        if self.threads > 1 and callable(self.warmup_search_jit):
+            try:
+                sig = inspect.signature(self.warmup_search_jit)
+                if "search_context" in sig.parameters:
+                    self.warmup_search_jit(search_context=engine.context)
+                else:
+                    self.warmup_search_jit()
+            except (TypeError, ValueError):
+                self.warmup_search_jit()
         engine.new_game(KIWIPETE_FEN)
         engine.get_move(SearchLimit(depth=14), show_info=(worker_id == 0))
         print(
@@ -826,6 +1081,16 @@ def play_game(
         "White": white_engine.name,
         "Black": black_engine.name,
     })
+    white_threads = getattr(white_engine, "threads", None)
+    black_threads = getattr(black_engine, "threads", None)
+    if (white_threads is not None and int(white_threads) > 1) or (
+        black_threads is not None and int(black_threads) > 1
+    ):
+        game.headers["WhiteThreads"] = str(int(white_threads) if white_threads is not None else 1)
+        game.headers["BlackThreads"] = str(int(black_threads) if black_threads is not None else 1)
+    if white_limit != black_limit:
+        game.headers["WhiteLimit"] = white_limit.token()
+        game.headers["BlackLimit"] = black_limit.token()
     logs = [f"Game {game_number}: {white_engine.name} (White) vs {black_engine.name} (Black)"]
     try:
         white_engine.new_game(start_fen)

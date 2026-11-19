@@ -66,23 +66,33 @@ def parse_limit(limit_str: str) -> dict[str, Optional[int]]:
 
 
 def parse_stages(stages_str: str) -> list[dict[str, object]]:
-    """Parse ``games:limit`` stages; every stage must contain full color pairs."""
+    """Parse ``games:limit`` or ``games:limit1:limit2`` stages; every stage must contain full color pairs."""
     stages: list[dict[str, object]] = []
     for raw in stages_str.split(","):
         raw = raw.strip()
         if not raw:
             continue
         parts = raw.split(":")
-        if len(parts) != 2:
-            raise ValueError(f"Invalid stage {raw!r}; expected games:limit")
+        if len(parts) not in (2, 3):
+            raise ValueError(
+                f"Invalid stage {raw!r}; expected games:limit or games:limit1:limit2"
+            )
         games = int(parts[0])
         if games < 2 or games % 2:
             raise ValueError(f"Stage games must be an even integer >= 2, got {games}")
-        limit = parse_limit_token(parts[1])
+        limit1 = parse_limit_token(parts[1])
+        limit2 = parse_limit_token(parts[2]) if len(parts) == 3 else limit1
+        limit_str = (
+            limit1.token()
+            if limit1 == limit2
+            else f"{limit1.token()}_vs_{limit2.token()}"
+        )
         stages.append({
             "games": games,
-            "limit": limit,
-            "limit_str": limit.token(),
+            "limit": limit1,
+            "limit1": limit1,
+            "limit2": limit2,
+            "limit_str": limit_str,
         })
     if not stages:
         raise ValueError("No stages were parsed")
@@ -93,16 +103,28 @@ def _safe_token(value: str) -> str:
     return "".join(char if char.isalnum() or char in "-_" else "_" for char in value)
 
 
-def _stage_pgn_path(base: Optional[str], stage_number: int, limit: SearchLimit, multi: bool) -> str:
+def _stage_pgn_path(
+    base: Optional[str],
+    stage_number: int,
+    limit: SearchLimit,
+    multi: bool,
+    *,
+    second_limit: Optional[SearchLimit] = None,
+) -> str:
     output_dir = ROOT / "tournament_analysis"
+    token = (
+        limit.token()
+        if second_limit is None or second_limit == limit
+        else f"{limit.token()}_vs_{second_limit.token()}"
+    )
     if base:
         path = Path(base).resolve()
         if not multi:
             return str(path)
         suffix = path.suffix or ".pgn"
-        return str(path.with_name(f"{path.stem}_stage{stage_number}_{_safe_token(limit.token())}{suffix}"))
+        return str(path.with_name(f"{path.stem}_stage{stage_number}_{_safe_token(token)}{suffix}"))
     if multi:
-        return str(output_dir / f"tournament_results_stage{stage_number}_{_safe_token(limit.token())}.pgn")
+        return str(output_dir / f"tournament_results_stage{stage_number}_{_safe_token(token)}.pgn")
     return str(output_dir / "tournament_results.pgn")
 
 
@@ -146,6 +168,18 @@ def _print_result(result: StageResult, first_name: str, second_name: str) -> Non
     print(f"PGN: {result.pgn_path}")
 
 
+def _validate_positive_int(value: object, label: str) -> int:
+    if isinstance(value, bool):
+        raise ValueError(f"{label} must be an integer >= 1, got {value!r}")
+    try:
+        parsed = int(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{label} must be an integer >= 1, got {value!r}") from exc
+    if parsed < 1:
+        raise ValueError(f"{label} must be >= 1")
+    return parsed
+
+
 def run_tournament(
     engine1_path: str,
     engine2_path: str,
@@ -176,6 +210,14 @@ def run_tournament(
     engine1_module: str = "chess_engine.classical",
     engine2_module: str = "chess_engine.classical_old",
     tt_mb: int = DEFAULT_TT_MB,
+    threads1: int = 1,
+    threads2: int = 1,
+    nodes1: Optional[int] = None,
+    depth1: Optional[int] = None,
+    time1_ms: Optional[int] = None,
+    nodes2: Optional[int] = None,
+    depth2: Optional[int] = None,
+    time2_ms: Optional[int] = None,
     max_plies: int = 400,
     search_timeout_s: float = 300.0,
     sprt_elo0: float = 0.0,
@@ -192,33 +234,85 @@ def run_tournament(
     del early_trash_max_elo  # Kept in the public signature for compatibility.
     if external_barriers is not None:
         raise ValueError("external_barriers belonged to the removed subprocess-JIT design")
-    if concurrency <= 0:
-        raise ValueError("concurrency must be >= 1")
-    if tt_mb <= 0:
-        raise ValueError("tt_mb must be >= 1")
+    concurrency = _validate_positive_int(concurrency, "concurrency")
+    tt_mb = _validate_positive_int(tt_mb, "tt_mb")
+    threads1 = _validate_positive_int(threads1, "threads1")
+    threads2 = _validate_positive_int(threads2, "threads2")
+    max_plies = _validate_positive_int(max_plies, "max_plies")
+    if float(search_timeout_s) <= 0.0:
+        raise ValueError("search_timeout_s must be > 0")
+    if adjudicate_win_score < 0 or adjudicate_draw_score < 0:
+        raise ValueError("adjudicate scores must be >= 0")
+    _validate_positive_int(adjudicate_win_plies, "adjudicate_win_plies")
+    _validate_positive_int(adjudicate_draw_min_move, "adjudicate_draw_min_move")
+    _validate_positive_int(adjudicate_draw_plies, "adjudicate_draw_plies")
 
     if stages:
         normalized: list[dict[str, object]] = []
         for stage in stages:
-            if isinstance(stage.get("limit"), SearchLimit):
-                limit = stage["limit"]
+            if (
+                "limit1" in stage
+                or "limit2" in stage
+                or "first_limit" in stage
+                or "second_limit" in stage
+            ):
+                raw_l1 = stage.get("limit1", stage.get("first_limit", stage.get("limit")))
+                raw_l2 = stage.get("limit2", stage.get("second_limit", raw_l1))
+                limit1 = (
+                    raw_l1
+                    if isinstance(raw_l1, SearchLimit)
+                    else SearchLimit.from_mapping(raw_l1)  # type: ignore[arg-type]
+                )
+                limit2 = (
+                    raw_l2
+                    if isinstance(raw_l2, SearchLimit)
+                    else SearchLimit.from_mapping(raw_l2)  # type: ignore[arg-type]
+                )
+            elif isinstance(stage.get("limit"), SearchLimit):
+                limit1 = limit2 = stage["limit"]
             else:
-                limit = SearchLimit.from_mapping(stage)
+                limit1 = limit2 = SearchLimit.from_mapping(stage)
             normalized.append({
                 "games": int(stage["games"]),
-                "limit": limit,
+                "limit1": limit1,
+                "limit2": limit2,
                 "pgn_file": stage.get("pgn_file"),
             })
     else:
         if nodes is not None:
-            limit = SearchLimit(nodes=nodes)
+            shared_limit: Optional[SearchLimit] = SearchLimit(nodes=nodes)
         elif depth is not None:
-            limit = SearchLimit(depth=depth)
+            shared_limit = SearchLimit(depth=depth)
         elif time_ms is not None:
-            limit = SearchLimit(time_ms=time_ms)
+            shared_limit = SearchLimit(time_ms=time_ms)
         else:
-            limit = SearchLimit(nodes=DEFAULT_NODES)
-        normalized = [{"games": int(games_count), "limit": limit, "pgn_file": pgn_file}]
+            shared_limit = None
+
+        def _resolve_side_limit(
+            side_nodes: Optional[int],
+            side_depth: Optional[int],
+            side_time_ms: Optional[int],
+        ) -> SearchLimit:
+            if sum(value is not None for value in (side_nodes, side_depth, side_time_ms)) > 1:
+                raise ValueError("Per-side limit must specify at most one of nodes/depth/time")
+            if side_nodes is not None:
+                return SearchLimit(nodes=side_nodes)
+            if side_depth is not None:
+                return SearchLimit(depth=side_depth)
+            if side_time_ms is not None:
+                return SearchLimit(time_ms=side_time_ms)
+            if shared_limit is not None:
+                return shared_limit
+            return SearchLimit(nodes=DEFAULT_NODES)
+
+        limit1 = _resolve_side_limit(nodes1, depth1, time1_ms)
+        limit2 = _resolve_side_limit(nodes2, depth2, time2_ms)
+        normalized = [{
+            "games": int(games_count),
+            "limit1": limit1,
+            "limit2": limit2,
+            "pgn_file": pgn_file,
+        }]
 
     for stage in normalized:
         games = int(stage["games"])
@@ -228,10 +322,18 @@ def run_tournament(
     selected = _select_backend(backend, engine1_path, engine2_path, own_book1, own_book2)
     if selected == "inprocess":
         factory1 = InProcessEngineFactory(
-            engine1_name, engine1_module, tt_mb=tt_mb, env_extra=engine1_env
+            engine1_name,
+            engine1_module,
+            tt_mb=tt_mb,
+            env_extra=engine1_env,
+            threads=threads1,
         )
         factory2 = InProcessEngineFactory(
-            engine2_name, engine2_module, tt_mb=tt_mb, env_extra=engine2_env
+            engine2_name,
+            engine2_module,
+            tt_mb=tt_mb,
+            env_extra=engine2_env,
+            threads=threads2,
         )
     else:
         for path in (engine1_path, engine2_path):
@@ -240,14 +342,14 @@ def run_tournament(
         factory1 = UciEngineFactory(
             engine1_name,
             engine1_path,
-            options={"OwnBook": own_book1},
+            options={"OwnBook": own_book1, "Hash": tt_mb, "Threads": threads1},
             env_extra=engine1_env,
             search_timeout_s=search_timeout_s,
         )
         factory2 = UciEngineFactory(
             engine2_name,
             engine2_path,
-            options={"OwnBook": own_book2},
+            options={"OwnBook": own_book2, "Hash": tt_mb, "Threads": threads2},
             env_extra=engine2_env,
             search_timeout_s=search_timeout_s,
         )
@@ -263,10 +365,25 @@ def run_tournament(
     max_pairs = max(int(stage["games"]) // 2 for stage in normalized)
     actual_concurrency = min(int(concurrency), max_pairs)
     print(
-        f"Backend: {selected}; workers={actual_concurrency}; TT={tt_mb} MB/context; "
-        f"openings={len(openings)}; seed={seed}",
+        f"Backend: {selected}; workers={actual_concurrency}; "
+        f"threads={engine1_name}:{threads1} vs {engine2_name}:{threads2}; "
+        f"TT={tt_mb} MB/context; openings={len(openings)}; seed={seed}",
         flush=True,
     )
+    if engine1_name == engine2_name:
+        print(
+            f"[warning] engine1_name and engine2_name are both {engine1_name!r}; "
+            "PGN White/Black headers will be indistinguishable.",
+            flush=True,
+        )
+    cpu_count = os.cpu_count()
+    peak_threads = actual_concurrency * max(threads1, threads2)
+    if cpu_count is not None and peak_threads > cpu_count:
+        print(
+            f"[warning] Requested concurrency * max_threads ({actual_concurrency} * {max(threads1, threads2)} = "
+            f"{peak_threads}) exceeds CPU count ({cpu_count}); CPU contention may affect timing and NPS.",
+            flush=True,
+        )
     if adjudicate:
         print(
             f"Adjudication: win >= {adjudicate_win_score} cp ({adjudicate_win_plies} plies), "
@@ -276,7 +393,16 @@ def run_tournament(
     else:
         print("Adjudication: disabled (games play until game-over or max plies)", flush=True)
     if selected == "inprocess":
-        print("JIT plan: classical once + classical_old once; worker contexts share compiled code.", flush=True)
+        if engine1_module == engine2_module:
+            print(
+                f"JIT plan: {engine1_module} once; worker contexts for both sides share compiled code.",
+                flush=True,
+            )
+        else:
+            print(
+                f"JIT plan: {engine1_module} once + {engine2_module} once; worker contexts share compiled code.",
+                flush=True,
+            )
     print(
         "Warm-up: Kiwipete depth 14 for each Python/Numba backend, then one "
         "complete startpos game at depth 1 (all results discarded).",
@@ -288,19 +414,27 @@ def run_tournament(
     try:
         multi = len(normalized) > 1
         for number, stage in enumerate(normalized, 1):
-            limit = stage["limit"]
-            output = stage.get("pgn_file") or _stage_pgn_path(pgn_file, number, limit, multi)
+            limit1 = stage["limit1"]
+            limit2 = stage["limit2"]
+            output = stage.get("pgn_file") or _stage_pgn_path(
+                pgn_file, number, limit1, multi, second_limit=limit2
+            )
+            limit_summary = (
+                f"limit={limit1.describe()}"
+                if limit1 == limit2
+                else f"{engine1_name}={limit1.describe()}; {engine2_name}={limit2.describe()}"
+            )
             print(
                 f"\n>>> Stage {number}/{len(normalized)}: games={stage['games']}, "
-                f"limit={limit.describe()}",
+                f"{limit_summary}",
                 flush=True,
             )
             result = run_stage(
                 pool,
                 openings,
                 games=int(stage["games"]),
-                first_limit=limit,
-                second_limit=limit,
+                first_limit=limit1,
+                second_limit=limit2,
                 first_name=engine1_name,
                 second_name=engine2_name,
                 pgn_path=str(output),
@@ -326,6 +460,25 @@ def run_tournament(
     return results
 
 
+class _SharedThreadsAction(argparse.Action):
+    """Apply --threads N to both sides unless overridden by --threads1/--threads2."""
+
+    def __call__(self, parser, namespace, values, option_string=None):
+        setattr(namespace, self.dest, values)
+        if not getattr(namespace, "_threads1_explicit", False):
+            namespace.threads1 = values
+        if not getattr(namespace, "_threads2_explicit", False):
+            namespace.threads2 = values
+
+
+class _SideThreadsAction(argparse.Action):
+    """Record explicit per-side thread count so --threads cannot overwrite it."""
+
+    def __call__(self, parser, namespace, values, option_string=None):
+        setattr(namespace, self.dest, values)
+        setattr(namespace, f"_{self.dest}_explicit", True)
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Run a paired tournament between current and baseline engines.",
@@ -336,6 +489,7 @@ def build_parser() -> argparse.ArgumentParser:
             "Examples:\n"
             "  python tools/tournament.py -c 8 --nodes 100000\n"
             "  python tools/tournament.py -c 8 --stages 200:n20000,400:n100000\n"
+            "  python tools/tournament.py --engine2 main.py --name1 SMP4 --name2 SMP1 --threads1 4 --threads2 1 --nodes 50000\n"
             "  python tools/tournament.py --depth 12\n"
             "  python tools/tournament.py --time 1000"
         ),
@@ -349,8 +503,37 @@ def build_parser() -> argparse.ArgumentParser:
     limits.add_argument("--nodes", type=int, help=f"fixed nodes/move (default: {DEFAULT_NODES})")
     limits.add_argument("--depth", type=int, help="fixed depth/move")
     limits.add_argument("--time", type=int, help="fixed movetime in ms/move")
-    parser.add_argument("--stages", metavar="SPEC", help="games:limit list, e.g. 200:n20000,400:n100000")
+    limits1 = parser.add_mutually_exclusive_group()
+    limits1.add_argument("--nodes1", type=int, help="override fixed nodes/move for engine 1")
+    limits1.add_argument("--depth1", type=int, help="override fixed depth/move for engine 1")
+    limits1.add_argument("--time1", type=int, help="override fixed movetime in ms/move for engine 1")
+    limits2 = parser.add_mutually_exclusive_group()
+    limits2.add_argument("--nodes2", type=int, help="override fixed nodes/move for engine 2")
+    limits2.add_argument("--depth2", type=int, help="override fixed depth/move for engine 2")
+    limits2.add_argument("--time2", type=int, help="override fixed movetime in ms/move for engine 2")
+    parser.add_argument("--stages", metavar="SPEC", help="games:limit or games:limit1:limit2 list, e.g. 200:n20000,400:n100000")
     parser.add_argument("--concurrency", "-c", type=int, default=1, help="parallel games/independent contexts")
+    parser.add_argument(
+        "--threads",
+        type=int,
+        default=None,
+        action=_SharedThreadsAction,
+        help="threads for both engines unless overridden by --threads1/--threads2",
+    )
+    parser.add_argument(
+        "--threads1",
+        type=int,
+        default=1,
+        action=_SideThreadsAction,
+        help="search threads for engine 1 (default: 1)",
+    )
+    parser.add_argument(
+        "--threads2",
+        type=int,
+        default=1,
+        action=_SideThreadsAction,
+        help="search threads for engine 2 (default: 1)",
+    )
     parser.add_argument("--backend", choices=("auto", "inprocess", "uci"), default="auto")
     parser.add_argument("--engine1-module", default="chess_engine.classical")
     parser.add_argument("--engine2-module", default="chess_engine.classical_old")
@@ -425,8 +608,21 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             parser.error("--no-openings conflicts with --openings-pgn")
         if args.opening_moves < 0:
             parser.error("--opening-moves must be >= 0")
-        if args.stages and any(value is not None for value in (args.nodes, args.depth, args.time)):
+        if args.stages and any(
+            value is not None
+            for value in (
+                args.nodes, args.depth, args.time,
+                args.nodes1, args.depth1, args.time1,
+                args.nodes2, args.depth2, args.time2,
+            )
+        ):
             parser.error("--stages conflicts with --nodes/--depth/--time")
+        if args.threads is not None and args.threads < 1:
+            raise ValueError("--threads must be >= 1")
+        if args.threads1 < 1:
+            raise ValueError("--threads1 must be >= 1")
+        if args.threads2 < 1:
+            raise ValueError("--threads2 must be >= 1")
         engine1_env = _parse_env(args.engine1_env, "--engine1-env")
         engine2_env = _parse_env(args.engine2_env, "--engine2-env")
         stages = parse_stages(args.stages) if args.stages else None
@@ -436,6 +632,11 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             nodes, depth, time_ms = None, args.depth, None
         elif args.time is not None:
             nodes, depth, time_ms = None, None, args.time
+        elif any(
+            value is not None
+            for value in (args.nodes1, args.depth1, args.time1, args.nodes2, args.depth2, args.time2)
+        ):
+            nodes, depth, time_ms = None, None, None
         else:
             nodes, depth, time_ms = DEFAULT_NODES, None, None
         run_tournament(
@@ -465,6 +666,14 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             engine1_module=args.engine1_module,
             engine2_module=args.engine2_module,
             tt_mb=args.tt_mb,
+            threads1=args.threads1,
+            threads2=args.threads2,
+            nodes1=args.nodes1,
+            depth1=args.depth1,
+            time1_ms=args.time1,
+            nodes2=args.nodes2,
+            depth2=args.depth2,
+            time2_ms=args.time2,
             max_plies=args.max_plies,
             search_timeout_s=args.search_timeout,
             sprt_elo0=args.sprt_elo0,

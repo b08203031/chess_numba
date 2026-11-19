@@ -1234,6 +1234,8 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
     search_context.follow_pv_stack[ply] = follow_pv
 
     # Publish progress and observe timer/node-limit stops at a bounded cadence.
+    if ply == 0 and search_context.stop_flag[0]:
+        return (np.int32(0), NO_MOVE, nodes_searched, quiescence_nodes, tt_hits)
     if (search_context.nodes_searched & STOP_CHECK_MASK) == 0:
         search_context.nodes_searched_array[0] = search_context.nodes_searched
         node_budget = search_context.nodes_searched_array[1]
@@ -1249,7 +1251,7 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
     search_context.pv_table[ply, ply] = NO_MOVE
 
     # --- Mate Distance Pruning ---
-    if ENABLE_MATE_DISTANCE_PRUNING:
+    if ENABLE_MATE_DISTANCE_PRUNING and ply > 0:
         # If we find a mate at 'ply', the score would be MATE_SCORE - ply.
         # We can't do better than mating at the current ply (MATE_SCORE - ply).
         # We can't do worse than being mated at the current ply (-MATE_SCORE + ply).
@@ -1318,6 +1320,8 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
     tt_score_raw = np.int32(min(max(tt_score_raw, -MATE_SCORE), MATE_SCORE))
     tt_is_pv = bool(tt_is_pv) if tt_hit else False
     tt_move = tt_move_raw if tt_hit else NO_MOVE
+    if ply == 0 and tt_move == NO_MOVE and search_context.last_iteration_pv_len > 0:
+        tt_move = search_context.last_iteration_pv[0]
     search_context.tt_hit_stack[ply] = tt_hit
 
     # Initialize tt_pv flag (TT-PV Memory Heuristic)
@@ -2088,6 +2092,9 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
     blockers_for_their_king_s, _ = get_blockers_for_king(piece_bbs, occupancy_bbs, opponent_side_s)
 
     best_move, max_eval = NO_MOVE, np.int32(-INFINITY)
+    root_cand_valid = False
+    root_cand_move = NO_MOVE
+    root_cand_score = np.int32(-INFINITY)
     best_moved_piece = np.int8(-1)
     best_is_capture = False
     best_victim_type = np.int8(-1)
@@ -2911,7 +2918,7 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                 else:
                     _diag_add(search_context, DIAG_LMR_CAPTURE_FAIL_HIGH)
 
-            if evaluation > alpha:
+            if (not search_context.stop_flag[0]) and evaluation > alpha:
                 do_full_pv_search = is_pv and evaluation < beta
                 adjusted_depth = search_depth
                 
@@ -2979,7 +2986,7 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                     else:
                         do_full_pv_search = False
                 
-                if do_full_pv_search:
+                if (not search_context.stop_flag[0]) and do_full_pv_search:
                     # Re-search with full window
                     search_context.reduction_stack[ply + 1] = 0
                     res = _search(
@@ -2998,23 +3005,49 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
         nodes_searched += child_nodes; quiescence_nodes += child_q_nodes; tt_hits += child_tt_hits
 
         if search_context.stop_flag[0]:
+            if ply == 0 and root_cand_valid:
+                return (np.int32(root_cand_score), np.uint16(root_cand_move), nodes_searched, quiescence_nodes, tt_hits)
             return (np.int32(0), NO_MOVE, nodes_searched, quiescence_nodes, tt_hits)
 
-        if evaluation > max_eval:
-            max_eval, best_move = evaluation, move
-            best_moved_piece = np.int8(moved_piece_type)
-            best_is_capture = is_capture
-            best_victim_type = np.int8(unmake_info[1] % 6) if (is_capture and unmake_info[1] != -1) else np.int8(-1)
-            search_context.pv_table[ply, ply] = move
-            
-            i = ply + 1
-            if ply + 1 < MAX_PLY:
-                j = ply + 1
-                while j < MAX_PLY and search_context.pv_table[ply + 1, j] != NO_MOVE:
-                    search_context.pv_table[ply, i] = search_context.pv_table[ply + 1, j]
-                    i += 1; j += 1
-            
-            if i < MAX_PLY: search_context.pv_table[ply, i] = NO_MOVE
+        if ply == 0:
+            if searched_legal_moves == 1 or evaluation > alpha:
+                root_cand_valid = True
+                root_cand_move = np.uint16(move)
+                root_cand_score = np.int32(evaluation)
+                search_context.pv_table[0, 0] = move
+                i = 1
+                if 1 < MAX_PLY:
+                    j = 1
+                    while j < MAX_PLY and search_context.pv_table[1, j] != NO_MOVE:
+                        search_context.pv_table[0, i] = search_context.pv_table[1, j]
+                        i += 1
+                        j += 1
+                if i < MAX_PLY:
+                    search_context.pv_table[0, i] = NO_MOVE
+
+            if evaluation > max_eval:
+                max_eval = np.int32(evaluation)
+                if searched_legal_moves == 1 or evaluation > alpha:
+                    best_move = move
+                    best_moved_piece = np.int8(moved_piece_type)
+                    best_is_capture = is_capture
+                    best_victim_type = np.int8(unmake_info[1] % 6) if (is_capture and unmake_info[1] != -1) else np.int8(-1)
+        else:
+            if evaluation > max_eval:
+                max_eval, best_move = np.int32(evaluation), move
+                best_moved_piece = np.int8(moved_piece_type)
+                best_is_capture = is_capture
+                best_victim_type = np.int8(unmake_info[1] % 6) if (is_capture and unmake_info[1] != -1) else np.int8(-1)
+                search_context.pv_table[ply, ply] = move
+                
+                i = ply + 1
+                if ply + 1 < MAX_PLY:
+                    j = ply + 1
+                    while j < MAX_PLY and search_context.pv_table[ply + 1, j] != NO_MOVE:
+                        search_context.pv_table[ply, i] = search_context.pv_table[ply + 1, j]
+                        i += 1; j += 1
+                
+                if i < MAX_PLY: search_context.pv_table[ply, i] = NO_MOVE
 
         # Alpha-raise depth reduction (SF18 spirit): after a non-fail-high improvement,
         # remaining siblings at this node use shallower depth. Applies on PV too
@@ -3455,7 +3488,8 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
     if not is_exclusion_search:
         store_tt(search_context.transposition_table, tt_key, depth, tt_score, tt_static_eval_to_store, final_flag, best_move, search_context.tt_generation, tt_pv)
 
-    return (np.int32(max_eval), best_move, nodes_searched, quiescence_nodes, tt_hits)
+    ret_best_move = root_cand_move if (ply == 0 and root_cand_valid) else best_move
+    return (np.int32(max_eval), np.uint16(ret_best_move), nodes_searched, quiescence_nodes, tt_hits)
 
 def reset_search_diagnostics(search_context):
     """Zero tree-efficiency counters (safe from pure Python)."""
@@ -4207,7 +4241,16 @@ def _prepare_search_context_jit(search_context, game_history_arr, game_history_c
 
 
 lazy_smp_helper_return_type = numba.types.Tuple([
-    numba.uint16, numba.int32, numba.uint64, numba.uint64, numba.uint64, numba.int32
+    numba.uint16,
+    numba.int32,
+    numba.uint64,
+    numba.uint64,
+    numba.uint64,
+    numba.int32,
+    numba.int32,
+    numba.boolean,
+    numba.boolean,
+    numba.int32,
 ])
 
 
@@ -4252,26 +4295,32 @@ def _lazy_smp_helper_loop_jit(
 
     last_score = np.int32(0)
     last_completed_depth = np.int32(0)
-    best_move_from_last_depth = np.uint16(NO_MOVE)
+    cand_valid = False
+    cand_move = np.uint16(NO_MOVE)
+    cand_score = np.int32(-INFINITY)
+    cand_uci_score = np.int32(-INFINITY)
+    cand_depth = np.int32(0)
+    cand_inexact_lower = False
+    cand_inexact_upper = False
+    cand_pv = np.zeros(MAX_PLY, dtype=np.uint16)
+    cand_pv_len = np.int32(0)
+
+    last_best_valid = False
+    last_best_move = np.uint16(NO_MOVE)
+    last_best_score = np.int32(-INFINITY)
+    last_best_depth = np.int32(0)
+    last_best_pv = np.zeros(MAX_PLY, dtype=np.uint16)
+    last_best_pv_len = np.int32(0)
+
     total_search_nodes = np.uint64(0)
     total_q_nodes = np.uint64(0)
     total_tt_hits = np.uint64(0)
-    asp_base = ASPIRATION_WINDOW_BASE + (int(thread_idx) & 3) * 4
+    # SF19 aspiration window diversification across threads without skipping depths
+    asp_base = ASPIRATION_WINDOW_BASE + (int(thread_idx) & 7)
 
     for current_depth in range(1, max_depth + 1):
         if search_context.stop_flag[0]:
             break
-
-        # Stockfish-style Lazy SMP depth diversification: stagger helper threads
-        # so half of the helpers push deeper into the shared TT ahead of Thread 0.
-        if (
-            thread_idx > 0
-            and current_depth >= 4
-            and current_depth < max_depth
-            and ((current_depth + thread_idx) % 2 == 0)
-            and (thread_idx % 3 != 0)
-        ):
-            continue
 
         alpha = -INFINITY
         beta = INFINITY
@@ -4286,9 +4335,12 @@ def _lazy_smp_helper_loop_jit(
 
         failed_high_cnt = 0
         score = np.int32(0)
-        best_move_iter = np.uint16(NO_MOVE)
+        stopped_in_iter = False
 
         while True:
+            if search_context.stop_flag[0]:
+                stopped_in_iter = True
+                break
             search_context.reduction_stack[0] = 0
             adjusted_depth = max(1, current_depth - failed_high_cnt)
             res = _search(
@@ -4311,7 +4363,48 @@ def _lazy_smp_helper_loop_jit(
             total_tt_hits += res[4]
             search_context.nodes_searched_array[0] = total_search_nodes + total_q_nodes
 
-            if search_context.stop_flag[0]:
+            iter_stopped = bool(search_context.stop_flag[0])
+            if best_move_iter != NO_MOVE:
+                cand_valid = True
+                cand_move = np.uint16(best_move_iter)
+                cand_score = np.int32(score)
+                cand_depth = np.int32(current_depth)
+                if score >= beta:
+                    cand_inexact_lower = True
+                    cand_inexact_upper = False
+                    cand_uci_score = np.int32(beta)
+                elif score <= alpha:
+                    cand_inexact_lower = False
+                    cand_inexact_upper = True
+                    cand_uci_score = np.int32(alpha)
+                else:
+                    cand_inexact_lower = False
+                    cand_inexact_upper = False
+                    cand_uci_score = np.int32(score)
+
+                pv_len_i = 0
+                for i in range(MAX_PLY):
+                    m = search_context.pv_table[0, i]
+                    if m == NO_MOVE:
+                        break
+                    cand_pv[i] = m
+                    pv_len_i += 1
+                if pv_len_i == 0:
+                    cand_pv[0] = best_move_iter
+                    pv_len_i = 1
+                cand_pv_len = np.int32(pv_len_i)
+            elif not iter_stopped:
+                cand_valid = False
+                cand_move = np.uint16(NO_MOVE)
+                cand_score = np.int32(score)
+                cand_uci_score = np.int32(score)
+                cand_depth = np.int32(current_depth)
+                cand_inexact_lower = False
+                cand_inexact_upper = False
+                cand_pv_len = np.int32(0)
+
+            if iter_stopped:
+                stopped_in_iter = True
                 break
 
             if score <= alpha:
@@ -4327,32 +4420,83 @@ def _lazy_smp_helper_loop_jit(
             else:
                 break
 
-        if search_context.stop_flag[0]:
+        forgotten_mate = (
+            last_best_valid
+            and abs(int(last_best_score)) >= MATE_IN_MAX_PLY
+            and (
+                (not cand_valid)
+                or abs(int(cand_score)) < abs(int(last_best_score))
+                or cand_inexact_lower
+                or cand_inexact_upper
+            )
+        )
+
+        if not stopped_in_iter:
+            last_completed_depth = np.int32(current_depth)
+            if cand_valid and not forgotten_mate:
+                last_best_valid = True
+                last_best_move = cand_move
+                last_best_score = cand_score
+                last_best_depth = np.int32(current_depth)
+                copy_len = min(int(cand_pv_len), MAX_PLY)
+                for i in range(copy_len):
+                    last_best_pv[i] = cand_pv[i]
+                last_best_pv_len = np.int32(copy_len)
+
+        aborted_loss_search = (
+            stopped_in_iter
+            and cand_valid
+            and int(cand_score) <= -VALUE_KNOWN_WIN
+            and (not cand_inexact_lower)
+            and (not cand_inexact_upper)
+        )
+
+        if aborted_loss_search or (cand_valid and forgotten_mate):
+            if last_best_valid:
+                cand_move = last_best_move
+                cand_score = last_best_score
+                cand_uci_score = last_best_score
+                cand_depth = np.int32(current_depth) if not stopped_in_iter else last_best_depth
+                cand_inexact_lower = False
+                cand_inexact_upper = False
+                copy_len = min(int(last_best_pv_len), MAX_PLY)
+                for i in range(copy_len):
+                    cand_pv[i] = last_best_pv[i]
+                cand_pv_len = np.int32(copy_len)
+            elif aborted_loss_search:
+                cand_inexact_lower = True
+
+        if stopped_in_iter:
             break
 
-        last_completed_depth = np.int32(current_depth)
-        last_score = np.int32(score)
-        if best_move_iter != NO_MOVE:
-            best_move_from_last_depth = best_move_iter
-        elif search_context.pv_table[0, 0] != NO_MOVE:
-            best_move_from_last_depth = search_context.pv_table[0, 0]
+        last_score = cand_score if cand_valid else np.int32(score)
+        if cand_valid:
+            copy_len = min(int(cand_pv_len), MAX_PLY)
+            for i in range(copy_len):
+                search_context.last_iteration_pv[i] = cand_pv[i]
+            search_context.last_iteration_pv_len = np.int32(copy_len)
+        else:
+            search_context.last_iteration_pv_len = np.int32(0)
 
-        lpv_len = 0
-        for i in range(MAX_PLY):
-            m = search_context.pv_table[0, i]
-            if m == NO_MOVE:
-                break
-            search_context.last_iteration_pv[i] = m
-            lpv_len += 1
-        search_context.last_iteration_pv_len = np.int32(lpv_len)
+    if cand_valid:
+        copy_len = min(int(cand_pv_len), MAX_PLY)
+        for i in range(copy_len):
+            search_context.last_iteration_pv[i] = cand_pv[i]
+        search_context.last_iteration_pv_len = np.int32(copy_len)
+    else:
+        search_context.last_iteration_pv_len = np.int32(0)
 
     return (
-        best_move_from_last_depth,
-        np.int32(last_score),
+        np.uint16(cand_move),
+        np.int32(cand_score),
         total_search_nodes,
         total_q_nodes,
         total_tt_hits,
-        np.int32(last_completed_depth),
+        np.int32(cand_depth),
+        np.int32(cand_uci_score),
+        bool(cand_inexact_lower),
+        bool(cand_inexact_upper),
+        np.int32(cand_pv_len),
     )
 
 
@@ -4458,6 +4602,202 @@ def warmup_search_jit(search_context=None):
     return True
 
 
+class RootThreadResult:
+    """Per-thread root search outcome used by SF19 get_best_thread voting."""
+
+    __slots__ = (
+        "thread_id",
+        "move",
+        "score",
+        "uci_score",
+        "depth",
+        "pv",
+        "pv_len",
+        "inexact_lower",
+        "inexact_upper",
+    )
+
+    def __init__(
+        self,
+        thread_id,
+        move,
+        score,
+        uci_score=None,
+        depth=0,
+        pv=None,
+        pv_len=None,
+        inexact_lower=False,
+        inexact_upper=False,
+    ):
+        self.thread_id = int(thread_id)
+        self.move = int(move)
+        self.score = int(score)
+        self.uci_score = int(score if uci_score is None else uci_score)
+        self.depth = int(depth)
+        self.pv = list(pv) if pv is not None else ([int(move)] if int(move) != int(NO_MOVE) else [])
+        self.pv_len = int(len(self.pv) if pv_len is None else pv_len)
+        self.inexact_lower = bool(inexact_lower)
+        self.inexact_upper = bool(inexact_upper)
+
+    def is_inexact(self):
+        return self.inexact_lower or self.inexact_upper
+
+    def is_valid(self):
+        return self.move != int(NO_MOVE) and self.score > -INFINITY
+
+    def is_decisive(self):
+        return abs(self.score) >= MATE_IN_MAX_PLY
+
+    def is_exact_decisive(self):
+        return self.is_valid() and self.is_decisive() and not self.is_inexact()
+
+    def is_win(self):
+        return self.score >= VALUE_KNOWN_WIN
+
+    def is_loss(self):
+        return self.score <= -VALUE_KNOWN_WIN
+
+
+def apply_root_iteration_guards(
+    cand_valid,
+    cand_move,
+    cand_score,
+    cand_uci_score,
+    cand_depth,
+    cand_inexact_lower,
+    cand_inexact_upper,
+    cand_pv,
+    last_best_valid,
+    last_best_move,
+    last_best_score,
+    last_best_depth,
+    last_best_pv,
+    current_depth,
+    stopped_in_iter,
+):
+    """
+    Apply SF19 forgottenMate and abortedLossSearch rollback protection after a root iteration.
+    """
+    forgotten_mate = (
+        bool(last_best_valid)
+        and abs(int(last_best_score)) >= MATE_IN_MAX_PLY
+        and (
+            (not bool(cand_valid))
+            or abs(int(cand_score)) < abs(int(last_best_score))
+            or bool(cand_inexact_lower)
+            or bool(cand_inexact_upper)
+        )
+    )
+
+    if (not stopped_in_iter) and cand_valid and (not forgotten_mate):
+        last_best_valid = True
+        last_best_move = int(cand_move)
+        last_best_score = int(cand_score)
+        last_best_depth = int(current_depth)
+        last_best_pv = list(cand_pv)
+
+    aborted_loss_search = (
+        bool(stopped_in_iter)
+        and bool(cand_valid)
+        and int(cand_score) <= -VALUE_KNOWN_WIN
+        and (not bool(cand_inexact_lower))
+        and (not bool(cand_inexact_upper))
+    )
+
+    rolled_back = False
+    if aborted_loss_search or (bool(cand_valid) and forgotten_mate):
+        if last_best_valid:
+            cand_move = int(last_best_move)
+            cand_score = int(last_best_score)
+            cand_uci_score = int(last_best_score)
+            cand_depth = int(current_depth) if not stopped_in_iter else int(last_best_depth)
+            cand_inexact_lower = False
+            cand_inexact_upper = False
+            cand_pv = list(last_best_pv)
+            rolled_back = True
+        elif aborted_loss_search:
+            cand_inexact_lower = True
+
+    return (
+        int(cand_move),
+        int(cand_score),
+        int(cand_uci_score),
+        int(cand_depth),
+        bool(cand_inexact_lower),
+        bool(cand_inexact_upper),
+        list(cand_pv),
+        bool(last_best_valid),
+        int(last_best_move),
+        int(last_best_score),
+        int(last_best_depth),
+        list(last_best_pv),
+        rolled_back,
+    )
+
+
+def select_best_thread(thread_results):
+    """
+    SF19 ThreadPool::get_best_thread() equivalent.
+    Pools Thread 0 and all helper threads using score-weighted voting,
+    exact decisive/mate priority, unconfirmed-loss rejection, and PV-length /
+    score / depth tie-breaking.
+    """
+    if not thread_results:
+        return None
+    valid_threads = [th for th in thread_results if th is not None and th.is_valid()]
+    if not valid_threads:
+        return thread_results[0]
+
+    best_thread = valid_threads[0]
+    min_score = min(th.score for th in valid_threads)
+
+    votes = {}
+    for th in valid_threads:
+        votes[th.move] = votes.get(th.move, 0) + (th.score - min_score + 14)
+
+    for th in valid_threads[1:]:
+        best_decisive = best_thread.is_exact_decisive()
+        new_decisive = th.is_exact_decisive()
+
+        if best_decisive:
+            if new_decisive:
+                if th.is_win() and best_thread.is_loss():
+                    best_thread = th
+                elif best_thread.is_win() and th.is_loss():
+                    continue
+                elif abs(th.score) > abs(best_thread.score):
+                    best_thread = th
+                elif abs(th.score) == abs(best_thread.score):
+                    best_vote = votes[best_thread.move]
+                    new_vote = votes[th.move]
+                    if (
+                        new_vote > best_vote
+                        or (
+                            new_vote == best_vote
+                            and (th.pv_len, th.score, th.depth)
+                            > (best_thread.pv_len, best_thread.score, best_thread.depth)
+                        )
+                    ):
+                        best_thread = th
+        else:
+            if new_decisive:
+                best_thread = th
+            elif not th.is_loss():
+                best_vote = votes[best_thread.move]
+                new_vote = votes[th.move]
+                if (
+                    new_vote > best_vote
+                    or (
+                        new_vote == best_vote
+                        and (th.pv_len, th.score, th.depth)
+                        > (best_thread.pv_len, best_thread.score, best_thread.depth)
+                    )
+                ):
+                    best_thread = th
+
+    return best_thread
+
+
 def iterative_deepening_search(
     piece_bbs,
     occupancy_bbs,
@@ -4515,7 +4855,7 @@ def iterative_deepening_search(
 
     nodes_limit = time_config.get('nodes_limit', 0)
 
-    last_score, best_move_total = 0, NO_MOVE
+    last_score = 0
     # Init before timer thread so nodes_limit closure never races NameError
     # ``total_nodes`` is the all-node counter used by UCI and fixed-node
     # stopping.  The public return tuple historically exposes main-search
@@ -4528,6 +4868,22 @@ def iterative_deepening_search(
     best_move_from_last_depth = NO_MOVE
     # Fresh root search: no previous-iteration PV until depth 1 completes
     search_context.last_iteration_pv_len = np.int32(0)
+
+    cand_valid = False
+    cand_move = int(NO_MOVE)
+    cand_score = -INFINITY
+    cand_uci_score = -INFINITY
+    cand_depth = 0
+    cand_inexact_lower = False
+    cand_inexact_upper = False
+    cand_pv = []
+
+    last_best_valid = False
+    last_best_move = int(NO_MOVE)
+    last_best_score = -INFINITY
+    last_best_depth = 0
+    last_best_pv = []
+    uci_pv_sent = False
 
     # Spawn a Python timer only for wall-clock limits. Fixed-node stopping is
     # checked directly in JIT through nodes_searched_array[1].
@@ -4601,6 +4957,11 @@ def iterative_deepening_search(
             t.start()
 
     for current_depth in range(1, max_depth + 1):
+        if search_context.stop_flag[0]:
+            break
+
+        uci_pv_sent = False
+
         # Aspiration Window Logic
         alpha = -INFINITY
         beta = INFINITY
@@ -4637,12 +4998,20 @@ def iterative_deepening_search(
                 else 0
             )
             remaining_nodes = int(nodes_limit) - (int(total_nodes) + helper_nodes_so_far)
+            if remaining_nodes <= 0 and (cand_valid or last_completed_depth > 0):
+                search_context.stop_flag[0] = True
+                break
             nodes_searched_array[1] = np.uint64(max(1, remaining_nodes))
         else:
             nodes_searched_array[1] = np.uint64(0)
         failed_high_cnt = 0
+        score = 0
+        stopped_in_iter = False
         
         while True:
+            if search_context.stop_flag[0]:
+                stopped_in_iter = True
+                break
             search_context.reduction_stack[0] = 0
             # Fail-High 降深重搜策略
             adjusted_depth = max(1, current_depth - failed_high_cnt)
@@ -4652,13 +5021,53 @@ def iterative_deepening_search(
                 _i32(adjusted_depth), _i32(alpha), _i32(beta),
                 search_context, _i32(0), _u16(NO_MOVE), _b_true(), _b_false(),
             )
-            score = res[0]
+            score = int(res[0])
+            best_move_iter = res[1]
             
             # Always accumulate stats from the search (even if stopped or failed window)
             total_search_nodes += res[2]
             total_q_nodes += res[3]; total_tt_hits += res[4]
 
-            if search_context.stop_flag[0]:
+            iter_stopped = bool(search_context.stop_flag[0])
+            if best_move_iter != NO_MOVE:
+                cand_valid = True
+                cand_move = int(best_move_iter)
+                cand_score = score
+                cand_depth = current_depth
+                if score >= beta:
+                    cand_inexact_lower = True
+                    cand_inexact_upper = False
+                    cand_uci_score = int(beta)
+                elif score <= alpha:
+                    cand_inexact_lower = False
+                    cand_inexact_upper = True
+                    cand_uci_score = int(alpha)
+                else:
+                    cand_inexact_lower = False
+                    cand_inexact_upper = False
+                    cand_uci_score = score
+
+                extracted_pv = []
+                for i in range(MAX_PLY):
+                    m = search_context.pv_table[0, i]
+                    if m == NO_MOVE:
+                        break
+                    extracted_pv.append(int(m))
+                if not extracted_pv:
+                    extracted_pv.append(int(best_move_iter))
+                cand_pv = extracted_pv
+            elif not iter_stopped:
+                cand_valid = False
+                cand_move = int(NO_MOVE)
+                cand_score = score
+                cand_uci_score = score
+                cand_depth = current_depth
+                cand_inexact_lower = False
+                cand_inexact_upper = False
+                cand_pv = []
+
+            if iter_stopped:
+                stopped_in_iter = True
                 break
             
             if score <= alpha:
@@ -4718,53 +5127,85 @@ def iterative_deepening_search(
             else 0
         )
 
-        if nodes_limit > 0 and (int(total_nodes) + helper_nodes_now) >= nodes_limit:
-            search_context.stop_flag[0] = True
+        if not stopped_in_iter and cand_move == int(NO_MOVE):
+            # GHI: use halfmove-aware key to match the key used inside the search
+            _id_tt_key = np.uint64(get_tt_key(game_state[4], int(game_state[3])))
+            _id_tt_flag, _id_tt_best_move = probe_tt_best_move(transposition_table, _id_tt_key)
+            if _id_tt_flag != TT_FLAG_NONE and _id_tt_best_move != NO_MOVE:
+                cand_move = int(_id_tt_best_move)
+                cand_valid = True
+                cand_pv = [cand_move]
+            elif search_context.pv_table[0, 0] != NO_MOVE:
+                cand_move = int(search_context.pv_table[0, 0])
+                cand_valid = True
+                cand_pv = [cand_move]
 
-        if search_context.stop_flag[0]:
+        (
+            cand_move,
+            cand_score,
+            cand_uci_score,
+            cand_depth,
+            cand_inexact_lower,
+            cand_inexact_upper,
+            cand_pv,
+            last_best_valid,
+            last_best_move,
+            last_best_score,
+            last_best_depth,
+            last_best_pv,
+            rolled_back,
+        ) = apply_root_iteration_guards(
+            cand_valid,
+            cand_move,
+            cand_score,
+            cand_uci_score,
+            cand_depth,
+            cand_inexact_lower,
+            cand_inexact_upper,
+            cand_pv,
+            last_best_valid,
+            last_best_move,
+            last_best_score,
+            last_best_depth,
+            last_best_pv,
+            current_depth,
+            stopped_in_iter,
+        )
+        if rolled_back:
+            uci_pv_sent = False
+
+        if stopped_in_iter:
             if verbose:
                 log_info(f"Search stopped at depth {current_depth} due to limit.")
             break
 
         # --- This block only runs if the search for the current depth was fully completed ---
         last_completed_depth = current_depth
-        last_score = score
-
-        if res[1] != NO_MOVE:
-            best_move_from_last_depth = res[1]
-        else:
-            # GHI: use halfmove-aware key to match the key used inside the search
-            _id_tt_key = np.uint64(get_tt_key(game_state[4], int(game_state[3])))
-            _id_tt_flag, _id_tt_best_move = probe_tt_best_move(transposition_table, _id_tt_key)
-            if _id_tt_flag != TT_FLAG_NONE and _id_tt_best_move != NO_MOVE:
-                best_move_from_last_depth = _id_tt_best_move
-            elif search_context.pv_table[0, 0] != NO_MOVE:
-                best_move_from_last_depth = search_context.pv_table[0, 0]
+        last_score = cand_score if cand_valid else score
+        best_move_from_last_depth = np.uint16(cand_move)
 
         # Snapshot PV for next iteration's followPV tracking (SF lastIterationPV)
-        lpv_len = 0
-        for i in range(MAX_PLY):
-            m = search_context.pv_table[0, i]
-            if m == NO_MOVE:
-                break
-            search_context.last_iteration_pv[i] = m
-            lpv_len += 1
+        lpv_len = min(len(cand_pv), MAX_PLY)
+        for i in range(lpv_len):
+            search_context.last_iteration_pv[i] = np.uint16(cand_pv[i])
         search_context.last_iteration_pv_len = np.int32(lpv_len)
 
         elapsed_time_ms = (time.time() - start_time) * 1000
-
-        pv_moves = []
-        for i in range(lpv_len):
-            pv_moves.append(move_to_uci(search_context.last_iteration_pv[i]))
-
-        pv_string = " ".join(pv_moves)
-        uci_score_string = format_score_for_uci(score)
+        pv_string = " ".join(move_to_uci(np.uint16(m)) for m in cand_pv)
+        uci_score_string = format_score_for_uci(cand_uci_score if cand_valid else score)
 
         if verbose:
             combined_nodes = int(total_nodes) + helper_nodes_now
             nps = int(combined_nodes / (elapsed_time_ms / 1000)) if elapsed_time_ms > 0 else 0
             hashfull_val = hashfull(transposition_table, search_context.tt_generation)
             print(f"info depth {current_depth} score {uci_score_string} nodes {combined_nodes} nps {nps} hashfull {hashfull_val / 10:.1f}% time {int(elapsed_time_ms)} pv {pv_string}")
+            uci_pv_sent = True
+
+        if nodes_limit > 0 and (int(total_nodes) + helper_nodes_now) >= nodes_limit:
+            search_context.stop_flag[0] = True
+            if verbose:
+                log_info(f"Search stopped at depth {current_depth} due to limit.")
+            break
 
         # Predictive soft time limit
         if maximum_time_ms > 0:
@@ -4791,19 +5232,99 @@ def iterative_deepening_search(
             total_q_nodes += h_res[3]
             total_tt_hits += h_res[4]
 
-    final_best_move = best_move_from_last_depth
-    if active_helpers:
-        for h_res in helper_results:
-            if h_res is None:
-                continue
-            h_move, h_score, _, _, _, h_depth = h_res
-            if h_move != NO_MOVE and int(h_depth) >= int(last_completed_depth) and int(h_depth) > 0:
-                if final_best_move == NO_MOVE or (
-                    int(h_depth) > int(last_completed_depth) and int(h_score) > int(last_score)
-                ):
-                    final_best_move = h_move
-                    last_score = int(h_score)
-                    last_completed_depth = int(h_depth)
+    thread0_result = RootThreadResult(
+        thread_id=0,
+        move=cand_move if cand_valid else int(NO_MOVE),
+        score=cand_score if cand_valid else -INFINITY,
+        uci_score=cand_uci_score if cand_valid else -INFINITY,
+        depth=cand_depth if cand_valid else int(last_completed_depth),
+        pv=cand_pv if cand_valid else [],
+        pv_len=len(cand_pv) if cand_valid else 0,
+        inexact_lower=cand_inexact_lower if cand_valid else False,
+        inexact_upper=cand_inexact_upper if cand_valid else False,
+    )
+
+    helper_thread_results = []
+    for idx, h_res in enumerate(helper_results):
+        if h_res is None:
+            continue
+        (
+            h_move,
+            h_score,
+            _,
+            _,
+            _,
+            h_depth,
+            h_uci_score,
+            h_inexact_lower,
+            h_inexact_upper,
+            h_pv_len,
+        ) = h_res
+        hc = active_helpers[idx]
+        pv_count = max(0, min(int(h_pv_len), MAX_PLY))
+        h_pv = [int(hc.last_iteration_pv[i]) for i in range(pv_count)]
+        if int(h_move) != int(NO_MOVE) and not h_pv:
+            h_pv = [int(h_move)]
+            pv_count = 1
+        helper_thread_results.append(
+            RootThreadResult(
+                thread_id=idx + 1,
+                move=int(h_move),
+                score=int(h_score),
+                uci_score=int(h_uci_score),
+                depth=int(h_depth),
+                pv=h_pv,
+                pv_len=pv_count,
+                inexact_lower=bool(h_inexact_lower),
+                inexact_upper=bool(h_inexact_upper),
+            )
+        )
+
+    is_fixed_depth = (
+        int(max_depth) < MAX_PLY
+        and int(maximum_time_ms) <= 0
+        and int(optimum_time_ms) <= 0
+        and int(nodes_limit) <= 0
+    )
+
+    if not helper_thread_results:
+        best_thread = thread0_result
+    elif is_fixed_depth:
+        # Match SF19 !limits.depth: preserve Thread 0's fixed-depth decision unless NO_MOVE
+        if thread0_result.is_valid():
+            best_thread = thread0_result
+        else:
+            best_thread = select_best_thread([thread0_result] + helper_thread_results)
+    else:
+        best_thread = select_best_thread([thread0_result] + helper_thread_results)
+
+    if best_thread is not None and best_thread.is_valid():
+        final_best_move = np.uint16(best_thread.move)
+        last_score = int(best_thread.score)
+        last_completed_depth = int(best_thread.depth)
+        if verbose and (best_thread.thread_id != 0 or not uci_pv_sent):
+            elapsed_time_ms = (time.time() - start_time) * 1000
+            combined_nodes = int(total_search_nodes) + int(total_q_nodes)
+            nps = int(combined_nodes / (elapsed_time_ms / 1000)) if elapsed_time_ms > 0 else 0
+            hashfull_val = hashfull(transposition_table, search_context.tt_generation)
+            out_pv = best_thread.pv if best_thread.pv else [int(best_thread.move)]
+            pv_string = " ".join(move_to_uci(np.uint16(m)) for m in out_pv)
+            uci_score_string = format_score_for_uci(int(best_thread.uci_score))
+            bound_suffix = (
+                " lowerbound"
+                if best_thread.inexact_lower
+                else (" upperbound" if best_thread.inexact_upper else "")
+            )
+            out_depth = max(1, int(best_thread.depth))
+            print(
+                f"info depth {out_depth} score {uci_score_string}{bound_suffix} "
+                f"nodes {combined_nodes} nps {nps} hashfull {hashfull_val / 10:.1f}% "
+                f"time {int(elapsed_time_ms)} pv {pv_string}"
+            )
+    else:
+        final_best_move = best_move_from_last_depth
+        if not cand_valid and cand_depth > 0:
+            last_score = int(cand_score)
 
     if max_depth >= 1:
         legal_moves = generate_legal_moves(piece_bbs, occupancy_bbs, game_state)
