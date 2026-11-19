@@ -131,7 +131,7 @@ def load_openings(path: Optional[Path], limit: int) -> List[str]:
             if len(parts) >= 6 and parts[4].isdigit():
                 fen = " ".join(parts[:6])
             fens.append(fen)
-        if len(fens) >= limit:
+        if limit > 0 and len(fens) >= limit:
             break
     return fens or ["rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"]
 

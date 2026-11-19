@@ -157,6 +157,7 @@ def get_2d_val(theta, base_idx, row, col_size, col):
 # Must match tune_eval_match.eval_weights
 _EW_IMB_SCALE_MG = 44
 _EW_IMB_SCALE_EG = 45
+_EW_IMB_DIV = 63
 
 
 @numba.njit(cache=True, inline="always")
@@ -183,6 +184,7 @@ def compute_imbalance(cnt_0, cnt_1, cnt_2, cnt_3, cnt_4, cnt_6, cnt_7, cnt_8, cn
 
     scale_mg = _ew_get_mat(ew, use_ew, _EW_IMB_SCALE_MG, get_int(theta, IDX_IMBALANCE_SCALE_MG))
     scale_eg = _ew_get_mat(ew, use_ew, _EW_IMB_SCALE_EG, get_int(theta, IDX_IMBALANCE_SCALE_EG))
+    imb_div = max(np.int32(1), _ew_get_mat(ew, use_ew, _EW_IMB_DIV, get_int(theta, IDX_IMBALANCE_DIVISOR)))
 
     w_bp = np.int32(1) if cnt_2 > 1 else np.int32(0)
     b_bp = np.int32(1) if cnt_8 > 1 else np.int32(0)
@@ -212,7 +214,7 @@ def compute_imbalance(cnt_0, cnt_1, cnt_2, cnt_3, cnt_4, cnt_6, cnt_7, cnt_8, cn
             v += get_2d_val(theta, IDX_IMBALANCE_QUADRATIC_THEIRS, pt1, 6, pt2) * w[pt2]
         b_bonus += b[pt1] * v
 
-    raw = _trunc_div(w_bonus - b_bonus, get_int(theta, IDX_IMBALANCE_DIVISOR))
+    raw = _trunc_div(w_bonus - b_bonus, imb_div)
     mg_imbalance = _trunc_div(raw * scale_mg, np.int32(100))
     eg_imbalance = _trunc_div(raw * scale_eg, np.int32(100))
     return mg_imbalance, eg_imbalance
@@ -871,10 +873,39 @@ _EW_PASS_R5_MG = 50
 _EW_PASS_R5_EG = 51
 _EW_PASS_R6_MG = 52
 _EW_PASS_R6_EG = 53
+# Extended King Safety, Space, Imbalance Divisor (54..63)
+_EW_KAW_N = 54
+_EW_KAW_B = 55
+_EW_KAW_R = 56
+_EW_KAW_Q = 57
+_EW_KD_NOQ_ROOKLESS = 58
+_EW_FLANK_ATT_EG = 59
+_EW_SPACE_THR = 60
+_EW_SPACE_BONUS_DIV = 61
+_EW_SPACE_SCALE_DIV = 62
+# Threats (64..97)
+_EW_THREAT_SAFE_PAWN_MG = 64
+_EW_THREAT_SAFE_PAWN_EG = 65
+_EW_THREAT_KOQ_MG = 66
+_EW_THREAT_KOQ_EG = 67
+_EW_THREAT_SOQ_MG = 68
+_EW_THREAT_SOQ_EG = 69
+_EW_THREAT_BY_MINOR_BASE = 70
+_EW_THREAT_BY_ROOK_BASE = 80
+_EW_THREAT_BY_KING_MG = 90
+_EW_THREAT_BY_KING_EG = 91
+_EW_THREAT_HANGING_MG = 92
+_EW_THREAT_HANGING_EG = 93
+_EW_THREAT_RESTRICTED_MG = 94
+_EW_THREAT_RESTRICTED_EG = 95
+_EW_THREAT_PAWN_PUSH_MG = 96
+_EW_THREAT_PAWN_PUSH_EG = 97
+# Endgame
+_EW_UNSTOPPABLE_PAWN = 98
 
 
 # Dummy weights when search_context is None (use_ew=False ignores values)
-_DUMMY_EW = np.zeros(64, dtype=np.int32)
+_DUMMY_EW = np.zeros(128, dtype=np.int32)
 
 
 @numba.njit(cache=True, inline="always")
@@ -1216,7 +1247,7 @@ def _evaluate_king_attackers(king_sq, color, piece_bbs, occupancy_bbs, enemy_att
         if piece_bbs[enemy_start_idx + 3]:
             kingDanger -= kd_noq
         else:
-            kingDanger -= get_int(theta, IDX_KING_DANGER_NO_QUEEN_ROOKLESS)
+            kingDanger -= _ew_get(ew, use_ew, _EW_KD_NOQ_ROOKLESS, get_int(theta, IDX_KING_DANGER_NO_QUEEN_ROOKLESS))
 
     return kingDanger
 
@@ -1269,6 +1300,7 @@ def evaluate_king_safety(piece_bbs, occupancy_bbs, white_attacks, black_attacks,
     pawnless_mg = _ew_get(ew, use_ew, _EW_PAWNLESS_MG, get_array_val(theta, IDX_PAWNLESS_FLANK, 0))
     pawnless_eg = _ew_get(ew, use_ew, _EW_PAWNLESS_EG, get_array_val(theta, IDX_PAWNLESS_FLANK, 1))
     flank_att_mg = _ew_get(ew, use_ew, _EW_FLANK_ATT_MG, get_array_val(theta, IDX_FLANK_ATTACKS, 0))
+    flank_att_eg = _ew_get(ew, use_ew, _EW_FLANK_ATT_EG, get_array_val(theta, IDX_FLANK_ATTACKS, 1))
     # get_int(theta, IDX_EG_SAFETY_SCALE): fixed-point 100 == 1.0 (constants.get_int(theta, IDX_EG_SAFETY_SCALE) is 100)
     eg_safe_scale = _ew_get(ew, use_ew, _EW_EG_SAFE_SCALE, np.int32(get_int(theta, IDX_EG_SAFETY_SCALE)))
 
@@ -1315,7 +1347,7 @@ def evaluate_king_safety(piece_bbs, occupancy_bbs, white_attacks, black_attacks,
         w_extra_mg += pawnless_mg
         w_extra_eg += pawnless_eg
     w_extra_mg += flank_att_mg * w_flank_attack
-    w_extra_eg += get_array_val(theta, IDX_FLANK_ATTACKS, 1) * w_flank_attack
+    w_extra_eg += flank_att_eg * w_flank_attack
 
     b_extra_mg = np.int32(0)
     b_extra_eg = np.int32(0)
@@ -1323,7 +1355,7 @@ def evaluate_king_safety(piece_bbs, occupancy_bbs, white_attacks, black_attacks,
         b_extra_mg += pawnless_mg
         b_extra_eg += pawnless_eg
     b_extra_mg += flank_att_mg * b_flank_attack
-    b_extra_eg += get_array_val(theta, IDX_FLANK_ATTACKS, 1) * b_flank_attack
+    b_extra_eg += flank_att_eg * b_flank_attack
 
     white_mg_score = white_mg_shield + w_extra_mg - w_penalty_mg
     white_eg_score = white_eg_shield + w_extra_eg - w_penalty_eg
@@ -1372,7 +1404,15 @@ def evaluate_king_safety(piece_bbs, occupancy_bbs, white_attacks, black_attacks,
 
 
 @numba.njit(cache=True, boundscheck=False, fastmath=True)
-def evaluate_attacks_mobility_threats(piece_bbs, occupancy_bbs, white_king_sq, black_king_sq, white_pawn_attacks_span, black_pawn_attacks_span, castling_rights, theta):
+def _evaluate_attacks_mobility_threats_ew(
+    piece_bbs, occupancy_bbs, white_king_sq, black_king_sq,
+    white_pawn_attacks_span, black_pawn_attacks_span, castling_rights, ew, use_ew, theta
+):
+    kaw_n = _ew_get(ew, use_ew, _EW_KAW_N, get_array_val(theta, IDX_KING_ATTACK_WEIGHTS, 2))
+    kaw_b = _ew_get(ew, use_ew, _EW_KAW_B, get_array_val(theta, IDX_KING_ATTACK_WEIGHTS, 3))
+    kaw_r = _ew_get(ew, use_ew, _EW_KAW_R, get_array_val(theta, IDX_KING_ATTACK_WEIGHTS, 4))
+    kaw_q = _ew_get(ew, use_ew, _EW_KAW_Q, get_array_val(theta, IDX_KING_ATTACK_WEIGHTS, 5))
+
     (wp_bb, wn_bb, wb_bb, wr_bb, wq_bb, wk_bb,
      bp_bb, bn_bb, bb_bb, br_bb, bq_bb, bk_bb) = piece_bbs
 
@@ -1492,7 +1532,7 @@ def evaluate_attacks_mobility_threats(piece_bbs, occupancy_bbs, white_king_sq, b
         # King safety: White Knight attacking Black King ring
         if att & black_king_zone:
             b_attacker_count += 1
-            b_attacker_weight += get_array_val(theta, IDX_KING_ATTACK_WEIGHTS, 2)  # KNIGHT
+            b_attacker_weight += kaw_n  # KNIGHT
             b_king_attacks_count += count_bits(att & black_king_adjacent)
 
         # Outpost Logic (White Knight) — SF11: OutpostRanks & pawn-supported & ~enemy span
@@ -1546,7 +1586,7 @@ def evaluate_attacks_mobility_threats(piece_bbs, occupancy_bbs, white_king_sq, b
             # King safety calculation (White Bishop attacking Black King)
             if att & black_king_zone:
                 b_attacker_count += 1
-                b_attacker_weight += get_array_val(theta, IDX_KING_ATTACK_WEIGHTS, 3)  # BISHOP
+                b_attacker_weight += kaw_b  # BISHOP
                 b_king_attacks_count += count_bits(att & black_king_adjacent)
 
             # Outpost Logic (White Bishop) — SF11: same mask as knight, no separate hole bonus
@@ -1599,7 +1639,7 @@ def evaluate_attacks_mobility_threats(piece_bbs, occupancy_bbs, white_king_sq, b
         # King safety calculation (White Rook attacking Black King)
         if att & black_king_zone:
             b_attacker_count += 1
-            b_attacker_weight += get_array_val(theta, IDX_KING_ATTACK_WEIGHTS, 4)  # ROOK
+            b_attacker_weight += kaw_r  # ROOK
             b_king_attacks_count += count_bits(att & black_king_adjacent)
 
         temp_bb &= temp_bb - np.uint64(1)
@@ -1624,7 +1664,7 @@ def evaluate_attacks_mobility_threats(piece_bbs, occupancy_bbs, white_king_sq, b
         # King safety calculation (White Queen attacking Black King)
         if att & black_king_zone:
             b_attacker_count += 1
-            b_attacker_weight += get_array_val(theta, IDX_KING_ATTACK_WEIGHTS, 5)  # QUEEN
+            b_attacker_weight += kaw_q  # QUEEN
             b_king_attacks_count += count_bits(att & black_king_adjacent)
 
         # WeakQueen: penalty if queen is in a relative pin / discovered attack line (SF11 Position::slider_blockers)
@@ -1675,7 +1715,7 @@ def evaluate_attacks_mobility_threats(piece_bbs, occupancy_bbs, white_king_sq, b
         # King safety calculation (Black Knight attacking White King)
         if att & white_king_zone:
             w_attacker_count += 1
-            w_attacker_weight += get_array_val(theta, IDX_KING_ATTACK_WEIGHTS, 2)  # KNIGHT
+            w_attacker_weight += kaw_n  # KNIGHT
             w_king_attacks_count += count_bits(att & white_king_adjacent)
 
         # Outpost Logic (Black Knight)
@@ -1730,7 +1770,7 @@ def evaluate_attacks_mobility_threats(piece_bbs, occupancy_bbs, white_king_sq, b
             # King safety calculation (Black Bishop attacking White King)
             if att & white_king_zone:
                 w_attacker_count += 1
-                w_attacker_weight += get_array_val(theta, IDX_KING_ATTACK_WEIGHTS, 3)  # BISHOP
+                w_attacker_weight += kaw_b  # BISHOP
                 w_king_attacks_count += count_bits(att & white_king_adjacent)
 
             # Outpost Logic (Black Bishop) — SF11: no separate hole bonus
@@ -1783,7 +1823,7 @@ def evaluate_attacks_mobility_threats(piece_bbs, occupancy_bbs, white_king_sq, b
         # King safety calculation (Black Rook attacking White King)
         if att & white_king_zone:
             w_attacker_count += 1
-            w_attacker_weight += get_array_val(theta, IDX_KING_ATTACK_WEIGHTS, 4)  # ROOK
+            w_attacker_weight += kaw_r  # ROOK
             w_king_attacks_count += count_bits(att & white_king_adjacent)
 
         temp_bb &= temp_bb - np.uint64(1)
@@ -1808,7 +1848,7 @@ def evaluate_attacks_mobility_threats(piece_bbs, occupancy_bbs, white_king_sq, b
         # King safety calculation (Black Queen attacking White King)
         if att & white_king_zone:
             w_attacker_count += 1
-            w_attacker_weight += get_array_val(theta, IDX_KING_ATTACK_WEIGHTS, 5)  # QUEEN
+            w_attacker_weight += kaw_q  # QUEEN
             w_king_attacks_count += count_bits(att & white_king_adjacent)
 
         # WeakQueen: penalty if queen is in a relative pin / discovered attack line (SF11 Position::slider_blockers)
@@ -1856,8 +1896,8 @@ def evaluate_attacks_mobility_threats(piece_bbs, occupancy_bbs, white_king_sq, b
     white_safe_pawn_sq = white_safe_pawn_attacks & black_non_pawns
     if white_safe_pawn_sq:
         count = count_bits(white_safe_pawn_sq)
-        mg_threats += get_array_val(theta, IDX_THREAT_SAFE_PAWN, 0) * count
-        eg_threats += get_array_val(theta, IDX_THREAT_SAFE_PAWN, 1) * count
+        mg_threats += _ew_get(ew, use_ew, _EW_THREAT_SAFE_PAWN_MG, get_array_val(theta, IDX_THREAT_SAFE_PAWN, 0)) * count
+        eg_threats += _ew_get(ew, use_ew, _EW_THREAT_SAFE_PAWN_EG, get_array_val(theta, IDX_THREAT_SAFE_PAWN, 1)) * count
 
     black_safe = ~white_attacks | black_attacks
     black_safe_pawns = bp_bb & black_safe
@@ -1865,8 +1905,8 @@ def evaluate_attacks_mobility_threats(piece_bbs, occupancy_bbs, white_king_sq, b
     black_safe_pawn_sq = black_safe_pawn_attacks & white_non_pawns
     if black_safe_pawn_sq:
         count = count_bits(black_safe_pawn_sq)
-        mg_threats -= get_array_val(theta, IDX_THREAT_SAFE_PAWN, 0) * count
-        eg_threats -= get_array_val(theta, IDX_THREAT_SAFE_PAWN, 1) * count
+        mg_threats -= _ew_get(ew, use_ew, _EW_THREAT_SAFE_PAWN_MG, get_array_val(theta, IDX_THREAT_SAFE_PAWN, 0)) * count
+        eg_threats -= _ew_get(ew, use_ew, _EW_THREAT_SAFE_PAWN_EG, get_array_val(theta, IDX_THREAT_SAFE_PAWN, 1)) * count
 
     # --- 2. ThreatByMinor: SF11 uses (defended | weak) for minors ---
     # defended = strongly-protected non-pawn enemies; weak = not strongly protected & under attack
@@ -1878,8 +1918,8 @@ def evaluate_attacks_mobility_threats(piece_bbs, occupancy_bbs, white_king_sq, b
             intersection = w_minor_threatens & piece_bbs[6 + pt]
             if intersection:
                 count = count_bits(intersection)
-                mg_threats += get_2d_val(theta, IDX_THREAT_BY_MINOR, pt, 2, 0) * count
-                eg_threats += get_2d_val(theta, IDX_THREAT_BY_MINOR, pt, 2, 1) * count
+                mg_threats += _ew_get(ew, use_ew, _EW_THREAT_BY_MINOR_BASE + pt * 2, get_2d_val(theta, IDX_THREAT_BY_MINOR, pt, 2, 0)) * count
+                eg_threats += _ew_get(ew, use_ew, _EW_THREAT_BY_MINOR_BASE + pt * 2 + 1, get_2d_val(theta, IDX_THREAT_BY_MINOR, pt, 2, 1)) * count
 
     b_minor_threatens = (black_knight_attacks | black_bishop_attacks) & (white_defended | white_weak)
     if b_minor_threatens:
@@ -1887,8 +1927,8 @@ def evaluate_attacks_mobility_threats(piece_bbs, occupancy_bbs, white_king_sq, b
             intersection = b_minor_threatens & piece_bbs[pt]
             if intersection:
                 count = count_bits(intersection)
-                mg_threats -= get_2d_val(theta, IDX_THREAT_BY_MINOR, pt, 2, 0) * count
-                eg_threats -= get_2d_val(theta, IDX_THREAT_BY_MINOR, pt, 2, 1) * count
+                mg_threats -= _ew_get(ew, use_ew, _EW_THREAT_BY_MINOR_BASE + pt * 2, get_2d_val(theta, IDX_THREAT_BY_MINOR, pt, 2, 0)) * count
+                eg_threats -= _ew_get(ew, use_ew, _EW_THREAT_BY_MINOR_BASE + pt * 2 + 1, get_2d_val(theta, IDX_THREAT_BY_MINOR, pt, 2, 1)) * count
 
     # --- 3. ThreatByRook: rook attacks weak enemy pieces, per type ---
     w_rook_threatens = white_rook_attacks & black_weak
@@ -1897,8 +1937,8 @@ def evaluate_attacks_mobility_threats(piece_bbs, occupancy_bbs, white_king_sq, b
             intersection = w_rook_threatens & piece_bbs[6 + pt]
             if intersection:
                 count = count_bits(intersection)
-                mg_threats += get_2d_val(theta, IDX_THREAT_BY_ROOK, pt, 2, 0) * count
-                eg_threats += get_2d_val(theta, IDX_THREAT_BY_ROOK, pt, 2, 1) * count
+                mg_threats += _ew_get(ew, use_ew, _EW_THREAT_BY_ROOK_BASE + pt * 2, get_2d_val(theta, IDX_THREAT_BY_ROOK, pt, 2, 0)) * count
+                eg_threats += _ew_get(ew, use_ew, _EW_THREAT_BY_ROOK_BASE + pt * 2 + 1, get_2d_val(theta, IDX_THREAT_BY_ROOK, pt, 2, 1)) * count
 
     b_rook_threatens = black_rook_attacks & white_weak
     if b_rook_threatens:
@@ -1906,43 +1946,43 @@ def evaluate_attacks_mobility_threats(piece_bbs, occupancy_bbs, white_king_sq, b
             intersection = b_rook_threatens & piece_bbs[pt]
             if intersection:
                 count = count_bits(intersection)
-                mg_threats -= get_2d_val(theta, IDX_THREAT_BY_ROOK, pt, 2, 0) * count
-                eg_threats -= get_2d_val(theta, IDX_THREAT_BY_ROOK, pt, 2, 1) * count
+                mg_threats -= _ew_get(ew, use_ew, _EW_THREAT_BY_ROOK_BASE + pt * 2, get_2d_val(theta, IDX_THREAT_BY_ROOK, pt, 2, 0)) * count
+                eg_threats -= _ew_get(ew, use_ew, _EW_THREAT_BY_ROOK_BASE + pt * 2 + 1, get_2d_val(theta, IDX_THREAT_BY_ROOK, pt, 2, 1)) * count
 
     # --- 4. ThreatByKing: king attacks weak enemy pieces (SF11 boolean check: triggers at most once) ---
     if (KING_ATTACKS[white_king_sq] & black_weak) != np.uint64(0):
-        mg_threats += get_array_val(theta, IDX_THREAT_BY_KING, 0)
-        eg_threats += get_array_val(theta, IDX_THREAT_BY_KING, 1)
+        mg_threats += _ew_get(ew, use_ew, _EW_THREAT_BY_KING_MG, get_array_val(theta, IDX_THREAT_BY_KING, 0))
+        eg_threats += _ew_get(ew, use_ew, _EW_THREAT_BY_KING_EG, get_array_val(theta, IDX_THREAT_BY_KING, 1))
 
     if (KING_ATTACKS[black_king_sq] & white_weak) != np.uint64(0):
-        mg_threats -= get_array_val(theta, IDX_THREAT_BY_KING, 0)
-        eg_threats -= get_array_val(theta, IDX_THREAT_BY_KING, 1)
+        mg_threats -= _ew_get(ew, use_ew, _EW_THREAT_BY_KING_MG, get_array_val(theta, IDX_THREAT_BY_KING, 0))
+        eg_threats -= _ew_get(ew, use_ew, _EW_THREAT_BY_KING_EG, get_array_val(theta, IDX_THREAT_BY_KING, 1))
 
     # --- 5. Hanging: weak pieces with no defenders at all OR doubly attacked ---
     black_hanging = black_weak & (~black_attacks | (black_non_pawns & white_attacks2))
     if black_hanging:
         count = count_bits(black_hanging)
-        mg_threats += get_array_val(theta, IDX_THREAT_HANGING, 0) * count
-        eg_threats += get_array_val(theta, IDX_THREAT_HANGING, 1) * count
+        mg_threats += _ew_get(ew, use_ew, _EW_THREAT_HANGING_MG, get_array_val(theta, IDX_THREAT_HANGING, 0)) * count
+        eg_threats += _ew_get(ew, use_ew, _EW_THREAT_HANGING_EG, get_array_val(theta, IDX_THREAT_HANGING, 1)) * count
 
     white_hanging = white_weak & (~white_attacks | (white_non_pawns & black_attacks2))
     if white_hanging:
         count = count_bits(white_hanging)
-        mg_threats -= get_array_val(theta, IDX_THREAT_HANGING, 0) * count
-        eg_threats -= get_array_val(theta, IDX_THREAT_HANGING, 1) * count
+        mg_threats -= _ew_get(ew, use_ew, _EW_THREAT_HANGING_MG, get_array_val(theta, IDX_THREAT_HANGING, 0)) * count
+        eg_threats -= _ew_get(ew, use_ew, _EW_THREAT_HANGING_EG, get_array_val(theta, IDX_THREAT_HANGING, 1)) * count
 
     # Restricted piece threat (RestrictedPiece * popcount(b))
     w_restricted = black_attacks & ~black_strongly_protected & white_attacks
     if w_restricted:
         count = count_bits(w_restricted)
-        mg_threats += get_array_val(theta, IDX_THREAT_RESTRICTED_PIECE, 0) * count
-        eg_threats += get_array_val(theta, IDX_THREAT_RESTRICTED_PIECE, 1) * count
+        mg_threats += _ew_get(ew, use_ew, _EW_THREAT_RESTRICTED_MG, get_array_val(theta, IDX_THREAT_RESTRICTED_PIECE, 0)) * count
+        eg_threats += _ew_get(ew, use_ew, _EW_THREAT_RESTRICTED_EG, get_array_val(theta, IDX_THREAT_RESTRICTED_PIECE, 1)) * count
 
     b_restricted = white_attacks & ~white_strongly_protected & black_attacks
     if b_restricted:
         count = count_bits(b_restricted)
-        mg_threats -= get_array_val(theta, IDX_THREAT_RESTRICTED_PIECE, 0) * count
-        eg_threats -= get_array_val(theta, IDX_THREAT_RESTRICTED_PIECE, 1) * count
+        mg_threats -= _ew_get(ew, use_ew, _EW_THREAT_RESTRICTED_MG, get_array_val(theta, IDX_THREAT_RESTRICTED_PIECE, 0)) * count
+        eg_threats -= _ew_get(ew, use_ew, _EW_THREAT_RESTRICTED_EG, get_array_val(theta, IDX_THREAT_RESTRICTED_PIECE, 1)) * count
 
     # --- 7. ThreatByPawnPush ---
     # In SF11, pawn pushes are only evaluated if the landing square is unoccupied and safe.
@@ -1954,8 +1994,8 @@ def evaluate_attacks_mobility_threats(piece_bbs, occupancy_bbs, white_king_sq, b
     w_push_threat = w_push_attacks & black_non_pawns
     if w_push_threat:
         count = count_bits(w_push_threat)
-        mg_threats += get_array_val(theta, IDX_THREAT_PAWN_PUSH, 0) * count
-        eg_threats += get_array_val(theta, IDX_THREAT_PAWN_PUSH, 1) * count
+        mg_threats += _ew_get(ew, use_ew, _EW_THREAT_PAWN_PUSH_MG, get_array_val(theta, IDX_THREAT_PAWN_PUSH, 0)) * count
+        eg_threats += _ew_get(ew, use_ew, _EW_THREAT_PAWN_PUSH_EG, get_array_val(theta, IDX_THREAT_PAWN_PUSH, 1)) * count
 
     b_push1 = (bp_bb >> np.uint64(8)) & ~all_occupancy & ~np.uint64(0xFF)
     b_push2 = ((b_push1 & np.uint64(0xFF0000000000)) >> np.uint64(8)) & ~all_occupancy  # double push from rank 7
@@ -1964,8 +2004,8 @@ def evaluate_attacks_mobility_threats(piece_bbs, occupancy_bbs, white_king_sq, b
     b_push_threat = b_push_attacks & white_non_pawns
     if b_push_threat:
         count = count_bits(b_push_threat)
-        mg_threats -= get_array_val(theta, IDX_THREAT_PAWN_PUSH, 0) * count
-        eg_threats -= get_array_val(theta, IDX_THREAT_PAWN_PUSH, 1) * count
+        mg_threats -= _ew_get(ew, use_ew, _EW_THREAT_PAWN_PUSH_MG, get_array_val(theta, IDX_THREAT_PAWN_PUSH, 0)) * count
+        eg_threats -= _ew_get(ew, use_ew, _EW_THREAT_PAWN_PUSH_EG, get_array_val(theta, IDX_THREAT_PAWN_PUSH, 1)) * count
 
     # --- KnightOnQueen & SliderOnQueen threats ---
     # White threats against Black Queen
@@ -1978,8 +2018,8 @@ def evaluate_attacks_mobility_threats(piece_bbs, occupancy_bbs, white_king_sq, b
         w_koq = white_knight_attacks & bq_knight_attacks & w_safe_for_queen_threat
         if w_koq != np.uint64(0):
             count = count_bits(w_koq)
-            mg_threats += get_array_val(theta, IDX_THREAT_KNIGHT_ON_QUEEN, 0) * count
-            eg_threats += get_array_val(theta, IDX_THREAT_KNIGHT_ON_QUEEN, 1) * count
+            mg_threats += _ew_get(ew, use_ew, _EW_THREAT_KOQ_MG, get_array_val(theta, IDX_THREAT_KNIGHT_ON_QUEEN, 0)) * count
+            eg_threats += _ew_get(ew, use_ew, _EW_THREAT_KOQ_EG, get_array_val(theta, IDX_THREAT_KNIGHT_ON_QUEEN, 1)) * count
 
         # SliderOnQueen: white bishop/rook attacks squares that also attack black queen
         bq_rook_attacks = get_rook_attacks(bq_sq, all_occupancy)
@@ -1987,8 +2027,8 @@ def evaluate_attacks_mobility_threats(piece_bbs, occupancy_bbs, white_king_sq, b
         w_soq = ((white_bishop_attacks & bq_bishop_attacks) | (white_rook_attacks & bq_rook_attacks)) & w_safe_for_queen_threat & white_attacks2
         if w_soq != np.uint64(0):
             count = count_bits(w_soq)
-            mg_threats += get_array_val(theta, IDX_THREAT_SLIDER_ON_QUEEN, 0) * count
-            eg_threats += get_array_val(theta, IDX_THREAT_SLIDER_ON_QUEEN, 1) * count
+            mg_threats += _ew_get(ew, use_ew, _EW_THREAT_SOQ_MG, get_array_val(theta, IDX_THREAT_SLIDER_ON_QUEEN, 0)) * count
+            eg_threats += _ew_get(ew, use_ew, _EW_THREAT_SOQ_EG, get_array_val(theta, IDX_THREAT_SLIDER_ON_QUEEN, 1)) * count
 
     # Black threats against White Queen
     if count_bits(wq_bb) == 1:
@@ -2000,8 +2040,8 @@ def evaluate_attacks_mobility_threats(piece_bbs, occupancy_bbs, white_king_sq, b
         b_koq = black_knight_attacks & wq_knight_attacks & b_safe_for_queen_threat
         if b_koq != np.uint64(0):
             count = count_bits(b_koq)
-            mg_threats -= get_array_val(theta, IDX_THREAT_KNIGHT_ON_QUEEN, 0) * count
-            eg_threats -= get_array_val(theta, IDX_THREAT_KNIGHT_ON_QUEEN, 1) * count
+            mg_threats -= _ew_get(ew, use_ew, _EW_THREAT_KOQ_MG, get_array_val(theta, IDX_THREAT_KNIGHT_ON_QUEEN, 0)) * count
+            eg_threats -= _ew_get(ew, use_ew, _EW_THREAT_KOQ_EG, get_array_val(theta, IDX_THREAT_KNIGHT_ON_QUEEN, 1)) * count
 
         # SliderOnQueen: black bishop/rook attacks squares that also attack white queen
         wq_rook_attacks = get_rook_attacks(wq_sq, all_occupancy)
@@ -2009,8 +2049,8 @@ def evaluate_attacks_mobility_threats(piece_bbs, occupancy_bbs, white_king_sq, b
         b_soq = ((black_bishop_attacks & wq_bishop_attacks) | (black_rook_attacks & wq_rook_attacks)) & b_safe_for_queen_threat & black_attacks2
         if b_soq != np.uint64(0):
             count = count_bits(b_soq)
-            mg_threats -= get_array_val(theta, IDX_THREAT_SLIDER_ON_QUEEN, 0) * count
-            eg_threats -= get_array_val(theta, IDX_THREAT_SLIDER_ON_QUEEN, 1) * count
+            mg_threats -= _ew_get(ew, use_ew, _EW_THREAT_SOQ_MG, get_array_val(theta, IDX_THREAT_SLIDER_ON_QUEEN, 0)) * count
+            eg_threats -= _ew_get(ew, use_ew, _EW_THREAT_SOQ_EG, get_array_val(theta, IDX_THREAT_SLIDER_ON_QUEEN, 1)) * count
 
     return (white_attacks, black_attacks, white_pawn_attacks, black_pawn_attacks,
             white_attacks2, black_attacks2, pinned_white, pinned_black,
@@ -2020,6 +2060,15 @@ def evaluate_attacks_mobility_threats(piece_bbs, occupancy_bbs, white_king_sq, b
             w_attacker_weight, w_attacker_count, w_king_attacks_count,
             b_attacker_weight, b_attacker_count, b_king_attacks_count,
             white_king_zone, black_king_zone, mg_mobility_pure)
+
+
+@numba.njit(cache=True, boundscheck=False, fastmath=True)
+def evaluate_attacks_mobility_threats(piece_bbs, occupancy_bbs, white_king_sq, black_king_sq, white_pawn_attacks_span, black_pawn_attacks_span, castling_rights, theta):
+    return _evaluate_attacks_mobility_threats_ew(
+        piece_bbs, occupancy_bbs, white_king_sq, black_king_sq,
+        white_pawn_attacks_span, black_pawn_attacks_span, castling_rights,
+        _DUMMY_EW, False,
+     theta)
 
 
 @numba.njit(cache=True, boundscheck=False, fastmath=True)
@@ -2064,7 +2113,7 @@ def _evaluate_king_pawn_endgame(piece_bbs, occupancy_bbs, game_state, castling_r
             if side_to_move == 1:
                 adjusted_pawn_steps += 1
             if king_dist > adjusted_pawn_steps:
-                score += get_int(theta, IDX_UNSTOPPABLE_PAWN_BONUS)
+                score += _ew_get(ew, use_ew, _EW_UNSTOPPABLE_PAWN, get_int(theta, IDX_UNSTOPPABLE_PAWN_BONUS))
 
         temp_wp &= temp_wp - np.uint64(1)
 
@@ -2088,7 +2137,7 @@ def _evaluate_king_pawn_endgame(piece_bbs, occupancy_bbs, game_state, castling_r
             if side_to_move == 0:
                 adjusted_pawn_steps += 1
             if king_dist > adjusted_pawn_steps:
-                score -= get_int(theta, IDX_UNSTOPPABLE_PAWN_BONUS)
+                score -= _ew_get(ew, use_ew, _EW_UNSTOPPABLE_PAWN, get_int(theta, IDX_UNSTOPPABLE_PAWN_BONUS))
 
         temp_bp &= temp_bp - np.uint64(1)
 
@@ -2184,11 +2233,15 @@ def _process_piece_score_and_count(piece_type, bb, is_white, ew, use_ew, theta):
 
 
 @numba.njit(cache=True, boundscheck=False, fastmath=True)
-def evaluate_space(piece_bbs, white_attacks, black_attacks, white_pawn_attacks, black_pawn_attacks, piece_counts, npm, theta):
+def _evaluate_space_ew(
+    piece_bbs, white_attacks, black_attacks,
+    white_pawn_attacks, black_pawn_attacks, piece_counts, npm, ew, use_ew, theta
+):
     """
     評估雙方的空間控制優勢（僅影響中局）。
     """
-    if npm < get_int(theta, IDX_SPACE_THRESHOLD):
+    space_thr = _ew_get(ew, use_ew, _EW_SPACE_THR, get_int(theta, IDX_SPACE_THRESHOLD))
+    if npm < space_thr:
         return np.int32(0)
 
     white_pawns = piece_bbs[0]
@@ -2217,11 +2270,22 @@ def evaluate_space(piece_bbs, white_attacks, black_attacks, white_pawn_attacks, 
     w_weight = piece_counts[0] + piece_counts[1] + piece_counts[2] + piece_counts[3] + piece_counts[4]
     b_weight = piece_counts[6] + piece_counts[7] + piece_counts[8] + piece_counts[9] + piece_counts[10]
 
-    space_div = get_int(theta, IDX_SPACE_BONUS_DIVISOR) * get_int(theta, IDX_SPACE_SCALE_DIVISOR)
+    space_bonus_div = _ew_get(ew, use_ew, _EW_SPACE_BONUS_DIV, get_int(theta, IDX_SPACE_BONUS_DIVISOR))
+    space_scale_div = _ew_get(ew, use_ew, _EW_SPACE_SCALE_DIV, get_int(theta, IDX_SPACE_SCALE_DIVISOR))
+    space_div = max(np.int32(1), space_bonus_div * space_scale_div)
     white_space_scaled = (w_bonus * w_weight * w_weight) // space_div
     black_space_scaled = (b_bonus * b_weight * b_weight) // space_div
 
     return np.int32(white_space_scaled - black_space_scaled)
+
+
+@numba.njit(cache=True, boundscheck=False, fastmath=True)
+def evaluate_space(piece_bbs, white_attacks, black_attacks, white_pawn_attacks, black_pawn_attacks, piece_counts, npm, theta):
+    return _evaluate_space_ew(
+        piece_bbs, white_attacks, black_attacks,
+        white_pawn_attacks, black_pawn_attacks, piece_counts, npm,
+        _DUMMY_EW, False,
+     theta)
 
 
 @numba.njit(cache=True, boundscheck=False, fastmath=True, inline='always')
@@ -2470,8 +2534,9 @@ def _evaluate_position_jit(piece_bbs, occupancy_bbs, game_state, lazy, search_co
      black_knight_attacks, black_bishop_attacks, black_rook_attacks, black_queen_attacks,
      w_attacker_weight, w_attacker_count, w_king_attacks_count,
      b_attacker_weight, b_attacker_count, b_king_attacks_count,
-     white_king_zone, black_king_zone, mg_mobility_pure) = evaluate_attacks_mobility_threats(
-         piece_bbs, occupancy_bbs, white_king_sq, black_king_sq, white_pawn_attacks_span, black_pawn_attacks_span, castling_rights, theta)
+     white_king_zone, black_king_zone, mg_mobility_pure) = _evaluate_attacks_mobility_threats_ew(
+         piece_bbs, occupancy_bbs, white_king_sq, black_king_sq,
+         white_pawn_attacks_span, black_pawn_attacks_span, castling_rights, ew, use_ew, theta)
 
     # --- 4.5 Passed Pawns (Dynamic Evaluation) ---
     mg_passed, eg_passed, passed_count = evaluate_passed_pawns(
@@ -2515,9 +2580,9 @@ def _evaluate_position_jit(piece_bbs, occupancy_bbs, game_state, lazy, search_co
     eg_score += eg_threats
 
     # --- 8.5 Space Evaluation ---
-    mg_space = evaluate_space(
+    mg_space = _evaluate_space_ew(
         piece_bbs, white_attacks, black_attacks,
-        white_pawn_attacks, black_pawn_attacks, piece_counts, npm,
+        white_pawn_attacks, black_pawn_attacks, piece_counts, npm, ew, use_ew,
      theta)
     mg_score += mg_space
 

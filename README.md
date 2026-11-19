@@ -51,7 +51,7 @@ python -m tests.benchmark        # NNUE 版：python -m tests.benchmark_nn_real
 * **[引擎核心架構說明書](chess_engine/README.md)**：UCI、分層架構與 `classical` / `classical_old` / `nnue` 模組清單
 * **[Classical HCE 調參手冊](tuner/README.md)**：20M EPD / `val_pgn` / `SF19` 混合標籤、per-dataset `K*` 分離、SPSA `scales^2` 與子桶守衛
 * **[搜尋參數 SPSA 手冊](tune_search/README.md)**：96/44 軸清冊、Fishtest `inprocess` SPSA、L0→L2 SPRT 流程與非對稱峭壁經驗
-* **[對局式 HCE 權重 SPSA](tune_eval_match/README.md)**：單進程共享 JIT 的 `eval_weights` 對局 SPSA
+* **[對局式 HCE 權重 SPSA](tune_eval_match/README.md)**：單進程共享 JIT 的 `eval_weights`（99 軸含威脅/王安全/空間）對局 SPSA 與 `L1→L2→400k` 驗證
 * **[引擎對戰指南](tools/TOURNAMENT_TUTORIAL.md)**、**[對戰分析框架](tournament_analysis/README.md)**、**[SPRT 統計原理](tournament_analysis/sprt_tutorial.md)**
 * **[NNUE 架構設計說明](chess_engine/nnue/ARCHITECTURE.md)** 與 **[NNUE 訓練及量化說明書](chess_engine/nnue/ml_eval/ml_eval_documentation_and_architecture.md)**
 

@@ -3,20 +3,13 @@
 Match-based SPSA for classical HCE eval weights.
 
 ONE process, ONE Numba JIT compile:
-  - Two long-lived SearchContexts (θ+, θ−)
+  - ThreadPool of long-lived SearchContext pairs (θ+, θ− / candidate vs best)
   - In-place eval_weights mutation (StructRef field — live under nopython)
-  - Fixed-node games; no subprocess spawn per iteration
+  - Fixed-node games with disjoint L1/L2 opening streams and score adjudication
 
-Protocol (default L1):
-  - each iteration: simultaneous perturbation θ±c·Δ
-  - ~games games @ nodes (paired color swap)
-  - update θ with SPSA gradient estimate
-  - checkpoint every N iters; optional L2 accept @ more games/nodes
-
-Usage (repo root):
-  python -u tune_eval_match/spsa_match.py
-  python -u tune_eval_match/spsa_match.py --games 100 --nodes 2000 --iters 200
-  python -u tune_eval_match/spsa_match.py --resume tournament_analysis/spsa_eval/checkpoint.json
+Typical workflow:
+  python -u tune_eval_match/spsa_match.py --block threats_mg \
+    --nodes 80000 --games 500 --l2-every 10 --l2-nodes 200000 --l2-games 500
 """
 from __future__ import annotations
 
@@ -30,36 +23,40 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 
-import numpy as np
-
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from tune_eval_match.eval_weights import (  # noqa: E402
-    default_eval_weights,
-    params_from_weights,
-)
-from tune_eval_match.inprocess_match import (  # noqa: E402
-    expand_worker_pool,
-    load_openings,
-    make_worker_pool,
-    run_match,
-    set_eval_params,
-    verify_live_weights,
-    warmup_jit,
+    EVAL_PARAM_INDEX,
+    format_constants_diff,
 )
 from tune_eval_match.param_config import (  # noqa: E402
     BLOCKS,
     active_block,
+    bounds,
     clip_params_float,
     default_params,
     param_names,
     quantize_params,
     r_end,
+    select_custom_params,
     set_active_block,
     step_c,
 )
+from tune_search.stats import (  # noqa: E402
+    drift_z,
+    elo_estimate,
+    merge_penta,
+    sprt_bounds,
+    sprt_decision,
+    sprt_llr,
+)
+
+
+def default_concurrency() -> int:
+    cpus = os.cpu_count() or 4
+    return max(1, min(8, cpus - 2))
 
 
 def elo_from_score(score: float) -> float:
@@ -85,99 +82,160 @@ def load_checkpoint(path: Path) -> dict:
 def save_json(path: Path, obj: dict) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(".tmp")
-    with open(tmp, "w", encoding="utf-8") as f:
+    with open(tmp, "w", encoding="utf-8", newline="\n") as f:
         json.dump(obj, f, indent=2, ensure_ascii=False)
     tmp.replace(path)
 
 
+def save_text(path: Path, text: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path, "w", encoding="utf-8", newline="\n") as f:
+        f.write(text)
+
+
+def _average_tail_thetas(window_thetas: list[dict], names: list[str]) -> dict:
+    """Polyak-Ruppert average over the second half of the current L1 window."""
+    tail = window_thetas[len(window_thetas) // 2 :] if len(window_thetas) > 1 else window_thetas
+    n = max(1, len(tail))
+    return {k: sum(float(row[k]) for row in tail) / n for k in names}
+
+
+def _parse_sprt(raw: str):
+    if not raw or not raw.strip():
+        return None
+    parts = [p.strip() for p in raw.split(",")]
+    if len(parts) != 2:
+        raise ValueError(f"--l2-sprt must look like ELO0,ELO1, got {raw!r}")
+    elo0, elo1 = float(parts[0]), float(parts[1])
+    if elo1 <= elo0:
+        raise ValueError(f"--l2-sprt requires ELO1 > ELO0, got {raw!r}")
+    return (elo0, elo1)
+
+
+def _print_blocks_and_params() -> None:
+    print("Available Match-SPSA blocks (with live constants defaults):")
+    for bname, spec_map in BLOCKS.items():
+        set_active_block(bname)
+        live = default_params()
+        print(f"\n[{bname}] ({len(spec_map)} params)")
+        for pname, (_, lo, hi, c, r) in spec_map.items():
+            print(f"  {pname:32s} cur={int(live[pname]):6d}  bounds=[{lo:g}, {hi:g}]  c={c:g}  r_end={r:g}")
+    print(f"\nTotal runtime-wired eval params in EVAL_PARAM_INDEX: {len(EVAL_PARAM_INDEX)}")
+
+
 def main(argv=None) -> int:
     p = argparse.ArgumentParser(description="In-process match SPSA for HCE eval weights")
-    # Defaults (i5-12500H / 16GB class): permanent production protocol.
-    #   L1 250 @ n50k, L2 250 @ n200k every 10 iters, -c 10, TT 4MB, float θ.
-    p.add_argument("--games", type=int, default=250, help="Games per SPSA iteration (L1)")
-    p.add_argument("--nodes", type=int, default=20000, help="Fixed nodes per move (L1)")
-    p.add_argument("--iters", type=int, default=500, help="SPSA iterations (0 = infinite)")
-    p.add_argument("--A", type=float, default=50.0, help="SPSA A stability constant")
+    p.add_argument("--list-blocks", action="store_true", help="List all blocks with live defaults and exit")
+    p.add_argument("--block", type=str, default="threats_mg", choices=sorted(BLOCKS.keys()),
+                   help="SPSA parameter block (ignored if --params is passed)")
+    p.add_argument("--params", type=str, default="",
+                   help="Optional comma-separated custom parameter list from EVAL_PARAM_INDEX")
+    # L1 / L2 Match Protocol (defaults match 80k L1 -> 200k L2 -> 400k final verify)
+    p.add_argument("--games", type=int, default=500, help="Games per SPSA iteration (L1)")
+    p.add_argument("--nodes", type=int, default=80000, help="Fixed nodes per move (L1)")
+    p.add_argument("--iters", type=int, default=200, help="SPSA iterations (0 = infinite)")
+    p.add_argument("--A", type=float, default=25.0, help="SPSA A stability constant")
     p.add_argument("--alpha", type=float, default=0.602, help="SPSA alpha")
     p.add_argument("--gamma", type=float, default=0.101, help="SPSA gamma")
-    p.add_argument("--seed", type=int, default=42)
-    p.add_argument(
-        "--tt-mb", type=int, default=4,
-        help="TT size per SearchContext in MB (4 is enough for n50k–n200k; "
-             "history tables dominate memory, not TT)",
-    )
-    p.add_argument(
-        "-c", "--concurrency", type=int, default=10,
-        help="Parallel opening-pairs via ThreadPool of independent SearchContext pairs "
-             "(still ONE process / ONE JIT). Default 10 for 12C/16T + 16GB.",
-    )
-    p.add_argument("--openings", type=str, default="", help="EPD/FEN openings file")
-    p.add_argument("--out-dir", type=str, default="tournament_analysis/spsa_eval")
-    p.add_argument("--resume", type=str, default="", help="checkpoint.json path")
-    p.add_argument("--ckpt-every", type=int, default=5)
-    p.add_argument("--log-every-games", type=int, default=20)
-    p.add_argument("--l2-every", type=int, default=25, help="L2 accept every N iters (0=off)")
-    p.add_argument("--l2-games", type=int, default=250, help="Games for L2 accept match")
-    p.add_argument(
-        "--l2-nodes", type=int, default=200000,
-        help="Nodes per move for L2 (default 200k; stronger accept than L1 n20k)",
-    )
-    p.add_argument(
-        "--l2-early-trash-games", type=int, default=150,
-        help="L2 early-trash: after this many games, if score_A < threshold → reject",
-    )
-    p.add_argument(
-        "--l2-early-trash-score", type=float, default=0.45,
-        help="L2 early-trash score_A upper bound (θ hopeless vs best)",
-    )
-    p.add_argument(
-        "--l2-stop-after-fails", type=int, default=2,
-        help="Stop SPSA after this many consecutive L2 rejects (0=never stop on fails)",
-    )
-    # Optional one-shot promote (used by the in-flight run that started lighter).
-    # When phase2 targets == defaults, upgrade is a no-op after first L2.
-    p.add_argument(
-        "--phase2-after-l2", action="store_true", default=True,
-        help="After first L2, switch to phase2 L1/L2/-c if different from current",
-    )
-    p.add_argument("--no-phase2-after-l2", action="store_true", help="Disable phase2 upgrade")
-    p.add_argument("--phase2-c", type=int, default=10, help="Concurrency after first L2")
-    p.add_argument("--phase2-games", type=int, default=250, help="L1 games after first L2")
-    p.add_argument("--phase2-nodes", type=int, default=20000, help="L1 nodes after first L2")
-    p.add_argument("--phase2-l2-games", type=int, default=250, help="L2 games after first L2")
-    p.add_argument("--phase2-l2-nodes", type=int, default=200000, help="L2 nodes after first L2")
-    p.add_argument("--smoke", action="store_true", help="Tiny run for wiring check")
+    p.add_argument("--seed", type=int, default=42, help="RNG seed for SPSA ±1 perturbations")
+    p.add_argument("--tt-mb", type=int, default=8,
+                   help="TT size per SearchContext in MB (8MB recommended for 80k-200k nodes)")
+    p.add_argument("-c", "--concurrency", type=int, default=default_concurrency(),
+                   help="Parallel opening-pairs via ThreadPool of independent SearchContext pairs")
+    p.add_argument("--openings", type=str, default="", help="EPD/FEN openings file (defaults to data/openings.epd)")
+    p.add_argument("--openings-limit", type=int, default=0,
+                   help="Max openings to load (0 = load all positions in file)")
+    p.add_argument("--opening-seed", type=int, default=20261119,
+                   help="Private RNG seed for shuffling openings (decoupled from SPSA delta seed)")
+    p.add_argument("--l2-holdout-frac", type=float, default=0.25,
+                   help="Fraction of shuffled openings reserved exclusively for L2 validation")
+    p.add_argument("--out-dir", type=str, default="",
+                   help="Output directory (defaults to tournament_analysis/spsa_eval_<block>)")
+    p.add_argument("--resume", type=str, default="", help="checkpoint.json path to resume from")
+    p.add_argument("--ckpt-every", type=int, default=2)
+    p.add_argument("--log-every-games", type=int, default=40)
+    # L2 Gate Settings
+    p.add_argument("--l2-every", type=int, default=10, help="L2 accept every N L1 iters (0=off)")
+    p.add_argument("--l2-games", type=int, default=500, help="Max games for L2 accept match")
+    p.add_argument("--l2-nodes", type=int, default=200000, help="Nodes per move for L2 validation")
+    p.add_argument("--l2-batch-games", type=int, default=100,
+                   help="Run L2 in batches of N games for Elo/CI/SPRT tracking")
+    p.add_argument("--l2-candidate", type=str, default="tail", choices=("tail", "latest"),
+                   help="Evaluate window tail-averaged θ (recommended) or latest θ at L2")
+    p.add_argument("--l2-min-score", type=float, default=0.510,
+                   help="Minimum L2 score vs best to accept when SPRT is off or reaches cap (default 0.510 ≈ +7 Elo)")
+    p.add_argument("--l2-sprt", type=str, default="",
+                   help="Optional pentanomial SPRT bounds ELO0,ELO1 for L2 (e.g. '0,10' or '-3,5')")
+    p.add_argument("--sprt-alpha", type=float, default=0.05)
+    p.add_argument("--sprt-beta", type=float, default=0.05)
+    p.add_argument("--l2-early-trash-games", type=int, default=150,
+                   help="L2 early-trash: after this many games, if score < threshold -> reject")
+    p.add_argument("--l2-early-trash-score", type=float, default=0.45,
+                   help="L2 early-trash score upper bound")
+    p.add_argument("--l2-stop-after-fails", type=int, default=3,
+                   help="Stop SPSA after this many consecutive L2 rejects (0=never stop)")
+    # Adjudication
+    p.add_argument("--adjudicate", action="store_true", default=True,
+                   help="Use score-based win/draw adjudication (default: on)")
+    p.add_argument("--no-adjudicate", action="store_true", help="Disable score adjudication")
+    # Legacy phase2 flags kept opt-in (default OFF so user settings are never silently clobbered)
+    p.add_argument("--phase2-after-l2", action="store_true", default=False,
+                   help="Opt-in: switch protocol after first L2")
+    p.add_argument("--no-phase2-after-l2", action="store_true", help="Legacy no-op (phase2 is off by default)")
+    p.add_argument("--phase2-c", type=int, default=default_concurrency())
+    p.add_argument("--phase2-games", type=int, default=500)
+    p.add_argument("--phase2-nodes", type=int, default=80000)
+    p.add_argument("--phase2-l2-games", type=int, default=500)
+    p.add_argument("--phase2-l2-nodes", type=int, default=200000)
+    # Smoke / verification
+    p.add_argument("--smoke", action="store_true", help="Tiny run for end-to-end wiring check")
     p.add_argument("--no-verify", action="store_true")
-    p.add_argument(
-        "--block",
-        type=str,
-        default="a",
-        choices=sorted(BLOCKS.keys()),
-        help="SPSA parameter block: a | passed | material (see ROADMAP_BLOCKS.md)",
-    )
     args = p.parse_args(argv)
+
+    if args.list_blocks:
+        _print_blocks_and_params()
+        return 0
+
+    try:
+        l2_sprt = _parse_sprt(args.l2_sprt)
+    except ValueError as exc:
+        p.error(str(exc))
+
+    if args.no_adjudicate:
+        args.adjudicate = False
     if args.no_phase2_after_l2:
         args.phase2_after_l2 = False
 
-    block_name = set_active_block(args.block)
-    print(f"[block] active={block_name}  params={param_names()}", flush=True)
+    if args.params.strip():
+        block_name = select_custom_params(args.params.split(","))
+    else:
+        block_name = set_active_block(args.block)
+
+    names = param_names()
+    print(f"[block] active={block_name} ({len(names)} params): {names}", flush=True)
 
     if args.smoke:
         args.games = 4
         args.nodes = 800
         args.iters = 3
-        args.l2_every = 0
+        args.l2_every = 2
+        args.l2_games = 4
+        args.l2_nodes = 800
+        args.l2_batch_games = 4
+        args.l2_early_trash_games = 0
         args.ckpt_every = 1
+        args.log_every_games = 4
         args.concurrency = max(1, min(args.concurrency, 2))
-        args.tt_mb = min(args.tt_mb, 4)
+        args.tt_mb = min(args.tt_mb, 2)
 
     args.concurrency = max(1, int(args.concurrency))
     args.tt_mb = max(1, int(args.tt_mb))
+    args.games = max(2, int(args.games) - (int(args.games) % 2))
+    args.l2_games = max(2, int(args.l2_games) - (int(args.l2_games) % 2))
+    args.l2_batch_games = max(2, int(args.l2_batch_games) - (int(args.l2_batch_games) % 2))
 
-    # Default out-dir per block if still the legacy path
-    if args.out_dir == "tournament_analysis/spsa_eval" and block_name != "a":
+    if not args.out_dir:
         args.out_dir = f"tournament_analysis/spsa_eval_{block_name}"
-
     out_dir = Path(args.out_dir)
     if not out_dir.is_absolute():
         out_dir = ROOT / out_dir
@@ -185,27 +243,39 @@ def main(argv=None) -> int:
     log_path = out_dir / "spsa_log.jsonl"
     ckpt_path = out_dir / "checkpoint.json"
     best_path = out_dir / "best_params.json"
+    patch_path = out_dir / "best_constants_diff.txt"
+
+    from tune_eval_match.inprocess_match import (  # noqa: E402
+        expand_worker_pool,
+        load_openings,
+        make_worker_pool,
+        run_match,
+        set_eval_params,
+        verify_live_weights,
+        warmup_jit,
+    )
 
     rng = random.Random(args.seed)
-    names = param_names()
 
     # --- State ---
     start_iter = 0
     theta = default_params()
     best_theta = dict(theta)
     best_l2_score = 0.5
-    history_scores = []
+    history_scores: list[float] = []
+    window_thetas: list[dict] = []
+    raw_updates: dict[str, list[float]] = {n: [] for n in names}
     l2_count = 0
     l2_fail_streak = 0
     l2_skip_no_int = 0
-    last_l2_gate_iter = -1  # last time we considered L2 (ran or skipped)
+    last_l2_gate_iter = -1
+    l1_opening_offset = 0
+    l2_opening_offset = 0
     phase2_active = False
 
     if args.resume:
         ck = load_checkpoint(Path(args.resume))
-        # Float state if present; old int checkpoints still load fine
         theta = clip_params_float(ck["theta"])
-        # Prefer explicit best int snapshot; else quantize stored best (snap float→L2 ints)
         if ck.get("best_theta_int"):
             best_theta = best_from_l2_ints(ck["best_theta_int"])
         else:
@@ -216,36 +286,45 @@ def main(argv=None) -> int:
         l2_fail_streak = int(ck.get("l2_fail_streak", 0))
         l2_skip_no_int = int(ck.get("l2_skip_no_int", 0))
         last_l2_gate_iter = int(ck.get("last_l2_gate_iter", -1))
+        l1_opening_offset = int(ck.get("l1_opening_offset", start_iter * max(1, args.games // 2)))
+        l2_opening_offset = int(ck.get("l2_opening_offset", l2_count * max(1, args.l2_games // 2)))
+        window_thetas = [clip_params_float(t) for t in ck.get("window_thetas", [])]
+        if isinstance(ck.get("raw_updates"), dict):
+            for n in names:
+                raw_updates[n] = [float(x) for x in ck["raw_updates"].get(n, [])]
+        if isinstance(ck.get("rng_state"), list):
+            rng.setstate(tuple(tuple(x) if isinstance(x, list) else x for x in ck["rng_state"]))
         phase2_active = bool(ck.get("phase2_active", False))
-        print(f"[resume] iter={start_iter} theta from {args.resume}", flush=True)
-        if phase2_active or l2_count >= 1:
-            # Restore heavier protocol if already past first L2
-            args.concurrency = max(args.concurrency, int(ck.get("concurrency", args.phase2_c) or args.phase2_c))
-            if phase2_active or l2_count >= 1:
-                args.games = int(ck.get("games", args.phase2_games) or args.phase2_games)
-                args.nodes = int(ck.get("nodes", args.phase2_nodes) or args.phase2_nodes)
-                args.l2_games = int(ck.get("l2_games", args.phase2_l2_games) or args.phase2_l2_games)
-                args.l2_nodes = int(ck.get("l2_nodes", args.phase2_l2_nodes) or args.phase2_l2_nodes)
-                args.concurrency = int(ck.get("concurrency", args.phase2_c) or args.phase2_c)
-                phase2_active = True
-                print(
-                    f"[resume] phase2: L1 {args.games}g@n{args.nodes}  "
-                    f"L2 {args.l2_games}g@n{args.l2_nodes}  -c {args.concurrency}",
-                    flush=True,
-                )
+        print(
+            f"[resume] iter={start_iter} l1_off={l1_opening_offset} "
+            f"l2_off={l2_opening_offset} from {args.resume}",
+            flush=True,
+        )
 
     openings_path = Path(args.openings) if args.openings else None
-    openings = load_openings(openings_path, limit=max(500, args.games * 2))
-    print(f"[openings] {len(openings)} positions", flush=True)
+    openings = list(load_openings(openings_path, limit=int(args.openings_limit)))
+    random.Random(int(args.opening_seed)).shuffle(openings)
+    if len(openings) >= 200 and 0.0 < args.l2_holdout_frac < 0.8:
+        split = max(1, int(round(len(openings) * (1.0 - float(args.l2_holdout_frac)))))
+        l1_openings = openings[:split]
+        l2_openings = openings[split:]
+    else:
+        l1_openings = openings
+        l2_openings = openings
+    print(
+        f"[openings] total={len(openings)} l1={len(l1_openings)} l2_holdout={len(l2_openings)} "
+        f"adjudicate={args.adjudicate}",
+        flush=True,
+    )
 
     # --- One-time engine construction + single JIT ---
     print(
-        f"[init] building worker pool concurrency={args.concurrency} "
+        f"[init] building worker pool concurrency={args.concurrency} tt={args.tt_mb}MB "
         f"(one process, one JIT)...",
         flush=True,
     )
     worker_pool = make_worker_pool(args.concurrency, tt_mb=args.tt_mb)
-    warmup_jit(worker_pool[0][0], nodes=min(5000, max(2000, args.nodes)))
+    warmup_jit(worker_pool[0][0], nodes=min(5000, max(1500, args.nodes)))
     warmup_jit(worker_pool[0][1], nodes=min(1500, args.nodes))
     for i, (wa, wb) in enumerate(worker_pool[1:], start=1):
         print(f"[warmup] worker {i} touch...", flush=True)
@@ -270,33 +349,64 @@ def main(argv=None) -> int:
         "alpha": args.alpha,
         "gamma": args.gamma,
         "seed": args.seed,
+        "opening_seed": args.opening_seed,
+        "adjudicate": bool(args.adjudicate),
         "params": names,
+        "initial_theta": dict(theta),
+        "bounds": {n: list(bounds(n)) for n in names},
         "r_end": {n: r_end(n) for n in names},
         "c": {n: step_c(n) for n in names},
         "theta_mode": "float_accumulate_quantize_on_apply",
         "l2_every": args.l2_every,
-        "phase2_after_l2": bool(args.phase2_after_l2),
-        "phase2": {
-            "c": args.phase2_c,
-            "games": args.phase2_games,
-            "nodes": args.phase2_nodes,
-            "l2_games": args.phase2_l2_games,
-            "l2_nodes": args.phase2_l2_nodes,
-        },
+        "l2_games": args.l2_games,
+        "l2_nodes": args.l2_nodes,
+        "l2_candidate": args.l2_candidate,
+        "l2_min_score": args.l2_min_score,
+        "l2_sprt": l2_sprt,
         "pid": os.getpid(),
-        "note": "in-process match SPSA; single process / single JIT; ThreadPool -c; float θ",
-        "roadmap": "a -> passed -> material (see tune_eval_match/ROADMAP_BLOCKS.md)",
     }
     save_json(out_dir / "run_meta.json", meta)
-    print(json.dumps(meta, indent=2), flush=True)
+    print(json.dumps(meta, indent=2, ensure_ascii=False), flush=True)
     print(f"[run] log={log_path}", flush=True)
 
+    adjudicate_cfg = {} if args.adjudicate else None
     iter_i = start_iter
     max_iters = args.iters if args.iters > 0 else 10**9
     t_run0 = time.time()
 
+    def _save_checkpoint(stopped_reason: str | None = None) -> None:
+        payload = {
+            "iter": iter_i + (1 if stopped_reason else 0),
+            "block": active_block(),
+            "params": names,
+            "theta": theta,
+            "theta_int": quantize_params(theta),
+            "best_theta": best_theta,
+            "best_theta_int": quantize_params(best_theta),
+            "best_l2_score": best_l2_score,
+            "recent_scores": history_scores[-50:],
+            "window_thetas": window_thetas[-50:],
+            "raw_updates": {n: raw_updates[n][-200:] for n in names},
+            "elapsed_run_s": time.time() - t_run0,
+            "l2_count": l2_count,
+            "l2_fail_streak": l2_fail_streak,
+            "l2_skip_no_int": l2_skip_no_int,
+            "last_l2_gate_iter": last_l2_gate_iter,
+            "l1_opening_offset": l1_opening_offset,
+            "l2_opening_offset": l2_opening_offset,
+            "phase2_active": phase2_active,
+            "games": args.games,
+            "nodes": args.nodes,
+            "l2_games": args.l2_games,
+            "l2_nodes": args.l2_nodes,
+            "concurrency": args.concurrency,
+            "meta": meta,
+        }
+        if stopped_reason:
+            payload["stopped_reason"] = stopped_reason
+        save_json(ckpt_path, payload)
+
     while iter_i < max_iters:
-        # SPSA simultaneous perturbation (float)
         delta = {n: (1 if rng.random() < 0.5 else -1) for n in names}
         c_k = {}
         a_k = {}
@@ -312,39 +422,48 @@ def main(argv=None) -> int:
             theta_m[n] = theta[n] - c * delta[n]
         theta_p = clip_params_float(theta_p)
         theta_m = clip_params_float(theta_m)
-        # Engine only sees integers
         theta_p_i = quantize_params(theta_p)
         theta_m_i = quantize_params(theta_m)
 
         print(
             f"\n=== SPSA iter {iter_i}  games={args.games} nodes={args.nodes} "
-            f"c={args.concurrency} ===",
+            f"c={args.concurrency} l1_off={l1_opening_offset} ===",
             flush=True,
         )
         match = run_match(
             theta_p_i,
             theta_m_i,
-            openings=openings,
+            openings=l1_openings,
             nodes=args.nodes,
             games=args.games,
             log_every=args.log_every_games,
             worker_pool=worker_pool,
             concurrency=args.concurrency,
+            opening_offset=l1_opening_offset,
+            adjudicate=adjudicate_cfg,
         )
-        score_plus = match["score_a"]
+        l1_opening_offset += max(1, int(match["games"]) // 2)
+
+        score_plus = float(match["score_a"])
         y_diff = 2.0 * score_plus - 1.0
         elo = elo_from_score(score_plus)
 
         new_theta = {}
+        step_l1 = 0.0
         for n in names:
             g = y_diff / (2.0 * c_k[n] * delta[n])
-            new_theta[n] = theta[n] + a_k[n] * g
+            upd = a_k[n] * g
+            raw_updates[n].append(upd)
+            step_l1 += abs(upd)
+            new_theta[n] = theta[n] + upd
         theta = clip_params_float(new_theta)
         theta_i = quantize_params(theta)
         history_scores.append(score_plus)
+        window_thetas.append(dict(theta))
 
-        # Health: how far float θ moved / whether int weights changed
-        step_l1 = sum(abs(a_k[n] * y_diff / (2.0 * c_k[n] * delta[n])) for n in names)
+        z_map = {n: round(drift_z(raw_updates[n]), 2) for n in names}
+        top_z = sorted(z_map.items(), key=lambda kv: abs(kv[1]), reverse=True)[:4]
+        top_z_str = " ".join(f"{k}:{v:+.2f}" for k, v in top_z)
 
         row = {
             "ts": datetime.now(timezone.utc).isoformat(),
@@ -353,8 +472,10 @@ def main(argv=None) -> int:
             "elo_plus_vs_minus": elo,
             "pts_plus": match["pts_a"],
             "pts_minus": match["pts_b"],
+            "penta_plus": match.get("penta"),
             "games": match["games"],
             "nodes": args.nodes,
+            "opening_offset": match.get("opening_offset"),
             "match_s": match["elapsed_s"],
             "theta": dict(theta),
             "theta_int": dict(theta_i),
@@ -363,64 +484,54 @@ def main(argv=None) -> int:
             "delta": delta,
             "y_diff": y_diff,
             "step_l1_float": step_l1,
+            "drift_z": z_map,
         }
-        with open(log_path, "a", encoding="utf-8") as f:
+        with open(log_path, "a", encoding="utf-8", newline="\n") as f:
             f.write(json.dumps(row, ensure_ascii=False) + "\n")
 
-        # Compact progress line (A-block highlights)
-        fa = theta_i.get("KING_FLANK_ATTACK_NUM", "?")
-        out_mg = theta_i.get("KING_DANGER_OUT_MG_NUM", "?")
-        sh_mg = theta_i.get("SHELTER_BASE_MG", "?")
         print(
             f"[iter {iter_i}] score+={score_plus:.3f} ({elo:+.1f} Elo)  "
-            f"games={match['games']}  {match['elapsed_s']:.1f}s  "
-            f"flankAtt={fa} outMg={out_mg} shBase={sh_mg}  "
-            f"stepL1={step_l1:.3f}",
+            f"games={match['games']} {match['elapsed_s']:.1f}s  "
+            f"stepL1={step_l1:.3f}  topZ=[{top_z_str}]",
             flush=True,
         )
 
-        # L2 accept: quantized θ vs quantized best
-        # scheduled every l2_every; catch-up if we never handled a gate past the first window.
+        # --- L2 Validation Gate ---
         l2_scheduled = args.l2_every > 0 and (iter_i + 1) % args.l2_every == 0
-        l2_catchup = (
-            args.phase2_after_l2
-            and l2_count == 0
-            and last_l2_gate_iter < 0
-            and args.l2_every > 0
-            and (iter_i + 1) >= args.l2_every
-        )
-        if l2_scheduled or l2_catchup:
-            why = "scheduled" if l2_scheduled else "catch-up-first"
+        if l2_scheduled:
             last_l2_gate_iter = iter_i
-            theta_i_gate = quantize_params(theta)
             best_i_gate = quantize_params(best_theta)
-            # If all SPSA ints equal best, L2 is θ≡best — skip and wait another l2_every L1s.
-            if theta_i_gate == best_i_gate:
+            tail_theta = _average_tail_thetas(window_thetas, names) if window_thetas else dict(theta)
+            tail_i_gate = quantize_params(tail_theta)
+            latest_i_gate = quantize_params(theta)
+            if args.l2_candidate == "tail":
+                if tail_i_gate != best_i_gate:
+                    cand_source = "tail"
+                    cand_i_gate = tail_i_gate
+                else:
+                    cand_source = "tail==best->latest"
+                    cand_i_gate = latest_i_gate
+            else:
+                cand_source = "latest"
+                cand_i_gate = latest_i_gate
+
+            if cand_i_gate == best_i_gate:
                 l2_skip_no_int += 1
                 next_gate = iter_i + args.l2_every
                 print(
-                    f"\n--- L2 SKIP @ iter {iter_i} ({why}): "
-                    f"theta_int == best_int (no integer change) ---",
+                    f"\n--- L2 SKIP @ iter {iter_i}: cand_int == best_int (no integer change, skips={l2_skip_no_int}) ---",
                     flush=True,
                 )
-                print(
-                    f"[L2] skip match; continue L1 for another {args.l2_every} iters "
-                    f"(next L2 gate ~iter {next_gate}; skips={l2_skip_no_int})",
-                    flush=True,
-                )
-                with open(log_path, "a", encoding="utf-8") as f:
+                with open(log_path, "a", encoding="utf-8", newline="\n") as f:
                     f.write(
                         json.dumps(
                             {
                                 "ts": datetime.now(timezone.utc).isoformat(),
                                 "type": "l2_skip_no_int_change",
                                 "iter": iter_i,
-                                "why": why,
-                                "l2_every": args.l2_every,
                                 "next_l2_gate_iter": next_gate,
                                 "l2_skip_no_int": l2_skip_no_int,
-                                "theta_int": theta_i_gate,
-                                "best_theta_int": best_i_gate,
+                                "theta_int": cand_i_gate,
                             },
                             ensure_ascii=False,
                         )
@@ -428,145 +539,158 @@ def main(argv=None) -> int:
                     )
             else:
                 print(
-                    f"\n--- L2 accept @ iter {iter_i} ({why}): "
-                    f"{args.l2_games}g @ n{args.l2_nodes} vs best ---",
+                    f"\n--- L2 validate @ iter {iter_i} ({cand_source}): "
+                    f"<= {args.l2_games}g @ n{args.l2_nodes} vs best (l2_off={l2_opening_offset}) ---",
                     flush=True,
                 )
-                l2 = run_match(
-                    theta_i_gate,
-                    best_i_gate,
-                    openings=openings,
-                    nodes=args.l2_nodes,
-                    games=args.l2_games,
-                    log_every=max(20, args.log_every_games),
-                    worker_pool=worker_pool,
-                    concurrency=args.concurrency,
-                    early_trash_min_games=int(args.l2_early_trash_games),
-                    early_trash_max_score=float(args.l2_early_trash_score),
-                )
-                l2_score = l2["score_a"]
-                l2_elo = elo_from_score(l2_score)
-                l2_trash = bool(l2.get("early_trash"))
-                print(
-                    f"[L2] theta vs best: score={l2_score:.3f} ({l2_elo:+.1f} Elo)  "
-                    f"games={l2['games']}  {l2['elapsed_s']:.1f}s"
-                    f"{'  EARLY_TRASH' if l2_trash else ''}",
-                    flush=True,
-                )
-                l2_row = {
-                    "ts": datetime.now(timezone.utc).isoformat(),
-                    "type": "l2_accept",
-                    "iter": iter_i,
-                    "score_theta_vs_best": l2_score,
-                    "elo": l2_elo,
-                    "theta": dict(theta),
-                    "theta_int": dict(theta_i_gate),
-                    "best_theta": dict(best_theta),
-                    "best_theta_int": dict(best_i_gate),
-                    "games": l2["games"],
-                    "nodes": args.l2_nodes,
-                    "early_trash": l2_trash,
-                }
-                with open(log_path, "a", encoding="utf-8") as f:
-                    f.write(json.dumps(l2_row, ensure_ascii=False) + "\n")
-                # Accept if θ beats the current best_theta by the gate (default ≥0.52).
-                # Early trash ⇒ automatic reject (already score_A < 0.45).
-                l2_accepted = False
-                if (not l2_trash) and l2_score >= 0.52:
-                    # best = exact ints used in L2; working θ keeps float (preserves sub-int progress).
-                    best_theta = best_from_l2_ints(theta_i_gate)
-                    best_l2_score = l2_score  # bookkeeping only
-                    l2_accepted = True
+                print(f"[L2] diffs vs best:\n{format_constants_diff(cand_i_gate)}", flush=True)
+                penta_parts: list[list[int]] = []
+                pts_cand = 0.0
+                pts_best = 0.0
+                games_done = 0
+                l2_trash = False
+                l2_decision = "fixed_cap"
+                l2_llr = 0.0
+                t_l2_0 = time.time()
+
+                while games_done < args.l2_games:
+                    this_batch = min(args.l2_batch_games, args.l2_games - games_done)
+                    if this_batch % 2:
+                        this_batch += 1
+                    res = run_match(
+                        cand_i_gate,
+                        best_i_gate,
+                        openings=l2_openings,
+                        nodes=args.l2_nodes,
+                        games=this_batch,
+                        log_every=max(20, args.log_every_games),
+                        worker_pool=worker_pool,
+                        concurrency=args.concurrency,
+                        opening_offset=l2_opening_offset,
+                        adjudicate=adjudicate_cfg,
+                    )
+                    l2_opening_offset += max(1, int(res["games"]) // 2)
+                    penta_parts.append(list(res["penta"]))
+                    games_done += int(res["games"])
+                    pts_cand += float(res["pts_a"])
+                    pts_best += float(res["pts_b"])
+
+                    penta_cand = merge_penta(penta_parts)
+                    est = elo_estimate(penta_cand)
+                    batch_msg = (
+                        f"  [L2 batch] games={games_done}/{args.l2_games} "
+                        f"score={est['score']:.3f} elo={est['elo']:+.1f}±{est['elo_err']:.1f} "
+                        f"penta={penta_cand}"
+                    )
+                    if l2_sprt is not None:
+                        l2_llr = sprt_llr(penta_cand, l2_sprt[0], l2_sprt[1])
+                        lo_b, hi_b = sprt_bounds(args.sprt_alpha, args.sprt_beta)
+                        l2_decision = sprt_decision(l2_llr, args.sprt_alpha, args.sprt_beta)
+                        batch_msg += f" LLR={l2_llr:+.2f} [{lo_b:.2f},{hi_b:.2f}] -> {l2_decision}"
+                    print(batch_msg, flush=True)
+
+                    if (
+                        args.l2_early_trash_games > 0
+                        and games_done >= args.l2_early_trash_games
+                        and est["score"] < args.l2_early_trash_score
+                    ):
+                        l2_trash = True
+                        l2_decision = "early_trash"
+                        break
+                    if l2_sprt is not None and l2_decision != "continue":
+                        break
+
+                l2_elapsed = time.time() - t_l2_0
+                penta_cand = merge_penta(penta_parts)
+                est = elo_estimate(penta_cand)
+                l2_score = float(est["score"])
+                l2_elo = float(est["elo"])
+
+                if l2_trash:
+                    l2_accepted = False
+                elif l2_sprt is not None:
+                    if l2_decision == "accept_h1":
+                        l2_accepted = True
+                    elif l2_decision == "accept_h0":
+                        l2_accepted = False
+                    else:
+                        l2_accepted = l2_score >= float(args.l2_min_score)
+                        l2_decision = f"cap_score_{'pass' if l2_accepted else 'fail'}"
+                else:
+                    l2_accepted = l2_score >= float(args.l2_min_score)
+                    l2_decision = f"score_{'pass' if l2_accepted else 'fail'}"
+
+                if l2_accepted:
+                    best_theta = best_from_l2_ints(cand_i_gate)
+                    best_l2_score = l2_score
                     l2_fail_streak = 0
+                    window_thetas.clear()
+                    diff_txt = format_constants_diff(cand_i_gate)
                     save_json(
                         best_path,
                         {
+                            "block": active_block(),
                             "theta": best_theta,
-                            "theta_int": dict(theta_i_gate),
+                            "theta_int": dict(cand_i_gate),
+                            "cand_source": cand_source,
                             "l2_score": best_l2_score,
+                            "l2_elo": l2_elo,
+                            "l2_elo_err95": est["elo_err"],
+                            "l2_penta": penta_cand,
+                            "l2_decision": l2_decision,
                             "iter": iter_i,
                             "ts": datetime.now(timezone.utc).isoformat(),
-                            "note": "best = L2 match ints; working θ NOT re-centered (stays float)",
                         },
                     )
+                    save_text(patch_path, diff_txt + "\n")
                     print(
-                        f"[L2] NEW BEST accepted score={best_l2_score:.3f} vs prior best "
-                        f"(best=L2 ints; θ keeps float)",
-                        flush=True,
-                    )
-                elif l2_trash:
-                    l2_fail_streak += 1
-                    print(
-                        f"[L2] reject EARLY_TRASH "
-                        f"(score={l2_score:.3f} < {args.l2_early_trash_score} "
-                        f"after {l2['games']} games)  fail_streak={l2_fail_streak}",
+                        f"[L2] NEW BEST ACCEPTED ({l2_decision}): score={l2_score:.3f} "
+                        f"({l2_elo:+.1f}±{est['elo_err']:.1f} Elo) in {l2_elapsed:.1f}s",
                         flush=True,
                     )
                 else:
                     l2_fail_streak += 1
                     print(
-                        f"[L2] reject (need score>=0.52 vs best_theta, got {l2_score:.3f})  "
-                        f"fail_streak={l2_fail_streak}",
+                        f"[L2] REJECT ({l2_decision}): score={l2_score:.3f} "
+                        f"({l2_elo:+.1f}±{est['elo_err']:.1f} Elo)  fail_streak={l2_fail_streak}",
                         flush=True,
                     )
 
                 l2_count += 1
-                l2_row["accepted"] = l2_accepted
-                l2_row["l2_fail_streak"] = l2_fail_streak
-                with open(log_path, "a", encoding="utf-8") as f:
-                    f.write(
-                        json.dumps(
-                            {
-                                "ts": datetime.now(timezone.utc).isoformat(),
-                                "type": "l2_result",
-                                "iter": iter_i,
-                                "accepted": l2_accepted,
-                                "early_trash": l2_trash,
-                                "score": l2_score,
-                                "l2_fail_streak": l2_fail_streak,
-                            },
-                            ensure_ascii=False,
-                        )
-                        + "\n"
-                    )
+                l2_row = {
+                    "ts": datetime.now(timezone.utc).isoformat(),
+                    "type": "l2_accept",
+                    "iter": iter_i,
+                    "cand_source": cand_source,
+                    "accepted": l2_accepted,
+                    "decision": l2_decision,
+                    "score_theta_vs_best": l2_score,
+                    "elo": l2_elo,
+                    "elo_err95": est["elo_err"],
+                    "penta": penta_cand,
+                    "llr": l2_llr if l2_sprt is not None else None,
+                    "games": games_done,
+                    "nodes": args.l2_nodes,
+                    "elapsed_s": l2_elapsed,
+                    "early_trash": l2_trash,
+                    "l2_fail_streak": l2_fail_streak,
+                    "theta_int": dict(cand_i_gate),
+                    "best_theta_int": dict(best_i_gate),
+                }
+                with open(log_path, "a", encoding="utf-8", newline="\n") as f:
+                    f.write(json.dumps(l2_row, ensure_ascii=False) + "\n")
 
-                if (
-                    args.l2_stop_after_fails > 0
-                    and l2_fail_streak >= args.l2_stop_after_fails
-                ):
+                if args.l2_stop_after_fails > 0 and l2_fail_streak >= args.l2_stop_after_fails:
                     print(
                         f"[stop] {l2_fail_streak} consecutive L2 rejects "
                         f"(limit={args.l2_stop_after_fails}). Stopping SPSA.",
                         flush=True,
                     )
-                    save_json(
-                        ckpt_path,
-                        {
-                            "iter": iter_i + 1,
-                            "theta": theta,
-                            "theta_int": quantize_params(theta),
-                            "best_theta": best_theta,
-                            "best_theta_int": quantize_params(best_theta),
-                            "best_l2_score": best_l2_score,
-                            "recent_scores": history_scores[-50:],
-                            "elapsed_run_s": time.time() - t_run0,
-                            "l2_count": l2_count,
-                            "l2_fail_streak": l2_fail_streak,
-                            "l2_skip_no_int": l2_skip_no_int,
-                            "last_l2_gate_iter": last_l2_gate_iter,
-                            "phase2_active": phase2_active,
-                            "games": args.games,
-                            "nodes": args.nodes,
-                            "l2_games": args.l2_games,
-                            "l2_nodes": args.l2_nodes,
-                            "concurrency": args.concurrency,
-                            "stopped_reason": "consecutive_l2_rejects",
-                            "meta": meta,
-                        },
-                    )
+                    _save_checkpoint(stopped_reason="consecutive_l2_rejects")
                     save_json(
                         out_dir / "final_params.json",
                         {
+                            "block": active_block(),
                             "theta": theta,
                             "best_theta": best_theta,
                             "best_theta_int": quantize_params(best_theta),
@@ -577,13 +701,8 @@ def main(argv=None) -> int:
                     )
                     return 0
 
-                # Promote to heavier protocol once (same process / no re-JIT)
                 if args.phase2_after_l2 and not phase2_active and l2_count >= 1:
                     phase2_active = True
-                    old = (
-                        f"L1 {args.games}g@n{args.nodes} L2 {args.l2_games}g@n{args.l2_nodes} "
-                        f"c={args.concurrency}"
-                    )
                     args.games = int(args.phase2_games)
                     args.nodes = int(args.phase2_nodes)
                     args.l2_games = int(args.phase2_l2_games)
@@ -594,73 +713,36 @@ def main(argv=None) -> int:
                             worker_pool, target_c, tt_mb=args.tt_mb, warmup_nodes=800
                         )
                     args.concurrency = target_c
-                    print(
-                        f"[phase2] after L2#{l2_count}: {old}  ->  "
-                        f"L1 {args.games}g@n{args.nodes} L2 {args.l2_games}g@n{args.l2_nodes} "
-                        f"c={args.concurrency}",
-                        flush=True,
-                    )
-                    with open(log_path, "a", encoding="utf-8") as f:
-                        f.write(
-                            json.dumps(
-                                {
-                                    "ts": datetime.now(timezone.utc).isoformat(),
-                                    "type": "phase2_upgrade",
-                                    "iter": iter_i,
-                                    "l2_count": l2_count,
-                                    "games": args.games,
-                                    "nodes": args.nodes,
-                                    "l2_games": args.l2_games,
-                                    "l2_nodes": args.l2_nodes,
-                                    "concurrency": args.concurrency,
-                                },
-                                ensure_ascii=False,
-                            )
-                            + "\n"
-                        )
 
-        if (iter_i + 1) % args.ckpt_every == 0 or iter_i == 0 or phase2_active:
-            save_json(
-                ckpt_path,
-                {
-                    "iter": iter_i + 1,
-                    "theta": theta,
-                    "theta_int": quantize_params(theta),
-                    "best_theta": best_theta,
-                    "best_theta_int": quantize_params(best_theta),
-                    "best_l2_score": best_l2_score,
-                    "recent_scores": history_scores[-50:],
-                    "elapsed_run_s": time.time() - t_run0,
-                    "l2_count": l2_count,
-                    "l2_fail_streak": l2_fail_streak,
-                    "l2_skip_no_int": l2_skip_no_int,
-                    "last_l2_gate_iter": last_l2_gate_iter,
-                    "phase2_active": phase2_active,
-                    "games": args.games,
-                    "nodes": args.nodes,
-                    "l2_games": args.l2_games,
-                    "l2_nodes": args.l2_nodes,
-                    "concurrency": args.concurrency,
-                    "meta": meta,
-                },
-            )
+        if (iter_i + 1) % args.ckpt_every == 0 or iter_i == 0:
+            _save_checkpoint()
             save_json(
                 out_dir / "latest_params.json",
                 {
+                    "block": active_block(),
                     "theta": theta,
                     "theta_int": quantize_params(theta),
+                    "best_theta_int": quantize_params(best_theta),
                     "iter": iter_i + 1,
-                    "phase2_active": phase2_active,
-                    "games": args.games,
-                    "nodes": args.nodes,
-                    "concurrency": args.concurrency,
+                    "drift_z": z_map,
                 },
             )
 
         iter_i += 1
 
     print(f"\n[done] {iter_i} iterations, elapsed {time.time() - t_run0:.1f}s", flush=True)
-    save_json(out_dir / "final_params.json", {"theta": theta, "best_theta": best_theta})
+    _save_checkpoint(stopped_reason="max_iters")
+    save_json(
+        out_dir / "final_params.json",
+        {
+            "block": active_block(),
+            "theta": theta,
+            "best_theta": best_theta,
+            "best_theta_int": quantize_params(best_theta),
+            "stopped_reason": "max_iters",
+            "iter": iter_i,
+        },
+    )
     return 0
 
 
