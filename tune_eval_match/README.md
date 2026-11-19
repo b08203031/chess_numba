@@ -76,4 +76,8 @@ python -u tools/run_eval_param_match.py \
 * `checkpoint.json` / `latest_params.json`：含浮點 `theta`、開局偏移量與隨機數狀態以便無縫 `--resume`。
 * `best_params.json` / `best_constants_diff.txt`：L2 驗收通過之整數配置與與現行常數差異摘要。
 
+### Colab 執行與匯出至 `constants.py`
+* **Colab 工作台**：[`tune_colab_runner_eval_match.ipynb`](../tune_colab_runner_eval_match.ipynb) 會將紀錄（`spsa_log.jsonl`、`spsa_stdout.log`、`checkpoint.json`）與自動匯出的 `constants.py`（`constants_exports/constants_{best,latest,final}.py`）即時同步至 Google Drive `MyDrive/chess_numba_data/eval_match_spsa/<RUN_TAG>/`。
+* **匯出 / 套用 CLI**：`python -m tune_eval_match.export_constants --params-json <best_params.json> --out-constants <path>`（加 `--apply` 才會直接寫入 `chess_engine/classical/constants.py`）。
+
 400k SPRT 通過後方可將變動寫入 `chess_engine/classical/constants.py`，依序執行 `python -m tuner.sync_constants_snapshot`、`python -m tuner.codegen.generate_tunable_eval`，並在明確確認後執行 `python tools/sync_classical_old.py --sync`。
