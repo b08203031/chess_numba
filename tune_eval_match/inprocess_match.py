@@ -385,7 +385,9 @@ def run_match(
     strict: bool = True,
 ) -> dict:
     """
-    Play `games` games (paired color swap). Score = fraction of points for A.
+    Play `games` games (paired color swap). Convention: A = baseline/minus,
+    B = candidate/plus. Progress logs print ``score_B`` (fraction of points for
+    B); returned dict carries both ``score_a``/``penta`` and ``score_b``/``penta_b``.
 
     Concurrency (-c N):
       ThreadPool of N independent ctx pairs. Numba nopython releases GIL →
@@ -458,15 +460,19 @@ def run_match(
         total = pts_a + pts_b
         return pts_a / total if total > 0 else 0.5
 
+    def _score_b() -> float:
+        total = pts_a + pts_b
+        return pts_b / total if total > 0 else 0.5
+
     def _log_progress(tag: str = "") -> None:
         if not log_every and not tag:
             return
-        score = _score()
+        score_b = _score_b()
         elapsed = time.time() - t0
         extra = f"  {tag}" if tag else ""
         print(
             f"  [match] {played}/{n_pairs * 2} games  "
-            f"A={pts_a:.1f} B={pts_b:.1f} score_A={score:.3f}  "
+            f"A={pts_a:.1f} B={pts_b:.1f} score_B={score_b:.3f}  "
             f"{elapsed:.1f}s  c={concurrency}{extra}",
             flush=True,
         )
@@ -543,11 +549,14 @@ def run_match(
 
     total = pts_a + pts_b
     score_a = pts_a / total if total > 0 else 0.5
+    score_b = pts_b / total if total > 0 else 0.5
     return {
         "score_a": score_a,
+        "score_b": score_b,
         "pts_a": pts_a,
         "pts_b": pts_b,
         "penta": penta,
+        "penta_b": list(reversed(penta)),
         "opening_offset": opening_offset,
         "games": played,
         "elapsed_s": time.time() - t0,

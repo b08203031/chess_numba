@@ -172,7 +172,7 @@ def main(argv=None) -> int:
         warmup_jit(ctx_b, nodes=min(1500, warmup_nodes) if i == 0 else min(800, warmup_nodes))
 
     t0 = time.time()
-    penta_a_parts: list[list[int]] = []
+    penta_cand_parts: list[list[int]] = []
     pairs_done = 0
     games_done = 0
     pts_a = 0.0
@@ -199,13 +199,13 @@ def main(argv=None) -> int:
             opening_offset=pairs_done,
             adjudicate=adjudicate_cfg,
         )
-        penta_a_parts.append(list(result["penta"]))
-        pairs_done += sum(result["penta"])
+        penta_cand_parts.append(list(result["penta_b"]))
+        pairs_done += sum(result["penta_b"])
         games_done += int(result["games"])
         pts_a += float(result["pts_a"])
         pts_b += float(result["pts_b"])
 
-        penta_cand = merge_penta([p[::-1] for p in penta_a_parts])
+        penta_cand = merge_penta(penta_cand_parts)
         est = elo_estimate(penta_cand)
         llr_0_10 = sprt_llr(penta_cand, 0.0, 10.0)
         llr_m3_3 = sprt_llr(penta_cand, -3.0, 3.0)
@@ -226,8 +226,8 @@ def main(argv=None) -> int:
     if sprt is not None and decision == "continue":
         decision = "inconclusive_at_cap"
 
-    penta_a = merge_penta(penta_a_parts)
-    penta_cand = merge_penta([p[::-1] for p in penta_a_parts])
+    penta_cand = merge_penta(penta_cand_parts)
+    penta_a = list(reversed(penta_cand))
     est = elo_estimate(penta_cand)
     out = {
         "nodes": int(args.nodes),

@@ -1,13 +1,17 @@
 """Pure-Python unit tests for tune_eval_match and tools.run_eval_param_match."""
 from __future__ import annotations
 
+import contextlib
+import io
 import json
 import random
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from tools.run_eval_param_match import _load_params_json, _parse_overrides
+from tune_eval_match import inprocess_match
 from tune_eval_match.export_constants import build_constants_patch, export_params_to_files
 from tune_eval_match.spsa_match import (
     _average_tail_thetas,
@@ -108,6 +112,32 @@ class TestEvalMatchSpsa(unittest.TestCase):
             )
             self.assertTrue(out_c.exists())
             self.assertTrue(out_s.exists())
+
+    def test_run_match_prints_score_b_and_returns_penta_b(self):
+        buf = io.StringIO()
+        with (
+            mock.patch.object(inprocess_match, "play_match_pair", return_value=(0.5, 1.5)),
+            mock.patch.object(inprocess_match, "set_eval_params"),
+            contextlib.redirect_stdout(buf),
+        ):
+            res = inprocess_match.run_match(
+                {},
+                {},
+                openings=["rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"],
+                nodes=100,
+                games=4,
+                log_every=2,
+                ctx_a=object(),
+                ctx_b=object(),
+                concurrency=1,
+            )
+        out = buf.getvalue()
+        self.assertIn("score_B=0.750", out)
+        self.assertNotIn("score_A=", out)
+        self.assertAlmostEqual(res["score_a"], 0.25)
+        self.assertAlmostEqual(res["score_b"], 0.75)
+        self.assertEqual(res["penta"], [0, 2, 0, 0, 0])
+        self.assertEqual(res["penta_b"], [0, 0, 0, 2, 0])
 
 
 if __name__ == "__main__":

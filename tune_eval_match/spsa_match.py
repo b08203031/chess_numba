@@ -460,8 +460,8 @@ def main(argv=None) -> int:
             flush=True,
         )
         match = run_match(
-            theta_p_i,
             theta_m_i,
+            theta_p_i,
             openings=l1_openings,
             nodes=args.nodes,
             games=args.games,
@@ -473,7 +473,7 @@ def main(argv=None) -> int:
         )
         l1_opening_offset += max(1, int(match["games"]) // 2)
 
-        score_plus = float(match["score_a"])
+        score_plus = float(match["score_b"])
         y_diff = 2.0 * score_plus - 1.0
         elo = elo_from_score(score_plus)
 
@@ -499,9 +499,9 @@ def main(argv=None) -> int:
             "iter": iter_i,
             "score_plus": score_plus,
             "elo_plus_vs_minus": elo,
-            "pts_plus": match["pts_a"],
-            "pts_minus": match["pts_b"],
-            "penta_plus": match.get("penta"),
+            "pts_plus": match["pts_b"],
+            "pts_minus": match["pts_a"],
+            "penta_plus": match.get("penta_b"),
             "games": match["games"],
             "nodes": args.nodes,
             "opening_offset": match.get("opening_offset"),
@@ -587,8 +587,8 @@ def main(argv=None) -> int:
                     if this_batch % 2:
                         this_batch += 1
                     res = run_match(
-                        cand_i_gate,
                         best_i_gate,
+                        cand_i_gate,
                         openings=l2_openings,
                         nodes=args.l2_nodes,
                         games=this_batch,
@@ -599,10 +599,10 @@ def main(argv=None) -> int:
                         adjudicate=adjudicate_cfg,
                     )
                     l2_opening_offset += max(1, int(res["games"]) // 2)
-                    penta_parts.append(list(res["penta"]))
+                    penta_parts.append(list(res["penta_b"]))
                     games_done += int(res["games"])
-                    pts_cand += float(res["pts_a"])
-                    pts_best += float(res["pts_b"])
+                    pts_cand += float(res["pts_b"])
+                    pts_best += float(res["pts_a"])
 
                     penta_cand = merge_penta(penta_parts)
                     est = elo_estimate(penta_cand)
