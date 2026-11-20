@@ -82,3 +82,14 @@ python -u tools/run_eval_param_match.py \
 * **匯出 / 套用 CLI**：`python -m tune_eval_match.export_constants --params-json <best_params.json> --out-constants <path>`（加 `--apply` 才會直接寫入 `chess_engine/classical/constants.py`）。
 
 400k SPRT 通過後方可將變動寫入 `chess_engine/classical/constants.py`，依序執行 `python -m tuner.sync_constants_snapshot`、`python -m tuner.codegen.generate_tunable_eval`，並在明確確認後執行 `python tools/sync_classical_old.py --sync`。
+
+---
+
+## 6. 實驗紀錄與防假陽性經驗（2026-11-20）
+
+* **`king_weights`（11 維，2026-11-19 ~ 20）❌ 已捨棄**：
+  * 設定：L1 `games=300`、`nodes=80k`、`101` iters；L2 `games=500`、`nodes=200k`、`l2_min_score=0.510`、`l2_sprt=null`。
+  * 結果：L1 `avg |score_plus - 0.5| = 0.0159`（低於 300 局隨機誤差）、最終 `drift_z` 全部 `|z| <= 1.41`；L2 在 `iter 49`（`0.517, +11.8±20.1 Elo`）與 `iter 99`（`0.516, +11.1±19.1 Elo`）靠 500 局抽樣波動擦邊過關，但 400k 驗證至 `g=500` 僅得 **`0.4790`（`-14.6 ± 18.3 Elo`, `LLR[0,10]=-2.26`）**。
+* **實務規範**：
+  1. 避免在已飽和的 `king_weights` 上用低局數（`300`）做高維擾動，優先選擇未調優區塊（如 `--block space`、`imbalance`、`threats_mg`）。
+  2. L2 建議開啟 **`--l2-sprt 0,10`**（或至少 `--l2-games 1000`），避免 500 局 `±19 Elo` 誤差造成多次檢定假陽性（Winner's Curse）。

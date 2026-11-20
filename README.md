@@ -24,6 +24,7 @@ python -m unittest tests.test_texel_parameterization tests.test_endgame_conforma
 python -m tests.perft perft --depth 5
 python -m tests.test_puzzle      # NNUE 版：python -m tests.test_puzzle_nn
 python -m tests.benchmark        # NNUE 版：python -m tests.benchmark_nn_real
+python tools/run_sts.py --suite v6 --limit n50000 -c 4   # Strategic Test Suite (Classical)
 ```
 
 ---
@@ -36,7 +37,7 @@ python -m tests.benchmark        # NNUE 版：python -m tests.benchmark_nn_real
 | `tuner/` | Classical HCE 靜態 Texel / SPSA 調參工作台（`texel_tuner_runner.ipynb`、`data_pipeline/`、`nnue_pipeline/`） |
 | `tune_search/` | 搜尋常數 SPSA 調優器（44 軸 runtime `SearchContext.tune[]` 單次 JIT + UCI compile-time 路徑） |
 | `tune_eval_match/` | 對局式 HCE 評估權重 SPSA（單進程共享 JIT、`SearchContext.eval_weights`） |
-| `tools/` | `tournament.py`（New vs Old 成對換先 + SPRT）、`match_runner.py`（對外部 Stockfish）、`match_core.py`、螢幕棋盤辨識 CNN |
+| `tools/` | `tournament.py`（New vs Old 成對換先 + SPRT）、`match_runner.py`（對外部 Stockfish）、`match_core.py`、`run_sts.py`（Strategic Test Suite 測試）、螢幕棋盤辨識 CNN |
 | `tournament_analysis/` | 對戰棋譜 `tournament_results.pgn`、局級/著法級統計分析腳本與實驗日誌 |
 | `tests/`、`data/`、`external/` | 單元/謎題/效能測試、開局庫與 CNN 模型、外部 Stockfish 執行檔 |
 

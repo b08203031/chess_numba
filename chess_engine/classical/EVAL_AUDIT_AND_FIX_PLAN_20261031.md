@@ -828,7 +828,30 @@ flowchart TD
 
 ---
 
-### 十四、Phase 14：Match-SPSA `material` 調優落地與 `classical_old/` 基準同步（2026-11-21）
+### 十四、Phase 14：Match-SPSA `king_weights` 失敗實驗歸檔與 STS v6 策略基線建置 (2026-11-19 ~ 2026-11-20)
+
+1. **`spsa_eval_king_weights` 實驗失敗歸檔與捨棄 ❌**：
+   * **實驗設定**：基於 `tune_eval_match` 99 軸實時權重管線，以 [`spsa_match.py`](../../tune_eval_match/spsa_match.py) 執行 `--block king_weights`（11 維：`KING_ATTACK_WEIGHT_{N,B,R,Q}`、`KING_DANGER_NO_QUEEN`、`KING_DANGER_NO_QUEEN_ROOKLESS`、`KING_DANGER_OUT_MG_NUM`、`KING_DANGER_OUT_EG_NUM`、`KING_DANGER_THRESHOLD`、`EG_SAFETY_SCALE`、`KING_FLANK_ATTACK_NUM`）。L1 為 `games=300`、`nodes=80,000`、`iters=100`（實際紀錄 `iter 0..100` 共 101 輪）；L2 為 `l2_every=25`、`l2_games=500`、`l2_nodes=200,000`、`l2_candidate="tail"`、`l2_min_score=0.51`、`l2_sprt=null`。
+   * **L1 訊噪診斷（無真實梯度收斂）**：
+     * 101 輪 `score_plus` 落於 `[0.4567, 0.5733]`，平均絕對偏差 `avg |score_plus - 0.5| = 0.0159`（低於 300 局二項隨機標準差 `~0.023`）。
+     * `iter 99` 最終 `drift_z` 全數未達統計顯著（最大僅 `KING_FLANK_ATTACK_NUM: +1.41`、`KING_DANGER_NO_QUEEN: -1.30`、`KING_DANGER_THRESHOLD: +1.06`，其餘 8 項皆 `|z| <= 0.68`），主因 `king_weights` 經先前 G4 與 Block A 調參已處局部平坦區，300 局擾動訊噪比不足。
+   * **L2 Gate 抽樣假陽性（Winner's Curse）**：
+     * 4 次 L2 驗收：`iter 24` `0.4960`（`-2.8 ± 20.7 Elo` ❌）、`iter 49` `0.5170`（`+11.8 ± 20.1 Elo` ✅）、`iter 74` `0.5010`（`+0.7 ± 18.3 Elo` ❌）、`iter 99` `0.5160`（`+11.1 ± 19.1 Elo` ✅）。由於關閉 `--l2-sprt` 且僅用 500 局（95% CI 達 `±19~20 Elo`）搭配 `score >= 0.510` 門檻，0 Elo 噪點靠多次檢定偶發跨線，產出 7 項僅 `0.5% ~ 1.3%` 之微幅漂移（`KING_ATTACK_WEIGHT_N: 56→57`、`KING_DANGER_NO_QUEEN: 539→532`、`KING_DANGER_NO_QUEEN_ROOKLESS: 867→876`、`KING_DANGER_OUT_MG_NUM: 120→119`、`KING_DANGER_OUT_EG_NUM: 17076→16982`、`KING_DANGER_THRESHOLD: 66→68`、`EG_SAFETY_SCALE: 110→109`）。
+   * **400k 獨立驗證與處置**：
+     * 以 [`tools/run_eval_param_match.py`](../../tools/run_eval_param_match.py) 對 `--baseline-old` 執行 400k nodes/move 驗證至 `g=500` 時，候選得分率僅 **`0.4790`**（**`-14.6 ± 18.3 Elo`**，95% CI `[-32.9, +3.7]`、`SPRT[0,10] LLR=-2.26`、`[-3,3]=-1.01`、`[-5,0]=-0.70`），確認 200k L2 增益為假陽性且實戰表現不佳。
+     * **處置**：手動中止驗證、未寫入 [`constants.py`](constants.py)，並刪除 `tournament_analysis/spsa_eval_king_weights/` 保持基線乾淨。
+   * **後續調參規範修正**：(1) 避開已飽和之 `king_weights`，優先轉向未調校區塊（`space`、`imbalance`、`threats_mg`）；(2) 依參數維度提高 L1 `games`（建議 `>= 500`）；(3) L2 強制開啟 `--l2-sprt 0,10` 或拉高至 `--l2-games >= 1000`，杜絕 500 局 `0.510` 假陽性。
+
+2. **Strategic Test Suite (STS v6) 策略診斷基線建置（[`tools/run_sts.py`](../../tools/run_sts.py)）**：
+   * 下載 `fsmosca/STS-Rating` 題庫至 `data/sts/`（`v3` 1,500 題與 SF15 MultiPV-10 校驗版 `v6` 1,188 題，`top1 - top2 >= 10 cp`），預設採用 **`v6`** 搭配 `InProcessEngineFactory` + `ThreadPoolExecutor` 平行測試 `chess_engine/classical`。
+   * **現行基線量測**（`classical`）：
+     * **`300k nodes`**（[`sts_classical_v6_n300k.json`](../../tournament_analysis/sts_classical_v6_n300k.json)，`avg_depth=13.70`, `avg_nodes=159,785`）：總分 **`98,457 / 118,800 (82.88%)`**、`Best1 = 759 / 1,188 (63.89%)`、0 分題 `31`。
+     * **`1M nodes`**（[`sts_classical_v6_n1M.json`](../../tournament_analysis/sts_classical_v6_n1M.json)，`avg_depth=16.97`, `avg_nodes=536,622`）：總分 **`103,474 / 118,800 (87.10%, +4.22%)`**、`Best1 = 817 / 1,188 (68.77%, +4.88%)`、0 分題 `18`（12/15 主題達 `82.6% ~ 95.6%`）。
+   * **1M 下仍偏弱之 3 項結構性盲點**：`STS07 Offer of Simplification`（`79.15%`, Best1 `46/82`）、`STS09 Advancement of a/b/c Pawns`（`79.82%`, 25 題失誤中 SF15 有 22 題推兵 vs 引擎僅 9 題）、`STS15 Avoid Pointless Exchange`（`79.95%`, 38 題失誤中引擎仍走 10 次換后 vs SF15 僅 2 次）。後續 Match-SPSA（如 `space` / `threats_mg` / `imbalance`）與搜尋 LMR 改動可藉 `--compare-json` 同步檢驗策略面是否隨 Elo 提升。
+
+---
+
+### 十五、Phase 15：Match-SPSA `material` 調優落地與 `classical_old/` 基準同步（2026-11-21）
 
 在 `SF_LAMBDA=0.15 + Block 7a Imbalance R1` 基準上，透過 [`tune_eval_match/spsa_match.py`](../../tune_eval_match/spsa_match.py) 執行對局式 HCE `material` 區塊調優（`10` 維，`20k` nodes / `200g` L1 → `100k` nodes / `600g` L2 `tail` 驗收，`spsa_eval_material`）並完成本機 `400k` 驗證：
 
