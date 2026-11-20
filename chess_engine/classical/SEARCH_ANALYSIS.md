@@ -1317,3 +1317,23 @@ NMP gate/R、ProbCut style、NMP beta requirement 的預設值也由常量明確
 | **4 Threads** | 1,013,317 | 0.54s | **1.51x** | **1,889,421** | **4.14x** |
 | **8 Threads** | 2,011,716 | 0.59s | **1.36x** | **3,388,855** | **7.43x** |
 
+### 18.4 SF19-Aligned Lazy SMP 實戰對戰驗證（2026-11-19 ~ 11-20，4 Threads vs 4 Threads）
+
+針對 §18.1–18.2 實作之 SF19 對齊改動（移除 depth skipping、支援中斷部分迭代根節點保留、`apply_root_iteration_guards` 與 `select_best_thread` 投票決策），於 Colab 環境進行 **4 Threads vs 4 Threads** 對戰驗證，對比 **New_SF19SMP**（新版）與 **Old_SMP**（`classical_old/` 上一版多執行緒）。
+
+* **對戰 PGN**：[`tournament_analysis/sf19_smp_vs_old_smp_t4_250ms.pgn`](../../tournament_analysis/sf19_smp_vs_old_smp_t4_250ms.pgn)（詳細分析與圖表見 `tournament_analysis/sf19_smp_analysis/`，實驗紀錄見 [`SEARCH_EXP_LOG.md`](../../tournament_analysis/SEARCH_EXP_LOG.md) **E148**）
+* **規模與對局條件**：**694 局（347 組嚴格換色配對）**，347 個唯一 FEN，0 錯誤/失敗局；`WhiteThreads="4"` / `BlackThreads="4"`。
+  * 註：檔名標記 `_250ms` 為 notebook 預設 `RUN_TAG`，實測 PGN 每步實際用時峰值達 **501–503 ms**（平均 **354.0 ms** vs **355.0 ms**），對應 `MOVETIME_MS = 500` 與預測式時間管理（`elapsed * 2.0 > maximum_time_ms`）之實測條件。
+
+| 統計維度 | 數值（New_SF19SMP vs Old_SMP） | 說明 |
+| :--- | :--- | :--- |
+| **總戰績 (WDL)** | **126W - 483D - 85L**（淨勝 **+41 局**） | 總得分 `367.5 / 694`（**52.95%**），和棋率 `69.60%` |
+| **相對 Elo（Pentanomial）** | **+20.55 ± 14.00 Elo** | 95% CI `[+6.58, +34.59]`（成對群聚 CI `[+6.56, +34.61]`）；nElo `+38.03 ± 25.85` |
+| **SPRT `[0, 10]` (α=β=0.05)** | **Penta Normal LLR = +3.06**（Exact `+3.04`） | 於第 347 組（694 局）通過上限 `+2.94`，**H1 Accepted ✅** |
+| **額外邊界觀測** | `[0, 5]: +1.78`、`[-5, 0]: +2.27`、`[-3, 3]: +2.43` | 均顯著偏向正收益（`[-5, 0]`、`[-3, 3]` 與 `[0, 5]` 處於 Continue 區間） |
+| **九宮格 (先白後黑)** | `DD:168 (48.4%) \| WD:59 (17.0%) \| LD:36 (10.4%)` | `DW:28 \| DL:24 \| WL:12 \| WW:11 \| LW:5 \| LL:4`；成對淨勝 **WD+DW=87 vs DL+LD=60**、**WW:LL=11:4** |
+| **雙色表現** | 執白 **55.33%**（82W-220D-45L）、執黑 **50.58%**（44W-263D-40L） | 白棋佔優且黑棋穩守反擊（全體白方得分 `52.38%`, `p=4.13e-04`） |
+| **搜尋指標（每步均值）** | 深度 **`17.35` vs `17.22` ply**（**+0.13 ply**, `p=1.53e-05`） | 節點 `699,765` vs `675,726`（`+3.6%`）；**NPS `2,001,269` vs `1,924,697`（`+4.0%`, `p=7.68e-28`）**；平均耗時無差異（`354.0 ms` vs `355.0 ms`, `p=0.112`） |
+
+**結論**：在相同 4 執行緒硬體與每步等時消耗下，SF19 對齊後的 Lazy SMP 透過無 depth skipping 的更密根/共享 TT 搜尋與投票擇優，帶來 **+4.0% NPS**、**+0.13 ply 平均深度** 與 **+20.55 Elo** 的實質棋力提升，並在中長局（26–50 回合 `52.5%`、51–80 回合 `54.9%`、`>80` 回合 `53.3%`）穩定兌現優勢。目前通過 SPRT `[0, 10]` H1 驗證，待使用者確認後可決定是否執行 `tools/sync_classical_old.py --sync` 更新對戰基準。
+

@@ -11,6 +11,7 @@ from chess_engine.classical_old.constants import (
 # Must match tune_eval_match.eval_weights
 _EW_IMB_SCALE_MG = 44
 _EW_IMB_SCALE_EG = 45
+_EW_IMB_DIV = 63
 
 
 @numba.njit(cache=True, inline="always")
@@ -37,6 +38,7 @@ def compute_imbalance(cnt_0, cnt_1, cnt_2, cnt_3, cnt_4, cnt_6, cnt_7, cnt_8, cn
 
     scale_mg = _ew_get_mat(ew, use_ew, _EW_IMB_SCALE_MG, IMBALANCE_SCALE_MG)
     scale_eg = _ew_get_mat(ew, use_ew, _EW_IMB_SCALE_EG, IMBALANCE_SCALE_EG)
+    imb_div = max(np.int32(1), _ew_get_mat(ew, use_ew, _EW_IMB_DIV, IMBALANCE_DIVISOR))
 
     w_bp = np.int32(1) if cnt_2 > 1 else np.int32(0)
     b_bp = np.int32(1) if cnt_8 > 1 else np.int32(0)
@@ -66,7 +68,7 @@ def compute_imbalance(cnt_0, cnt_1, cnt_2, cnt_3, cnt_4, cnt_6, cnt_7, cnt_8, cn
             v += IMBALANCE_QUADRATIC_THEIRS[pt1, pt2] * w[pt2]
         b_bonus += b[pt1] * v
 
-    raw = _trunc_div(w_bonus - b_bonus, IMBALANCE_DIVISOR)
+    raw = _trunc_div(w_bonus - b_bonus, imb_div)
     mg_imbalance = _trunc_div(raw * scale_mg, np.int32(100))
     eg_imbalance = _trunc_div(raw * scale_eg, np.int32(100))
     return mg_imbalance, eg_imbalance

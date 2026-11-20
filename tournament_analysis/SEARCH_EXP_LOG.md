@@ -4,7 +4,7 @@
 
 > **用途：** 連續 A/B 實驗的唯一進度表與決策紀錄。未來接續實驗、回顧為何留下/回滾，以此檔為準。  
 
-> **最後更新：** 2026-11-08  
+> **最後更新：** 2026-11-20  
 
 > **當前基準狀態：**
 
@@ -121,6 +121,7 @@
 > 56. **E146（延續步評估修正寫入步長等比例補償探索 CORRECTION_CONT_2PLY_NUM = 156 / 4PLY = 78 vs 136 / 68，實測 1,558 局）獲 +3.35 Elo 淨勝 +15 局，微幅正向平緩暫定採納**（1,558 局實測打出 293W/987D/278L 勝率 50.48% 淨勝 +15 局 +3.35 ± 10.40 Elo，成對雙勝 WW:LL = 30:17 淨勝 +13 對，但單勝轉移出現 -11 對負補償且 SPRT LLR=-0.61 趨向高原；暫定保留但不作進一步加碼）；
 
 > 57. **E147（吃子步 LMR 減深寬免尺度全局凹函數掃描與重大突破 LMR_CAPTURE_VICTIM_SCALE = 792 vs 809，5 筆記本累計 6,908 局）狂勝 +16.67 Elo 光速觸發 SPRT H1 Accepted，已採納進生產基線**（針對 E85 子力價值膨脹導致吃子 LMR 寬免虛胖進行全面校準，橫向覆蓋 760/785/792/830 vs 809 以及 799 vs 792；其中 792 實測 1,022 局打出 220W/631D/171L 勝率 52.40% 淨勝 +49 局 +16.67 ± 13.17 Elo，單勝成對 WD:DL = 136:93 狂勝 +43 對，SPRT [0.0, 10.0] 在第 1,022 局 LLR=+2.96 擊穿上限觸發 H1 Accepted；799 vs 792 驗證確認 792 穩居頂峰；完美修正吃子減深過度寬免，已採納進生產基線）；
+> 58. **E148（SF19 Lazy SMP 多執行緒投票 `select_best_thread` 與根節點策略對齊，4 Threads vs 4 Threads 694 局）狂勝 +20.55 ± 14.00 Elo 通過 SPRT `[0, 10]` H1 Accepted（待使用者確認後同步基準）**（實作 `select_best_thread` 投票選步、`RootThreadResult`、中斷部分迭代根節點保留、`apply_root_iteration_guards` 與移除 depth skipping；在相同 4 執行緒與平均耗時 `354.0 ms vs 355.0 ms` 下打出 **126W/483D/85L**（得分率 `52.95%`，淨勝 `+41` 局），成對九宮格 `WD+DW=87 vs DL+LD=60`、`WW:LL=11:4`，Pentanomial 95% CI `[+6.58, +34.59] Elo`，SPRT `[0, 10]` Penta Normal LLR = `+3.06` 擊穿上限觸發 **H1 Accepted**；同時在搜尋層驗證平均深度 `+0.13 ply`（`17.35` vs `17.22`, `p=1.53e-5`）與綜合吞吐量 `+4.0% NPS`（`2,001,269` vs `1,924,697`, `p=7.68e-28`）顯著提升）。
 
 ---
 
@@ -8443,6 +8444,42 @@ LMP skip 體積 ≫ RFP ≈ FP/Razor/hist-prune 帶 ≫ NMP ≫ ProbCut
 * **處置結論**：
   * **採納（Accepted 🏆）**：確立 `LMR_CAPTURE_VICTIM_SCALE = 792` 為全新生產基準（本地容錯區間 792~796 均在最佳平原內），1,022 局實測狂砍 **+49 淨勝局（+16.67 Elo）**，SPRT LLR = +2.96 正式擊穿上限觸發 H1 Accepted。
   * 代碼正式固化為 `LMR_CAPTURE_VICTIM_SCALE = 796`（或 792），並同步 Tuner Snapshot 與相關文檔。
+
+---
+
+### E148：SF19 Lazy SMP 多執行緒投票與根節點策略對齊（4 Threads vs 4 Threads 實戰驗證，2026-11-19 ~ 2026-11-20）
+
+* **研究動機**：原先 Lazy SMP 僅單純「主執行緒直接返回其自身結果（忽略 helper 的根節點最佳步與分數），且 helper 存在奇數執行緒 depth skipping」，造成多執行緒雖有 TT 共享與 NPS 提升，卻未從所有執行緒中投票選出最深/最高品質的走法。本次依 Stockfish 19 `ThreadPool::get_best_thread` 與根節點策略全面對齊，並透過 4v4 對戰直接驗證實戰棋力增益。
+* **核心改動**（詳見 `chess_engine/classical/search.py` 與 `chess_engine/classical/SEARCH_ANALYSIS.md` §18）：
+  * 新增 `RootThreadResult` 與 `select_best_thread`（依 SF19 `score + (value - minScore) * depth` 加權投票與平手/將殺保護決定最終走法）；
+  * 實作中斷時部分迭代（partial iteration）根節點結果保留與 `apply_root_iteration_guards`；
+  * 移除 helper 的 depth skipping，讓各執行緒完整並發搜尋並透過 shared TT + 投票機制互補；
+  * 同步強化 `tools/match_core.py`、`tools/tournament.py`、`tools/match_runner.py` 多執行緒與裁決支援，並新增 `tournament_colab_runner_sf19_smp.ipynb`。
+* **測試配置**（Colab 4v4 SMP 對戰，`New_SF19SMP` vs `Old_SMP`）：
+  * **PGN 來源**：`tournament_analysis/sf19_smp_vs_old_smp_t4_250ms.pgn`（分析報告與圖表：`tournament_analysis/sf19_smp_analysis/`）
+  * **對局規模**：**694 局（347 組嚴格換色配對）**、347 個唯一開局 FEN、0 失敗/異常中斷局；`WhiteThreads="4"`、`BlackThreads="4"`。
+  * **時間說明**：檔名 `_250ms` 為 notebook 預設 `RUN_TAG`，PGN 實測每步時間峰值達 `501–503 ms`、平均 `354.0 ms`（`New_SF19SMP`）vs `355.0 ms`（`Old_SMP`），對應 `MOVETIME_MS = 500` 與預測式時間停止（`elapsed * 2.0 > maximum_time_ms`）。
+* **對局統計結果（`New_SF19SMP` vs `Old_SMP`）**：
+  * **總戰績**：**126W - 483D - 85L**（總得分 `367.5 / 694` = **52.95%**，淨勝 **+41 局**，和棋率 `69.60%`）。
+  * **相對 Elo（Pentanomial）**：**+20.55 ± 14.00 Elo**（95% CI `[+6.58, +34.59]`；成對群聚 CI `[+6.56, +34.61]`；nElo `+38.03 ± 25.85`；Trinomial Elo `+20.55 ± 14.22`, pair/game 方差比 `0.969`）。
+  * **SPRT（α=0.05, β=0.05，界線 `[-2.94, +2.94]`）**：
+    * `[0, 10]`：Penta Normal LLR = **+3.06**（Exact `+3.04`，WDL Normal `+2.97`，Exact `+2.95`，nElo `+1.90`）→ 第 347 組（694 局）**H1 Accepted ✅**
+    * 額外邊界：`[0, 5]` = `+1.78`（P(H1)=100%, 預估 455 局）；`[-5, 0]` = `+2.27`；`[-3, 3]` = `+2.43`（均於 Continue 區間且顯著偏向正收益）。
+  * **Pentanomial `[0, 0.5, 1, 1.5, 2]`**：`[4, 60, 185, 87, 11]`。
+  * **九宮格（Target 先白後黑）**：`DD:168 (48.4%)` | `WD:59 (17.0%)` | `LD:36 (10.4%)` | `DW:28 (8.1%)` | `DL:24 (6.9%)` | `WL:12 (3.5%)` | `WW:11 (3.2%)` | `LW:5 (1.4%)` | `LL:4 (1.2%)`（單勝成對 `WD+DW = 87` vs `DL+LD = 60` 淨勝 `+27` 對，雙勝比 `WW:LL = 11:4`）。
+  * **先後手表現**：執白 `55.33%`（`82W-220D-45L`）、執黑 `50.58%`（`44W-263D-40L`）；全體白方勝率 `52.38%`（`p=4.1332e-04`）。
+  * **對局長度分層（回合數，均值 `49.3`, σ=`23.6`）**：
+    * `short (<=25)`: `n=85`, `5W-74D-6L` (`49.4%`)
+    * `medium (26-50)`: `n=326`, `51W-240D-35L` (`52.5%`)
+    * `long (51-80)`: `n=223`, `62W-121D-40L` (`54.9%`)
+    * `very_long (>80)`: `n=60`, `8W-48D-4L` (`53.3%`)
+  * **前後半場與序列穩定度**：前半 173 組 `51.9%`、後半 174 組 `54.0%`；Lag-1 自相關 `0.0668`、Runs test `p=0.4537`（序列穩定無漂移）。
+* **搜尋遙測統計（`parse_search_stats.py`，`New_SF19SMP` n=34,036 步 vs `Old_SMP` n=34,054 步，`draw_depth_cap=40`）**：
+  * **平均搜尋深度**：**`17.35` (σ=4.09, med=16)** vs **`17.22` (σ=4.01, med=16)**，淨增 **`+0.13 ply`**（Welch `t=+4.325, p=1.5261e-05`，統計顯著）；`depth>=14` 佔比 `90.0%` vs `88.7%`，`21-39 ply` 深搜尋佔比 `16.6%` vs `15.5%`。
+  * **平均每步節點**：`699,765`（med `599,158`）vs `675,726`（med `573,413`），**`+3.6%`**（`t=+9.078, p=1.1386e-19`）。
+  * **平均每步耗時**：`354.0 ms`（σ=83.8）vs `355.0 ms`（σ=84.0），Welch `t=-1.590, p=0.1118`（等時基準嚴格一致）。
+  * **綜合吞吐量 (Aggregate NPS)**：**`2,001,269`**（med `1,652,820`）vs **`1,924,697`**（med `1,585,436`），淨增 **`+4.0%`**（`t=+10.942, p=7.6836e-28`，統計顯著）。
+* **結論與決策**：**驗證通過（SPRT `[0, 10]` H1 Accepted）**。SF19 對齊之 Lazy SMP 在 4 執行緒等時對戰中同時帶來可觀測的搜尋吞吐（`+4.0% NPS`）、平均深度（`+0.13 ply`）與實戰勝率（`+20.55 ± 14.00 Elo`）雙重收益。待使用者確認後，可決定是否執行 `tools/sync_classical_old.py --sync` 將此版本同步為新的對戰基準（註：目前 `classical` 與 `classical_old` 尚包含 `evaluation.py` / `material.py` 之 runtime `eval_weights` 參數化重構差異）。
 
 ---
 
