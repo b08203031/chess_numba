@@ -126,6 +126,7 @@ def uci_loop():
             if command == "uci":
                 print("id name MyChessEngine")
                 print("id author YourName")
+                print(f"option name Hash type spin default {TT_SIZE_MB} min 1 max 4096")
                 print("option name OwnBook type check default true")
                 print("option name Threads type spin default 1 min 1 max 64")
                 print("uciok", flush=True)
@@ -138,6 +139,21 @@ def uci_loop():
                     if opt_name == "OwnBook":
                         own_book = opt_val.lower() == "true"
                         print(f"info string OwnBook set to {own_book}", flush=True)
+                    elif opt_name.lower() == "hash":
+                        hash_mb = max(1, min(4096, int(opt_val)))
+                        transposition_table = create_transposition_table(hash_mb)
+                        global_search_context = SearchContext(
+                            transposition_table, killer_moves, pv_table, history_table,
+                            butterfly_history, continuation_history, capture_history, pawn_history,
+                            pawn_correction_history, minor_correction_history,
+                            non_pawn_correction_history_white, non_pawn_correction_history_black,
+                            continuation_correction_history,
+                        )
+                        helper_search_contexts = [
+                            create_smp_helper_context(global_search_context)
+                            for _ in range(max(0, num_threads - 1))
+                        ]
+                        print(f"info string Hash set to {hash_mb} MB", flush=True)
                     elif opt_name.lower() == "threads":
                         num_threads = max(1, min(64, int(opt_val)))
                         needed_helpers = num_threads - 1

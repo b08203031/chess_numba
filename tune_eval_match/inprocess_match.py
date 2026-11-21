@@ -13,6 +13,7 @@ from __future__ import annotations
 import queue
 import threading
 import time
+import traceback
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import List, Optional, Sequence, Tuple
@@ -381,6 +382,7 @@ def run_match(
     param_setter=None,
     opening_offset: int = 0,
     adjudicate: Optional[dict] = None,
+    strict: bool = True,
 ) -> dict:
     """
     Play `games` games (paired color swap). Score = fraction of points for A.
@@ -400,6 +402,13 @@ def run_match(
 
     The result also carries ``penta``: counts of pair outcomes for A in
       points (0, 0.5, 1, 1.5, 2) -- the pentanomial statistic used for SPRT/Elo.
+
+    strict (default True):
+      A pair that raises (parallel path) is logged with its traceback and the
+      match then raises ``RuntimeError``.  Silently dropping failed pairs would
+      bias SPSA/SPRT (a θ that crashes the engine would never be penalised).
+      With ``strict=False`` failures are only logged and reported via the
+      ``failed_pairs`` result field.
     """
     if worker_pool is None:
         if ctx_a is None or ctx_b is None:
@@ -425,6 +434,7 @@ def run_match(
     t0 = time.time()
     print_lock = threading.Lock()
     early_trash = False
+    failures: list = []
     stop_submit = threading.Event()
 
     # Free-list of worker pairs (thread-safe borrow)
@@ -494,11 +504,19 @@ def run_match(
         with ThreadPoolExecutor(max_workers=concurrency) as ex:
             futs = {ex.submit(_one_pair, i): i for i in range(n_pairs)}
             for fut in as_completed(futs):
-                if stop_submit.is_set() and fut.cancelled():
+                if fut.cancelled():
                     continue
                 try:
                     a, b = fut.result()
                 except Exception:
+                    tb = traceback.format_exc()
+                    with print_lock:
+                        failures.append((futs[fut], tb))
+                        if len(failures) <= 3:
+                            print(
+                                f"  [match] ERROR pair {futs[fut]} failed:\n{tb}",
+                                flush=True,
+                            )
                     continue
                 # Ignore zero-point phantom results from cancelled late workers
                 with print_lock:
@@ -517,6 +535,12 @@ def run_match(
                         # Best-effort: don't wait forever on in-flight pair games
                         break
 
+    if failures:
+        msg = f"{len(failures)} of {n_pairs} pairs raised; first failure:\n{failures[0][1]}"
+        if strict:
+            raise RuntimeError(msg)
+        print(f"  [match] WARNING: {msg}", flush=True)
+
     total = pts_a + pts_b
     score_a = pts_a / total if total > 0 else 0.5
     return {
@@ -531,6 +555,7 @@ def run_match(
         "early_trash": early_trash,
         "early_trash_min_games": early_trash_min_games,
         "early_trash_max_score": early_trash_max_score,
+        "failed_pairs": len(failures),
     }
 
 

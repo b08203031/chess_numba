@@ -2,13 +2,19 @@
 from __future__ import annotations
 
 import json
+import random
 import tempfile
 import unittest
 from pathlib import Path
 
 from tools.run_eval_param_match import _load_params_json, _parse_overrides
 from tune_eval_match.export_constants import build_constants_patch, export_params_to_files
-from tune_eval_match.spsa_match import _average_tail_thetas, _parse_sprt
+from tune_eval_match.spsa_match import (
+    _average_tail_thetas,
+    _parse_sprt,
+    _restore_rng,
+    _rng_state_to_json,
+)
 
 
 class TestEvalMatchSpsa(unittest.TestCase):
@@ -22,6 +28,25 @@ class TestEvalMatchSpsa(unittest.TestCase):
         avg = _average_tail_thetas(hist, ["A", "B"])
         self.assertAlmostEqual(avg["A"], 21.0)
         self.assertAlmostEqual(avg["B"], 112.0)
+
+    def test_rng_state_roundtrips_through_json_checkpoint(self):
+        rng = random.Random(42)
+        for _ in range(7):
+            rng.random()
+        ck = json.loads(json.dumps({"rng_state": _rng_state_to_json(rng)}))
+        expected = [rng.random() for _ in range(5)]
+
+        fresh = random.Random(42)
+        self.assertTrue(_restore_rng(fresh, ck, seed=42, start_iter=7))
+        self.assertEqual([fresh.random() for _ in range(5)], expected)
+
+    def test_legacy_checkpoint_does_not_replay_initial_perturbations(self):
+        first_run = random.Random(42)
+        first_draws = [first_run.random() for _ in range(5)]
+
+        resumed = random.Random(42)
+        self.assertFalse(_restore_rng(resumed, {}, seed=42, start_iter=30))
+        self.assertNotEqual([resumed.random() for _ in range(5)], first_draws)
 
     def test_parse_sprt_validation(self):
         self.assertIsNone(_parse_sprt(""))

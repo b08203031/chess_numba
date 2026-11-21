@@ -86,7 +86,7 @@ def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--nodes", type=int, default=400000)
     ap.add_argument("--games", type=int, default=2000, help="Even game cap (or exact count if --sprt off)")
-    ap.add_argument("--concurrency", type=int, default=_default_concurrency())
+    ap.add_argument("-c", "--concurrency", type=int, default=_default_concurrency())
     ap.add_argument("--tt-mb", type=int, default=16)
     ap.add_argument("--openings", type=Path, default=Path("data/openings.epd"))
     ap.add_argument("--openings-limit", type=int, default=0, help="0 = load all openings")

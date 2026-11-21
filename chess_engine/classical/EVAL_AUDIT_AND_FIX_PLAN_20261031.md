@@ -826,6 +826,26 @@ flowchart TD
    * **第 2 輪續調 `block7a_imbalance`（維持未採用）**：基於 R1 續調（`OURS[0][0] 1221→1191`、`IMBALANCE_SCALE_EG 79→82`）雖使 `holdout (-15.45)` 與 `Zurichess (-30.25)` 續降，但 `val_pgn` 整體反轉惡化至 **`z = +5.59`**（`phase=64..95 +15.28`、`sf19-quiet +5.25`、`sf19-tactical +2.59`），保留未採用（候選檔存於 `tuner/runs/classical_with_pgn_sf15/block7a_imbalance.py`）。
    * **基準同步完成**：經 `SPRT[0, 10]` 與 `SPRT[-3, 3]` 雙線 `H1 Accepted` 並獲確認，已執行 `python tools/sync_classical_old.py --sync` 將 [`classical_old/`](../classical_old/) 同步為 **`SF_LAMBDA=0.15 + Block 7a Imbalance R1`** 新對戰基準（`--diff` 驗證雙目錄 100% 邏輯一致）。
 
+---
+
+### 十四、Phase 14：Match-SPSA `material` 調優落地與 `classical_old/` 基準同步（2026-11-21）
+
+在 `SF_LAMBDA=0.15 + Block 7a Imbalance R1` 基準上，透過 [`tune_eval_match/spsa_match.py`](../../tune_eval_match/spsa_match.py) 執行對局式 HCE `material` 區塊調優（`10` 維，`20k` nodes / `200g` L1 → `100k` nodes / `600g` L2 `tail` 驗收，`spsa_eval_material`）並完成本機 `400k` 驗證：
+
+1. **Match-SPSA 候選產出（`iter 89` L2 `best`）**：
+   * `iter 29`（`0.5108`, `+7.5 ± 19.6 Elo`）與 `iter 89`（`0.5142`, `+9.8 ± 20.1 Elo`）通過 L2 驗收；後續 `iter 119 / 149 / 179` 未再超越 `iter 89`（`0.5067 / 0.4917 / 0.4917`）。
+   * 採納數值變動（寫入 [`constants.py`](constants.py) 並同步 [`tuner/constants_snapshot.py`](../../tuner/constants_snapshot.py)）：
+     * `MG_MATERIAL_VALUES`：`[100, 353, 361, 567, 1180, 0]` → **`[100, 358, 366, 562, 1179, 0]`**（中局輕子各 `+5`、車 `-5`、后 `-1`，象馬差維持 `8 cp`、`midgame_limit` 僅微變 `+0.24%`）。
+     * `EG_MATERIAL_VALUES`：`[117, 419, 439, 702, 1317, 0]` → **`[117, 419, 435, 695, 1315, 0]`**（殘局象 `-4`、車 `-7`、后 `-2`）。
+     * `IMBALANCE_SCALE_EG`：`79` → **`80`**（`IMBALANCE_SCALE_MG = 53` 不變）。
+2. **本機 400k nodes/move 對戰驗證（vs `classical_old` 基準）**：
+   * 完成 **`2,000` 局 / `1,000` 對**（[`tournament_analysis/tournament_results.pgn`](../../tournament_analysis/tournament_results.pgn)，400k nodes/move，64 MB TT，12 workers）：
+     * 戰績 **`351W - 1,332D - 317L`**（淨勝 `+34` 局，得分率 `50.85%`，和棋率 `66.60%`；持白 `195W-667D-138L, 52.85%`、持黑 `156W-665D-179L, 48.85%`），Penta `[28, 191, 525, 231, 25]`，**`+5.91 ± 8.57 Elo`**（`95% CI [-2.66, +14.48]`，`nElo = +10.50 ± 15.23`）。
+     * **SPRT 指標（未達 `±2.94` 邊界，全面偏正）**：`[-5, 0]` `LLR = +2.20`、`[-3, 3]` `LLR = +1.86`、`[0, 5]` `LLR = +0.89`、`[0, 10]` `LLR = +0.48`。四個局數分桶全數 `> 0.500`（`≤25: 0.511`、`26–50: 0.502`、`51–80: 0.515`、`>80: 0.509`），前後半程皆正（`0.516 → 0.501`），搜尋完全中立（`mean_d 17.11 vs 17.11`, `mean_n 242,911 vs 242,860`, `mean_nps 317,128 vs 317,054`）。
+3. **後續合併實驗與工具鏈補強（進行中）**：
+   * 為直接對比 **`material` + `king_weights` 精選項**相對於 `Phase 13` 基準的綜合成效，[`classical_old/`](../classical_old/) 暫維持於 `Phase 13` 基準，於 [`constants.py`](constants.py) 併入 `king_weights` 顯著／穩定項（`KING_DANGER_OUT_EG_NUM: 17076→17300`、`EG_SAFETY_SCALE: 110→104`、`KING_FLANK_ATTACK_NUM: 3→4`）並同步 [`tuner/constants_snapshot.py`](../../tuner/constants_snapshot.py)，待綜合 `400k` 對戰驗證後再行決定 `--sync`。
+   * 同步補強 [`tune_eval_match/spsa_match.py`](../../tune_eval_match/spsa_match.py) checkpoint `rng_state` 與 `iter+1` 續跑一致性、[`tune_eval_match/inprocess_match.py`](../../tune_eval_match/inprocess_match.py) 平行對局例外中止（`strict=True`），以及 [`tools/run_eval_param_match.py`](../../tools/run_eval_param_match.py) `-c` 參數別名。
+
 
 
 

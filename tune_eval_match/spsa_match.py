@@ -100,6 +100,29 @@ def _average_tail_thetas(window_thetas: list[dict], names: list[str]) -> dict:
     return {k: sum(float(row[k]) for row in tail) / n for k in names}
 
 
+def _rng_state_to_json(rng: random.Random) -> list:
+    """JSON-serialisable ``random.Random`` state (version, 625 ints, gauss_next)."""
+    version, internal, gauss = rng.getstate()
+    return [version, list(internal), gauss]
+
+
+def _restore_rng(rng: random.Random, ck: dict, seed: int, start_iter: int) -> bool:
+    """Restore the SPSA perturbation RNG from a checkpoint.
+
+    Returns True if the exact state was restored.  Legacy checkpoints (written
+    before ``rng_state`` was saved) would otherwise restart from ``seed`` and
+    replay the first iterations' +/-1 deltas, so they get a seed derived from
+    the resume iteration instead.
+    """
+    state = ck.get("rng_state")
+    if isinstance(state, list) and len(state) == 3:
+        version, internal, gauss = state
+        rng.setstate((version, tuple(internal), gauss))
+        return True
+    rng.seed(int(seed) * 1_000_003 + int(start_iter))
+    return False
+
+
 def _parse_sprt(raw: str):
     if not raw or not raw.strip():
         return None
@@ -292,8 +315,12 @@ def main(argv=None) -> int:
         if isinstance(ck.get("raw_updates"), dict):
             for n in names:
                 raw_updates[n] = [float(x) for x in ck["raw_updates"].get(n, [])]
-        if isinstance(ck.get("rng_state"), list):
-            rng.setstate(tuple(tuple(x) if isinstance(x, list) else x for x in ck["rng_state"]))
+        if not _restore_rng(rng, ck, args.seed, start_iter):
+            print(
+                "[resume] WARNING: checkpoint has no rng_state (legacy); "
+                f"reseeded perturbation RNG from seed+iter={start_iter}",
+                flush=True,
+            )
         phase2_active = bool(ck.get("phase2_active", False))
         print(
             f"[resume] iter={start_iter} l1_off={l1_opening_offset} "
@@ -374,9 +401,11 @@ def main(argv=None) -> int:
     max_iters = args.iters if args.iters > 0 else 10**9
     t_run0 = time.time()
 
-    def _save_checkpoint(stopped_reason: str | None = None) -> None:
+    def _save_checkpoint(next_iter: int, stopped_reason: str | None = None) -> None:
+        """``next_iter`` = first iteration to run on resume (completed iters count)."""
         payload = {
-            "iter": iter_i + (1 if stopped_reason else 0),
+            "iter": int(next_iter),
+            "rng_state": _rng_state_to_json(rng),
             "block": active_block(),
             "params": names,
             "theta": theta,
@@ -686,7 +715,7 @@ def main(argv=None) -> int:
                         f"(limit={args.l2_stop_after_fails}). Stopping SPSA.",
                         flush=True,
                     )
-                    _save_checkpoint(stopped_reason="consecutive_l2_rejects")
+                    _save_checkpoint(iter_i + 1, stopped_reason="consecutive_l2_rejects")
                     save_json(
                         out_dir / "final_params.json",
                         {
@@ -714,8 +743,10 @@ def main(argv=None) -> int:
                         )
                     args.concurrency = target_c
 
-        if (iter_i + 1) % args.ckpt_every == 0 or iter_i == 0:
-            _save_checkpoint()
+        if (iter_i + 1) % args.ckpt_every == 0 or iter_i == 0 or l2_scheduled:
+            # l2_scheduled: persist best_theta / fail streak immediately so a
+            # disconnect cannot lose an accepted L2 result or replay the gate.
+            _save_checkpoint(iter_i + 1)
             save_json(
                 out_dir / "latest_params.json",
                 {
@@ -731,7 +762,7 @@ def main(argv=None) -> int:
         iter_i += 1
 
     print(f"\n[done] {iter_i} iterations, elapsed {time.time() - t_run0:.1f}s", flush=True)
-    _save_checkpoint(stopped_reason="max_iters")
+    _save_checkpoint(iter_i, stopped_reason="max_iters")
     save_json(
         out_dir / "final_params.json",
         {

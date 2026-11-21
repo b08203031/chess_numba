@@ -73,7 +73,8 @@ python -u tools/run_eval_param_match.py \
 
 `--out-dir` 產出：
 * `spsa_log.jsonl`：每輪 L1（含 `drift_z`、`penta_plus`）與每次 L2 驗收紀錄。
-* `checkpoint.json` / `latest_params.json`：含浮點 `theta`、開局偏移量與隨機數狀態以便無縫 `--resume`。
+* `checkpoint.json` / `latest_params.json`：含浮點 `theta`、開局偏移量與 `rng_state`（擾動 ±1 序列的 RNG 狀態）以便無縫 `--resume`；`iter` 為「續跑時的下一輪」（已完成輪數），每次 L2 閘門結束後會立即強制存檔。舊版缺 `rng_state` 的 checkpoint 續跑時會以 `seed+iter` 重設 RNG 並印出警告，避免重播前幾輪擾動。
+* `run_match` 平行路徑若有對局拋例外，預設（`strict=True`）會印 traceback 並 `RuntimeError` 中止，不再靜默丟棄（否則會讓導致崩潰的 θ 逃過懲罰）；`strict=False` 僅警告並回報 `failed_pairs`。
 * `best_params.json` / `best_constants_diff.txt`：L2 驗收通過之整數配置與與現行常數差異摘要。
 
 ### Colab 執行與匯出至 `constants.py`

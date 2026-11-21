@@ -286,6 +286,7 @@ class ChessVisionApp(tk.Tk):
         self.autoplay_mode_var = tk.StringVar(value="fixed")  # "fixed" or "self"
         self.use_book_var = tk.BooleanVar(value=True)
         self.threads_var = tk.StringVar(value="1")
+        self.default_hash_mb = 512  # 4x engine default TT_SIZE_MB (128 MB)
 
         # Manual Mode & Arrow States
         self.redo_stack = []
@@ -1879,6 +1880,9 @@ class ChessVisionApp(tk.Tk):
                         self.warming_up = False
                         self.lbl_status.config(text="狀態 (Status): 準備就緒 (Ready)", foreground="green")
                         self.engine.send_command("ucinewgame")
+                        self.engine.send_command(
+                            f"setoption name Hash value {self.default_hash_mb}"
+                        )
                         self.engine.send_command(
                             f"setoption name OwnBook value {'true' if self.use_book_var.get() else 'false'}"
                         )
