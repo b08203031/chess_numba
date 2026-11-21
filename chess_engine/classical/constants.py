@@ -321,7 +321,7 @@ _MG_SCALE_DEN = 128  # SF pawn MG
 def _sf_danger_to_ours(sf_val: int) -> np.int32:
     return np.int32((int(sf_val) * _MG_SCALE_NUM) // _MG_SCALE_DEN)
 
-KING_ATTACK_WEIGHTS = np.array([0, 0, 56, 19, 29, 20], dtype=np.int32)
+KING_ATTACK_WEIGHTS = np.array([0, 0, 56, 18, 29, 22], dtype=np.int32)
 
 # Safe checks (SF raw -> our danger space)
 # G4 match-SPSA best (L2 accept iter 19, score 0.526 vs prior; frozen 2026-07-20).
@@ -334,17 +334,17 @@ KING_DANGER_WEAK_SQ = 136
 KING_DANGER_UNSAFE_CHECK = 80
 KING_DANGER_BLOCKERS = 43
 KING_DANGER_ATTACK_ON_KING_SQ = 51
-KING_DANGER_NO_QUEEN = 539
+KING_DANGER_NO_QUEEN = 549
 # Rookless attackers need substantially more no-queen suppression than rook
 # attackers.  This single split removes the opposite Texel gradients of rook
 # endings and minor-only endings without material-combination special cases.
-KING_DANGER_NO_QUEEN_ROOKLESS = 867
+KING_DANGER_NO_QUEEN_ROOKLESS = 861
 KING_DANGER_KNIGHT_DEF = 79
 KING_DANGER_OFFSET = 0
-KING_DANGER_THRESHOLD = 66
+KING_DANGER_THRESHOLD = 67
 # Match-SPSA A-block best (L2 iter 74, score 0.534; source spsa_eval_a123/best_params.json).
 # Was _MG_SCALE_DEN (=128). Passed/material/passed_rank blocks had no L2 accept.
-KING_DANGER_OUT_MG_NUM = np.int32(120)
+KING_DANGER_OUT_MG_NUM = np.int32(118)
 KING_DANGER_OUT_MG_DEN = np.int32(4096 * _MG_SCALE_NUM)   # 409600
 KING_DANGER_OUT_EG_NUM = np.int32(17300)    # 128*120
 KING_DANGER_OUT_EG_DEN = np.int32(_MG_SCALE_NUM * 16 * 213)  # 100*16*213
