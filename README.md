@@ -57,7 +57,7 @@ python -m tests.benchmark        # NNUE 版：python -m tests.benchmark_nn_real
 
 ### 2. 現行系統分析、審計與專題報告
 * **[HCE 與 SF11 對齊審核](chess_engine/classical/HCE_SF11_GAP_AUDIT.md)**（HCE 對齊主文件）與 **[殘局 vs Stockfish 驗證](chess_engine/classical/ENDGAME_SF_VERIFICATION.md)**
-* **[2026-10-31 經典評估審計與修復計畫](chess_engine/classical/EVAL_AUDIT_AND_FIX_PLAN_20261031.md)**：`evaluation.py` Bug／死碼清理、Phase 11 殘局/防禦對齊、Phase 12 `SF_LAMBDA=0.15` 調參（+8.48 Elo `H1✅`）、Phase 13 非靜態對戰驗證與 `Block 7a` Imbalance（+13.01 Elo `H1✅`）、Phase 14 Match-SPSA `material`（+5.91 Elo）與 `king_weights` 綜合對戰中及 TT 修復
+* **[2026-10-31 經典評估審計與修復計畫](chess_engine/classical/EVAL_AUDIT_AND_FIX_PLAN_20261031.md)**：`evaluation.py` Bug／死碼清理、Phase 11 殘局/防禦對齊、Phase 12 `SF_LAMBDA=0.15` 調參（+8.48 Elo `H1✅`）、Phase 13 非靜態對戰驗證與 `Block 7a` Imbalance（+13.01 Elo `H1✅`）、Phase 14 Match-SPSA `material`（+5.91 Elo，剔除 `H0❌` 之 `king_weights` 僅留 `material`）及 TT 修復
 * **[古典搜尋算法分析](chess_engine/classical/SEARCH_ANALYSIS.md)** 與 **[NNUE 搜尋分析](chess_engine/nnue/SEARCH_ANALYSIS.md)**：PVS、QS、剪枝、無鎖 Lazy SMP 多執行緒平行搜尋架構及 Phase 18–29 調參結論
 * **[Numba JIT 編譯與快取報告](chess_engine/classical/JIT_COMPILE_CACHE_REPORT.md)**：1 MB 表上限、packed rook、StructRef 靜態存取、遞迴搜尋/QS/Lazy SMP 全鏈 disk cache 與冷/暖量測
 * **[搜尋 ↔ 評估介面](chess_engine/classical/SEARCH_EVAL_INTERFACE.md)**（KNOWN_WIN 護欄）、**[SEE 專題](chess_engine/classical/SEE_ANALYSIS.md)**、**[歷史啟發](chess_engine/classical/HISTORY_HEURISTICS_CN.md)**

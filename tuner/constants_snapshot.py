@@ -350,14 +350,14 @@ KING_DANGER_THRESHOLD = 66
 # Was _MG_SCALE_DEN (=128). Passed/material/passed_rank blocks had no L2 accept.
 KING_DANGER_OUT_MG_NUM = np.int32(120)
 KING_DANGER_OUT_MG_DEN = np.int32(4096 * _MG_SCALE_NUM)   # 409600
-KING_DANGER_OUT_EG_NUM = np.int32(17300)    # 128*120
+KING_DANGER_OUT_EG_NUM = np.int32(17076)    # 128*120
 KING_DANGER_OUT_EG_DEN = np.int32(_MG_SCALE_NUM * 16 * 213)  # 100*16*213
 
 # King tropism removed (was dead code: computed but never added to final score;
 # kingDanger already captures approach-to-king via ring attacks / safe checks).
 # --- Phase 4: Advanced & Dynamic / 進階與動態 ---
 # Match-SPSA A: fixed-point integer scale (100 == 1.0; aligned with evaluation.py & eval_weights.py)
-EG_SAFETY_SCALE = 104
+EG_SAFETY_SCALE = 110
 
 # --- SF11-aligned King Shelter & Storm Tables ---
 # ShelterStrength: friendly pawn shield defense values (MG)
@@ -378,7 +378,7 @@ BLOCKED_STORM_EG = -31
 SHELTER_BASE_MG = 20
 SHELTER_BASE_EG = 9
 KING_PAWN_DIST_PENALTY_EG = -5
-KING_FLANK_ATTACK_NUM = np.int32(4)
+KING_FLANK_ATTACK_NUM = np.int32(3)
 KING_FLANK_ATTACK_DEN = np.int32(8)
 KING_SHELTER_FEEDBACK_NUM = np.int32(6)
 KING_SHELTER_FEEDBACK_DEN = np.int32(8)

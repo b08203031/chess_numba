@@ -40,8 +40,8 @@ PAWN, KNIGHT, BISHOP, ROOK, QUEEN, KING = 0, 1, 2, 3, 4, 5
 #   SF types.h → N 367/401, B 387/430, R 599/648, Q 1192/1259.
 # Passed / path / prox use the same *100/213 so pass/N matches SF relative strength.
 # Index: PAWN, KNIGHT, BISHOP, ROOK, QUEEN, KING
-MG_MATERIAL_VALUES = np.array([100, 353, 361, 567, 1180, 0], dtype=np.int32)
-EG_MATERIAL_VALUES = np.array([117, 419, 439, 702, 1317, 0], dtype=np.int32)
+MG_MATERIAL_VALUES = np.array([100, 358, 366, 562, 1179, 0], dtype=np.int32)
+EG_MATERIAL_VALUES = np.array([117, 419, 435, 695, 1315, 0], dtype=np.int32)
 # =============================================================================
 # --- Game Phase Calculation (SF11 npm taper) / 遊戲階段計算 ---
 # =============================================================================
@@ -471,7 +471,7 @@ IMBALANCE_QUADRATIC_THEIRS = np.array([
 ], dtype=np.int32)
 IMBALANCE_DIVISOR = 20
 IMBALANCE_SCALE_MG = 53
-IMBALANCE_SCALE_EG = 79
+IMBALANCE_SCALE_EG = 80
 # =============================================================================
 # --- Search Constants / 搜尋常量 ---
 # =============================================================================

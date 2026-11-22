@@ -842,9 +842,11 @@ flowchart TD
    * 完成 **`2,000` 局 / `1,000` 對**（[`tournament_analysis/tournament_results.pgn`](../../tournament_analysis/tournament_results.pgn)，400k nodes/move，64 MB TT，12 workers）：
      * 戰績 **`351W - 1,332D - 317L`**（淨勝 `+34` 局，得分率 `50.85%`，和棋率 `66.60%`；持白 `195W-667D-138L, 52.85%`、持黑 `156W-665D-179L, 48.85%`），Penta `[28, 191, 525, 231, 25]`，**`+5.91 ± 8.57 Elo`**（`95% CI [-2.66, +14.48]`，`nElo = +10.50 ± 15.23`）。
      * **SPRT 指標（未達 `±2.94` 邊界，全面偏正）**：`[-5, 0]` `LLR = +2.20`、`[-3, 3]` `LLR = +1.86`、`[0, 5]` `LLR = +0.89`、`[0, 10]` `LLR = +0.48`。四個局數分桶全數 `> 0.500`（`≤25: 0.511`、`26–50: 0.502`、`51–80: 0.515`、`>80: 0.509`），前後半程皆正（`0.516 → 0.501`），搜尋完全中立（`mean_d 17.11 vs 17.11`, `mean_n 242,911 vs 242,860`, `mean_nps 317,128 vs 317,054`）。
-3. **後續合併實驗與工具鏈補強（進行中）**：
-   * 為直接對比 **`material` + `king_weights` 精選項**相對於 `Phase 13` 基準的綜合成效，[`classical_old/`](../classical_old/) 暫維持於 `Phase 13` 基準，於 [`constants.py`](constants.py) 併入 `king_weights` 顯著／穩定項（`KING_DANGER_OUT_EG_NUM: 17076→17300`、`EG_SAFETY_SCALE: 110→104`、`KING_FLANK_ATTACK_NUM: 3→4`）並同步 [`tuner/constants_snapshot.py`](../../tuner/constants_snapshot.py)，待綜合 `400k` 對戰驗證後再行決定 `--sync`。
-   * 同步補強 [`tune_eval_match/spsa_match.py`](../../tune_eval_match/spsa_match.py) checkpoint `rng_state` 與 `iter+1` 續跑一致性、[`tune_eval_match/inprocess_match.py`](../../tune_eval_match/inprocess_match.py) 平行對局例外中止（`strict=True`），以及 [`tools/run_eval_param_match.py`](../../tools/run_eval_param_match.py) `-c` 參數別名。
+3. **合併 `king_weights` 實戰否決與回退僅保留 `material`（2026-11-22）**：
+   * **`material` + `king_weights` 精選 3 項（`d71188a`：`KING_DANGER_OUT_EG_NUM=17300`、`EG_SAFETY_SCALE=104`、`KING_FLANK_ATTACK_NUM=4`）**：Colab 300k nodes/move 對戰 `Phase 13` 基準共 **1,992 局 / 996 對**，戰績 `364W - 1,256D - 372L`（`992.0 / 1,992`, `49.8%`, **`-1.40 ± 9.27 Elo`**），`SPRT[0, 10]` 達 **`LLR = -2.95` (`H0 Accepted` ❌)**。
+   * **`material` + `king_weights` 完整 9 項（`48f1d74`：`iter 179` 另加 `KAW_B=18, Q=22, NO_QUEEN=549, NO_QUEEN_ROOKLESS=861, THRESHOLD=67, OUT_MG_NUM=118`）**：Colab 400k nodes/move 對戰 `Phase 13` 基準共 **978 局 / 489 對**，戰績 `173W - 608D - 197L`（`477.0 / 978`, `48.8%`, **`-8.53 ± 13.39 Elo`**），`SPRT[0, 10]` 達 **`LLR = -3.00` (`H0 Accepted` ❌)**。
+   * **處置**：已從 [`constants.py`](constants.py) 移除全部 `king_weights` 改動、**僅保留 `material`（`iter 89`）**並同步 [`tuner/constants_snapshot.py`](../../tuner/constants_snapshot.py)，經確認後執行 `python tools/sync_classical_old.py --sync` 將 [`classical_old/`](../classical_old/) 同步為最新對戰基準（`--diff` 驗證雙目錄 100% 邏輯一致）。
+   * **工具鏈補強**：同步補強 [`tune_eval_match/spsa_match.py`](../../tune_eval_match/spsa_match.py) checkpoint `rng_state` 與 `iter+1` 續跑一致性、[`tune_eval_match/inprocess_match.py`](../../tune_eval_match/inprocess_match.py) 平行對局例外中止（`strict=True`）、[`tools/run_eval_param_match.py`](../../tools/run_eval_param_match.py) `-c` 參數別名，以及 [`tuner/sync_constants_snapshot.py`](../../tuner/sync_constants_snapshot.py) 依 `@njit` 相依鏈精準清快取。
 
 
 
