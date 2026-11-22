@@ -59,17 +59,62 @@ def parse_fen(fen_string: str):
         for char in parts[2]:
             castling_rights |= np.uint64(CASTLING_MAP.get(char, 0))
 
+    # Bug #18: drop castling rights whose king/rook are not on their home squares. A stale right
+    # would make make_move XOR a rook out of thin air (breaking the occupancy invariants).
+    # 移除王/車不在原位的殘留易位權，避免 make_move 憑空生出車而破壞佔用不變量。
+    def _has_piece(piece_index, sq):
+        return bool((int(piece_bbs[piece_index]) >> sq) & 1)
+
+    _castling_requirements = (
+        (1, 5, 4, 3, 7),     # K: white king e1, white rook h1
+        (2, 5, 4, 3, 0),     # Q: white king e1, white rook a1
+        (4, 11, 60, 9, 63),  # k: black king e8, black rook h8
+        (8, 11, 60, 9, 56),  # q: black king e8, black rook a8
+    )
+    valid_castling = 0
+    for right, king_idx, king_sq, rook_idx, rook_sq in _castling_requirements:
+        if (int(castling_rights) & right) and _has_piece(king_idx, king_sq) and _has_piece(rook_idx, rook_sq):
+            valid_castling |= right
+    castling_rights = np.uint64(valid_castling)
+
     # --- 4. Parse En Passant Square / 解析吃過路兵方格 ---
     # using 64 as sentinel for 'no EP square' / 使用 64 作為「無吃過路兵方格」的標記
     en_passant_square = np.uint64(64)
     if len(parts) > 3 and parts[3] != '-':
-        en_passant_square = np.uint64(SQUARE_MAP.get(parts[3], 64))
+        ep_idx = SQUARE_MAP.get(parts[3], 64)
+        # Bug #18: a phantom EP square (wrong rank, no double-pushed pawn behind it, or occupied
+        # squares) would corrupt occupancy in make_move; ignore it like SF's position validation.
+        # 虛構的 EP 格（錯誤橫排／後方無剛雙步之兵／格子被佔）會破壞佔用，故忽略。
+        if ep_idx != 64:
+            occ_all_int = 0
+            for bb in piece_bbs:
+                occ_all_int |= int(bb)
+            if side_to_move == WHITE:
+                # Black just double-pushed: ep on rank 6, black pawn on rank 5, origin (rank 7) empty.
+                ok = (
+                    ep_idx // 8 == 5
+                    and _has_piece(6, ep_idx - 8)
+                    and not (occ_all_int >> ep_idx) & 1
+                    and not (occ_all_int >> (ep_idx + 8)) & 1
+                )
+            else:
+                # White just double-pushed: ep on rank 3, white pawn on rank 4, origin (rank 2) empty.
+                ok = (
+                    ep_idx // 8 == 2
+                    and _has_piece(0, ep_idx + 8)
+                    and not (occ_all_int >> ep_idx) & 1
+                    and not (occ_all_int >> (ep_idx - 8)) & 1
+                )
+            if ok:
+                en_passant_square = np.uint64(ep_idx)
 
     # --- 5. Parse Halfmove Clock / 解析半步鐘 ---
     halfmove_clock = np.uint64(0)
     if len(parts) > 4:
         try:
-            halfmove_clock = np.uint64(int(parts[4]))
+            # Bug #18: negative values raised OverflowError under NumPy 2.x; values > 255 would wrap
+            # the uint8 old_halfmove_clock in make_move. Anything >= 100 is already a draw anyway.
+            halfmove_clock = np.uint64(min(max(0, int(parts[4])), 255))
         except (ValueError, IndexError):
             pass  # Keep default / 保持預設值
 

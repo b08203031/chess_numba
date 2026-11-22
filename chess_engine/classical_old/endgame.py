@@ -5,13 +5,16 @@
 import numba
 import numpy as np
 from chess_engine.classical_old.constants import (
-    SCALE_FACTOR_NORMAL, SCALE_FACTOR_DRAW, SCALE_FACTOR_KRPKR_FORTRESS,
-    WHITE, BLACK, PAWN, KNIGHT, BISHOP, ROOK, QUEEN, KING,
+    SCALE_FACTOR_NORMAL, SCALE_FACTOR_DRAW,
     EG_MATERIAL_VALUES, MG_MATERIAL_VALUES, VALUE_KNOWN_WIN, MATE_IN_MAX_PLY,
+    DARK_SQUARES, LIGHT_SQUARES,
 )
 from chess_engine.classical_old.bitboard_utils import get_lsb_index, count_bits, FILE_MASKS, BB_SQUARES
 from chess_engine.classical_old.move_generator import get_bishop_attacks, KING_ATTACKS, KNIGHT_ATTACKS, PAWN_ATTACKS
-from chess_engine.classical_old.pawns import MANHATTAN_DISTANCE, CHEBYSHEV_DISTANCE
+from chess_engine.classical_old.pawns import (
+    MANHATTAN_DISTANCE, CHEBYSHEV_DISTANCE,
+    WHITE_PASSED_PAWN_MASKS, BLACK_PASSED_PAWN_MASKS,
+)
 
 # PushToEdges: 8x8 table pushing enemy king to edges
 PUSH_TO_EDGES = np.array([
@@ -39,10 +42,9 @@ PUSH_TO_CORNERS = np.array([
      4160, 4480, 4800, 5120, 5440, 5760, 6080, 6400
 ], dtype=np.int32)
 
-DARK_SQUARES = np.uint64(0xAA55AA55AA55AA55)
-LIGHT_SQUARES = np.uint64(0x55AA55AA55AA55AA)
 # A/C/F/H files for KQKP exception (SF11)
 ACFH_FILES = np.uint64(0xA5A5A5A5A5A5A5A5)
+_KRPPKRP_SCALE = np.array([0, 9, 10, 14, 21, 44, 0, 0], dtype=np.int32)
 
 # =============================================================================
 # KPK Bitbase (SF11 bitbase.cpp) — generated once at import
@@ -604,17 +606,7 @@ def evaluate_special_endgame(piece_bbs, occupancy_bbs, game_state, phase):
 
 @numba.njit(cache=True, boundscheck=False, fastmath=True, inline='always')
 def is_pawn_passed_on_the_fly(sq, side, enemy_pawns_bb):
-    f = sq % 8
-    r = sq // 8
-    mask = np.uint64(0)
-    for file_idx in (f - 1, f, f + 1):
-        if 0 <= file_idx <= 7:
-            if side == 0:  # White
-                for rank_idx in range(r + 1, 8):
-                    mask |= np.uint64(1) << np.uint64(rank_idx * 8 + file_idx)
-            else:  # Black
-                for rank_idx in range(0, r):
-                    mask |= np.uint64(1) << np.uint64(rank_idx * 8 + file_idx)
+    mask = WHITE_PASSED_PAWN_MASKS[sq] if side == 0 else BLACK_PASSED_PAWN_MASKS[sq]
     return (mask & enemy_pawns_bb) == np.uint64(0)
 
 @numba.njit(cache=True, boundscheck=False, fastmath=True, inline='always')
@@ -954,7 +946,7 @@ def _get_specialized_scale_factor(
                     and abs(bk_sq % 8 - wpsq2 % 8) <= 1
                     and bk_sq // 8 > r):
                 if 1 < r < 6:
-                    return np.int32([0, 9, 10, 14, 21, 44, 0, 0][r])
+                    return _KRPPKRP_SCALE[r]
 
     if strong_side == 1 and b_minor_major == 1 and br == 1 and bp == 2 and w_minor_major == 1 and wr == 1 and wp == 1:
         pb_temp = piece_bbs[6]
@@ -968,7 +960,7 @@ def _get_specialized_scale_factor(
                     and abs(wk_sq % 8 - wpsq2 % 8) <= 1
                     and (7 - wk_sq // 8) > r):
                 if 1 < r < 6:
-                    return np.int32([0, 9, 10, 14, 21, 44, 0, 0][r])
+                    return _KRPPKRP_SCALE[r]
 
     # 3. KBPKN (King + Bishop + Pawn vs King + Knight)
     # SF11 endgame.cpp lines 716-736

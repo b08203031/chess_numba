@@ -745,12 +745,23 @@ def SearchContext(
     diag_stats = np.zeros(DIAG_SIZE, dtype=np.uint64)
     diag_enabled = bool(enable_diagnostics)
     tune = np.zeros(TUNE_SIZE, dtype=np.int32)
+    # Bug #17: never silently degrade to a short/zero weight table. evaluation.py reads indices up
+    # to 98 under boundscheck=False, so a 64-long (or all-zero) fallback means out-of-bounds reads
+    # and a meaningless evaluation. Fail loudly instead.
     try:
         from chess_engine.classical import constants as _classical_constants
         from tune_eval_match.eval_weights import default_eval_weights
-        eval_weights = np.ascontiguousarray(default_eval_weights(_classical_constants))
-    except Exception:
-        eval_weights = np.zeros(64, dtype=np.int32)
+        eval_weights = np.ascontiguousarray(default_eval_weights(_classical_constants), dtype=np.int32)
+    except Exception as exc:
+        raise RuntimeError(
+            "SearchContext requires tune_eval_match.eval_weights.default_eval_weights() "
+            "(runtime HCE weight table); refusing to fall back to an invalid table."
+        ) from exc
+    if eval_weights.shape[0] < 128:
+        raise RuntimeError(
+            f"eval_weights table too short ({eval_weights.shape[0]} < 128); "
+            "evaluation.py indexes up to slot 98 with bounds checking disabled."
+        )
     tune[TUNE_RFP_MULT] = RFP_BASE_MULT
     tune[TUNE_RAZOR_COEFF] = RAZORING_COEFF
     tune[TUNE_FP_BASE] = FP_BASE
@@ -962,6 +973,16 @@ def reset_search_context(ctx):
     ctx.last_iteration_pv_len = np.int32(0)
     ctx.nodes_searched = np.uint64(0)
     ctx.nodes_searched_array.fill(0)
+    # Bug #29: per-game state that used to survive ucinewgame.
+    ctx.game_history.fill(0)
+    ctx.game_history_count = np.int32(0)
+    ctx.tt_generation = np.uint8(0)
+    ctx.nmp_min_ply = np.int32(0)
+    ctx.diag_stats.fill(0)
+    ctx.cutoff_cnt.fill(0)
+    ctx.move_count_stack.fill(0)
+    ctx.tt_hit_stack.fill(False)
+    ctx.move_is_capture_stack.fill(False)
     ctx.pawn_table_keys.fill(np.uint64(0xFFFFFFFFFFFFFFFF))
     ctx.pawn_table_w_king_sq.fill(-1)
     ctx.pawn_table_b_king_sq.fill(-1)

@@ -12,7 +12,8 @@
 | :--- | :---: | :--- | :---: | :--- | :---: |
 | **Audit-0** | 2026-11-22 | 全模組純只讀深度審計（31 BUGs / 11 純加速 / 16+3 棋力提案） | — | 產出 `CLASSICAL_ENGINE_AUDIT_20261122.md` | ✅ 完成 |
 | **Wave 2A** | 2026-11-22 | 零樹變動純 NPS 優化與死碼清理（搜尋／啟發式／TT／Movegen／SEE／HCE） | **0 差異**（20/20 FENs `1,056,156` nodes 100% 一致） | 96 項測試全過；20 盤面 Depth 10 × 5 次加權 NPS `485,290 → 602,738`（**+24.20%**），算術平均 NPS **+30.35%**，中位數均值 **+28.67%** | ✅ 完成 |
-| **Wave 2B** | 2026-11-22 | 補齊剩餘 Wave 2 架構優化（64B AoS `pawn_table`、`SearchContext` 80→65 欄、TT 16B 對齊、`.nbi` 多重特化收斂、`quiets` 展開） | **0 差異**（20/20 FENs `1,056,156` nodes 100% 一致） | 96 項測試熱跑 `21.39s` 全過；`.nbi` 過載大幅收斂（`shelter` 24→2、`attacked` 13→1、`pinned` 4→1、`cont_hist` 5→1）；中位數均值 NPS `458,684 → 601,128`（**+31.05%**），算術平均 NPS **+30.89%**，加權 NPS **+23.10%** | ✅ 完成待對戰／後續波次 |
+| **Wave 2B** | 2026-11-22 | 補齊剩餘 Wave 2 架構優化（64B AoS `pawn_table`、`SearchContext` 80→65 欄、TT 16B 對齊、`.nbi` 多重特化收斂、`quiets` 展開） | **0 差異**（20/20 FENs `1,056,156` nodes 100% 一致） | 96 項測試熱跑 `21.39s` 全過；中位數均值 NPS `458,684 → 601,128`（**+31.05%**）；**Colab 500ms/move 實戰 780 局 `417.5 - 362.5`（53.53%，`194W 447D 139L`，`+24.54 ± 15.92 Elo`，`LLR=+2.95` H1 Accepted）** | ✅ **SPRT H1 通過** |
+| **Wave 1A** | 2026-11-22 | 安全／介面／殘局純正確性 BUG 修復（#4 #5 #6 #14 #15 #16 #17 #18 #25 #29 #30，共 11 項） | **20/20 FENs 節點 `1,056,156` 100% 一致**（一般局面零變動；僅特定殘局／畸形 FEN／開局庫輸出被修正） | 130 項測試全過；20 盤面 Depth 10 × 5 次加權 NPS `607,033`（vs Wave 2 `597,371`, **+1.62%**）、算術平均 `594,421`（+0.40%）、中位數均值 `598,558`（-0.43%）；`classical_old/` 已同步回 Wave 2 (`0f4c2eb`) 待 Colab 對戰 | ✅ 實作與測速完成，待對戰驗證 |
 
 ---
 
@@ -142,4 +143,89 @@
 | `Tactical_MG` | `f4f8` (`29999`) | 587 (65) | 28,932 | 132,171 | **180,475** | **+523.78%** |
 | `Rook_EG` | `b4f4` (`21`) | 16,908 (6,194) | 380,359 | 833,077 | **867,460** | **+128.06%** |
 
-*(註：Wave 2 所有嚴格 0 搜尋樹變動的加速與架構優化已全數到位；`depth <= 0` 直接分派 QS 因依賴 Bug #12 的 QS 重複偵測且會微幅改變葉節點計數，留待 Wave 1B 修妥 Bug #12 後一併處理。未經使用者同意不執行 `tools/sync_classical_old.py --sync`。)*
+---
+
+### 4. Wave 2 固定時間（`500 ms/move`）Colab SPRT 實戰對戰驗證（Commit `0f4c2eb` vs `d015345`）
+
+* **實驗目的**：由於 Wave 2（含 2A + 2B）為嚴格「零搜尋樹／零評估變動」的純加速與記憶體佈局優化（固定節點下為 0 差異），因此以**固定每步時間 `--time 500`（`500 ms/move`）**進行成對換先 SPRT 錦標賽，直接檢驗 **NPS 提升轉化為搜尋深度與實戰棋力（Elo）** 的幅度。
+* **硬體與對戰配置**（記錄於 [`tournament_colab_runner_se_multicut.ipynb`](../../tournament_colab_runner_se_multicut.ipynb)）：
+  * **環境**：Google Colab 8-vCPU `AMD EPYC 7B12`（50 GiB RAM，Python 3.13.18）
+  * **引擎對照**：`New` = `chess_engine.classical`（Commit `0f4c2eb`，Wave 2 完整版）vs `Old` = `chess_engine.classical_old`（Commit `d015345` 基準）
+  * **對局參數**：`--time 500`（每步固定 0.5 秒）、`--concurrency 7`（7 組平行對局 Worker）、`--tt-mb 64`、開局庫 `data/openings.epd`（成對換先）、預設裁決開啟、SPRT `elo0 = 0.0, elo1 = 10.0`（$\alpha = \beta = 0.05$，邊界 `[-2.94, +2.94]`）。
+* **對局結果與統計檢定（於第 780 局 / 390 對正式觸發 `H1 Accepted` 早停）**：
+  * **總戰績**：**`New 417.5 - 362.5 Old`**（**780 局：194 勝 447 和 139 負**，得分率 **`53.53%`**，淨勝 **`+55` 局**，和局率 `57.31%`）。
+  * **Elo 增益**：**`+24.54 ± 15.92 Elo`**（成對換先群聚 95% CI：**`[+8.54, +40.64]`**，下界顯著 $> 0$）。
+  * **SPRT `[0, 10]`**：**`LLR = +2.95`**（突破上界 `+2.94`）→ **`H1 Accepted (Engine improved)` 🏆**。
+  * **先後手對稱表現**：
+    * `New` 持白：**`55.00%`**（`103W - 223D - 64L`，淨勝 `+39` 局）
+    * `New` 持黑：**`52.05%`**（`91W - 224D - 75L`，淨勝 `+16` 局）
+  * **成對換先九宮格（共 390 對唯一開局 FEN，0 重複對局）**：
+    * `DD: 135 (34.6%)` | `WD: 54 (13.8%)` | `DW: 51 (13.1%)` | `DL: 37 (9.5%)` | `LD: 35 (9.0%)` | `WW: 26 (6.7%)` | `WL: 23 (5.9%)` | `LL: 15 (3.8%)` | `LW: 14 (3.6%)`
+    * **雙勝對比**：`WW : LL = 26 : 15`（淨勝 **`+11` 對雙勝**，比值 `1.73x`）
+    * **單勝對比**：`(WD + DW) : (DL + LD) = 105 : 72`（淨勝 **`+33` 對單勝**）
+    * **成對總淨勝**：`131` 勝對 vs `87` 負對（**淨勝 `+44` 對**）。
+  * **對局長度分桶（平均 `51.2` 回合，$\sigma = 20.7$）**：
+    * `short (<=25m)`：`n=68`，`3W-59D-6L`（`score = 0.478`）
+    * `medium (26-50m)`：`n=354`，**`97W-203D-54L`（`score = 0.561`，淨勝 `+43` 局）**
+    * `long (51-80m)`：`n=297`，**`82W-142D-73L`（`score = 0.515`，淨勝 `+9` 局）**
+    * `very_long (>80m)`：`n=61`，**`12W-43D-6L`（`score = 0.549`，淨勝 `+6` 局）**
+  * **序列穩定性**：前半場 195 對（390 局）`score = 0.532`（`100W-215D-75L`），後半場 195 對（390 局）`score = 0.538`（`94W-232D-64L`）；Lag-1 自相關 `0.0161`、游程檢定 `p = 0.4265`（全程穩定無漂移）。
+* **搜尋遙測對比（`parse_search_stats.py`，`New` 39,689 步 vs `Old` 39,707 步，`draw_depth_cap=40`）**：
+
+| 遙測指標 | `Old` (`classical_old`) | `New` (`classical` Wave 2) | 差異 / 增幅 | 統計顯著性 (Welch $t$-test) |
+| :--- | :---: | :---: | :---: | :---: |
+| **每步平均耗時 (ms)** | `355.8 ms` ($\sigma=81.6$) | `356.3 ms` ($\sigma=82.1$) | `+0.5 ms` (+0.1%) | $t = +0.861, p = 0.3895$（**等時一致**） |
+| **7 並發實戰平均 NPS** | `260,640` (med `216,966`) | **`290,074`** (med **`242,205`**) | **`+11.3%`** (med `+11.6%`) | $t = +32.060, p = 4.47 \times 10^{-224}$ (**極顯著**) |
+| **每步平均節點數 (Nodes)** | `91,829` (med `79,081`) | **`102,294`** (med **`88,047`**) | **`+11.4%`** (med `+11.3%`) | $t = +30.097, p = 7.03 \times 10^{-198}$ (**極顯著**) |
+| **每步平均搜尋深度 (Depth)** | `14.22` ($\sigma=3.14$, med `14`) | **`14.53`** ($\sigma=3.08$, med `14`) | **`+0.31 ply`** | $t = +13.985, p = 2.17 \times 10^{-44}$ (**極顯著**) |
+| **深層搜尋比例 (`depth >= 14`)** | `50.5%` | **`56.0%`** | **`+5.5%`** | `16-20 ply`: `20.9% → 23.9%` |
+
+> **結論**：在 8 邏輯核心跑滿 7 對局並發（14 個引擎 Context 共享 L3 Cache 與記憶體頻寬）的嚴苛環境下，Wave 2 的熱路徑延遲計算、64B 單 Cache-Line AoS `pawn_table`、`.nbi` 特化收斂與整數歷史老化仍穩定提供 **`+11.3%` 實戰並發吞吐量**，推升搜尋深度 **`+0.31 ply`**，並在 780 局直接以 **`+24.54 ± 15.92 Elo`（`LLR = +2.95`）擊穿 SPRT H1 上界通過驗收**。待使用者確認後，即可執行 `python tools/sync_classical_old.py --sync` 將 Wave 2 正式固化至 `classical_old/` 生產基準，作為後續 Wave 1A / 1B 除錯的全新對照基線。
+
+---
+
+## Wave 1A：安全／介面／殘局純正確性 BUG 修復（2026-11-22）
+
+> **性質**：搜尋與評估對「一般中局／開局局面」零變動（節點恆等已驗證）；只修正 (a) `boundscheck=False` 下的越界風險、(b) UCI／開局庫／FEN 介面輸出非法資料、(c) 稀有殘局（KBNK、KXK、KBPsK b/g 線、KRPKN、KRPPKRP）的錯誤評分／縮放。對應審計報告 [`CLASSICAL_ENGINE_AUDIT_20261122.md`](CLASSICAL_ENGINE_AUDIT_20261122.md) 的 Wave 1A。
+
+### 1. 修改明細
+
+| Bug | 檔案 | 修復內容 | SF 對照 |
+| :---: | :--- | :--- | :--- |
+| **#4** | [`search.py`](search.py) `_search` | 將 `ply >= MAX_PLY` 守衛改為 `ply >= MAX_PLY - 1` 並**前移至任何 per-ply 堆疊存取之前**（原本在 `cutoff_cnt[ply+2]`、`follow_pv_stack[ply]` 之後才檢查，且 `ply == 127` 時 6 處 `[ply+1]` 越界）。QSearch 在 `ply >= MAX_PLY` 守衛前無堆疊存取，維持不動 | — |
+| **#5** | [`opening_book.py`](opening_book.py) | Polyglot 以「王吃己方車」編碼易位：依 `board_state` 映射 `e1h1/e1a1/e8h8/e8a8 → e1g1/e1c1/e8g8/e8c8` 並設 `SPECIAL_MOVE_FLAG_CASTLING`；兵斜走至空格設 `SPECIAL_MOVE_FLAG_EN_PASSANT`。實測西班牙／義大利開局原回傳非法 `e1h1`，現為合法 `e1g1` | Polyglot 規格 |
+| **#6** | [`endgame.py`](endgame.py) `mate_kbnk` | (1) 逃生格不再以 `~strong_pieces` 排除（**無保護**的象可被弱王吃掉 → 非將死；有保護的子本來就落在 `strong_attacks`）；(2) 新參數 `weak_to_move`，逼和／將死捷徑僅在弱方行棋時成立（原強方行棋亦回傳 `0` 幻覺逼和）；(3) 象攻擊以 `occ ^ weak_king` 計算 X-Ray | SF11 `endgame.cpp` KBNK |
+| **#14** | `endgame.py` `KBPsK` | b/g 線堡壘改為檢查**雙方所有兵**皆在該線（`(piece_bbs[0] \| piece_bbs[6]) & ~FILE_MASKS[f] == 0`） | SF11 `endgame.cpp:363` |
+| **#15** | `endgame.py` | 移除非 SF 的 `KRPKN` 縮放歸零規則（白方／黑方兩段） | SF11 無此規則 |
+| **#16** | `endgame.py` `_eval_kxk` | 弱方行棋時：孤王所有鄰格被攻擊（含穿透自身 X-Ray）且未被將軍 → 回傳 `0`（逼和）。利用既有 `is_square_attacked_with_occ` | SF11 `endgame.cpp:124` |
+| **#25** | `endgame.py` `KRPPKRP` | `if 1 < r < 6` → `if 0 < r < 6`（第 2 橫排 `sf = 9` 現可達；白／黑兩段） | SF11 `r > RANK_1 && r < RANK_7` |
+| **#17** | [`engine_types.py`](engine_types.py) | `eval_weights` 取得失敗不再靜默降級為 `np.zeros(64)`（`evaluation.py` 會在 `boundscheck=False` 下讀到索引 98）；改為明確 `RuntimeError`，並檢查長度 `>= 128` | — |
+| **#18** | [`fen_parser.py`](fen_parser.py) | (1) 易位權需王／車位於原位才保留；(2) EP 格需符合行棋方對應橫排、後方有剛雙步之兵、且兩格皆空，否則忽略（**保留標準 FEN 的 EP 設定行為，不改 Zobrist 策略**；EP 雜湊策略屬 Wave 1B Bug #13）；(3) 半步鐘夾限 `[0, 255]`（負值原觸發 `OverflowError`） | SF19 `position.cpp` 驗證 |
+| **#29** | `engine_types.py` `reset_search_context` | 補清 `game_history`、`game_history_count`、`tt_generation`、`nmp_min_ply`、`diag_stats`，另含 `cutoff_cnt`、`move_count_stack`、`tt_hit_stack`、`move_is_capture_stack` | — |
+| **#30** | [`move.py`](move.py) | `move_to_uci(NO_MOVE)` 回傳 `"0000"`（原為不可能的 `"a1a1"`，將死／逼和盤面 UCI 輸出非法 `bestmove`） | UCI null move |
+
+### 2. 驗證
+
+* **新增回歸測試** [`tests/test_wave1a_fixes.py`](../../tests/test_wave1a_fixes.py)（27 項）：Polyglot 易位／EP／真實開局庫著法皆為合法著法、`NO_MOVE → "0000"`、FEN 畸形輸入消毒、KBNK 三個審計反例與真將死／真逼和、KXK 雙方逼和與有逃生格仍判勝、KBPsK／KRPKN／KRPPKRP 縮放、`eval_weights` 完整表與 `reset_search_context`、`MAX_PLY` 守衛順序契約。
+* **審計反例實測（修復前 → 修復後，白方視角）**：
+  * `k7/B1K5/1N6/8/8/8/8/8 b - - 0 1`：`+29871`（幻覺將死）→ `+14890`（正常大優勢）
+  * `k7/2K5/2N5/8/8/8/8/6B1 w - - 0 1`：`0`（幻覺逼和）→ `+14855`
+  * `k7/2Q5/1K6/8/8/8/8/8 b - - 0 1`（逼和）：`-11515` → `0`
+  * `1k6/1p6/1P6/4p3/8/3B4/8/4K3 w - - 0 1`：`sf = 0` → `sf = 43`；`8/4k3/4P3/3nK3/8/8/8/4R3 w - - 0 1`（KRPKN）：`sf = 0` → `sf = 43`
+  * KRPPKRP `r = 1`：不可達 → `sf = 9`
+* **全批次單元測試**（一個 process，`tests.test_wave1a_fixes tests.test_tunable_eval_parity tests.test_endgame_conformance tests.test_pinned_eval_geometry tests.test_see tests.test_search_core_contracts tests.test_lazy_smp tests.test_history`）：**130 項全過**。因 `endgame.py`／`search.py`／`engine_types.py` 變動（Numba 磁碟快取僅以「定義檔」mtime 判定失效，不會偵測被呼叫端變更），已先清除 `chess_engine/classical/__pycache__` 與 `tuner/__pycache__` 全部 `.nbi/.nbc` 後**冷編譯**重跑，耗時 `1516 s`（約 25 分鐘；受背景 CPU 競爭影響偏慢）。
+* **節點恆等（20 盤面 Depth 10，與 Wave 2 後基準比對）**：`mismatches = 0 / 20`，總節點 `1,056,156`，`best_move` / `best_eval` / `quiescence_nodes` 逐盤面 100% 一致 — 證明修復對一般局面（開局庫 EPD、Startpos、Kiwipete、戰術中局、Rook 殘局）完全無搜尋樹影響。
+* 未執行 Perft：本波未更動 `board_operations` / `move_generator` / `zobrist`。
+
+### 3. 風險與後續
+
+* **#17 行為改變**：`tune_eval_match.eval_weights` 不可匯入時 `SearchContext` 現在會直接失敗（原本靜默產出無意義評估）。部署／打包時務必隨附 `tune_eval_match/eval_weights.py`（或日後改為內建於 `classical/`）。
+* **#16 / #6 / #14 / #15 / #25 為稀有殘局修正**：預期對 Elo 影響極小（< 數 Elo、需極多局才可量測）；建議不單獨跑 SPRT，併入 Wave 1B 之後的整合對戰（以 `[-5, 0]` 非退化檢定）一併驗證。
+* **#5** 影響 `OwnBook=True` 的 UCI 對局（`tools/tournament.py` 預設關閉 OwnBook，故過去 SPRT 未受影響）。
+
+### 4. 最新重測效能與基準同步狀態
+
+* **重測效能基準（20 盤面 Depth 10 × 5 次，系統回復正常負載後重跑）**：
+  * 總節點數：**`1,056,156`**，`mismatches = 0 / 20`（與 Wave 2 完全一致），總耗時 **`1.740 s`**（Wave 2 為 `1.768 s`）。
+  * 加權平均 NPS：`597,371 → 607,033`（**`+1.62%`**）；算術平均 NPS：`592,026 → 594,421`（**`+0.40%`**）；中位數均值 NPS：`601,128 → 598,558`（`-0.43%`）。（與熱路徑無變動預期完全相符；該輪稍早因 25 分鐘冷編譯後筆電降頻 `% Processor Performance = 55.6%` 所測之 `307,009` 已確認屬降頻暫態，本次回復至 `% Processor Performance = 83.56%`、`2187.00 MHz`。）
+* **`classical_old/` 基準已正規化至 Wave 2（Commit `0f4c2eb`）**：依使用者指示已將 [`classical_old/`](../classical_old/) 20 個 `.py` 檔案完全同步至 SPRT H1 通過之 Wave 2 完成狀態（`0f4c2eb`），並清除 `classical_old/__pycache__/` 舊快取（312 檔）；`python tools/sync_classical_old.py --diff` 驗證僅存在 Wave 1A 的 6 個檔案差異（`endgame.py`、`engine_types.py`、`fen_parser.py`、`move.py`、`opening_book.py`、`search.py`），可進行乾淨的 **Wave 1A vs Wave 2** Colab 對戰驗證。

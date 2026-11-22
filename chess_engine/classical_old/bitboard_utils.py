@@ -90,7 +90,7 @@ def _init_king_attack_zones(color):
     return zones
 
 WHITE_KING_ZONES = _init_king_attack_zones(0)
-BLACK_KING_ZONES = _init_king_attack_zones(1)
+BLACK_KING_ZONES = WHITE_KING_ZONES
 
 def _init_file_masks():
     """
@@ -208,24 +208,6 @@ def _init_line_bb():
     return line_bb
 
 LINE_BB = _init_line_bb()
-
-@nb.njit(nb.int8(piece_bbs_signature, nb.uint8), cache=True)
-def find_piece_type_on_square(piece_bbs, square):
-    """
-    在給定的方格上尋找棋子類型（0-11）。
-    
-    Args:
-        piece_bbs (np.uint64[::1]): 12 個棋子位元棋盤的陣列。
-        square (int): 方格索引 (0-63)。
-
-    Returns:
-        int: 棋子類型索引 (0-11)，如果在該方格上沒有找到棋子，則返回 -1。
-    """
-    bb_square = BB_SQUARES[square]
-    for piece_type in range(12):
-        if piece_bbs[piece_type] & bb_square:
-            return nb.int8(piece_type)
-    return nb.int8(-1)
 
 @nb.njit(nb.int8(piece_bbs_signature, nb.uint8, nb.uint8), cache=True, inline='always')
 def find_piece_type_on_square_side(piece_bbs, square, side):

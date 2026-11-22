@@ -71,6 +71,25 @@ unmake_info_signature = numba.types.Tuple([
 # Field order is part of the type; keep stable for disk cache.
 # Prefer C-contiguous array types so typeof(constructed ctx) matches the
 # signature type used in @njit (layout mismatches create extra overloads).
+pawn_table_entry_dtype = np.dtype([
+    ('keys', np.uint64),            # 8B (offset 0)
+    ('w_passed', np.uint64),        # 8B (offset 8)
+    ('b_passed', np.uint64),        # 8B (offset 16)
+    ('w_attacks_span', np.uint64),  # 8B (offset 24)
+    ('b_attacks_span', np.uint64),  # 8B (offset 32)
+    ('mg', np.int32),               # 4B (offset 40)
+    ('eg', np.int32),               # 4B (offset 44)
+    ('w_shield_mg', np.int16),      # 2B (offset 48)
+    ('w_shield_eg', np.int16),      # 2B (offset 50)
+    ('b_shield_mg', np.int16),      # 2B (offset 52)
+    ('b_shield_eg', np.int16),      # 2B (offset 54)
+    ('w_king_sq', np.int8),         # 1B (offset 56)
+    ('b_king_sq', np.int8),         # 1B (offset 57)
+    ('castling_rights', np.uint8),  # 1B (offset 58)
+    ('padding', np.uint8, 5),       # 5B (offset 59..63) -> 64 bytes
+])
+numba_pawn_table_entry_type = numba.from_dtype(pawn_table_entry_dtype)
+
 search_context_spec = [
     ('transposition_table', numba.types.Array(numba_tt_entry_type, 1, 'C')),
     ('killer_moves', numba.uint16[::1]),
@@ -93,8 +112,6 @@ search_context_spec = [
     ('moves_buffer', numba.uint16[:, ::1]),
     ('quiet_moves_tried', numba.uint16[:, ::1]),
     ('quiet_pieces_tried', numba.int8[:, ::1]),
-    ('aggressor_cache', numba.int8[:, ::1]),
-    ('victim_cache', numba.int8[:, ::1]),
     ('bad_captures', numba.uint16[:, ::1]),
     ('mp_stage', numba.int32[::1]),
     ('mp_current_idx', numba.int32[::1]),
@@ -136,20 +153,7 @@ search_context_spec = [
     ('follow_pv_stack', numba.boolean[::1]),
     ('last_iteration_pv', numba.uint16[::1]),
     ('last_iteration_pv_len', numba.int32),
-    ('pawn_table_keys', numba.uint64[::1]),
-    ('pawn_table_w_king_sq', numba.int8[::1]),
-    ('pawn_table_b_king_sq', numba.int8[::1]),
-    ('pawn_table_castling_rights', numba.uint8[::1]),
-    ('pawn_table_mg', numba.int32[::1]),
-    ('pawn_table_eg', numba.int32[::1]),
-    ('pawn_table_w_shield_mg', numba.int32[::1]),
-    ('pawn_table_w_shield_eg', numba.int32[::1]),
-    ('pawn_table_b_shield_mg', numba.int32[::1]),
-    ('pawn_table_b_shield_eg', numba.int32[::1]),
-    ('pawn_table_w_passed', numba.uint64[::1]),
-    ('pawn_table_b_passed', numba.uint64[::1]),
-    ('pawn_table_w_attacks_span', numba.uint64[::1]),
-    ('pawn_table_b_attacks_span', numba.uint64[::1]),
+    ('pawn_table', numba.types.Array(numba_pawn_table_entry_type, 1, 'C')),
     ('diag_stats', numba.uint64[::1]),
     ('tune', numba.int32[::1]),
     # Runtime HCE weights for match-SPSA (live under Numba when mutated in-place)
@@ -193,7 +197,7 @@ def _construct_search_context_proxy(
     nodes_searched_array, end_time, stop_flag, game_history, game_history_count,
     ply_path_stack, tt_generation, counter_moves, move_stack, piece_stack,
     static_eval_stack, move_scores, moves_buffer, quiet_moves_tried,
-    quiet_pieces_tried, aggressor_cache, victim_cache, bad_captures, mp_stage,
+    quiet_pieces_tried, bad_captures, mp_stage,
     mp_current_idx, mp_captures_end, mp_quiets_end, mp_bad_captures_count,
     mp_bad_captures_idx, continuation_history, low_ply_history, pawn_history,
     pawn_correction_history, minor_correction_history,
@@ -204,12 +208,8 @@ def _construct_search_context_proxy(
     enable_lmr, enable_see_pruning, enable_lmp, enable_fp, enable_probcut,
     enable_multicut, cutoff_cnt, move_count_stack, tt_hit_stack,
     move_is_capture_stack, reduction_stack, tt_pv_stack, follow_pv_stack,
-    last_iteration_pv, last_iteration_pv_len, pawn_table_keys,
-    pawn_table_w_king_sq, pawn_table_b_king_sq, pawn_table_castling_rights,
-    pawn_table_mg, pawn_table_eg, pawn_table_w_shield_mg,
-    pawn_table_w_shield_eg, pawn_table_b_shield_mg, pawn_table_b_shield_eg,
-    pawn_table_w_passed, pawn_table_b_passed, pawn_table_w_attacks_span,
-    pawn_table_b_attacks_span, diag_stats, tune, eval_weights, diag_enabled,
+    last_iteration_pv, last_iteration_pv_len, pawn_table,
+    diag_stats, tune, eval_weights, diag_enabled,
 ):
     """Disk-cached StructRef constructor matching search_context_spec field order."""
     return SearchContextProxy(
@@ -217,7 +217,7 @@ def _construct_search_context_proxy(
         nodes_searched_array, end_time, stop_flag, game_history, game_history_count,
         ply_path_stack, tt_generation, counter_moves, move_stack, piece_stack,
         static_eval_stack, move_scores, moves_buffer, quiet_moves_tried,
-        quiet_pieces_tried, aggressor_cache, victim_cache, bad_captures, mp_stage,
+        quiet_pieces_tried, bad_captures, mp_stage,
         mp_current_idx, mp_captures_end, mp_quiets_end, mp_bad_captures_count,
         mp_bad_captures_idx, continuation_history, low_ply_history, pawn_history,
         pawn_correction_history, minor_correction_history,
@@ -228,12 +228,8 @@ def _construct_search_context_proxy(
         enable_lmr, enable_see_pruning, enable_lmp, enable_fp, enable_probcut,
         enable_multicut, cutoff_cnt, move_count_stack, tt_hit_stack,
         move_is_capture_stack, reduction_stack, tt_pv_stack, follow_pv_stack,
-        last_iteration_pv, last_iteration_pv_len, pawn_table_keys,
-        pawn_table_w_king_sq, pawn_table_b_king_sq, pawn_table_castling_rights,
-        pawn_table_mg, pawn_table_eg, pawn_table_w_shield_mg,
-        pawn_table_w_shield_eg, pawn_table_b_shield_mg, pawn_table_b_shield_eg,
-        pawn_table_w_passed, pawn_table_b_passed, pawn_table_w_attacks_span,
-        pawn_table_b_attacks_span, diag_stats, tune, eval_weights, diag_enabled,
+        last_iteration_pv, last_iteration_pv_len, pawn_table,
+        diag_stats, tune, eval_weights, diag_enabled,
     )
 
 
@@ -353,18 +349,13 @@ def _sc_get_tt(self):
 
 
 @numba.njit(cache=True, nogil=True)
-def _sc_get_u8_1d(self):
-    return self.pawn_table_castling_rights
+def _sc_get_pawn_table(self):
+    return self.pawn_table
 
 
 @numba.njit(cache=True, nogil=True)
-def _sc_get_i8_1d(self, idx):
-    if idx == 0:
-        return self.piece_stack
-    elif idx == 1:
-        return self.pawn_table_w_king_sq
-    else:
-        return self.pawn_table_b_king_sq
+def _sc_get_i8_1d(self):
+    return self.piece_stack
 
 
 @numba.njit(cache=True, nogil=True)
@@ -372,12 +363,8 @@ def _sc_get_i8_2d(self, idx):
     if idx == 0:
         return self.quiet_pieces_tried
     elif idx == 1:
-        return self.aggressor_cache
-    elif idx == 2:
-        return self.victim_cache
-    elif idx == 3:
         return self.capture_aggressor_tried
-    elif idx == 4:
+    elif idx == 2:
         return self.capture_victim_tried
     else:
         return self.capture_tosq_tried
@@ -464,18 +451,6 @@ def _sc_get_i32_1d(self, idx):
     elif idx == 9:
         return self.reduction_stack
     elif idx == 10:
-        return self.pawn_table_mg
-    elif idx == 11:
-        return self.pawn_table_eg
-    elif idx == 12:
-        return self.pawn_table_w_shield_mg
-    elif idx == 13:
-        return self.pawn_table_w_shield_eg
-    elif idx == 14:
-        return self.pawn_table_b_shield_mg
-    elif idx == 15:
-        return self.pawn_table_b_shield_eg
-    elif idx == 16:
         return self.tune
     else:
         return self.eval_weights
@@ -504,16 +479,6 @@ def _sc_get_u64_1d(self, idx):
         return self.game_history
     elif idx == 2:
         return self.ply_path_stack
-    elif idx == 3:
-        return self.pawn_table_keys
-    elif idx == 4:
-        return self.pawn_table_w_passed
-    elif idx == 5:
-        return self.pawn_table_b_passed
-    elif idx == 6:
-        return self.pawn_table_w_attacks_span
-    elif idx == 7:
-        return self.pawn_table_b_attacks_span
     else:
         return self.diag_stats
 
@@ -573,13 +538,13 @@ _SCALAR_ACCESSOR_GROUPS = (
 
 _ARRAY_ACCESSOR_GROUPS = (
     (_sc_get_tt, ("transposition_table",)),
-    (_sc_get_u8_1d, ("pawn_table_castling_rights",)),
-    (_sc_get_i8_1d, ("piece_stack", "pawn_table_w_king_sq", "pawn_table_b_king_sq")),
+    (_sc_get_pawn_table, ("pawn_table",)),
+    (_sc_get_i8_1d, ("piece_stack",)),
     (
         _sc_get_i8_2d,
         (
-            "quiet_pieces_tried", "aggressor_cache", "victim_cache",
-            "capture_aggressor_tried", "capture_victim_tried", "capture_tosq_tried",
+            "quiet_pieces_tried", "capture_aggressor_tried",
+            "capture_victim_tried", "capture_tosq_tried",
         ),
     ),
     (_sc_get_u16_1d, ("killer_moves", "move_stack", "last_iteration_pv")),
@@ -607,8 +572,6 @@ _ARRAY_ACCESSOR_GROUPS = (
             "static_eval_stack", "mp_stage", "mp_current_idx", "mp_captures_end",
             "mp_quiets_end", "mp_bad_captures_count", "mp_bad_captures_idx",
             "cutoff_cnt", "move_count_stack", "reduction_stack",
-            "pawn_table_mg", "pawn_table_eg", "pawn_table_w_shield_mg",
-            "pawn_table_w_shield_eg", "pawn_table_b_shield_mg", "pawn_table_b_shield_eg",
             "tune", "eval_weights",
         ),
     ),
@@ -616,11 +579,7 @@ _ARRAY_ACCESSOR_GROUPS = (
     (_sc_get_i32_3d, ("capture_history",)),
     (
         _sc_get_u64_1d,
-        (
-            "nodes_searched_array", "game_history", "ply_path_stack",
-            "pawn_table_keys", "pawn_table_w_passed", "pawn_table_b_passed",
-            "pawn_table_w_attacks_span", "pawn_table_b_attacks_span", "diag_stats",
-        ),
+        ("nodes_searched_array", "game_history", "ply_path_stack", "diag_stats"),
     ),
     (
         _sc_get_bool_1d,
@@ -678,6 +637,18 @@ def _install_python_field_accessors():
     if (registered_scalars | registered_arrays) != all_fields:
         raise RuntimeError(
             f"SearchContext accessor mismatch: {(registered_scalars | registered_arrays) ^ all_fields}"
+        )
+
+    # Backward-compatible Python array views into the AoS pawn_table.
+    for _pt_field in (
+        "keys", "w_king_sq", "b_king_sq", "castling_rights",
+        "mg", "eg", "w_shield_mg", "w_shield_eg", "b_shield_mg", "b_shield_eg",
+        "w_passed", "b_passed", "w_attacks_span", "b_attacks_span",
+    ):
+        setattr(
+            SearchContextProxy,
+            f"pawn_table_{_pt_field}",
+            property(lambda self, _f=_pt_field: _sc_get_pawn_table(self)[_f]),
         )
 
 
@@ -741,14 +712,12 @@ def SearchContext(
 
     move_scores = np.zeros((MAX_PLY, 256), dtype=np.int32)
     moves_buffer = np.zeros((MAX_PLY, 256), dtype=np.uint16)
-    quiet_moves_tried = np.zeros((MAX_PLY, 256), dtype=np.uint16)
-    quiet_pieces_tried = np.zeros((MAX_PLY, 256), dtype=np.int8)
+    quiet_moves_tried = np.zeros((MAX_PLY, 64), dtype=np.uint16)
+    quiet_pieces_tried = np.zeros((MAX_PLY, 64), dtype=np.int8)
     capture_moves_tried = np.zeros((MAX_PLY, 64), dtype=np.uint16)
     capture_aggressor_tried = np.zeros((MAX_PLY, 64), dtype=np.int8)
     capture_victim_tried = np.zeros((MAX_PLY, 64), dtype=np.int8)
     capture_tosq_tried = np.zeros((MAX_PLY, 64), dtype=np.int8)
-    aggressor_cache = np.zeros((MAX_PLY, 256), dtype=np.int8)
-    victim_cache = np.zeros((MAX_PLY, 256), dtype=np.int8)
     bad_captures = np.zeros((MAX_PLY, 256), dtype=np.uint16)
 
     mp_stage = np.zeros(MAX_PLY, dtype=np.int32)
@@ -768,20 +737,10 @@ def SearchContext(
     last_iteration_pv = np.zeros(MAX_PLY, dtype=np.uint16)
     last_iteration_pv_len = np.int32(0)
 
-    pawn_table_keys = np.full(262144, np.uint64(0xFFFFFFFFFFFFFFFF), dtype=np.uint64)
-    pawn_table_w_king_sq = np.full(262144, -1, dtype=np.int8)
-    pawn_table_b_king_sq = np.full(262144, -1, dtype=np.int8)
-    pawn_table_castling_rights = np.zeros(262144, dtype=np.uint8)
-    pawn_table_mg = np.zeros(262144, dtype=np.int32)
-    pawn_table_eg = np.zeros(262144, dtype=np.int32)
-    pawn_table_w_shield_mg = np.zeros(262144, dtype=np.int32)
-    pawn_table_w_shield_eg = np.zeros(262144, dtype=np.int32)
-    pawn_table_b_shield_mg = np.zeros(262144, dtype=np.int32)
-    pawn_table_b_shield_eg = np.zeros(262144, dtype=np.int32)
-    pawn_table_w_passed = np.zeros(262144, dtype=np.uint64)
-    pawn_table_b_passed = np.zeros(262144, dtype=np.uint64)
-    pawn_table_w_attacks_span = np.zeros(262144, dtype=np.uint64)
-    pawn_table_b_attacks_span = np.zeros(262144, dtype=np.uint64)
+    pawn_table = np.zeros(262144, dtype=pawn_table_entry_dtype)
+    pawn_table['keys'].fill(np.uint64(0xFFFFFFFFFFFFFFFF))
+    pawn_table['w_king_sq'].fill(-1)
+    pawn_table['b_king_sq'].fill(-1)
 
     diag_stats = np.zeros(DIAG_SIZE, dtype=np.uint64)
     diag_enabled = bool(enable_diagnostics)
@@ -868,8 +827,6 @@ def SearchContext(
         moves_buffer,
         quiet_moves_tried,
         quiet_pieces_tried,
-        aggressor_cache,
-        victim_cache,
         bad_captures,
         mp_stage,
         mp_current_idx,
@@ -910,20 +867,7 @@ def SearchContext(
         follow_pv_stack,
         last_iteration_pv,
         last_iteration_pv_len,
-        pawn_table_keys,
-        pawn_table_w_king_sq,
-        pawn_table_b_king_sq,
-        pawn_table_castling_rights,
-        pawn_table_mg,
-        pawn_table_eg,
-        pawn_table_w_shield_mg,
-        pawn_table_w_shield_eg,
-        pawn_table_b_shield_mg,
-        pawn_table_b_shield_eg,
-        pawn_table_w_passed,
-        pawn_table_b_passed,
-        pawn_table_w_attacks_span,
-        pawn_table_b_attacks_span,
+        pawn_table,
         diag_stats,
         tune,
         eval_weights,

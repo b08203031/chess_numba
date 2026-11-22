@@ -627,7 +627,11 @@ def quiescence_search(piece_bbs, occupancy_bbs, game_state, alpha, beta, ply, se
             tt_score = val
             if tt_score > MATE_IN_MAX_PLY: tt_score += ply
             elif tt_score < -MATE_IN_MAX_PLY: tt_score -= ply
-            store_tt(search_context.transposition_table, tt_key, 0, tt_score, np.int16(stand_pat), TT_FLAG_BETA, NO_MOVE, search_context.tt_generation, False)
+            store_tt(
+                search_context.transposition_table, tt_key, int(_i32(0)), int(tt_score),
+                np.int16(stand_pat), int(_i32(TT_FLAG_BETA)), np.uint16(NO_MOVE),
+                search_context.tt_generation, _b_false(),
+            )
             return np.int32(val), q_nodes
         alpha = max(alpha, stand_pat)
 
@@ -636,7 +640,11 @@ def quiescence_search(piece_bbs, occupancy_bbs, game_state, alpha, beta, ply, se
             tt_score = np.int32(stand_pat)
             if tt_score > MATE_IN_MAX_PLY: tt_score += ply
             elif tt_score < -MATE_IN_MAX_PLY: tt_score -= ply
-            store_tt(search_context.transposition_table, tt_key, 0, tt_score, np.int16(stand_pat), TT_FLAG_EXACT, NO_MOVE, search_context.tt_generation, False)
+            store_tt(
+                search_context.transposition_table, tt_key, int(_i32(0)), int(tt_score),
+                np.int16(stand_pat), int(_i32(TT_FLAG_EXACT)), np.uint16(NO_MOVE),
+                search_context.tt_generation, _b_false(),
+            )
             return np.int32(stand_pat), q_nodes
 
     _diag_add(search_context, DIAG_Q_MOVES, move_count)
@@ -805,7 +813,6 @@ def quiescence_search(piece_bbs, occupancy_bbs, game_state, alpha, beta, ply, se
         scores[i], scores[best_idx] = scores[best_idx], scores[i]
 
         move = moves[i]
-        score_val = scores[i]
         qs_from_sq = get_from_square(move)
         qs_to_sq = get_to_square(move)
         qs_special_flag = get_special_move_flag(move)
@@ -877,7 +884,7 @@ def quiescence_search(piece_bbs, occupancy_bbs, game_state, alpha, beta, ply, se
                     check_sq_bishop_qs = get_bishop_attacks(their_king_sq_qs, all_occ_qs)
                     check_sq_rook_qs = get_rook_attacks(their_king_sq_qs, all_occ_qs)
                     check_sq_queen_qs = check_sq_bishop_qs | check_sq_rook_qs
-                    blockers_for_their_king_qs, pinners_for_their_king_qs = get_blockers_for_king(
+                    blockers_for_their_king_qs, _ = get_blockers_for_king(
                         piece_bbs, occupancy_bbs, opponent_side_qs,
                     )
                     qs_check_info_computed = True
@@ -901,7 +908,11 @@ def quiescence_search(piece_bbs, occupancy_bbs, game_state, alpha, beta, ply, se
                 _diag_add(search_context, DIAG_Q_SEE_TRY)
                 if qs_att_type < 0:
                     qs_att_type = find_piece_type_on_square_side(piece_bbs, qs_from_sq, qs_side)
-                if not _see_ge_jit(piece_bbs, occupancy_bbs, qs_side, qs_from_sq, qs_to_sq, search_context.tune[TUNE_QS_SEE], pinned_white, pinned_black, qs_att_type, qs_vic_type, get_promotion_piece(move) + 1):
+                if not _see_ge_jit(
+                    piece_bbs, occupancy_bbs, int(qs_side), int(qs_from_sq), int(qs_to_sq),
+                    int(_i32(search_context.tune[TUNE_QS_SEE])), pinned_white, pinned_black,
+                    int(_i32(qs_att_type)), int(_i32(qs_vic_type)), int(_i32(get_promotion_piece(move) + 1)),
+                ):
                     _diag_add(search_context, DIAG_Q_SEE_SKIP)
                     continue
 
@@ -964,7 +975,7 @@ def quiescence_search(piece_bbs, occupancy_bbs, game_state, alpha, beta, ply, se
         if not skip_post_legality:
             king_bb_after_move = piece_bbs[5] if (1 - game_state[0]) == 0 else piece_bbs[11]
             king_sq = get_lsb_index(king_bb_after_move) if king_bb_after_move else 0
-            if is_square_attacked(piece_bbs, occupancy_bbs, king_sq, game_state[0]):
+            if is_square_attacked(piece_bbs, occupancy_bbs, int(king_sq), int(game_state[0])):
                 unmake_move(piece_bbs, occupancy_bbs, game_state, move, unmake_info)
                 _diag_add(search_context, DIAG_Q_ILLEGAL_SKIP)
                 continue
@@ -1010,7 +1021,11 @@ def quiescence_search(piece_bbs, occupancy_bbs, game_state, alpha, beta, ply, se
     tt_static_eval_to_store = np.int16(32767)
     if not is_currently_in_check and stand_pat != 32767:
         tt_static_eval_to_store = np.int16(stand_pat)
-    store_tt(search_context.transposition_table, tt_key, 0, tt_score, tt_static_eval_to_store, tt_flag, best_move, search_context.tt_generation, False)
+    store_tt(
+        search_context.transposition_table, tt_key, int(_i32(0)), int(tt_score),
+        tt_static_eval_to_store, int(tt_flag), np.uint16(best_move),
+        search_context.tt_generation, _b_false(),
+    )
 
     return np.int32(best_eval), q_nodes
 
@@ -1100,7 +1115,11 @@ def get_next_move(
                         and SEE_PIECE_VALUES[vic_type % 6] >= SEE_PIECE_VALUES[att_type % 6]):
                     is_good = True
                 else:
-                    is_good = _see_ge_jit(piece_bbs, occupancy_bbs, side_to_move, c_from, c_to, 0, pinned_white, pinned_black, att_type, vic_type, get_promotion_piece(candidate_move) + 1)
+                    is_good = _see_ge_jit(
+                        piece_bbs, occupancy_bbs, int(side_to_move), int(c_from), int(c_to),
+                        int(_i32(0)), pinned_white, pinned_black,
+                        int(_i32(att_type)), int(_i32(vic_type)), int(_i32(get_promotion_piece(candidate_move) + 1)),
+                    )
                 
                 if is_good:
                     move = candidate_move
@@ -1137,7 +1156,7 @@ def get_next_move(
             )
             
             # Sort good quiets (score >= GOOD_QUIET_THRESHOLD) to the front. Bad quiets (score < GOOD_QUIET_THRESHOLD) remain at the back.
-            num_sorted = partial_insertion_sort_moves(moves, scores, captures_end, search_context.mp_quiets_end[ply], GOOD_QUIET_THRESHOLD)
+            partial_insertion_sort_moves(moves, scores, captures_end, search_context.mp_quiets_end[ply], GOOD_QUIET_THRESHOLD)
             
             search_context.mp_current_idx[ply] = captures_end
             search_context.mp_stage[ply] = STAGE_GOOD_QUIETS
@@ -1309,8 +1328,6 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
     # ==========================================
     # PHASE 2: Transposition Table Probe
     # ==========================================
-    moves_generated = False
-
     tt_move = NO_MOVE
     tt_key = get_tt_key(zobrist_key, halfmove_clock)  # GHI: halfmove-aware key for TT
     tt_flag, tt_depth, tt_score_raw, tt_static_eval_raw, tt_is_pv, tt_move_raw = probe_tt_snapshot(
@@ -1389,7 +1406,7 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                                 unmake_info = make_move(piece_bbs, occupancy_bbs, game_state, tt_move)
                                 king_bb = piece_bbs[5] if (1 - game_state[0]) == 0 else piece_bbs[11]
                                 king_sq = get_lsb_index(king_bb) if king_bb else 0
-                                if not is_square_attacked(piece_bbs, occupancy_bbs, king_sq, game_state[0]):
+                                if not is_square_attacked(piece_bbs, occupancy_bbs, int(king_sq), int(game_state[0])):
                                     child_zobrist_key = game_state[4]
                                     child_halfmove_clock = int(game_state[3])
                                     child_tt_key = get_tt_key(child_zobrist_key, child_halfmove_clock)
@@ -1549,13 +1566,6 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
             if prior_reduction >= HINDSIGHT_INCREASE_MIN_PRIOR and depth >= 2:
                 if static_score + parent_eval > HINDSIGHT_EVAL_SUM_MARGIN:
                     depth -= 1
-
-    if depth <= 0:
-        search_context.pv_table[ply, ply] = NO_MOVE
-        eval_score, q_nodes = quiescence_search(
-            piece_bbs, occupancy_bbs, game_state, alpha, beta, ply, search_context, _i32(0)
-        )
-        return (np.int32(eval_score), NO_MOVE, nodes_searched, q_nodes, tt_hits)
 
     # --- Dissonance Calculation (DGP Algorithm) ---
     dissonance = 0
@@ -1931,7 +1941,11 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                 # SEE filter: only try captures whose SEE >= probcut_beta - static_eval
                 see_threshold_pc = probcut_beta - static_score if static_score != -INFINITY else 0
                 _diag_add(search_context, DIAG_PROBCUT_SEE_TRY)
-                if not _see_ge_jit(piece_bbs, occupancy_bbs, game_state[0], pc_from, pc_to, see_threshold_pc, pc_pinned_w, pc_pinned_b, -1, -1, get_promotion_piece(pc_move) + 1):
+                if not _see_ge_jit(
+                    piece_bbs, occupancy_bbs, int(game_state[0]), int(pc_from), int(pc_to),
+                    int(_i32(see_threshold_pc)), pc_pinned_w, pc_pinned_b,
+                    int(_i32(-1)), int(_i32(-1)), int(_i32(get_promotion_piece(pc_move) + 1)),
+                ):
                     continue
     
                 pc_original_side = game_state[0]
@@ -1940,7 +1954,7 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                 # Legality check
                 pc_king_bb = piece_bbs[5] if (1 - game_state[0]) == 0 else piece_bbs[11]
                 pc_king_sq = get_lsb_index(pc_king_bb) if pc_king_bb else 0
-                if is_square_attacked(piece_bbs, occupancy_bbs, pc_king_sq, game_state[0]):
+                if is_square_attacked(piece_bbs, occupancy_bbs, int(pc_king_sq), int(game_state[0])):
                     unmake_move(piece_bbs, occupancy_bbs, game_state, pc_move, pc_unmake)
                     continue
     
@@ -1998,7 +2012,11 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                     if tt_store_score_pc > MATE_IN_MAX_PLY: tt_store_score_pc += ply
                     elif tt_store_score_pc < -MATE_IN_MAX_PLY: tt_store_score_pc -= ply
                     pc_tt_depth = max(1, depth - probcut_r + 1)
-                    store_tt(search_context.transposition_table, tt_key, pc_tt_depth, tt_store_score_pc, np.int16(32767), TT_FLAG_BETA, pc_move, search_context.tt_generation, tt_pv)
+                    store_tt(
+                        search_context.transposition_table, tt_key, int(_i32(pc_tt_depth)),
+                        int(tt_store_score_pc), np.int16(32767), int(_i32(TT_FLAG_BETA)),
+                        np.uint16(pc_move), search_context.tt_generation, bool(tt_pv),
+                    )
                     _diag_add(search_context, DIAG_PROBCUT)
                     return (np.int32(probcut_return_score), pc_move, nodes_searched, quiescence_nodes, tt_hits)
 
@@ -2020,18 +2038,26 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
     killer_1 = search_context.killer_moves[safe_ply*2]
     killer_2 = search_context.killer_moves[safe_ply*2+1]
 
-    # Optimization: Reuse pinned pieces from full evaluation or ProbCut if available
+    # Optimization: Reuse pinned pieces from full evaluation or ProbCut if available;
+    # otherwise compute only our pinned pieces now and defer opponent pin/check
+    # geometry until a non-TT move is actually needed (skips TT-cutoff & Multi-Cut nodes).
+    side_to_move_s = game_state[0]
+    opponent_side_s = np.uint8(1 - side_to_move_s)
     if cached_pinned_white != PINNED_UNCOMPUTED_SENTINEL:
         pinned_white = cached_pinned_white
         pinned_black = cached_pinned_black
+        their_pin_ready = True
     else:
-        pinned_white = get_pinned_pieces(piece_bbs, occupancy_bbs, WHITE)
-        pinned_black = get_pinned_pieces(piece_bbs, occupancy_bbs, BLACK)
+        if side_to_move_s == WHITE:
+            pinned_white = get_pinned_pieces(piece_bbs, occupancy_bbs, WHITE)
+            pinned_black = np.uint64(0)
+        else:
+            pinned_white = np.uint64(0)
+            pinned_black = get_pinned_pieces(piece_bbs, occupancy_bbs, BLACK)
+        their_pin_ready = False
 
-    # --- Phase 2: Pre-compute check info for Pre-make Legality + O(1) Gives-Check ---
+    # --- Phase 2: Pre-compute our king info now; defer opponent check info past Move 1 ---
     _diag_add(search_context, DIAG_MAIN_GEOMETRY_NODE)
-    side_to_move_s = game_state[0]
-    opponent_side_s = np.uint8(1 - side_to_move_s)
     
     # Our king info (for pre-make legality)
     our_king_bb_s = piece_bbs[5] if side_to_move_s == WHITE else piece_bbs[11]
@@ -2076,20 +2102,16 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                 main_checkers_s | SQUARES_BETWEEN[our_king_sq_s, main_checker_sq_s]
             )
     
-    # Their king info (for O(1) gives-check detection)
-    their_king_bb_s = piece_bbs[11] if side_to_move_s == WHITE else piece_bbs[5]
-    their_king_sq_s = get_lsb_index(their_king_bb_s) if their_king_bb_s else np.int8(0)
-    
-    # Pre-compute check_squares: squares from which each piece type gives check
-    # Equivalent to SF18's set_check_info(): checkSquares[Pt] = attacks_bb<Pt>(ksq)
-    check_sq_pawn_s = PAWN_ATTACKS[side_to_move_s, their_king_sq_s]
-    check_sq_knight_s = KNIGHT_ATTACKS[their_king_sq_s]
-    check_sq_bishop_s = get_bishop_attacks(their_king_sq_s, all_occ_s)
-    check_sq_rook_s = get_rook_attacks(their_king_sq_s, all_occ_s)
-    check_sq_queen_s = check_sq_bishop_s | check_sq_rook_s
-    
-    # Pre-compute blockers_for_their_king (for discovered check detection)
-    blockers_for_their_king_s, _ = get_blockers_for_king(piece_bbs, occupancy_bbs, opponent_side_s)
+    # Opponent check info (populated lazily once we leave STAGE_TT_MOVE)
+    their_king_bb_s = np.uint64(0)
+    their_king_sq_s = np.int8(0)
+    check_sq_pawn_s = np.uint64(0)
+    check_sq_knight_s = np.uint64(0)
+    check_sq_bishop_s = np.uint64(0)
+    check_sq_rook_s = np.uint64(0)
+    check_sq_queen_s = np.uint64(0)
+    blockers_for_their_king_s = np.uint64(0)
+    their_check_ready = False
 
     best_move, max_eval = NO_MOVE, np.int32(-INFINITY)
     root_cand_valid = False
@@ -2127,16 +2149,47 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
     opponent_pieces_bb = occupancy_bbs[1] if game_state[0] == 0 else occupancy_bbs[0]
 
     while True:
-        move = get_next_move(
-            piece_bbs, occupancy_bbs, game_state, search_context, ply,
-            tt_move, excluded_move, killer_1, killer_2, counter_move,
-            pinned_white, pinned_black, pawn_key_idx,
-            is_currently_in_check, our_king_sq_s, our_king_bb_s,
-            opponent_side_s, pinned_us_s, main_checker_count_s,
-            main_evasion_targets_s,
-            check_sq_knight_s, check_sq_bishop_s, check_sq_rook_s,
-            check_sq_queen_s, check_sq_pawn_s,
-        )
+        move = NO_MOVE
+        if search_context.mp_stage[ply] == STAGE_TT_MOVE:
+            if tt_move != NO_MOVE and tt_move != excluded_move:
+                if is_move_pseudo_legal(piece_bbs, occupancy_bbs, game_state, tt_move):
+                    move = tt_move
+            search_context.mp_stage[ply] = STAGE_GEN_CAPTURES
+            if move != NO_MOVE and is_currently_in_check and search_context.diag_enabled:
+                _classify_and_diag_main_in_check_move(
+                    piece_bbs, occupancy_bbs, move,
+                    our_king_sq_s, our_king_bb_s,
+                    opponent_side_s, pinned_us_s,
+                    main_checker_count_s, main_evasion_targets_s,
+                    search_context,
+                )
+        if move == NO_MOVE:
+            if not their_pin_ready:
+                if side_to_move_s == WHITE:
+                    pinned_black = get_pinned_pieces(piece_bbs, occupancy_bbs, BLACK)
+                else:
+                    pinned_white = get_pinned_pieces(piece_bbs, occupancy_bbs, WHITE)
+                their_pin_ready = True
+            if not their_check_ready:
+                their_king_bb_s = piece_bbs[11] if side_to_move_s == WHITE else piece_bbs[5]
+                their_king_sq_s = get_lsb_index(their_king_bb_s) if their_king_bb_s else np.int8(0)
+                check_sq_pawn_s = PAWN_ATTACKS[side_to_move_s, their_king_sq_s]
+                check_sq_knight_s = KNIGHT_ATTACKS[their_king_sq_s]
+                check_sq_bishop_s = get_bishop_attacks(their_king_sq_s, all_occ_s)
+                check_sq_rook_s = get_rook_attacks(their_king_sq_s, all_occ_s)
+                check_sq_queen_s = check_sq_bishop_s | check_sq_rook_s
+                blockers_for_their_king_s, _ = get_blockers_for_king(piece_bbs, occupancy_bbs, opponent_side_s)
+                their_check_ready = True
+            move = get_next_move(
+                piece_bbs, occupancy_bbs, game_state, search_context, ply,
+                tt_move, excluded_move, killer_1, killer_2, counter_move,
+                pinned_white, pinned_black, pawn_key_idx,
+                is_currently_in_check, our_king_sq_s, our_king_bb_s,
+                opponent_side_s, pinned_us_s, main_checker_count_s,
+                main_evasion_targets_s,
+                check_sq_knight_s, check_sq_bishop_s, check_sq_rook_s,
+                check_sq_queen_s, check_sq_pawn_s,
+            )
         if move == NO_MOVE:
             break
         diag_picker_source_s = np.int32(MOVE_ORDER_SOURCE_OTHER)
@@ -2212,8 +2265,8 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                     skip_post_legality_s = True
                 elif flag == SPECIAL_MOVE_FLAG_CASTLING:
                     mid_sq_s = (from_sq + to_sq) >> 1
-                    if (is_square_attacked(piece_bbs, occupancy_bbs, mid_sq_s, opponent_side_s)
-                            or is_square_attacked(piece_bbs, occupancy_bbs, to_sq, opponent_side_s)):
+                    if (is_square_attacked(piece_bbs, occupancy_bbs, int(mid_sq_s), int(opponent_side_s))
+                            or is_square_attacked(piece_bbs, occupancy_bbs, int(to_sq), int(opponent_side_s))):
                         continue
                     skip_post_legality_s = True
 
@@ -2272,7 +2325,11 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                     threshold = threshold - cap_hist * search_context.tune[TUNE_CAP_SEE_HIST_NUM] // CAP_SEE_CAPTHIST_DEN
                 _diag_add(search_context, DIAG_MAIN_CAP_SEE_TRY)
                 cap_victim_see = -2 if flag == SPECIAL_MOVE_FLAG_EN_PASSANT else cap_victim
-                if not _see_ge_jit(piece_bbs, occupancy_bbs, side_to_move, from_sq, to_sq, threshold, pinned_white, pinned_black, cap_piece, cap_victim_see, get_promotion_piece(move) + 1):
+                if not _see_ge_jit(
+                    piece_bbs, occupancy_bbs, int(side_to_move), int(from_sq), int(to_sq),
+                    int(_i32(threshold)), pinned_white, pinned_black,
+                    int(_i32(cap_piece)), int(_i32(cap_victim_see)), int(_i32(get_promotion_piece(move) + 1)),
+                ):
                     pruned_moves += 1
                     _diag_add(search_context, DIAG_SEE_CAP_SKIP)
                     continue
@@ -2301,7 +2358,11 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                 if pre_move_gives_check:
                     threshold = search_context.tune[TUNE_SEE_CAP_MARGIN] * depth
                     _diag_add(search_context, DIAG_MAIN_CHECK_SEE_ROUTE)
-                    if flag != SPECIAL_MOVE_FLAG_CASTLING and not _see_ge_jit(piece_bbs, occupancy_bbs, side_to_move, from_sq, to_sq, threshold, pinned_white, pinned_black, see_piece, -2):
+                    if flag != SPECIAL_MOVE_FLAG_CASTLING and not _see_ge_jit(
+                        piece_bbs, occupancy_bbs, int(side_to_move), int(from_sq), int(to_sq),
+                        int(_i32(threshold)), pinned_white, pinned_black,
+                        int(_i32(see_piece)), int(_i32(-2)), int(_i32(QUEEN)),
+                    ):
                         pruned_moves += 1
                         continue
                 else:
@@ -2424,6 +2485,7 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                         continue
 
                     # --- Step 14c: Futility Pruning (FP) ---
+                    fp_lmr_d = np.int32(-1)
                     if (search_context.enable_fp and depth <= FP_MAX_DEPTH
                             and tt_refined_eval != -INFINITY):
                         fp_lmr_d = compute_quiet_pruning_lmr_depth(
@@ -2461,16 +2523,24 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                                 continue
 
                     # --- Step 14d: Quiet SEE Pruning ---
-                    see_lmr_d = compute_quiet_pruning_lmr_depth(
-                        depth, quiet_move_counter, improving, search_context, ply,
-                        from_sq, to_sq, see_piece,
+                    see_lmr_d = (
+                        fp_lmr_d
+                        if fp_lmr_d >= 0
+                        else compute_quiet_pruning_lmr_depth(
+                            depth, quiet_move_counter, improving, search_context, ply,
+                            from_sq, to_sq, see_piece,
+                        )
                     )
                     threshold = (
                         search_context.tune[TUNE_SEE_QUIET_MARGIN]
                         * see_lmr_d * see_lmr_d
                     )
                     _diag_add(search_context, DIAG_MAIN_QUIET_SEE_TRY)
-                    if flag != SPECIAL_MOVE_FLAG_CASTLING and not _see_ge_jit(piece_bbs, occupancy_bbs, side_to_move, from_sq, to_sq, threshold, pinned_white, pinned_black, see_piece, -2):
+                    if flag != SPECIAL_MOVE_FLAG_CASTLING and not _see_ge_jit(
+                        piece_bbs, occupancy_bbs, int(side_to_move), int(from_sq), int(to_sq),
+                        int(_i32(threshold)), pinned_white, pinned_black,
+                        int(_i32(see_piece)), int(_i32(-2)), int(_i32(QUEEN)),
+                    ):
                         pruned_moves += 1
                         _diag_add(search_context, DIAG_SEE_QUIET_SKIP)
                         continue
@@ -2509,8 +2579,8 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                 skip_post_legality_s = True
             elif flag == SPECIAL_MOVE_FLAG_CASTLING:
                 mid_sq_s = (from_sq + to_sq) >> 1
-                if (is_square_attacked(piece_bbs, occupancy_bbs, mid_sq_s, opponent_side_s)
-                        or is_square_attacked(piece_bbs, occupancy_bbs, to_sq, opponent_side_s)):
+                if (is_square_attacked(piece_bbs, occupancy_bbs, int(mid_sq_s), int(opponent_side_s))
+                        or is_square_attacked(piece_bbs, occupancy_bbs, int(to_sq), int(opponent_side_s))):
                     continue
                 skip_post_legality_s = True
 
@@ -2526,9 +2596,9 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
             if move == tt_move:
                 _diag_add(search_context, DIAG_LMR_CAP_SEE_TRY)
                 is_bad_capture = not _see_ge_jit(
-                    piece_bbs, occupancy_bbs, original_side,
-                    from_sq, to_sq, 0, pinned_white, pinned_black,
-                    -1, -1, get_promotion_piece(move) + 1,
+                    piece_bbs, occupancy_bbs, int(original_side),
+                    int(from_sq), int(to_sq), int(_i32(0)), pinned_white, pinned_black,
+                    int(_i32(-1)), int(_i32(-1)), int(_i32(get_promotion_piece(move) + 1)),
                 )
             else:
                 is_bad_capture = (search_context.mp_stage[ply] == STAGE_BAD_CAPTURES)
@@ -2635,79 +2705,11 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
         if not skip_post_legality_s:
             post_king_bb = piece_bbs[5] if (1 - game_state[0]) == 0 else piece_bbs[11]
             post_king_sq = get_lsb_index(post_king_bb) if post_king_bb else 0
-            if is_square_attacked(piece_bbs, occupancy_bbs, post_king_sq, game_state[0]):
+            if is_square_attacked(piece_bbs, occupancy_bbs, int(post_king_sq), int(game_state[0])):
                 if quiet_see_passed_s:
                     _diag_add(search_context, DIAG_MAIN_QUIET_FALLBACK_REJECT)
                 unmake_move(piece_bbs, occupancy_bbs, game_state, move, unmake_info)
                 continue
-        
-        # --- O(1) Gives-Check Detection (SF18-style) ---
-        is_giving_check_after_move = False
-        
-        # 1. Direct check: does the moved piece land on a check square?
-        to_bb_s = BB_SQUARES[to_sq]
-        base_piece_type = moved_piece_type % 6 if moved_piece_type != -1 else -1
-        
-        if base_piece_type == PAWN:
-            if is_promotion:
-                # Promotion changes occupancy (pawn removed, new piece appears),
-                # so pre-computed slider check_squares may be inaccurate.
-                # Knight promotion is a leaper — always correct with O(1).
-                # For slider promotions, use post-make is_square_attacked.
-                promo_piece = get_promotion_piece(move)
-                if promo_piece == PROMO_KNIGHT:
-                    if check_sq_knight_s & to_bb_s:
-                        is_giving_check_after_move = True
-                else:
-                    # Queen/Rook/Bishop promotion: post-make check for correctness
-                    their_king_bb_promo = piece_bbs[11] if original_side == WHITE else piece_bbs[5]
-                    their_king_sq_promo = get_lsb_index(their_king_bb_promo) if their_king_bb_promo else 0
-                    if is_square_attacked(piece_bbs, occupancy_bbs, their_king_sq_promo, original_side):
-                        is_giving_check_after_move = True
-            else:
-                if check_sq_pawn_s & to_bb_s:
-                    is_giving_check_after_move = True
-        elif base_piece_type == KNIGHT:
-            if check_sq_knight_s & to_bb_s:
-                is_giving_check_after_move = True
-        elif base_piece_type == BISHOP:
-            if check_sq_bishop_s & to_bb_s:
-                is_giving_check_after_move = True
-        elif base_piece_type == ROOK:
-            if check_sq_rook_s & to_bb_s:
-                is_giving_check_after_move = True
-        elif base_piece_type == QUEEN:
-            if check_sq_queen_s & to_bb_s:
-                is_giving_check_after_move = True
-        
-        # 2. Discovered check: if the moved piece was blocking a slider ray to their king
-        if not is_giving_check_after_move:
-            from_bb_dc = BB_SQUARES[from_sq]
-            if blockers_for_their_king_s & from_bb_dc:
-                # The piece was blocking a ray to their king.
-                # If it moved off that ray, it's a discovered check.
-                if not (LINE_BB[from_sq, to_sq] & their_king_bb_s):
-                    is_giving_check_after_move = True
-        
-        # 3. Special case: EP discovered check through the captured pawn
-        if not is_giving_check_after_move and flag == SPECIAL_MOVE_FLAG_EN_PASSANT:
-            # The captured pawn is removed — this could open a rank for slider attacks
-            # Use a post-make check for this rare case
-            # Note: after make_move, game_state[0] has flipped to opponent.
-            # We want to check if THEIR king is attacked by OUR side (original_side).
-            their_king_bb_post = piece_bbs[11] if original_side == WHITE else piece_bbs[5]
-            their_king_sq_post = get_lsb_index(their_king_bb_post) if their_king_bb_post else 0
-            if is_square_attacked(piece_bbs, occupancy_bbs, their_king_sq_post, original_side):
-                is_giving_check_after_move = True
-        
-        # 4. Special case: Castling gives check via the rook's final position
-        #    Use post-make is_square_attacked since occupancy changes after castling
-        #    (both king and rook move). Castling is rare so this is negligible overhead.
-        if not is_giving_check_after_move and flag == SPECIAL_MOVE_FLAG_CASTLING:
-            their_king_bb_castle = piece_bbs[11] if original_side == WHITE else piece_bbs[5]
-            their_king_sq_castle = get_lsb_index(their_king_bb_castle) if their_king_bb_castle else 0
-            if is_square_attacked(piece_bbs, occupancy_bbs, their_king_sq_castle, original_side):
-                is_giving_check_after_move = True
             
         legal_moves_tried += 1
 
@@ -2838,12 +2840,6 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                         all_node = not is_pv and not cut_node
                         if all_node:
                             r += LMR_ALLNODE_EXTRA  # All-node extra (SF: 1143)
-                    elif move == tt_move:
-                        r = max(
-                            LMR_R_FLOOR,
-                            r - search_context.tune[TUNE_LMR_TTMOVE_RED]
-                            + LMR_TTMOVE_CUTNODE_EXTRA * (1 if cut_node else 0),
-                        )
 
                     # History adjustment
                     if is_quiet_move:
@@ -2877,7 +2873,65 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                     d = max(1, min(search_depth - trunc_div(r, 1024), search_depth + LMR_D_MAX_EXTRA))
                     lmr = search_depth - d
 
-                    # Clamping & Safeguards
+                    # Clamping & Safeguards (compute gives-check lazily ONLY when lmr > 0)
+                    is_giving_check_after_move = False
+                    if lmr > 0:
+                        if not their_check_ready:
+                            their_king_bb_s = piece_bbs[11] if side_to_move_s == WHITE else piece_bbs[5]
+                            their_king_sq_s = get_lsb_index(their_king_bb_s) if their_king_bb_s else np.int8(0)
+                            check_sq_pawn_s = PAWN_ATTACKS[side_to_move_s, their_king_sq_s]
+                            check_sq_knight_s = KNIGHT_ATTACKS[their_king_sq_s]
+                            check_sq_bishop_s = get_bishop_attacks(their_king_sq_s, all_occ_s)
+                            check_sq_rook_s = get_rook_attacks(their_king_sq_s, all_occ_s)
+                            check_sq_queen_s = check_sq_bishop_s | check_sq_rook_s
+                            blockers_for_their_king_s, _ = get_blockers_for_king(piece_bbs, occupancy_bbs, opponent_side_s)
+                            their_check_ready = True
+                        to_bb_s = BB_SQUARES[to_sq]
+                        base_piece_type = moved_piece_type % 6 if moved_piece_type != -1 else -1
+                        if base_piece_type == PAWN:
+                            if is_promotion:
+                                promo_piece = get_promotion_piece(move)
+                                if promo_piece == PROMO_KNIGHT:
+                                    if check_sq_knight_s & to_bb_s:
+                                        is_giving_check_after_move = True
+                                else:
+                                    their_king_bb_promo = piece_bbs[11] if original_side == WHITE else piece_bbs[5]
+                                    their_king_sq_promo = get_lsb_index(their_king_bb_promo) if their_king_bb_promo else 0
+                                    if is_square_attacked(piece_bbs, occupancy_bbs, int(their_king_sq_promo), int(original_side)):
+                                        is_giving_check_after_move = True
+                            else:
+                                if check_sq_pawn_s & to_bb_s:
+                                    is_giving_check_after_move = True
+                        elif base_piece_type == KNIGHT:
+                            if check_sq_knight_s & to_bb_s:
+                                is_giving_check_after_move = True
+                        elif base_piece_type == BISHOP:
+                            if check_sq_bishop_s & to_bb_s:
+                                is_giving_check_after_move = True
+                        elif base_piece_type == ROOK:
+                            if check_sq_rook_s & to_bb_s:
+                                is_giving_check_after_move = True
+                        elif base_piece_type == QUEEN:
+                            if check_sq_queen_s & to_bb_s:
+                                is_giving_check_after_move = True
+
+                        if not is_giving_check_after_move:
+                            if blockers_for_their_king_s & BB_SQUARES[from_sq]:
+                                if not (LINE_BB[from_sq, to_sq] & their_king_bb_s):
+                                    is_giving_check_after_move = True
+
+                        if not is_giving_check_after_move and flag == SPECIAL_MOVE_FLAG_EN_PASSANT:
+                            their_king_bb_post = piece_bbs[11] if original_side == WHITE else piece_bbs[5]
+                            their_king_sq_post = get_lsb_index(their_king_bb_post) if their_king_bb_post else 0
+                            if is_square_attacked(piece_bbs, occupancy_bbs, int(their_king_sq_post), int(original_side)):
+                                is_giving_check_after_move = True
+
+                        if not is_giving_check_after_move and flag == SPECIAL_MOVE_FLAG_CASTLING:
+                            their_king_bb_castle = piece_bbs[11] if original_side == WHITE else piece_bbs[5]
+                            their_king_sq_castle = get_lsb_index(their_king_bb_castle) if their_king_bb_castle else 0
+                            if is_square_attacked(piece_bbs, occupancy_bbs, int(their_king_sq_castle), int(original_side)):
+                                is_giving_check_after_move = True
+
                     if is_giving_check_after_move:
                         lmr = max(0, lmr - 1)
 
@@ -3038,16 +3092,16 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                 best_moved_piece = np.int8(moved_piece_type)
                 best_is_capture = is_capture
                 best_victim_type = np.int8(unmake_info[1] % 6) if (is_capture and unmake_info[1] != -1) else np.int8(-1)
-                search_context.pv_table[ply, ply] = move
-                
-                i = ply + 1
-                if ply + 1 < MAX_PLY:
-                    j = ply + 1
-                    while j < MAX_PLY and search_context.pv_table[ply + 1, j] != NO_MOVE:
-                        search_context.pv_table[ply, i] = search_context.pv_table[ply + 1, j]
-                        i += 1; j += 1
-                
-                if i < MAX_PLY: search_context.pv_table[ply, i] = NO_MOVE
+                if is_pv:
+                    search_context.pv_table[ply, ply] = move
+                    i = ply + 1
+                    if ply + 1 < MAX_PLY:
+                        j = ply + 1
+                        while j < MAX_PLY and search_context.pv_table[ply + 1, j] != NO_MOVE:
+                            search_context.pv_table[ply, i] = search_context.pv_table[ply + 1, j]
+                            i += 1; j += 1
+                    if i < MAX_PLY:
+                        search_context.pv_table[ply, i] = NO_MOVE
 
         # Alpha-raise depth reduction (SF18 spirit): after a non-fail-high improvement,
         # remaining siblings at this node use shallower depth. Applies on PV too
@@ -3486,7 +3540,11 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
         search_context.tt_pv_stack[ply] = tt_pv
 
     if not is_exclusion_search:
-        store_tt(search_context.transposition_table, tt_key, depth, tt_score, tt_static_eval_to_store, final_flag, best_move, search_context.tt_generation, tt_pv)
+        store_tt(
+            search_context.transposition_table, tt_key, int(_i32(depth)), int(tt_score),
+            tt_static_eval_to_store, int(final_flag), np.uint16(best_move),
+            search_context.tt_generation, bool(tt_pv),
+        )
 
     ret_best_move = root_cand_move if (ply == 0 and root_cand_valid) else best_move
     return (np.int32(max_eval), np.uint16(ret_best_move), nodes_searched, quiescence_nodes, tt_hits)
@@ -4183,8 +4241,8 @@ def format_search_diagnostics(search_context, total_nodes=0, q_nodes=0) -> str:
 
 
 @numba.njit(cache=True, nogil=True, boundscheck=False, fastmath=True)
-def _prepare_search_context_jit(search_context, game_history_arr, game_history_count, tt_generation):
-    """Prepare a thread-local SearchContext for a new root search completely inside nogil JIT."""
+def _age_history_tables_jit(search_context):
+    """Age all history tables in-place using integer trunc_div(..., 2) without float64 temporaries."""
     ht = search_context.history_table
     for i in range(ht.shape[0]):
         for j in range(ht.shape[1]):
@@ -4221,6 +4279,12 @@ def _prepare_search_context_jit(search_context, game_history_arr, game_history_c
     for i in range(lph.shape[0]):
         for j in range(lph.shape[1]):
             lph[i, j] = np.int16(trunc_div(lph[i, j], 2))
+
+
+@numba.njit(cache=True, nogil=True, boundscheck=False, fastmath=True)
+def _prepare_search_context_jit(search_context, game_history_arr, game_history_count, tt_generation):
+    """Prepare a thread-local SearchContext for a new root search completely inside nogil JIT."""
+    _age_history_tables_jit(search_context)
 
     if search_context.diag_enabled:
         search_context.diag_stats.fill(0)
@@ -4813,15 +4877,8 @@ def iterative_deepening_search(
 ):
     start_time = time.time()
     
-    # --- Age history tables (Phase 1a: ÷2; Phase 2 soft-age rolled back) ---
-    # Python's // 2 is floor division: -1 // 2 = -1 (sticks forever).
-    # np.divide(..., out=..., casting='unsafe') truncates towards zero.
-    np.divide(search_context.history_table, 2, out=search_context.history_table, casting='unsafe')
-    np.divide(search_context.butterfly_history, 2, out=search_context.butterfly_history, casting='unsafe')
-    np.divide(search_context.capture_history, 2, out=search_context.capture_history, casting='unsafe')
-    np.divide(search_context.pawn_history, 2, out=search_context.pawn_history, casting='unsafe')
-    np.divide(search_context.continuation_history, 2, out=search_context.continuation_history, casting='unsafe')
-    np.divide(search_context.low_ply_history, 2, out=search_context.low_ply_history, casting='unsafe')
+    # --- Age history tables (Phase 1a: ÷2 via JIT trunc_div; avoids float64 np.divide allocs) ---
+    _age_history_tables_jit(search_context)
     # Fresh diagnostics each root search (not aged)
     if search_context.diag_enabled:
         search_context.diag_stats[:] = 0

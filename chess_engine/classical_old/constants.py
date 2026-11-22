@@ -438,7 +438,6 @@ ROOK_ON_QUEEN_FILE = np.array([4, 3], dtype=np.int32)
 WEAK_QUEEN = np.array([21, 2], dtype=np.int32)
 SCALE_FACTOR_NORMAL = 64              # Normal scaling (64/64 = 1.0) / 正常殘局縮放因子（無縮減）
 SCALE_FACTOR_DRAW = 0                 # Scaling for forced draw positions (0/64 = 0.0) / 強制和棋局面縮放因子
-SCALE_FACTOR_KRPKR_FORTRESS = 8       # King + Rook + Pawn vs King + Rook (fortress) / 王車兵對王車堡壘局面縮放因子
 
 # =============================================================================
 # --- Material Imbalance Polynomial Matrix (SF11 material.cpp) ---
@@ -758,9 +757,6 @@ HISTORY_LPH_SCALE_DEN = 1024
 CHECK_BONUS = 20000
 CHECK_SEE_THRESHOLD = -84  # Rescaled x1.134 for MG_MATERIAL_VALUES SEE (was -75)
 ENABLE_CHECK_SEE_GATE = True
-
-# Capture history victim dimension: piece type 0..5 (SF CapturePieceToHistory)
-CAPTURE_HISTORY_VICTIM_TYPES = 6
 
 # History prune threshold. More negative = harder to prune.
 # E3: -4000→-4500 kept; E12/H5: -4500→-5000 kept (2026-07-17).

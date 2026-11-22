@@ -1227,6 +1227,13 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
     tt_hits = np.uint64(0)
     is_exclusion_search = excluded_move != NO_MOVE
 
+    # Bug #4: per-ply stack buffers (follow_pv/reduction/cutoff_cnt/...) have length MAX_PLY and
+    # this function also touches [ply + 1] / [ply + 2]; boundscheck=False turns those into silent
+    # OOB writes. Guard BEFORE any per-ply stack access; MAX_PLY - 1 keeps every child index valid.
+    if ply >= MAX_PLY - 1:
+        eval_score, _, _ = _evaluate_position_jit(piece_bbs, occupancy_bbs, game_state, False, search_context)
+        return (np.int32(eval_score), NO_MOVE, nodes_searched, quiescence_nodes, tt_hits)
+
     if ply == 0:
         search_context.cutoff_cnt[0] = 0
         search_context.cutoff_cnt[1] = 0
@@ -1262,10 +1269,6 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
             search_context.stop_flag[0] = True
         if search_context.stop_flag[0]:
             return (np.int32(0), NO_MOVE, nodes_searched, quiescence_nodes, tt_hits)
-
-    if ply >= MAX_PLY:
-        eval_score, _, _ = _evaluate_position_jit(piece_bbs, occupancy_bbs, game_state, False, search_context)
-        return (np.int32(eval_score), NO_MOVE, nodes_searched, quiescence_nodes, tt_hits)
 
     search_context.pv_table[ply, ply] = NO_MOVE
 
