@@ -169,47 +169,56 @@ def _inject_theta_arg(text: str, func_names: list[str]) -> str:
     return "".join(out)
 
 
-def _fix_numba_signatures(text: str) -> str:
-    """Append numba.float64[:] for theta to common njit signatures when present."""
-    # Broad approach: for @numba.njit(...(...)) lines that decorate our tuned
-    # functions, inject theta type if missing. Heuristic: any signature tuple
-    # that ends with ')' before ', cache' — inject before final ')'.
+def _fix_numba_signatures(text: str, func_names: list[str] | set[str] = ()) -> str:
+    """Append numba.float64[:] for theta to njit signatures of theta-injected functions."""
+    allowed = set(func_names)
+
     def inject(sig_line: str) -> str:
         if "float64[:]" in sig_line or "theta" in sig_line:
             return sig_line
         # Only touch signatures that look like function type specs
         if "numba." not in sig_line or "(" not in sig_line:
             return sig_line
-        # Insert before the last ')' that closes the parameter type list of the
-        # function signature (not the njit call). Pattern: ...)(TYPES)
-        # Example: @numba.njit(numba.int32(...types...), cache=True)
         m = re.match(
             r"(@numba\.njit\()(.*)(\).*)$",
             sig_line.strip(),
         )
         if not m:
             return sig_line
-        # Find the innermost parameter type list of the return-type(args) form
         core = m.group(2)
-        # Inject before the last ')' of core if core has a function type
         if "cache" in sig_line and "(" in core:
-            # Find last ')' before ', cache' or end inside njit args
-            # Simpler: replace ", cache=" / ", boundscheck" — inject into the
-            # type signature preceding first keyword arg.
             kw = re.search(r",\s*cache\s*=", sig_line)
             if not kw:
                 return sig_line
             head = sig_line[: kw.start()]
             tail = sig_line[kw.start() :]
             if head.rstrip().endswith(")"):
-                # insert before last )
                 idx = head.rfind(")")
                 head = head[:idx] + ", numba.float64[:]" + head[idx:]
                 return head + tail
         return sig_line
 
     lines = text.splitlines(True)
-    return "".join(inject(line) if line.lstrip().startswith("@numba.njit") else line for line in lines)
+    out = []
+    n = len(lines)
+    for idx, line in enumerate(lines):
+        if line.lstrip().startswith("@numba.njit"):
+            def_name = None
+            j = idx + 1
+            while j < n:
+                nxt = lines[j].lstrip()
+                if nxt == "" or nxt.startswith("@") or nxt.startswith("#"):
+                    j += 1
+                    continue
+                m_def = re.match(r"def\s+(\w+)\s*\(", nxt)
+                if m_def:
+                    def_name = m_def.group(1)
+                break
+            if def_name in allowed:
+                out.append(inject(line))
+                continue
+        out.append(line)
+    return "".join(out)
 
 
 def build() -> str:
@@ -297,7 +306,6 @@ def get_2d_val(theta, base_idx, row, col_size, col):
         "_evaluate_attacks_mobility_threats_ew",
         "evaluate_attacks_mobility_threats",
         "_evaluate_space_ew",
-        "evaluate_space",
         "_evaluate_king_pawn_endgame",
         "_process_piece_score_and_count",
         "_evaluate_king_attackers",
@@ -308,7 +316,7 @@ def get_2d_val(theta, base_idx, row, col_size, col):
     existing = [f for f in funcs if re.search(rf"def {f}\(", combined)]
     combined = _inject_theta_arg(combined, existing)
     combined = _apply_theta_rewrites(combined, meta)
-    combined = _fix_numba_signatures(combined)
+    combined = _fix_numba_signatures(combined, existing)
 
     # Entry points (njit so SPSA compute_mse can call it from nopython)
     combined = combined.replace(

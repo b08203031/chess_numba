@@ -330,7 +330,11 @@ class TestSearchCoreContracts(unittest.TestCase):
         self.assertIn('elif victim_type == -2:', see)
         quiet_see_start = search.index('# --- Step 14d: Quiet SEE Pruning ---')
         quiet_see_end = search.index('# --- Pre-make Legality Fast Path', quiet_see_start)
-        self.assertIn('see_piece, -2)', search[quiet_see_start:quiet_see_end])
+        quiet_see_body = search[quiet_see_start:quiet_see_end]
+        self.assertTrue(
+            'see_piece, -2)' in quiet_see_body
+            or 'int(_i32(see_piece)), int(_i32(-2))' in quiet_see_body
+        )
 
         # 4. Staged captures + quiets must never duplicate non-capture promotions
         for fen in (

@@ -221,19 +221,10 @@ def _precompute_pawn_attacks():
 _precompute_pawn_attacks()
 
 
-
-GLOBAL_ATTACK_TABLES = (
-    PAWN_ATTACKS, KNIGHT_ATTACKS, KING_ATTACKS,
-    BISHOP_MASKS, ROOK_MASKS, BISHOP_MAGIC_NUMBERS, ROOK_MAGIC_NUMBERS,
-    BISHOP_RELEVANT_BITS, ROOK_RELEVANT_BITS,
-    BISHOP_ATTACKS, ROOK_ATTACKS, ROOK_ATTACK_OFFSETS,
-    SQUARES_BETWEEN, ROOK_RAYS, BISHOP_RAYS
+@numba.njit(
+    numba.boolean(piece_bbs_signature, occupancy_bbs_signature, numba.int64, numba.int64),
+    cache=True, boundscheck=False, fastmath=True,
 )
-
-
-
-
-@numba.njit(cache=True, boundscheck=False, fastmath=True)
 def is_square_attacked(piece_bbs, occupancy_bbs, sq, attacker_side):
     """
     Checks if a given square is attacked by the specified side.
@@ -265,88 +256,10 @@ def is_square_attacked(piece_bbs, occupancy_bbs, sq, attacker_side):
         
     return False
 
-@numba.njit(cache=True, boundscheck=False, fastmath=True)
-def check_legality_and_gives_check(piece_bbs, occupancy_bbs, our_king_sq, their_king_sq, our_side):
-    """
-    Combined function to check:
-    1. Is the move legal? (our_king_sq is NOT attacked by 1 - our_side)
-    2. Does the move give check? (their_king_sq IS attacked by our_side)
-    Returns (is_legal, gives_check) as explicit booleans.
-    """
-    all_pieces_bb = occupancy_bbs[2]
-    
-    if our_side == WHITE:
-        # Our side is WHITE, opponent is BLACK
-        bp, bn, bb, br, bq, bk = piece_bbs[6], piece_bbs[7], piece_bbs[8], piece_bbs[9], piece_bbs[10], piece_bbs[11]
-        
-        # 1. Check Legality (Is our king attacked by black?)
-        is_legal = True
-        if PAWN_ATTACKS[BLACK, our_king_sq] & bp:
-            is_legal = False
-        elif KING_ATTACKS[our_king_sq] & bk:
-            is_legal = False
-        elif KNIGHT_ATTACKS[our_king_sq] & bn:
-            is_legal = False
-        elif ((bb | bq) & BISHOP_RAYS[our_king_sq]) and (get_bishop_attacks(our_king_sq, all_pieces_bb) & (bb | bq)):
-            is_legal = False
-        elif ((br | bq) & ROOK_RAYS[our_king_sq]) and (get_rook_attacks(our_king_sq, all_pieces_bb) & (br | bq)):
-            is_legal = False
-            
-        if not is_legal:
-            return False, False
-        
-        # 2. Check Gives Check (Is their king attacked by white?)
-        wp, wn, wb, wr, wq, wk = piece_bbs[0], piece_bbs[1], piece_bbs[2], piece_bbs[3], piece_bbs[4], piece_bbs[5]
-        gives_check = False
-        if PAWN_ATTACKS[WHITE, their_king_sq] & wp:
-            gives_check = True
-        elif KING_ATTACKS[their_king_sq] & wk:
-            gives_check = True
-        elif KNIGHT_ATTACKS[their_king_sq] & wn:
-            gives_check = True
-        elif ((wb | wq) & BISHOP_RAYS[their_king_sq]) and (get_bishop_attacks(their_king_sq, all_pieces_bb) & (wb | wq)):
-            gives_check = True
-        elif ((wr | wq) & ROOK_RAYS[their_king_sq]) and (get_rook_attacks(their_king_sq, all_pieces_bb) & (wr | wq)):
-            gives_check = True
-            
-        return True, gives_check
-    else:
-        # Our side is BLACK, opponent is WHITE
-        wp, wn, wb, wr, wq, wk = piece_bbs[0], piece_bbs[1], piece_bbs[2], piece_bbs[3], piece_bbs[4], piece_bbs[5]
-        
-        # 1. Check Legality (Is our king attacked by white?)
-        is_legal = True
-        if PAWN_ATTACKS[WHITE, our_king_sq] & wp:
-            is_legal = False
-        elif KING_ATTACKS[our_king_sq] & wk:
-            is_legal = False
-        elif KNIGHT_ATTACKS[our_king_sq] & wn:
-            is_legal = False
-        elif ((wb | wq) & BISHOP_RAYS[our_king_sq]) and (get_bishop_attacks(our_king_sq, all_pieces_bb) & (wb | wq)):
-            is_legal = False
-        elif ((wr | wq) & ROOK_RAYS[our_king_sq]) and (get_rook_attacks(our_king_sq, all_pieces_bb) & (wr | wq)):
-            is_legal = False
-            
-        if not is_legal:
-            return False, False
-        
-        # 2. Check Gives Check (Is their king attacked by black?)
-        bp, bn, bb, br, bq, bk = piece_bbs[6], piece_bbs[7], piece_bbs[8], piece_bbs[9], piece_bbs[10], piece_bbs[11]
-        gives_check = False
-        if PAWN_ATTACKS[BLACK, their_king_sq] & bp:
-            gives_check = True
-        elif KING_ATTACKS[their_king_sq] & bk:
-            gives_check = True
-        elif KNIGHT_ATTACKS[their_king_sq] & bn:
-            gives_check = True
-        elif ((bb | bq) & BISHOP_RAYS[their_king_sq]) and (get_bishop_attacks(their_king_sq, all_pieces_bb) & (bb | bq)):
-            gives_check = True
-        elif ((br | bq) & ROOK_RAYS[their_king_sq]) and (get_rook_attacks(their_king_sq, all_pieces_bb) & (br | bq)):
-            gives_check = True
-            
-        return True, gives_check
-
-@numba.njit(cache=True, boundscheck=False, fastmath=True)
+@numba.njit(
+    numba.uint64(piece_bbs_signature, occupancy_bbs_signature, numba.int64),
+    cache=True, boundscheck=False, fastmath=True,
+)
 def get_pinned_pieces(piece_bbs, occupancy_bbs, side):
     """
     Returns a bitboard of all pieces of 'side' that are pinned to their King
@@ -858,8 +771,8 @@ def generate_legal_moves_buffer(piece_bbs, occupancy_bbs, game_state, moves_buff
  
     # Optimization: Pre-calculate pinned pieces and check status to skip expensive make/unmake
     opponent_side = 1 - side_to_move
-    in_check = is_square_attacked(piece_bbs, occupancy_bbs, original_king_sq, opponent_side)
-    pinned = get_pinned_pieces(piece_bbs, occupancy_bbs, side_to_move) if not in_check else np.uint64(0)
+    in_check = is_square_attacked(piece_bbs, occupancy_bbs, int(original_king_sq), int(opponent_side))
+    pinned = get_pinned_pieces(piece_bbs, occupancy_bbs, int(side_to_move)) if not in_check else np.uint64(0)
  
     for i in range(move_count):
         move = moves_buffer[ply, i]
@@ -880,7 +793,7 @@ def generate_legal_moves_buffer(piece_bbs, occupancy_bbs, game_state, moves_buff
         king_sq = get_lsb_index(king_bb_after_move) if king_bb_after_move else original_king_sq
  
         # Check if the king is attacked by the new side to move (the opponent)
-        if not is_square_attacked(piece_bbs, occupancy_bbs, king_sq, game_state[0]):
+        if not is_square_attacked(piece_bbs, occupancy_bbs, int(king_sq), int(game_state[0])):
             moves_buffer[ply, legal_move_count] = move
             legal_move_count += 1
  
@@ -901,196 +814,6 @@ def generate_legal_moves(piece_bbs, occupancy_bbs, game_state):
 
 
 @numba.njit(cache=True, boundscheck=False, fastmath=True)
-def _generate_tactical_moves_jit(piece_bbs, occupancy_bbs, game_state):
-    """
-    Generates pseudo-legal tactical moves (all captures and promotions).
-    """
-    moves = np.zeros(128, dtype=np.uint16)
-    move_count = 0
-
-    side_to_move = game_state[0]
-    en_passant_square = game_state[2]
-    
-    (wp_bb, wn_bb, wb_bb, wr_bb, wq_bb, wk_bb, 
-     bp_bb, bn_bb, bb_bb, br_bb, bq_bb, bk_bb) = piece_bbs
-     
-    # Optimization: Unpack all 3 elements. occupancy_bbs[2] is the pre-calculated union of white and black pieces.
-    white_pieces_bb, black_pieces_bb, all_pieces_bb = occupancy_bbs
-
-    opponent_pieces_bb = black_pieces_bb if side_to_move == WHITE else white_pieces_bb
-    own_pieces_bb = white_pieces_bb if side_to_move == WHITE else black_pieces_bb
-
-    if side_to_move == WHITE:
-        # --- Pawn Captures & Promotions ---
-        single_pushes = (wp_bb << 8) & ~all_pieces_bb
-        captures_west = ((wp_bb & NOT_A_FILE) << 7) & opponent_pieces_bb
-        captures_east = ((wp_bb & NOT_H_FILE) << 9) & opponent_pieces_bb
-
-        # Promotion via single push
-        promo_pushes = single_pushes & RANK_8
-        while promo_pushes:
-            to_sq = get_lsb_index(promo_pushes)
-            from_sq = to_sq - 8
-            moves[move_count] = encode_move(from_sq, to_sq, PROMO_QUEEN, SPECIAL_MOVE_FLAG_PROMOTION)
-            moves[move_count + 1] = encode_move(from_sq, to_sq, PROMO_ROOK, SPECIAL_MOVE_FLAG_PROMOTION)
-            moves[move_count + 2] = encode_move(from_sq, to_sq, PROMO_BISHOP, SPECIAL_MOVE_FLAG_PROMOTION)
-            moves[move_count + 3] = encode_move(from_sq, to_sq, PROMO_KNIGHT, SPECIAL_MOVE_FLAG_PROMOTION)
-            move_count += 4
-            promo_pushes &= (promo_pushes - np.uint64(1))
-
-        # Capture Promotions
-        promo_caps_west = captures_west & RANK_8
-        while promo_caps_west:
-            to_sq = get_lsb_index(promo_caps_west)
-            from_sq = to_sq - 7
-            moves[move_count] = encode_move(from_sq, to_sq, PROMO_QUEEN, SPECIAL_MOVE_FLAG_PROMOTION)
-            moves[move_count + 1] = encode_move(from_sq, to_sq, PROMO_ROOK, SPECIAL_MOVE_FLAG_PROMOTION)
-            moves[move_count + 2] = encode_move(from_sq, to_sq, PROMO_BISHOP, SPECIAL_MOVE_FLAG_PROMOTION)
-            moves[move_count + 3] = encode_move(from_sq, to_sq, PROMO_KNIGHT, SPECIAL_MOVE_FLAG_PROMOTION)
-            move_count += 4
-            promo_caps_west &= (promo_caps_west - np.uint64(1))
-            
-        promo_caps_east = captures_east & RANK_8
-        while promo_caps_east:
-            to_sq = get_lsb_index(promo_caps_east)
-            from_sq = to_sq - 9
-            moves[move_count] = encode_move(from_sq, to_sq, PROMO_QUEEN, SPECIAL_MOVE_FLAG_PROMOTION)
-            moves[move_count + 1] = encode_move(from_sq, to_sq, PROMO_ROOK, SPECIAL_MOVE_FLAG_PROMOTION)
-            moves[move_count + 2] = encode_move(from_sq, to_sq, PROMO_BISHOP, SPECIAL_MOVE_FLAG_PROMOTION)
-            moves[move_count + 3] = encode_move(from_sq, to_sq, PROMO_KNIGHT, SPECIAL_MOVE_FLAG_PROMOTION)
-            move_count += 4
-            promo_caps_east &= (promo_caps_east - np.uint64(1))
-
-        # Regular Captures
-        caps_west = captures_west & ~RANK_8
-        while caps_west:
-            to_sq = get_lsb_index(caps_west)
-            from_sq = to_sq - 7
-            moves[move_count] = encode_move(from_sq, to_sq, 0, SPECIAL_MOVE_FLAG_NORMAL)
-            move_count += 1
-            caps_west &= (caps_west - np.uint64(1))
-
-        caps_east = captures_east & ~RANK_8
-        while caps_east:
-            to_sq = get_lsb_index(caps_east)
-            from_sq = to_sq - 9
-            moves[move_count] = encode_move(from_sq, to_sq, 0, SPECIAL_MOVE_FLAG_NORMAL)
-            move_count += 1
-            caps_east &= (caps_east - np.uint64(1))
-
-        # En Passant
-        if en_passant_square != 64:
-            ep_target_bb = BB_SQUARES[np.uint8(en_passant_square)]
-            west_attackers = ((wp_bb & NOT_A_FILE) << 7) & ep_target_bb
-            if west_attackers:
-                from_sq = np.uint8(en_passant_square - 7)
-                moves[move_count] = encode_move(from_sq, np.uint8(en_passant_square), 0, SPECIAL_MOVE_FLAG_EN_PASSANT); move_count += 1
-            east_attackers = ((wp_bb & NOT_H_FILE) << 9) & ep_target_bb
-            if east_attackers:
-                from_sq = np.uint8(en_passant_square - 9)
-                moves[move_count] = encode_move(from_sq, np.uint8(en_passant_square), 0, SPECIAL_MOVE_FLAG_EN_PASSANT); move_count += 1
-    
-    else: # BLACK
-        # --- Pawn Captures & Promotions ---
-        single_pushes = (bp_bb >> 8) & ~all_pieces_bb
-        captures_west = ((bp_bb & NOT_H_FILE) >> 7) & opponent_pieces_bb
-        captures_east = ((bp_bb & NOT_A_FILE) >> 9) & opponent_pieces_bb
-
-        # Promotion via single push
-        promo_pushes = single_pushes & RANK_1
-        while promo_pushes:
-            to_sq = get_lsb_index(promo_pushes)
-            from_sq = to_sq + 8
-            moves[move_count] = encode_move(from_sq, to_sq, PROMO_QUEEN, SPECIAL_MOVE_FLAG_PROMOTION)
-            moves[move_count + 1] = encode_move(from_sq, to_sq, PROMO_ROOK, SPECIAL_MOVE_FLAG_PROMOTION)
-            moves[move_count + 2] = encode_move(from_sq, to_sq, PROMO_BISHOP, SPECIAL_MOVE_FLAG_PROMOTION)
-            moves[move_count + 3] = encode_move(from_sq, to_sq, PROMO_KNIGHT, SPECIAL_MOVE_FLAG_PROMOTION)
-            move_count += 4
-            promo_pushes &= (promo_pushes - np.uint64(1))
-
-        # Capture Promotions
-        promo_caps_west = captures_west & RANK_1
-        while promo_caps_west:
-            to_sq = get_lsb_index(promo_caps_west)
-            from_sq = to_sq + 7
-            moves[move_count] = encode_move(from_sq, to_sq, PROMO_QUEEN, SPECIAL_MOVE_FLAG_PROMOTION)
-            moves[move_count + 1] = encode_move(from_sq, to_sq, PROMO_ROOK, SPECIAL_MOVE_FLAG_PROMOTION)
-            moves[move_count + 2] = encode_move(from_sq, to_sq, PROMO_BISHOP, SPECIAL_MOVE_FLAG_PROMOTION)
-            moves[move_count + 3] = encode_move(from_sq, to_sq, PROMO_KNIGHT, SPECIAL_MOVE_FLAG_PROMOTION)
-            move_count += 4
-            promo_caps_west &= (promo_caps_west - np.uint64(1))
-            
-        promo_caps_east = captures_east & RANK_1
-        while promo_caps_east:
-            to_sq = get_lsb_index(promo_caps_east)
-            from_sq = to_sq + 9
-            moves[move_count] = encode_move(from_sq, to_sq, PROMO_QUEEN, SPECIAL_MOVE_FLAG_PROMOTION)
-            moves[move_count + 1] = encode_move(from_sq, to_sq, PROMO_ROOK, SPECIAL_MOVE_FLAG_PROMOTION)
-            moves[move_count + 2] = encode_move(from_sq, to_sq, PROMO_BISHOP, SPECIAL_MOVE_FLAG_PROMOTION)
-            moves[move_count + 3] = encode_move(from_sq, to_sq, PROMO_KNIGHT, SPECIAL_MOVE_FLAG_PROMOTION)
-            move_count += 4
-            promo_caps_east &= (promo_caps_east - np.uint64(1))
-
-        # Regular Captures
-        caps_west = captures_west & ~RANK_1
-        while caps_west:
-            to_sq = get_lsb_index(caps_west)
-            from_sq = to_sq + 7
-            moves[move_count] = encode_move(from_sq, to_sq, 0, SPECIAL_MOVE_FLAG_NORMAL)
-            move_count += 1
-            caps_west &= (caps_west - np.uint64(1))
-
-        caps_east = captures_east & ~RANK_1
-        while caps_east:
-            to_sq = get_lsb_index(caps_east)
-            from_sq = to_sq + 9
-            moves[move_count] = encode_move(from_sq, to_sq, 0, SPECIAL_MOVE_FLAG_NORMAL)
-            move_count += 1
-            caps_east &= (caps_east - np.uint64(1))
-
-        # En Passant
-        if en_passant_square != 64:
-            ep_target_bb = BB_SQUARES[np.uint8(en_passant_square)]
-            west_attackers = ((bp_bb & NOT_H_FILE) >> 7) & ep_target_bb
-            if west_attackers:
-                from_sq = np.uint8(en_passant_square + 7)
-                moves[move_count] = encode_move(from_sq, np.uint8(en_passant_square), 0, SPECIAL_MOVE_FLAG_EN_PASSANT); move_count += 1
-            east_attackers = ((bp_bb & NOT_A_FILE) >> 9) & ep_target_bb
-            if east_attackers:
-                from_sq = np.uint8(en_passant_square + 9)
-                moves[move_count] = encode_move(from_sq, np.uint8(en_passant_square), 0, SPECIAL_MOVE_FLAG_EN_PASSANT); move_count += 1
-
-    # --- Leaper Captures (Knights, Bishops, Rooks, Queens, Kings) ---
-    leaper_bbs = (wn_bb, wb_bb, wr_bb, wq_bb, wk_bb) if side_to_move == WHITE else (bn_bb, bb_bb, br_bb, bq_bb, bk_bb)
-    for piece_type in range(5):
-        bb = leaper_bbs[piece_type]
-        while bb:
-            from_sq = get_lsb_index(bb)
-            if piece_type == 0: targets = KNIGHT_ATTACKS[from_sq]
-            elif piece_type == 1: targets = get_bishop_attacks(from_sq, all_pieces_bb)
-            elif piece_type == 2: targets = get_rook_attacks(from_sq, all_pieces_bb)
-            elif piece_type == 3: targets = get_queen_attacks(from_sq, all_pieces_bb)
-            else: targets = KING_ATTACKS[from_sq]
-            
-            # --- This is the key difference: only consider captures ---
-            capture_targets = targets & opponent_pieces_bb
-            
-            while capture_targets:
-                to_sq = get_lsb_index(capture_targets)
-                moves[move_count] = encode_move(from_sq, to_sq, 0, SPECIAL_MOVE_FLAG_NORMAL)
-                move_count += 1
-                capture_targets &= (capture_targets - np.uint64(1))
-            bb &= (bb - np.uint64(1))
-            
-    return moves[:move_count]
-
-def generate_tactical_moves(piece_bbs, occupancy_bbs, game_state):
-    """
-    Generates pseudo-legal tactical moves (all captures and promotions).
-    """
-    return _generate_tactical_moves_jit(piece_bbs, occupancy_bbs, game_state)
-
-@numba.njit(cache=True, boundscheck=False, fastmath=True)
 def _is_in_check_jit(piece_bbs, occupancy_bbs, game_state):
     """
     Checks if the current side to move is in check.
@@ -1100,7 +823,7 @@ def _is_in_check_jit(piece_bbs, occupancy_bbs, game_state):
     if king_bb == 0: # Should not happen in a legal position
         return False
     king_sq = get_lsb_index(king_bb)
-    return is_square_attacked(piece_bbs, occupancy_bbs, king_sq, 1 - side_to_move)
+    return is_square_attacked(piece_bbs, occupancy_bbs, int(king_sq), int(1 - side_to_move))
 
 def is_in_check(piece_bbs, occupancy_bbs, game_state):
     return _is_in_check_jit(piece_bbs, occupancy_bbs, game_state)
@@ -1199,8 +922,17 @@ def generate_pseudo_legal_quiets_buffer(piece_bbs, occupancy_bbs, game_state, mo
             pushes &= (pushes - np.uint64(1))
 
         # --- Castling ---
-        if (castling_rights & WK) and not(all_pieces_bb & 0x60) and not is_square_attacked(piece_bbs, occupancy_bbs, 4, BLACK) and not is_square_attacked(piece_bbs, occupancy_bbs, 5, BLACK) and not is_square_attacked(piece_bbs, occupancy_bbs, 6, BLACK): moves_buffer[ply, move_count]=encode_move(4,6,0,SPECIAL_MOVE_FLAG_CASTLING); move_count+=1
-        if (castling_rights & WQ) and not(all_pieces_bb & 0xe) and not is_square_attacked(piece_bbs, occupancy_bbs, 4, BLACK) and not is_square_attacked(piece_bbs, occupancy_bbs, 3, BLACK) and not is_square_attacked(piece_bbs, occupancy_bbs, 2, BLACK): moves_buffer[ply, move_count]=encode_move(4,2,0,SPECIAL_MOVE_FLAG_CASTLING); move_count+=1
+        if (castling_rights & (WK | WQ)):
+            can_wk = (castling_rights & WK) and not (all_pieces_bb & 0x60)
+            can_wq = (castling_rights & WQ) and not (all_pieces_bb & 0xE)
+            if can_wk or can_wq:
+                if not is_square_attacked(piece_bbs, occupancy_bbs, 4, BLACK):
+                    if can_wk and not is_square_attacked(piece_bbs, occupancy_bbs, 5, BLACK) and not is_square_attacked(piece_bbs, occupancy_bbs, 6, BLACK):
+                        moves_buffer[ply, move_count] = encode_move(4, 6, 0, SPECIAL_MOVE_FLAG_CASTLING)
+                        move_count += 1
+                    if can_wq and not is_square_attacked(piece_bbs, occupancy_bbs, 3, BLACK) and not is_square_attacked(piece_bbs, occupancy_bbs, 2, BLACK):
+                        moves_buffer[ply, move_count] = encode_move(4, 2, 0, SPECIAL_MOVE_FLAG_CASTLING)
+                        move_count += 1
 
     else: # BLACK
         # --- Pawn Moves ---
@@ -1225,26 +957,77 @@ def generate_pseudo_legal_quiets_buffer(piece_bbs, occupancy_bbs, game_state, mo
             pushes &= (pushes - np.uint64(1))
 
         # --- Castling ---
-        if (castling_rights & BK) and not(all_pieces_bb & 0x6000000000000000) and not is_square_attacked(piece_bbs, occupancy_bbs, 60, WHITE) and not is_square_attacked(piece_bbs, occupancy_bbs, 61, WHITE) and not is_square_attacked(piece_bbs, occupancy_bbs, 62, WHITE): moves_buffer[ply, move_count]=encode_move(60,62,0,SPECIAL_MOVE_FLAG_CASTLING); move_count+=1
-        if (castling_rights & BQ) and not(all_pieces_bb & 0xe00000000000000) and not is_square_attacked(piece_bbs, occupancy_bbs, 60, WHITE) and not is_square_attacked(piece_bbs, occupancy_bbs, 59, WHITE) and not is_square_attacked(piece_bbs, occupancy_bbs, 58, WHITE): moves_buffer[ply, move_count]=encode_move(60,58,0,SPECIAL_MOVE_FLAG_CASTLING); move_count+=1
+        if (castling_rights & (BK | BQ)):
+            can_bk = (castling_rights & BK) and not (all_pieces_bb & 0x6000000000000000)
+            can_bq = (castling_rights & BQ) and not (all_pieces_bb & 0xE00000000000000)
+            if can_bk or can_bq:
+                if not is_square_attacked(piece_bbs, occupancy_bbs, 60, WHITE):
+                    if can_bk and not is_square_attacked(piece_bbs, occupancy_bbs, 61, WHITE) and not is_square_attacked(piece_bbs, occupancy_bbs, 62, WHITE):
+                        moves_buffer[ply, move_count] = encode_move(60, 62, 0, SPECIAL_MOVE_FLAG_CASTLING)
+                        move_count += 1
+                    if can_bq and not is_square_attacked(piece_bbs, occupancy_bbs, 59, WHITE) and not is_square_attacked(piece_bbs, occupancy_bbs, 58, WHITE):
+                        moves_buffer[ply, move_count] = encode_move(60, 58, 0, SPECIAL_MOVE_FLAG_CASTLING)
+                        move_count += 1
 
     # --- Leaper Moves (Knights, Bishops, Rooks, Queens, Kings) ---
-    leaper_bbs = (wn_bb, wb_bb, wr_bb, wq_bb, wk_bb) if side_to_move == WHITE else (bn_bb, bb_bb, br_bb, bq_bb, bk_bb)
-    for piece_type in range(5):
-        bb = leaper_bbs[piece_type]
-        while bb:
-            from_sq = get_lsb_index(bb)
-            if piece_type == 0: targets = KNIGHT_ATTACKS[from_sq] & empty_squares
-            elif piece_type == 1: targets = get_bishop_attacks(from_sq, all_pieces_bb) & empty_squares
-            elif piece_type == 2: targets = get_rook_attacks(from_sq, all_pieces_bb) & empty_squares
-            elif piece_type == 3: targets = get_queen_attacks(from_sq, all_pieces_bb) & empty_squares
-            else: targets = KING_ATTACKS[from_sq] & empty_squares
-            
-            while targets:
-                to_sq = get_lsb_index(targets)
-                moves_buffer[ply, move_count] = encode_move(from_sq, to_sq, 0, SPECIAL_MOVE_FLAG_NORMAL); move_count+=1
-                targets &= (targets - np.uint64(1))
-            bb &= (bb - np.uint64(1))
+    if side_to_move == WHITE:
+        n_bb, b_bb, r_bb, q_bb, k_bb = wn_bb, wb_bb, wr_bb, wq_bb, wk_bb
+    else:
+        n_bb, b_bb, r_bb, q_bb, k_bb = bn_bb, bb_bb, br_bb, bq_bb, bk_bb
+
+    bb = n_bb
+    while bb:
+        from_sq = get_lsb_index(bb)
+        targets = KNIGHT_ATTACKS[from_sq] & empty_squares
+        while targets:
+            to_sq = get_lsb_index(targets)
+            moves_buffer[ply, move_count] = encode_move(from_sq, to_sq, 0, SPECIAL_MOVE_FLAG_NORMAL)
+            move_count += 1
+            targets &= (targets - np.uint64(1))
+        bb &= (bb - np.uint64(1))
+
+    bb = b_bb
+    while bb:
+        from_sq = get_lsb_index(bb)
+        targets = get_bishop_attacks(from_sq, all_pieces_bb) & empty_squares
+        while targets:
+            to_sq = get_lsb_index(targets)
+            moves_buffer[ply, move_count] = encode_move(from_sq, to_sq, 0, SPECIAL_MOVE_FLAG_NORMAL)
+            move_count += 1
+            targets &= (targets - np.uint64(1))
+        bb &= (bb - np.uint64(1))
+
+    bb = r_bb
+    while bb:
+        from_sq = get_lsb_index(bb)
+        targets = get_rook_attacks(from_sq, all_pieces_bb) & empty_squares
+        while targets:
+            to_sq = get_lsb_index(targets)
+            moves_buffer[ply, move_count] = encode_move(from_sq, to_sq, 0, SPECIAL_MOVE_FLAG_NORMAL)
+            move_count += 1
+            targets &= (targets - np.uint64(1))
+        bb &= (bb - np.uint64(1))
+
+    bb = q_bb
+    while bb:
+        from_sq = get_lsb_index(bb)
+        targets = get_queen_attacks(from_sq, all_pieces_bb) & empty_squares
+        while targets:
+            to_sq = get_lsb_index(targets)
+            moves_buffer[ply, move_count] = encode_move(from_sq, to_sq, 0, SPECIAL_MOVE_FLAG_NORMAL)
+            move_count += 1
+            targets &= (targets - np.uint64(1))
+        bb &= (bb - np.uint64(1))
+
+    bb = k_bb
+    if bb:
+        from_sq = get_lsb_index(bb)
+        targets = KING_ATTACKS[from_sq] & empty_squares
+        while targets:
+            to_sq = get_lsb_index(targets)
+            moves_buffer[ply, move_count] = encode_move(from_sq, to_sq, 0, SPECIAL_MOVE_FLAG_NORMAL)
+            move_count += 1
+            targets &= (targets - np.uint64(1))
     
     return move_count
 
@@ -1409,121 +1192,66 @@ def generate_pseudo_legal_captures_buffer(piece_bbs, occupancy_bbs, game_state, 
                 from_sq = np.uint8(en_passant_square + 9)
                 moves_buffer[ply, move_count] = encode_move(from_sq, np.uint8(en_passant_square), 0, SPECIAL_MOVE_FLAG_EN_PASSANT); move_count += 1
 
-    # --- Leaper Captures (Knights, Bishops, Rooks, Queens, Kings) ---
-    leaper_bbs = (wn_bb, wb_bb, wr_bb, wq_bb, wk_bb) if side_to_move == WHITE else (bn_bb, bb_bb, br_bb, bq_bb, bk_bb)
-    for piece_type in range(5):
-        bb = leaper_bbs[piece_type]
-        while bb:
-            from_sq = get_lsb_index(bb)
-            if piece_type == 0: targets = KNIGHT_ATTACKS[from_sq]
-            elif piece_type == 1: targets = get_bishop_attacks(from_sq, all_pieces_bb)
-            elif piece_type == 2: targets = get_rook_attacks(from_sq, all_pieces_bb)
-            elif piece_type == 3: targets = get_queen_attacks(from_sq, all_pieces_bb)
-            else: targets = KING_ATTACKS[from_sq]
+    # --- Piece Captures (Knights, Bishops, Rooks, Queens, Kings; ray pre-filtered) ---
+    bb = wn_bb if side_to_move == WHITE else bn_bb
+    while bb:
+        from_sq = get_lsb_index(bb)
+        capture_targets = KNIGHT_ATTACKS[from_sq] & opponent_pieces_bb
+        while capture_targets:
+            to_sq = get_lsb_index(capture_targets)
+            moves_buffer[ply, move_count] = encode_move(from_sq, to_sq, 0, SPECIAL_MOVE_FLAG_NORMAL)
+            move_count += 1
+            capture_targets &= (capture_targets - np.uint64(1))
+        bb &= (bb - np.uint64(1))
 
-            capture_targets = targets & opponent_pieces_bb
-
+    bb = wb_bb if side_to_move == WHITE else bb_bb
+    while bb:
+        from_sq = get_lsb_index(bb)
+        if BISHOP_RAYS[from_sq] & opponent_pieces_bb:
+            capture_targets = get_bishop_attacks(from_sq, all_pieces_bb) & opponent_pieces_bb
             while capture_targets:
                 to_sq = get_lsb_index(capture_targets)
                 moves_buffer[ply, move_count] = encode_move(from_sq, to_sq, 0, SPECIAL_MOVE_FLAG_NORMAL)
                 move_count += 1
                 capture_targets &= (capture_targets - np.uint64(1))
-            bb &= (bb - np.uint64(1))
+        bb &= (bb - np.uint64(1))
+
+    bb = wr_bb if side_to_move == WHITE else br_bb
+    while bb:
+        from_sq = get_lsb_index(bb)
+        if ROOK_RAYS[from_sq] & opponent_pieces_bb:
+            capture_targets = get_rook_attacks(from_sq, all_pieces_bb) & opponent_pieces_bb
+            while capture_targets:
+                to_sq = get_lsb_index(capture_targets)
+                moves_buffer[ply, move_count] = encode_move(from_sq, to_sq, 0, SPECIAL_MOVE_FLAG_NORMAL)
+                move_count += 1
+                capture_targets &= (capture_targets - np.uint64(1))
+        bb &= (bb - np.uint64(1))
+
+    bb = wq_bb if side_to_move == WHITE else bq_bb
+    while bb:
+        from_sq = get_lsb_index(bb)
+        targets = np.uint64(0)
+        if BISHOP_RAYS[from_sq] & opponent_pieces_bb:
+            targets |= get_bishop_attacks(from_sq, all_pieces_bb)
+        if ROOK_RAYS[from_sq] & opponent_pieces_bb:
+            targets |= get_rook_attacks(from_sq, all_pieces_bb)
+        capture_targets = targets & opponent_pieces_bb
+        while capture_targets:
+            to_sq = get_lsb_index(capture_targets)
+            moves_buffer[ply, move_count] = encode_move(from_sq, to_sq, 0, SPECIAL_MOVE_FLAG_NORMAL)
+            move_count += 1
+            capture_targets &= (capture_targets - np.uint64(1))
+        bb &= (bb - np.uint64(1))
+
+    bb = wk_bb if side_to_move == WHITE else bk_bb
+    if bb:
+        from_sq = get_lsb_index(bb)
+        capture_targets = KING_ATTACKS[from_sq] & opponent_pieces_bb
+        while capture_targets:
+            to_sq = get_lsb_index(capture_targets)
+            moves_buffer[ply, move_count] = encode_move(from_sq, to_sq, 0, SPECIAL_MOVE_FLAG_NORMAL)
+            move_count += 1
+            capture_targets &= (capture_targets - np.uint64(1))
 
     return move_count
-
-@numba.njit(cache=True, boundscheck=False, fastmath=True)
-def generate_captures_buffer(piece_bbs, occupancy_bbs, game_state, moves_buffer, ply):
-    """
-    Generates all fully legal capture and promotion moves for the current position into the provided buffer at the given ply.
-    Returns the count of legal moves.
-    """
-    move_count = generate_pseudo_legal_captures_buffer(piece_bbs, occupancy_bbs, game_state, moves_buffer, ply)
-    side_to_move = game_state[0]
-
-    # --- Filter for legality ---
-    legal_move_count = 0
-
-    king_bb = piece_bbs[5] if side_to_move == WHITE else piece_bbs[11]
-    original_king_sq = get_lsb_index(king_bb) if king_bb else 0
-
-    # Optimization: Pre-calculate pinned pieces and check status to skip expensive make/unmake
-    opponent_side = 1 - side_to_move
-    in_check = is_square_attacked(piece_bbs, occupancy_bbs, original_king_sq, opponent_side)
-    pinned = get_pinned_pieces(piece_bbs, occupancy_bbs, side_to_move) if not in_check else np.uint64(0)
-
-    for i in range(move_count):
-        move = moves_buffer[ply, i]
-        from_sq = get_from_square(move)
-        
-        # Fast path: if not in check, not pinned, not a king move, and not en passant, it MUST be legal.
-        if not in_check and not (pinned & BB_SQUARES[from_sq]) and from_sq != original_king_sq and get_special_move_flag(move) != SPECIAL_MOVE_FLAG_EN_PASSANT:
-            moves_buffer[ply, legal_move_count] = move
-            legal_move_count += 1
-            continue
-
-        unmake_info = make_move(piece_bbs, occupancy_bbs, game_state, move)
-
-        king_bb_after_move = piece_bbs[5] if side_to_move == WHITE else piece_bbs[11]
-        king_sq = get_lsb_index(king_bb_after_move) if king_bb_after_move else original_king_sq
-
-        if not is_square_attacked(piece_bbs, occupancy_bbs, king_sq, game_state[0]):
-            moves_buffer[ply, legal_move_count] = move
-            legal_move_count += 1
-
-        unmake_move(piece_bbs, occupancy_bbs, game_state, move, unmake_info)
-
-    return legal_move_count
-
-def generate_captures(piece_bbs, occupancy_bbs, game_state):
-    """
-    Wrapper for generate_captures_buffer.
-    """
-    moves = np.zeros((1, 128), dtype=np.uint16)
-    count = generate_captures_buffer(piece_bbs, occupancy_bbs, game_state, moves, 0)
-    return moves[0, :count]
-
-@numba.njit(cache=True, boundscheck=False, fastmath=True)
-def get_all_pawn_attacks(piece_bbs, side):
-    pawn_bb = piece_bbs[0 if side == 0 else 6]
-    attacks = np.uint64(0)
-    if side == 0:
-        attacks |= ((pawn_bb & NOT_A_FILE) << 7) | ((pawn_bb & NOT_H_FILE) << 9)
-    else:
-        attacks |= ((pawn_bb & NOT_H_FILE) >> 7) | ((pawn_bb & NOT_A_FILE) >> 9)
-    return attacks
-
-@numba.njit(cache=True, boundscheck=False, fastmath=True)
-def get_all_knight_attacks(piece_bbs, side):
-    knight_bb = piece_bbs[1 if side == 0 else 7]
-    attacks = np.uint64(0)
-    bb = knight_bb
-    while bb:
-        sq = get_lsb_index(bb)
-        attacks |= KNIGHT_ATTACKS[sq]
-        bb &= bb - np.uint64(1)
-    return attacks
-
-@numba.njit(cache=True, boundscheck=False, fastmath=True)
-def get_all_bishop_attacks(piece_bbs, occupancy_bbs, side):
-    bishop_bb = piece_bbs[2 if side == 0 else 8]
-    attacks = np.uint64(0)
-    all_occ = occupancy_bbs[2]
-    bb = bishop_bb
-    while bb:
-        sq = get_lsb_index(bb)
-        attacks |= get_bishop_attacks(sq, all_occ)
-        bb &= bb - np.uint64(1)
-    return attacks
-
-@numba.njit(cache=True, boundscheck=False, fastmath=True)
-def get_all_rook_attacks(piece_bbs, occupancy_bbs, side):
-    rook_bb = piece_bbs[3 if side == 0 else 9]
-    attacks = np.uint64(0)
-    all_occ = occupancy_bbs[2]
-    bb = rook_bb
-    while bb:
-        sq = get_lsb_index(bb)
-        attacks |= get_rook_attacks(sq, all_occ)
-        bb &= bb - np.uint64(1)
-    return attacks

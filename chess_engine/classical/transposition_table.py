@@ -10,7 +10,7 @@ TT_FLAG_ALPHA = 2  # Upper bound (score <= alpha), an ALL-node / 上界（分數
 TT_FLAG_BETA = 3   # Lower bound (score >= beta), a CUT-node / 下界（分數 >= beta），截斷節點（CUT-node）
 
 # 2. Define the data type (dtype) for a transposition table entry / 定義置換表項目的數據類型
-# Total size: 8 (key) + 2 (score) + 1 (depth) + 1 (flag) + 1 (generation) + 2 (best_move) + 1 (padding) = 16 bytes
+# Total size: 4 (key) + 2 (score) + 2 (static_eval) + 1 (depth) + 1 (flag) + 1 (generation) + 1 (is_pv) + 2 (best_move) + 2 (padding) = 16 bytes
 # Using 16 bytes ensures optimal memory alignment on 64-bit systems.
 tt_entry_dtype = np.dtype([
     ('key', np.uint32),        # 32-bit Zobrist hash key (compressed) / 32位 Zobrist 哈希鍵值
@@ -19,8 +19,8 @@ tt_entry_dtype = np.dtype([
     ('depth', np.uint8),       # Search depth / 搜尋深度
     ('flag', np.uint8),        # Node type flag (Exact, Alpha, Beta) / 節點類型標誌
     ('generation', np.uint8),  # Generation ID for aging / 用於老化的世代 ID
-    ('best_move', np.uint16),  # Best move found at this node / 此節點找到的最佳移動
     ('is_pv', np.bool_),       # PV node flag / 主變例節點標誌
+    ('best_move', np.uint16),  # Best move found at this node / 此節點找到的最佳移動
     ('padding', np.uint8, 2)   # Padding for exactly 16-byte alignment / 用於完全 16 字節對齊的填充 (2 bytes)
 ])
 
@@ -314,24 +314,30 @@ def store_tt(tt, zobrist_key, depth, score, static_eval, flag, best_move, curren
                 tt[idx]['padding'][0] = np.uint8(chk & np.uint16(0xFF))
                 tt[idx]['padding'][1] = np.uint8(chk >> np.uint16(8))
             else:
+                updated = False
                 if static_eval != 32767 and existing_entry['static_eval'] == 32767:
                     tt[idx]['static_eval'] = np.int16(static_eval)
+                    updated = True
                 # Secondary aging. Important for elementary mate finding.
                 if existing_entry['depth'] >= 8 and existing_entry['flag'] != TT_FLAG_EXACT:
                     existing_score = existing_entry['score']
-                    if abs(existing_score) >= MATE_IN_MAX_PLY:
-                        tt[idx]['depth'] = np.uint8(max(int(existing_entry['depth']) - 1, 0))
-                chk = _compute_tt_checksum(
-                    key32,
-                    tt[idx]['score'],
-                    tt[idx]['static_eval'],
-                    tt[idx]['depth'],
-                    tt[idx]['flag'],
-                    tt[idx]['best_move'],
-                    tt[idx]['is_pv'],
-                )
-                tt[idx]['padding'][0] = np.uint8(chk & np.uint16(0xFF))
-                tt[idx]['padding'][1] = np.uint8(chk >> np.uint16(8))
+                    if abs(int(existing_score)) >= MATE_IN_MAX_PLY:
+                        new_depth = np.uint8(max(int(existing_entry['depth']) - 1, 0))
+                        if new_depth != existing_entry['depth']:
+                            tt[idx]['depth'] = new_depth
+                            updated = True
+                if updated:
+                    chk = _compute_tt_checksum(
+                        key32,
+                        tt[idx]['score'],
+                        tt[idx]['static_eval'],
+                        tt[idx]['depth'],
+                        tt[idx]['flag'],
+                        tt[idx]['best_move'],
+                        tt[idx]['is_pv'],
+                    )
+                    tt[idx]['padding'][0] = np.uint8(chk & np.uint16(0xFF))
+                    tt[idx]['padding'][1] = np.uint8(chk >> np.uint16(8))
             return # 找到並處理完相符局面，直接退出
             
     # 2. 如果沒有找到完全相同的局面 (雜湊碰撞 Collision)，進入替換評估 (Replacement Strategy)
@@ -382,23 +388,3 @@ def store_tt(tt, zobrist_key, depth, score, static_eval, flag, best_move, curren
     tt[replace_idx]['is_pv'] = pv_b
     tt[replace_idx]['padding'][0] = np.uint8(chk & np.uint16(0xFF))
     tt[replace_idx]['padding'][1] = np.uint8(chk >> np.uint16(8))
-
-@nb.njit(cache=True, nogil=True)
-def estimate_tt_occupancy_percentage(tt):
-    """
-    使用 Stockfish 的 1000 個 bucket 抽樣法，快速估算置換表歷史總使用率（百分比 %）。
-    這能避免全表掃描帶來的快取污染和效能下降。
-    """
-    if len(tt) < 4:
-        return 0.0
-    num_buckets = len(tt) // 4
-    scan_buckets = min(1000, num_buckets)
-    
-    cnt = 0
-    for i in range(scan_buckets):
-        base = i * 4
-        for j in range(4):
-            if tt[base + j]['flag'] != TT_FLAG_NONE:
-                cnt += 1
-                
-    return (cnt * 100.0) / (scan_buckets * 4)

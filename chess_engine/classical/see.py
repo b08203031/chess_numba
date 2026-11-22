@@ -9,15 +9,13 @@ from chess_engine.classical.constants import (
 from chess_engine.classical.engine_types import (
     piece_bbs_signature, occupancy_bbs_signature
 )
-from chess_engine.classical.bitboard_utils import find_piece_type_on_square, find_piece_type_on_square_side, SQUARES_BETWEEN, ROOK_RAYS, BISHOP_RAYS, LINE_BB
-import numba.types as nbt
+from chess_engine.classical.bitboard_utils import find_piece_type_on_square_side, ROOK_RAYS, BISHOP_RAYS, LINE_BB, get_lsb_index
 # Import Magic Bitboard functions
 from chess_engine.classical.move_generator import (
     get_bishop_attacks, get_rook_attacks,
     PAWN_ATTACKS, KNIGHT_ATTACKS, KING_ATTACKS,
     get_pinned_pieces
 )
-from chess_engine.classical.bitboard_utils import get_lsb_index, count_bits
 
 
 # Piece values for SEE: P/N/B/R/Q directly use MG_MATERIAL_VALUES;
@@ -30,12 +28,6 @@ SEE_PIECE_VALUES = np.array([
     MG_MATERIAL_VALUES[QUEEN],
     20000,
 ], dtype=np.int32)
-
-# Basic Attack Tables (Initialize once if possible, or use logic)
-# Numba caches function compilation, so we can embed logic.
-
-DIAGONAL_DIRECTIONS = np.array([-9, -7, 7, 9], dtype=np.int32)
-ORTHOGONAL_DIRECTIONS = np.array([-8, -1, 1, 8], dtype=np.int32)
 
 @numba.njit(cache=True, boundscheck=False, fastmath=True, inline='always')
 def get_sliding_attacks(square, occupied, is_diagonal):
@@ -68,48 +60,6 @@ def get_all_attackers_for_see(square, occupied, piece_bbs, sliders_diag, sliders
         attackers |= (get_rook_attacks(square, occupied) & sliders_orth)
     return attackers
 
-@numba.njit(cache=True, boundscheck=False, fastmath=True)
-def get_attackers_for_see(square, occupied, piece_bbs, side_mask):
-    """
-    Get bitboard of all pieces of 'side_mask' (0=White, 1=Black) attacking 'square'.
-    Optimized for SEE loop (uses passed 'occupied' which has holes).
-    """
-    attackers = np.uint64(0)
-    offset = 0 if side_mask == WHITE else 6
-
-    # 1. Pawns - Use precomputed attack tables.
-    # Note: PAWN_ATTACKS[side, sq] returns squares where a pawn of 'side' 
-    # must be to attack 'sq'.
-    attackers |= (PAWN_ATTACKS[side_mask, square] & piece_bbs[offset + PAWN])
-
-    # 2. Knights - Use precomputed attack tables
-    knights = piece_bbs[KNIGHT + offset]
-    if knights:
-        attackers |= (KNIGHT_ATTACKS[square] & knights)
-
-    # 3. Sliders
-    # We use the current 'occupied' which has holes where pieces were captured!
-    # This allows X-Ray attacks to be found "through" the captured square.
- 
-    # Performance optimization: Use ray pre-filters to avoid expensive Magic Bitboard lookups
-    # when no sliding pieces of the given side are on the relevant rays.
-
-    # Bishops + Queens
-    sliders_diag = piece_bbs[BISHOP + offset] | piece_bbs[QUEEN + offset]
-    if sliders_diag & BISHOP_RAYS[square]:
-        attackers |= (get_sliding_attacks(square, occupied, True) & sliders_diag)
-
-    # Rooks + Queens
-    sliders_orth = piece_bbs[ROOK + offset] | piece_bbs[QUEEN + offset]
-    if sliders_orth & ROOK_RAYS[square]:
-        attackers |= (get_sliding_attacks(square, occupied, False) & sliders_orth)
-
-    # 4. King - Use precomputed attack tables
-    kings = piece_bbs[KING + offset]
-    if kings:
-        attackers |= (KING_ATTACKS[square] & kings)
-
-    return attackers
 
 @numba.njit(cache=True, boundscheck=False, fastmath=True, inline='always')
 def get_lva_and_remove(attackers, piece_bbs, side_mask):
@@ -316,6 +266,12 @@ def _see_ge_jit(piece_bbs, occupancy_bbs, side_to_move, from_sq, to_sq, threshol
 
     initial_occ = occupancy_bbs[2]
     is_promo_rank = (to_sq >= 56 or to_sq < 8)
+    if to_sq >= 56:
+        has_promo_pawn = (piece_bbs[PAWN] & ~BB_SQUARES[from_sq] & PAWN_ATTACKS[WHITE, to_sq]) != 0
+    elif to_sq < 8:
+        has_promo_pawn = (piece_bbs[6 + PAWN] & ~BB_SQUARES[from_sq] & PAWN_ATTACKS[BLACK, to_sq]) != 0
+    else:
+        has_promo_pawn = False
     # 2. Handle en passant and compute initial value directly from occupancy
     is_ep = False
     if (initial_occ & BB_SQUARES[to_sq]) == 0:
@@ -350,7 +306,7 @@ def _see_ge_jit(piece_bbs, occupancy_bbs, side_to_move, from_sq, to_sq, threshol
 
     swap = attacker_val - swap
     if swap <= 0:
-        if not is_promo_rank or (swap + promo_gain <= 0):
+        if not has_promo_pawn or (swap + promo_gain <= 0):
             return True
 
     # 4. Setup occupied (XOR style)
@@ -393,7 +349,7 @@ def _see_ge_jit(piece_bbs, occupancy_bbs, side_to_move, from_sq, to_sq, threshol
         val, bb, type_idx = get_lva_and_remove(stm_attackers, piece_bbs, current_side)
 
         # Subsequent pawn promotion on back rank
-        if is_promo_rank:
+        if has_promo_pawn:
             if type_idx == PAWN:
                 swap += promo_gain
                 val = SEE_PIECE_VALUES[QUEEN]
@@ -411,7 +367,7 @@ def _see_ge_jit(piece_bbs, occupancy_bbs, side_to_move, from_sq, to_sq, threshol
         # Update swap and check for early cutoff
         swap = val - swap
         if swap < res:
-            if not is_promo_rank or (swap + promo_gain < res):
+            if not has_promo_pawn or (swap + promo_gain < res):
                 break
 
         # Remove attacker from occupied (XOR)

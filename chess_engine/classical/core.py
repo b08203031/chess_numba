@@ -2,27 +2,7 @@ import numba
 import numpy as np
 
 from .board_operations import make_move, unmake_move
-from .move_generator import generate_legal_moves_buffer, is_square_attacked, generate_legal_moves
-from .engine_types import piece_bbs_signature, occupancy_bbs_signature, game_state_signature
-import numba.types as nbt
-from .zobrist import get_lsb_index
-
-@numba.njit(cache=True)
-def _is_king_in_check_jit(piece_bbs, occupancy_bbs, game_state):
-    """
-    檢查當前行棋方的王是否處於被將軍狀態。
-    """
-    side_to_move = game_state[0]
-    king_bb_index = 5 if side_to_move == 0 else 11
-    king_sq = get_lsb_index(piece_bbs[king_bb_index])
-
-    # Check if the king's square is attacked by the opponent
-    return is_square_attacked(piece_bbs, occupancy_bbs, king_sq, 1 - side_to_move)
-
-
-def is_king_in_check(piece_bbs, occupancy_bbs, game_state):
-    return _is_king_in_check_jit(piece_bbs, occupancy_bbs, game_state)
-
+from .move_generator import generate_legal_moves_buffer, generate_legal_moves
 
 PERFT_RESULTS = {
     "startpos": {

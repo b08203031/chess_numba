@@ -1,8 +1,7 @@
 # chess_engine/zobrist.py
 import numpy as np
 import numba
-from numba.extending import intrinsic
-from numba import types
+from chess_engine.classical.bitboard_utils import get_lsb_index
 from chess_engine.classical.engine_types import piece_bbs_signature, game_state_signature
 
 WHITE = 0
@@ -84,28 +83,6 @@ CASTLING_RIGHTS_KEYS = np.array([
 是一個長度為 16 的一維陣列（對應 4 個位元的組合）。
 """
 
-# New implementation using intrinsic
-@intrinsic
-def count_trailing_zeros(typingctx, val):
-    def codegen(context, builder, signature, args):
-        val_arg = args[0]
-        # llvm.cttz.i64(i64 <src>, i1 <is_zero_undef>)
-        # We pass False for is_zero_undef, so it is defined for 0 (returns 64).
-        return builder.cttz(val_arg, context.get_constant(types.boolean, False))
-
-    sig = types.int64(types.uint64)
-    return sig, codegen
-
-@numba.jit(numba.int8(numba.uint64), nopython=True, cache=True, inline='always')
-def get_lsb_index(bitboard: np.uint64) -> int:
-    """
-    Uses hardware CTZ (Count Trailing Zeros) intrinsic via LLVM to find LSB index.
-    Replacing De Bruijn multiplication for better performance.
-    """
-    if bitboard == 0:
-        return -1
-    return numba.int8(count_trailing_zeros(bitboard))
-
 @numba.jit(numba.uint64(piece_bbs_signature, game_state_signature), nopython=True, cache=True)
 def compute_initial_hash(piece_bbs: np.ndarray, game_state: np.ndarray) -> np.uint64:
     """
@@ -144,43 +121,4 @@ def compute_initial_hash(piece_bbs: np.ndarray, game_state: np.ndarray) -> np.ui
     if side_to_move == WHITE:
         zobrist_key ^= SIDE_TO_MOVE_KEY
 
-    return zobrist_key
-
-@numba.jit(numba.uint64(piece_bbs_signature, game_state_signature), nopython=True, cache=True)
-def compute_initial_pawn_hash(piece_bbs: np.ndarray, game_state: np.ndarray) -> np.uint64:
-    """計算僅包含兵的 Zobrist 哈希值"""
-    zobrist_key = np.uint64(0)
-    for piece_type in (0, 6): # 白兵、黑兵
-        bb = piece_bbs[piece_type]
-        while bb != 0:
-            square = get_lsb_index(bb)
-            zobrist_key ^= PIECE_SQUARE_KEYS[piece_type, square]
-            bb &= np.uint64(bb - 1)
-    return zobrist_key
-
-@numba.jit(numba.uint64(piece_bbs_signature, game_state_signature), nopython=True, cache=True)
-def compute_initial_minor_hash(piece_bbs: np.ndarray, game_state: np.ndarray) -> np.uint64:
-    """計算包含馬與象 (輕子) 的 Zobrist 哈希值"""
-    zobrist_key = np.uint64(0)
-    for piece_type in (1, 2, 7, 8): # 白馬、白象、黑馬、黑象
-        bb = piece_bbs[piece_type]
-        while bb != 0:
-            square = get_lsb_index(bb)
-            zobrist_key ^= PIECE_SQUARE_KEYS[piece_type, square]
-            bb &= np.uint64(bb - 1)
-    return zobrist_key
-
-@numba.jit(numba.uint64(piece_bbs_signature, game_state_signature, numba.boolean), nopython=True, cache=True)
-def compute_initial_non_pawn_hash(piece_bbs: np.ndarray, game_state: np.ndarray, is_white: bool) -> np.uint64:
-    """計算非兵棋子的 Zobrist 哈希值 (分黑白)"""
-    zobrist_key = np.uint64(0)
-    # 取決於顏色，計算 1~5 (白) 或 7~11 (黑)
-    start_idx = 1 if is_white else 7
-    end_idx = 6 if is_white else 12
-    for piece_type in range(start_idx, end_idx):
-        bb = piece_bbs[piece_type]
-        while bb != 0:
-            square = get_lsb_index(bb)
-            zobrist_key ^= PIECE_SQUARE_KEYS[piece_type, square]
-            bb &= np.uint64(bb - 1)
     return zobrist_key

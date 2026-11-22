@@ -62,6 +62,7 @@ python -m tests.benchmark        # NNUE 版：python -m tests.benchmark_nn_real
 * **[Numba JIT 編譯與快取報告](chess_engine/classical/JIT_COMPILE_CACHE_REPORT.md)**：1 MB 表上限、packed rook、StructRef 靜態存取、遞迴搜尋/QS/Lazy SMP 全鏈 disk cache 與冷/暖量測
 * **[搜尋 ↔ 評估介面](chess_engine/classical/SEARCH_EVAL_INTERFACE.md)**（KNOWN_WIN 護欄）、**[SEE 專題](chess_engine/classical/SEE_ANALYSIS.md)**、**[歷史啟發](chess_engine/classical/HISTORY_HEURISTICS_CN.md)**
 * **[Classical 搜尋單項實驗日誌](tournament_analysis/SEARCH_EXP_LOG.md)**（E1+ 連續 A/B 實驗流水紀錄）
+* **[2026-11-22 Classical 引擎深度審計報告](chess_engine/classical/CLASSICAL_ENGINE_AUDIT_20261122.md)**（31 項 BUG、11 項純 NPS 加速、死碼清單與 19 項 SF19/SF11 強化提案）與 **[Classical 除錯與優化實驗日誌](chess_engine/classical/CLASSICAL_OPTIMIZATION_EXP_LOG.md)**（Wave 2+ 修復與 NPS／SPRT 實測紀錄）
 
 ### 3. 已結案報告（歸檔，不進日常維護）
 * **[結案報告總覽](archive/closed_reports_2026/README.md)**：10 份已結案的搜尋／歷史啟發／NMP 階段計畫與戰役報告，每份附最終結論與現行取代文件（Phase 7/8、E47–E50、歷史啟發重構、搜尋審計與 07 月戰役等）。

@@ -26,6 +26,7 @@ from chess_engine.classical.constants import (
 )
 from chess_engine.classical.see import _see_ge_jit
 from chess_engine.classical.bitboard_utils import find_piece_type_on_square_side, get_lsb_index
+from chess_engine.classical.engine_types import search_context_type
 from chess_engine.classical.move_generator import (
     KNIGHT_ATTACKS, get_bishop_attacks, get_rook_attacks, PAWN_ATTACKS
 )
@@ -105,7 +106,10 @@ def update_pawn_history(pawn_history, pawn_key_idx, piece_type, to_square, bonus
     new_value = np.int32(current_value) + clamped_bonus - trunc_div(np.int32(current_value) * abs(clamped_bonus), HISTORY_MAX_PAWN)
     pawn_history[pawn_key_idx, piece_type, to_square] = new_value
 
-@numba.njit(cache=True, boundscheck=False, fastmath=True)
+@numba.njit(
+    numba.void(search_context_type, numba.int64, numba.uint16, numba.int8, numba.uint16, numba.int8, numba.int64),
+    cache=True, boundscheck=False, fastmath=True,
+)
 def update_continuation_history(context, ply_offset, prev_move, prev_piece, curr_move, curr_piece, bonus):
     """
     Updates the continuation history table.
@@ -325,13 +329,15 @@ def get_quiet_stat_components(search_context, ply, from_sq, to_sq, aggressor_typ
 @numba.njit(cache=True, boundscheck=False, fastmath=True)
 def score_captures_lazy(piece_bbs, occupancy_bbs, game_state, moves, scores, start_idx, end_idx, search_context, pinned_white, pinned_black, ply):
     side_to_move = game_state[0]
+    opp_side = 1 - side_to_move
+    opp_occ = occupancy_bbs[opp_side]
     
     for i in range(start_idx, end_idx):
         move = moves[i]
         to_square = get_to_square(move)
         from_sq = get_from_square(move)
         
-        victim_type = find_piece_type_on_square_side(piece_bbs, to_square, 1 - side_to_move)
+        victim_type = find_piece_type_on_square_side(piece_bbs, to_square, opp_side) if (opp_occ & BB_SQUARES[to_square]) != np.uint64(0) else np.int8(-1)
         aggressor_type = find_piece_type_on_square_side(piece_bbs, from_sq, side_to_move)
         
         if victim_type == -1 and get_special_move_flag(move) == SPECIAL_MOVE_FLAG_EN_PASSANT:
@@ -352,6 +358,8 @@ def score_captures_lazy(piece_bbs, occupancy_bbs, game_state, moves, scores, sta
 @numba.njit(cache=True, boundscheck=False, fastmath=True)
 def score_captures_with_tt_lazy(piece_bbs, occupancy_bbs, game_state, moves, scores, move_count, tt_move, pinned_white, pinned_black, search_context, ply):
     side_to_move = game_state[0]
+    opp_side = 1 - side_to_move
+    opp_occ = occupancy_bbs[opp_side]
     pawn_key_idx = game_state[PAWN_KEY_INDEX] & PAWN_HISTORY_MASK
     
     for i in range(move_count):
@@ -364,7 +372,7 @@ def score_captures_with_tt_lazy(piece_bbs, occupancy_bbs, game_state, moves, sco
             to_square = get_to_square(move)
             from_sq = get_from_square(move)
             
-            victim_type = find_piece_type_on_square_side(piece_bbs, to_square, 1 - side_to_move)
+            victim_type = find_piece_type_on_square_side(piece_bbs, to_square, opp_side) if (opp_occ & BB_SQUARES[to_square]) != np.uint64(0) else np.int8(-1)
             aggressor_type = find_piece_type_on_square_side(piece_bbs, from_sq, side_to_move)
             
             if victim_type == -1 and get_special_move_flag(move) == SPECIAL_MOVE_FLAG_EN_PASSANT:
@@ -421,6 +429,62 @@ def score_quiets(
         or check_sq_pawn != np.uint64(0)
     )
 
+    # Hoist loop-invariant continuation-history (prev_piece, prev_to) lookups outside the move loop.
+    has_c1 = False
+    p1 = np.int8(0)
+    to1 = np.uint8(0)
+    if ply > 0:
+        pm1 = search_context.move_stack[ply - 1]
+        pp1 = search_context.piece_stack[ply - 1]
+        if pm1 != NO_MOVE and pp1 != -1:
+            has_c1 = True
+            p1 = pp1
+            to1 = get_to_square(pm1)
+
+    has_c2 = False
+    p2 = np.int8(0)
+    to2 = np.uint8(0)
+    if ply > 1:
+        pm2 = search_context.move_stack[ply - 2]
+        pp2 = search_context.piece_stack[ply - 2]
+        if pm2 != NO_MOVE and pp2 != -1:
+            has_c2 = True
+            p2 = pp2
+            to2 = get_to_square(pm2)
+
+    has_c3 = False
+    p3 = np.int8(0)
+    to3 = np.uint8(0)
+    if ply > 2:
+        pm3 = search_context.move_stack[ply - 3]
+        pp3 = search_context.piece_stack[ply - 3]
+        if pm3 != NO_MOVE and pp3 != -1:
+            has_c3 = True
+            p3 = pp3
+            to3 = get_to_square(pm3)
+
+    has_c4 = False
+    p4 = np.int8(0)
+    to4 = np.uint8(0)
+    if ply > 3:
+        pm4 = search_context.move_stack[ply - 4]
+        pp4 = search_context.piece_stack[ply - 4]
+        if pm4 != NO_MOVE and pp4 != -1:
+            has_c4 = True
+            p4 = pp4
+            to4 = get_to_square(pm4)
+
+    has_c6 = False
+    p6 = np.int8(0)
+    to6 = np.uint8(0)
+    if ply > 5:
+        pm6 = search_context.move_stack[ply - 6]
+        pp6 = search_context.piece_stack[ply - 6]
+        if pm6 != NO_MOVE and pp6 != -1:
+            has_c6 = True
+            p6 = pp6
+            to6 = get_to_square(pm6)
+
     for i in range(start_idx, end_idx):
         move = moves[i]
         to_square = get_to_square(move)
@@ -428,7 +492,21 @@ def score_quiets(
         
         aggressor_type = find_piece_type_on_square_side(piece_bbs, from_sq, side_to_move)
         
-        score = get_quiet_ordering_score(search_context, ply, from_sq, to_square, aggressor_type, pawn_key_idx)
+        score = (
+            search_context.history_table[aggressor_type, to_square] * ORDERING_WEIGHT_MAIN
+            + search_context.pawn_history[pawn_key_idx, aggressor_type, to_square] * ORDERING_WEIGHT_PAWN
+            + search_context.butterfly_history[from_sq, to_square] * ORDERING_WEIGHT_BUTTERFLY
+        )
+        if has_c1:
+            score += search_context.continuation_history[0, p1, to1, aggressor_type, to_square] * ORDERING_WEIGHT_CONT_1
+        if has_c2:
+            score += search_context.continuation_history[1, p2, to2, aggressor_type, to_square] * ORDERING_WEIGHT_CONT_2
+        if has_c3:
+            score += search_context.continuation_history[2, p3, to3, aggressor_type, to_square] * ORDERING_WEIGHT_CONT_3
+        if has_c4:
+            score += search_context.continuation_history[3, p4, to4, aggressor_type, to_square] * ORDERING_WEIGHT_CONT_4
+        if has_c6:
+            score += search_context.continuation_history[4, p6, to6, aggressor_type, to_square] * ORDERING_WEIGHT_CONT_5
 
         if ply < LOW_PLY_HISTORY_SIZE:
             lph_score = search_context.low_ply_history[ply, move]
@@ -475,8 +553,9 @@ def score_quiets(
 
             if is_check_candidate:
                 if (not ENABLE_CHECK_SEE_GATE) or _see_ge_jit(
-                        piece_bbs, occupancy_bbs, side_to_move, from_sq, to_square,
-                        search_context.tune[TUNE_CHECK_SEE_THR], pinned_white, pinned_black, aggressor_type, -2):
+                        piece_bbs, occupancy_bbs, int(side_to_move), int(from_sq), int(to_square),
+                        int(search_context.tune[TUNE_CHECK_SEE_THR]), pinned_white, pinned_black,
+                        int(aggressor_type), -2, int(QUEEN)):
                     score += CHECK_BONUS
 
         scores[i] = score
