@@ -4,7 +4,7 @@
 
 > **用途：** 連續 A/B 實驗的唯一進度表與決策紀錄。未來接續實驗、回顧為何留下/回滾，以此檔為準。  
 
-> **最後更新：** 2026-11-22  
+> **最後更新：** 2026-11-23  
 
 > **當前基準狀態：**
 
@@ -123,6 +123,7 @@
 > 57. **E147（吃子步 LMR 減深寬免尺度全局凹函數掃描與重大突破 LMR_CAPTURE_VICTIM_SCALE = 792 vs 809，5 筆記本累計 6,908 局）狂勝 +16.67 Elo 光速觸發 SPRT H1 Accepted，已採納進生產基線**（針對 E85 子力價值膨脹導致吃子 LMR 寬免虛胖進行全面校準，橫向覆蓋 760/785/792/830 vs 809 以及 799 vs 792；其中 792 實測 1,022 局打出 220W/631D/171L 勝率 52.40% 淨勝 +49 局 +16.67 ± 13.17 Elo，單勝成對 WD:DL = 136:93 狂勝 +43 對，SPRT [0.0, 10.0] 在第 1,022 局 LLR=+2.96 擊穿上限觸發 H1 Accepted；799 vs 792 驗證確認 792 穩居頂峰；完美修正吃子減深過度寬免，已採納進生產基線）；
 > 58. **E148（SF19 Lazy SMP 多執行緒投票 `select_best_thread` 與根節點策略對齊，4 Threads vs 4 Threads 694 局）狂勝 +20.55 ± 14.00 Elo 通過 SPRT `[0, 10]` H1 Accepted（已同步基準 Commit `d015345`）**（實作 `select_best_thread` 投票選步、`RootThreadResult`、中斷部分迭代根節點保留、`apply_root_iteration_guards` 與移除 depth skipping；在相同 4 執行緒與平均耗時 `354.0 ms vs 355.0 ms` 下打出 **126W/483D/85L**（得分率 `52.95%`，淨勝 `+41` 局），成對九宮格 `WD+DW=87 vs DL+LD=60`、`WW:LL=11:4`，Pentanomial 95% CI `[+6.58, +34.59] Elo`，SPRT `[0, 10]` Penta Normal LLR = `+3.06` 擊穿上限觸發 **H1 Accepted**；同時在搜尋層驗證平均深度 `+0.13 ply`（`17.35` vs `17.22`, `p=1.53e-5`）與綜合吞吐量 `+4.0% NPS`（`2,001,269` vs `1,924,697`, `p=7.68e-28`）顯著提升）。
 > 59. **E149（Wave 2 零搜尋樹變動純 NPS 優化、64B AoS `pawn_table` 與 Numba 特化收斂，Commit `0f4c2eb` vs `d015345`，500 ms/move 780 局）狂勝 +24.54 ± 15.92 Elo 通過 SPRT `[0, 10]` H1 Accepted**（20 盤面 Depth 10 × 5 次節點數 `1,056,156` 100% 恆等且中位數均值 NPS 提升 **+31.05%**；Colab 8-vCPU 7 並發固定 `500 ms/move` 實戰 780 局打出 **194W/447D/139L**（`417.5 / 780` = **53.53%**，淨勝 **+55 局** / **+44 對**），成對群聚 95% CI `[+8.54, +40.64] Elo`，SPRT `[0, 10]` LLR = `+2.95` 觸發 **H1 Accepted**；7 並發實戰吞吐量提升 **+11.3% NPS**（`290,074` vs `260,640`, `p=4.47e-224`）、每步節點數提升 **+11.4%**（`102,294` vs `91,829`）、平均深度推進 **+0.31 ply**（`14.53` vs `14.22`, `p=2.17e-44`））。
+> 60. **E150（Wave 1A 安全／介面／稀有殘局純正確性 11 項 BUG 修復，Commit `b8b8717` vs `0f4c2eb`，500 ms/move 2,600 局）打出 +1.34 ± 8.24 Elo 通過無退化驗收（已同步基準至 `classical_old/`）**（20 盤面 Depth 10 節點 `1,056,156` 100% 恆等且 130 項測試全過；Colab 7 並發固定 `500 ms/move` 實戰 2,600 局（1,300 對）打出 **545W/1520D/535L**（`1305.0 / 2600` = **50.19%**，淨勝 **+10 局**），Pentanomial `[48, 298, 598, 308, 48]`（`WD-LD = +10` 對），**LOS = 62.5%**，`SPRT[-10, 0] LLR = +3.58` 通過、`SPRT[-5, 0] LLR = +1.09`；搜尋深度 `14.48 vs 14.46` 與耗時 `356.9 vs 357.2 ms` 完全持平；已同步至 `classical_old/` 作為 Wave 1B 對照基線）。
 
 ---
 
@@ -8513,6 +8514,25 @@ LMP skip 體積 ≫ RFP ≈ FP/Razor/hist-prune 帶 ≫ NMP ≫ ProbCut
   * **每步平均節點數**：**`102,294`**（med `88,047`）vs **`91,829`**（med `79,081`），淨增 **`+11.4%`**（`t=+30.097, p=7.0266e-198`）。
   * **每步平均搜尋深度**：**`14.53`**（σ=3.08, med=14）vs **`14.22`**（σ=3.14, med=14），淨增 **`+0.31 ply`**（`t=+13.985, p=2.1677e-44`）；`depth>=14` 佔比由 `50.5%` 躍升至 **`56.0%`**。
 * **結論與決策**：**採納（SPRT `[0, 10]` H1 Accepted 🏆）**。Wave 2 在完全不改變搜尋樹與評估邏輯的前提下，於高並發實戰將吞吐量提升 `+11.3%`、平均深度推進 `+0.31 ply`，轉化為 **`+24.54 ± 15.92 Elo`** 的顯著實戰增益。
+
+---
+
+### E150：Wave 1A 安全／介面／稀有殘局純正確性 11 項 BUG 修復（500 ms/move 無退化驗收，2026-11-22 ~ 2026-11-23）
+
+* **研究動機**：於 Wave 2（`0f4c2eb`）確定通過 SPRT H1 後，針對 [`CLASSICAL_ENGINE_AUDIT_20261122.md`](../chess_engine/classical/CLASSICAL_ENGINE_AUDIT_20261122.md) 中「不更動一般中局／搜尋樹行為」的安全、介面與稀有殘局正確性 Bug 執行 **Wave 1A（Commit `b8b8717` vs `0f4c2eb`）**，驗證無退化後固化為 Wave 1B 的基線。
+* **核心改動**（共 11 項，詳見 [`CLASSICAL_OPTIMIZATION_EXP_LOG.md`](../chess_engine/classical/CLASSICAL_OPTIMIZATION_EXP_LOG.md)）：
+  * 安全／介面：`search.py` `_search` 入口 `ply >= MAX_PLY - 1` 前置守衛（#4）；`opening_book.py` Polyglot 易位／EP 映射（#5）；`engine_types.py` 移除 `eval_weights` 靜默降級（#17）與 `reset_search_context` 補清跨局狀態（#29）；`fen_parser.py` 畸形 FEN 消毒（#18）；`move.py` `NO_MOVE → "0000"`（#30）。
+  * 稀有殘局：`endgame.py` 修復 `mate_kbnk`（#6）、`KBPsK` b/g 線堡壘檢查雙方所有兵（#14）、移除非 SF `KRPKN` 歸零（#15）、`_eval_kxk` 逼和守衛（#16）、`KRPPKRP` `0 < r < 6`（#25）。
+* **測試配置**（Colab 8-vCPU `AMD EPYC 7B12`，[`tournament_colab_runner_se_multicut copy.ipynb`](../tournament_colab_runner_se_multicut%20copy.ipynb)）：
+  * **對局規模與時控**：**2,600 局（1,300 組嚴格成對換先，0 重複對局）**，`--time 500`（`500 ms/move`）、`--concurrency 7`、`--tt-mb 64`。
+* **對局統計結果（`New` Wave 1A vs `Old` Wave 2）**：
+  * **總戰績**：**545W - 1520D - 535L**（總得分 `1,305.0 / 2,600` = **50.19%**，淨勝 **+10 局**，和局率 `58.46%`；持白 `53.19%`、持黑 `47.19%`）。
+  * **Pentanomial `[LL, LD/DL, DD/WL, WD/DW, WW]`**：`[48, 298, 598, 308, 48]`（`WW-LL = 0`、`WD-LD = +10` 對；九宮格 `DD:457, DL:180, WD:166, DW:142, LD:118, WL:88, LW:53, WW:48, LL:48`）。
+  * **相對 Elo 與 LOS**：Pentanomial **`+1.34 ± 8.24 Elo`**（95% CI `[-6.91, +9.58]`，**LOS = 62.5%**）。
+  * **SPRT 多區間驗證（[`tools/sprt_calc.py`](../tools/sprt_calc.py)）**：`SPRT[-10, 0] LLR = +3.58`（**H1 Accepted**）、`SPRT[-5, 0] LLR = +1.09`、`SPRT[-3, 0] LLR = +0.48`、`SPRT[-2, 0] LLR = +0.26`、`SPRT[-1.75, +0.25] LLR = +0.24`。
+* **搜尋遙測統計（`New` n=131,740 步 vs `Old` n=131,718 步，`draw_depth_cap=40`）**：
+  * 每步平均耗時 `356.9 ms` vs `357.2 ms`（`p = 0.4196`）；平均搜尋深度 `14.48` vs `14.46`（`p = 0.3769`）；每步節點 `100,597` vs `100,250`（`+0.3%`, `p = 0.0751`）；NPS `284,946` vs `283,780`（`+0.4%`, `p = 0.0241`）。
+* **結論與決策**：**採納並同步基準（已同步 `classical_old/`）**。`OwnBook` 與畸形 FEN 在對戰中未觸發，`KBNK`/`KXK` 多於 `±500 cp` 提早裁定，實戰主要由 `KBPsK` / `KRPKN` / `KRPPKRP` 貢獻穩健的 `+1.34 Elo`（淨勝 +10 局）並確認零退化，正式固化為後續 **Wave 1B** 基線。
 
 ---
 

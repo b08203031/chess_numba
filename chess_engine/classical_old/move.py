@@ -143,7 +143,12 @@ def move_to_uci(move: np.uint16) -> str:
         str: UCI 格式的移動字串。
     """
     from .core import SQUARE_TO_ALGEBRAIC
-    
+
+    # NO_MOVE (0) would otherwise decode to the impossible "a1a1"; UCI uses "0000" for a null move
+    # (e.g. bestmove in checkmate / stalemate positions).
+    if int(move) == 0:
+        return "0000"
+
     from_sq = get_from_square(move)
     to_sq = get_to_square(move)
     

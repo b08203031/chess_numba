@@ -70,7 +70,26 @@ class OpeningBook:
 
         return moves
 
-from .move import encode_move, SPECIAL_MOVE_FLAG_NORMAL, SPECIAL_MOVE_FLAG_PROMOTION, PROMO_KNIGHT, PROMO_BISHOP, PROMO_ROOK, PROMO_QUEEN
+from .move import (
+    encode_move, SPECIAL_MOVE_FLAG_NORMAL, SPECIAL_MOVE_FLAG_PROMOTION,
+    SPECIAL_MOVE_FLAG_EN_PASSANT, SPECIAL_MOVE_FLAG_CASTLING,
+    PROMO_KNIGHT, PROMO_BISHOP, PROMO_ROOK, PROMO_QUEEN,
+)
+
+# Polyglot encodes castling as "king takes own rook"; map to the engine's king-destination encoding.
+# Polyglot 以「王吃己方車」編碼易位；轉為引擎使用的王目標格編碼。
+_POLYGLOT_CASTLING_MAP = {
+    (4, 7): 6,     # e1h1 -> e1g1
+    (4, 0): 2,     # e1a1 -> e1c1
+    (60, 63): 62,  # e8h8 -> e8g8
+    (60, 56): 58,  # e8a8 -> e8c8
+}
+
+
+def _piece_bit(board_state, piece_index, sq) -> bool:
+    return bool((int(board_state[0][piece_index]) >> sq) & 1)
+
+
 def _convert_polyglot_move_to_engine_move(poly_move: np.uint16, board_state) -> np.uint16:
     """
     將 Polyglot 移動格式轉換為引擎內部的移動格式。
@@ -106,9 +125,24 @@ def _convert_polyglot_move_to_engine_move(poly_move: np.uint16, board_state) -> 
         elif promotion_piece_poly == 4:
             promotion_piece = PROMO_QUEEN
 
-    # Note: Polyglot does not explicitly handle castling or en passant.
-    # These moves must be inferred if necessary, but for lookup, this direct conversion is sufficient.
-    # 注意：Polyglot 不顯式處理王車易位或吃過路兵。
-    # 這些移動如果需要必須推斷，但對於查找，這種直接轉換已足夠。
+    # Polyglot encodes castling as king-takes-rook and does not flag en passant, so both must
+    # be inferred from the current position (Bug #5). Without this, the engine would emit illegal
+    # UCI such as `bestmove e1h1` straight from the book.
+    # Polyglot 以王吃車編碼易位且不標記吃過路兵，必須依當前局面推斷。
+    if special_flag == SPECIAL_MOVE_FLAG_NORMAL and board_state is not None:
+        from_sq_i = int(from_sq)
+        to_sq_i = int(to_sq)
+        castle_to = _POLYGLOT_CASTLING_MAP.get((from_sq_i, to_sq_i))
+        if castle_to is not None and (_piece_bit(board_state, 5, from_sq_i) or _piece_bit(board_state, 11, from_sq_i)):
+            to_sq = castle_to
+            special_flag = SPECIAL_MOVE_FLAG_CASTLING
+        else:
+            is_pawn_move = _piece_bit(board_state, 0, from_sq_i) or _piece_bit(board_state, 6, from_sq_i)
+            diagonal_to_empty = (
+                from_file != to_file
+                and ((int(board_state[1][2]) >> to_sq_i) & 1) == 0
+            )
+            if is_pawn_move and diagonal_to_empty:
+                special_flag = SPECIAL_MOVE_FLAG_EN_PASSANT
 
-    return encode_move(from_sq, to_sq, promotion_piece, special_flag)
+    return encode_move(int(from_sq), int(to_sq), promotion_piece, special_flag)

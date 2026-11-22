@@ -10,7 +10,9 @@ from chess_engine.classical_old.constants import (
     DARK_SQUARES, LIGHT_SQUARES,
 )
 from chess_engine.classical_old.bitboard_utils import get_lsb_index, count_bits, FILE_MASKS, BB_SQUARES
-from chess_engine.classical_old.move_generator import get_bishop_attacks, KING_ATTACKS, KNIGHT_ATTACKS, PAWN_ATTACKS
+from chess_engine.classical_old.move_generator import (
+    get_bishop_attacks, KING_ATTACKS, KNIGHT_ATTACKS, PAWN_ATTACKS, is_square_attacked_with_occ,
+)
 from chess_engine.classical_old.pawns import (
     MANHATTAN_DISTANCE, CHEBYSHEV_DISTANCE,
     WHITE_PASSED_PAWN_MASKS, BLACK_PASSED_PAWN_MASKS,
@@ -201,29 +203,35 @@ def relative_square(side, sq):
 
 
 @numba.njit(cache=True, boundscheck=False, fastmath=True)
-def mate_kbnk(strong_king_sq, weak_king_sq, bishop_sq, knight_sq, occ_all, strong_pieces):
+def mate_kbnk(strong_king_sq, weak_king_sq, bishop_sq, knight_sq, occ_all, weak_to_move):
     """
     KBN vs K (King, Bishop, Knight vs lone King) specialized evaluator.
     Guides the attacking side to herd the defending king away from wrong corners
     (opposite color to bishop) and into target corners (matching bishop color),
     restricting flight squares, coordinating knight and bishop, and avoiding stalemate.
+
+    ``weak_to_move``: stalemate / checkmate shortcuts are only valid when the lone king is the
+    side to move (Bug #6); otherwise they would hallucinate a draw for a winning strong side.
     """
-    b_attacks = get_bishop_attacks(bishop_sq, occ_all)
+    # X-ray through the weak king: squares behind it along the bishop line are still covered.
+    occ_xray = occ_all ^ BB_SQUARES[weak_king_sq]
+    b_attacks = get_bishop_attacks(bishop_sq, occ_xray)
     n_attacks = KNIGHT_ATTACKS[knight_sq]
     k_attacks = KING_ATTACKS[strong_king_sq]
+    # Attack sets include occupied squares, so a defended strong piece is "attacked" and cannot be
+    # captured by the weak king, while an UNDEFENDED strong piece remains a legal flight square.
     strong_attacks = b_attacks | n_attacks | k_attacks
 
     weak_adj = KING_ATTACKS[weak_king_sq]
-    flight = weak_adj & ~strong_attacks & ~strong_pieces
+    flight = weak_adj & ~strong_attacks & ~BB_SQUARES[strong_king_sq]
     safe_sq_count = count_bits(flight)
     is_check = (strong_attacks & BB_SQUARES[weak_king_sq]) != np.uint64(0)
 
-    # Stalemate protection: 0 flight squares and not in check -> DRAW (0)
-    if safe_sq_count == 0 and not is_check:
-        return np.int32(0)
-
-    # Immediate checkmate: 0 flight squares and in check -> near-mate win
-    if safe_sq_count == 0 and is_check:
+    if weak_to_move and safe_sq_count == 0:
+        # Stalemate protection: 0 flight squares and not in check -> DRAW (0)
+        if not is_check:
+            return np.int32(0)
+        # Immediate checkmate: 0 flight squares and in check -> near-mate win
         return np.int32(MATE_IN_MAX_PLY - 1)
 
     is_opposite = opposite_colors(bishop_sq, 0)  # 0 is SQ_A1
@@ -273,6 +281,25 @@ def _eval_kxk(
     pawn_eg, knight_eg, bishop_eg, rook_eg, queen_eg,
 ):
     """K + material vs lone king (SF11 Endgame<KXK>). Score from White's perspective."""
+    # SF11 endgame.cpp:124: weak side to move with no legal move -> VALUE_DRAW. A lone king is
+    # stalemated iff every adjacent square is attacked (x-ray through itself) and it is not in check.
+    if side_to_move != strong_side:
+        weak_king_bb = piece_bbs[11] if strong_side == 0 else piece_bbs[5]
+        weak_ksq = get_lsb_index(weak_king_bb)
+        all_occ = (piece_bbs[0] | piece_bbs[1] | piece_bbs[2] | piece_bbs[3] | piece_bbs[4] | piece_bbs[5]
+                   | piece_bbs[6] | piece_bbs[7] | piece_bbs[8] | piece_bbs[9] | piece_bbs[10] | piece_bbs[11])
+        occ_no_wk = all_occ ^ weak_king_bb
+        has_flight = False
+        adj = KING_ATTACKS[weak_ksq]
+        while adj != np.uint64(0):
+            esc_sq = get_lsb_index(adj)
+            adj &= adj - np.uint64(1)
+            if not is_square_attacked_with_occ(piece_bbs, esc_sq, occ_no_wk, strong_side):
+                has_flight = True
+                break
+        if not has_flight and not is_square_attacked_with_occ(piece_bbs, weak_ksq, occ_no_wk, strong_side):
+            return np.int32(0)
+
     if strong_side == 0:
         sk = get_lsb_index(piece_bbs[5])
         wk = get_lsb_index(piece_bbs[11])
@@ -529,11 +556,11 @@ def evaluate_special_endgame_with_material(
         if wn == 1 and wb == 1 and wr == 0 and wq == 0 and bn == 0 and bb == 0 and br == 0 and bq == 0:
             bishop_sq = get_lsb_index(piece_bbs[2])
             knight_sq = get_lsb_index(piece_bbs[1])
-            return True, np.int32(mate_kbnk(wk_sq, bk_sq, bishop_sq, knight_sq, occupancy_bbs[2], occupancy_bbs[0]))
+            return True, np.int32(mate_kbnk(wk_sq, bk_sq, bishop_sq, knight_sq, occupancy_bbs[2], side_to_move == 1))
         if bn == 1 and bb == 1 and br == 0 and bq == 0 and wn == 0 and wb == 0 and wr == 0 and wq == 0:
             bishop_sq = get_lsb_index(piece_bbs[8])
             knight_sq = get_lsb_index(piece_bbs[7])
-            return True, np.int32(-mate_kbnk(bk_sq, wk_sq, bishop_sq, knight_sq, occupancy_bbs[2], occupancy_bbs[1]))
+            return True, np.int32(-mate_kbnk(bk_sq, wk_sq, bishop_sq, knight_sq, occupancy_bbs[2], side_to_move == 0))
 
     # --- KPK (exactly one pawn, no other non-kings) ---
     if w_npm == 0 and b_npm == 0:
@@ -666,8 +693,10 @@ def _get_specialized_scale_factor(
 
         # B/G file case: if weak side has a pawn blocking on 7th rank with a weak king nearby
         # SF11 endgame.cpp lines 359-392
-        all_on_b = (piece_bbs[0] & ~FILE_MASKS[1]) == np.uint64(0)
-        all_on_g = (piece_bbs[0] & ~FILE_MASKS[6]) == np.uint64(0)
+        # SF11: !(pos.pieces(PAWN) & ~file_bb(pawnsFile)) -> pawns of BOTH colors on that file.
+        all_pawns = piece_bbs[0] | piece_bbs[6]
+        all_on_b = (all_pawns & ~FILE_MASKS[1]) == np.uint64(0)
+        all_on_g = (all_pawns & ~FILE_MASKS[6]) == np.uint64(0)
         if (all_on_b or all_on_g) and bp >= 1:
             # Find black's frontmost pawn (highest rank = most advanced from white's view)
             pb_temp = piece_bbs[6]
@@ -739,8 +768,9 @@ def _get_specialized_scale_factor(
                         return SCALE_FACTOR_DRAW
 
         # B/G file case (mirror of white's case)
-        all_on_b = (piece_bbs[6] & ~FILE_MASKS[1]) == np.uint64(0)
-        all_on_g = (piece_bbs[6] & ~FILE_MASKS[6]) == np.uint64(0)
+        all_pawns = piece_bbs[0] | piece_bbs[6]
+        all_on_b = (all_pawns & ~FILE_MASKS[1]) == np.uint64(0)
+        all_on_g = (all_pawns & ~FILE_MASKS[6]) == np.uint64(0)
         if (all_on_b or all_on_g) and wp >= 1:
             # Find white's frontmost pawn (lowest rank = most advanced from black's view)
             pw_temp = piece_bbs[0]
@@ -945,7 +975,7 @@ def _get_specialized_scale_factor(
             if (abs(bk_sq % 8 - wpsq1 % 8) <= 1
                     and abs(bk_sq % 8 - wpsq2 % 8) <= 1
                     and bk_sq // 8 > r):
-                if 1 < r < 6:
+                if 0 < r < 6:
                     return _KRPPKRP_SCALE[r]
 
     if strong_side == 1 and b_minor_major == 1 and br == 1 and bp == 2 and w_minor_major == 1 and wr == 1 and wp == 1:
@@ -959,7 +989,7 @@ def _get_specialized_scale_factor(
             if (abs(wk_sq % 8 - wpsq1 % 8) <= 1
                     and abs(wk_sq % 8 - wpsq2 % 8) <= 1
                     and (7 - wk_sq // 8) > r):
-                if 1 < r < 6:
+                if 0 < r < 6:
                     return _KRPPKRP_SCALE[r]
 
     # 3. KBPKN (King + Bishop + Pawn vs King + Knight)
@@ -1046,28 +1076,8 @@ def _get_specialized_scale_factor(
                         if abs(bsq % 8 - psq % 8) >= 2:
                             return 8
 
-    # 4. KRPKN (Rook + Pawn vs Knight)
-    if strong_side == 0 and w_minor_major == 1 and wr == 1 and wp == 1 and b_minor_major == 1 and bn == 1 and bp == 0:
-        p_sq = get_lsb_index(piece_bbs[0])
-        p_file = p_sq % 8
-        p_rank = p_sq // 8
-        bk_file = bk_sq % 8
-        bk_rank = bk_sq // 8
-        bn_sq = get_lsb_index(piece_bbs[7])
-        if bk_file == p_file and bk_rank > p_rank:
-            if CHEBYSHEV_DISTANCE[bk_sq, p_sq + 8] <= 2 and CHEBYSHEV_DISTANCE[bn_sq, p_sq + 8] <= 2:
-                return SCALE_FACTOR_DRAW
-
-    if strong_side == 1 and b_minor_major == 1 and br == 1 and bp == 1 and w_minor_major == 1 and wn == 1 and wp == 0:
-        p_sq = get_lsb_index(piece_bbs[6])
-        p_file = p_sq % 8
-        p_rank = p_sq // 8
-        wk_file = wk_sq % 8
-        wk_rank = wk_sq // 8
-        wn_sq = get_lsb_index(piece_bbs[1])
-        if wk_file == p_file and wk_rank < p_rank:
-            if CHEBYSHEV_DISTANCE[wk_sq, p_sq - 8] <= 2 and CHEBYSHEV_DISTANCE[wn_sq, p_sq - 8] <= 2:
-                return SCALE_FACTOR_DRAW
+    # (Removed Bug #15: a non-SF11 "KRPKN" rule used to zero R+P vs N, drawing won positions.
+    #  SF11 has no KRPKN scale function; generic material/pawn terms decide it.)
 
     # 6. KRPKR (Rook + Pawn vs Rook) - PHILIDOR & GLAURUNG RULES
     is_krpkr = False
