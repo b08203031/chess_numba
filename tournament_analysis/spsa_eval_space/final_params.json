@@ -1,0 +1,21 @@
+{
+  "block": "space",
+  "theta": {
+    "SPACE_THRESHOLD": 6086.470537985771,
+    "SPACE_BONUS_DIVISOR": 14.257897083544282,
+    "SPACE_SCALE_DIVISOR": 5.7243199969758205
+  },
+  "best_theta": {
+    "SPACE_THRESHOLD": 6000.0,
+    "SPACE_BONUS_DIVISOR": 15.0,
+    "SPACE_SCALE_DIVISOR": 6.0
+  },
+  "best_theta_int": {
+    "SPACE_THRESHOLD": 6000,
+    "SPACE_BONUS_DIVISOR": 15,
+    "SPACE_SCALE_DIVISOR": 6
+  },
+  "stopped_reason": "consecutive_l2_rejects",
+  "l2_fail_streak": 3,
+  "iter": 89
+}

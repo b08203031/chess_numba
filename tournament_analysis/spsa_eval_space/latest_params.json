@@ -1,0 +1,24 @@
+{
+  "block": "space",
+  "theta": {
+    "SPACE_THRESHOLD": 6087.779151636015,
+    "SPACE_BONUS_DIVISOR": 14.266621174545902,
+    "SPACE_SCALE_DIVISOR": 5.754428195155861
+  },
+  "theta_int": {
+    "SPACE_THRESHOLD": 6088,
+    "SPACE_BONUS_DIVISOR": 14,
+    "SPACE_SCALE_DIVISOR": 6
+  },
+  "best_theta_int": {
+    "SPACE_THRESHOLD": 6000,
+    "SPACE_BONUS_DIVISOR": 15,
+    "SPACE_SCALE_DIVISOR": 6
+  },
+  "iter": 88,
+  "drift_z": {
+    "SPACE_THRESHOLD": 0.91,
+    "SPACE_BONUS_DIVISOR": -1.15,
+    "SPACE_SCALE_DIVISOR": -0.77
+  }
+}

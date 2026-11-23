@@ -1,0 +1,60 @@
+{
+  "started_at": "2026-11-20T09:57:51.390718+00:00",
+  "block": "space",
+  "games": 300,
+  "nodes": 80000,
+  "iters": 300,
+  "concurrency": 8,
+  "tt_mb": 8,
+  "A": 25.0,
+  "alpha": 0.602,
+  "gamma": 0.101,
+  "seed": 42,
+  "opening_seed": 20261119,
+  "adjudicate": true,
+  "params": [
+    "SPACE_THRESHOLD",
+    "SPACE_BONUS_DIVISOR",
+    "SPACE_SCALE_DIVISOR"
+  ],
+  "initial_theta": {
+    "SPACE_THRESHOLD": 6000.0,
+    "SPACE_BONUS_DIVISOR": 15.0,
+    "SPACE_SCALE_DIVISOR": 6.0
+  },
+  "bounds": {
+    "SPACE_THRESHOLD": [
+      1000.0,
+      14000.0
+    ],
+    "SPACE_BONUS_DIVISOR": [
+      4.0,
+      40.0
+    ],
+    "SPACE_SCALE_DIVISOR": [
+      2.0,
+      20.0
+    ]
+  },
+  "r_end": {
+    "SPACE_THRESHOLD": 1.5,
+    "SPACE_BONUS_DIVISOR": 2.0,
+    "SPACE_SCALE_DIVISOR": 2.0
+  },
+  "c": {
+    "SPACE_THRESHOLD": 400.0,
+    "SPACE_BONUS_DIVISOR": 2.0,
+    "SPACE_SCALE_DIVISOR": 1.0
+  },
+  "theta_mode": "float_accumulate_quantize_on_apply",
+  "l2_every": 30,
+  "l2_games": 1000,
+  "l2_nodes": 200000,
+  "l2_candidate": "tail",
+  "l2_min_score": 0.51,
+  "l2_sprt": [
+    0.0,
+    10.0
+  ],
+  "pid": 21924
+}
