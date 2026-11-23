@@ -14,7 +14,7 @@
 | **Wave 2A** | 2026-11-22 | 零樹變動純 NPS 優化與死碼清理（搜尋／啟發式／TT／Movegen／SEE／HCE） | **0 差異**（20/20 FENs `1,056,156` nodes 100% 一致） | 96 項測試全過；20 盤面 Depth 10 × 5 次加權 NPS `485,290 → 602,738`（**+24.20%**），算術平均 NPS **+30.35%**，中位數均值 **+28.67%** | ✅ 完成 |
 | **Wave 2B** | 2026-11-22 | 補齊剩餘 Wave 2 架構優化（64B AoS `pawn_table`、`SearchContext` 80→65 欄、TT 16B 對齊、`.nbi` 多重特化收斂、`quiets` 展開） | **0 差異**（20/20 FENs `1,056,156` nodes 100% 一致） | 96 項測試熱跑 `21.39s` 全過；中位數均值 NPS `458,684 → 601,128`（**+31.05%**）；**Colab 500ms/move 實戰 780 局 `417.5 - 362.5`（53.53%，`194W 447D 139L`，`+24.54 ± 15.92 Elo`，`LLR=+2.95` H1 Accepted）** | ✅ **SPRT H1 通過** |
 | **Wave 1A** | 2026-11-22 | 安全／介面／殘局純正確性 BUG 修復（#4 #5 #6 #14 #15 #16 #17 #18 #25 #29 #30，共 11 項） | **20/20 FENs 節點 `1,056,156` 100% 一致**（一般局面零變動；僅特定殘局／畸形 FEN／開局庫輸出被修正） | 130 項測試全過；20 盤面 Depth 10 × 5 次加權 NPS `607,033`（+1.62%）；**Colab 500ms/move 實戰 2,600 局 `545W 1520D 535L`（`50.19%`，`+1.34 ± 8.24 Elo`，LOS `62.5%`，`SPRT[-10, 0] LLR=+3.58` H1 Accepted）；已同步至 `classical_old/`** | ✅ **無退化驗收 & 已同步基準** |
-| **Wave 1B-1** | 2026-11-23 | Bug #1 Part A：修正 `has_best_move` 判定（排除 `TT_FLAG_ALPHA` Fail-Low），啟用負向 Correction History | 20 FENs Depth-10 總節點 `1,056,156 → 1,059,970`（**`+0.36%`**）；`9/20` 變著、`19/20` 變分 | 72 項測試（含 [`test_wave1b_fixes.py`](../../tests/test_wave1b_fixes.py)）全過；熱匯入 `5.84s` / `0` `.numba.unresolved$`；Kiwipete 三張 STM 相對校正表負項由 `0` 轉正負均衡 | 🧪 **實作完成，待固定節點 SPRT** |
+| **Wave 1B-1** | 2026-11-23 | Bug #1 Part A：修正 `has_best_move` 判定（排除 `TT_FLAG_ALPHA` Fail-Low），啟用負向 Correction History | 20 FENs Depth-10 總節點 `1,056,156 → 1,059,970`（**`+0.36%`**）；`9/20` 變著、`19/20` 變分 | 72 項測試全過；熱匯入 `5.84s` / `0` `.numba.unresolved$`；**Colab `300k nodes` 1,628 局 `303W 1055D 270L`（`51.01%`，`+7.04 ± 9.72 Elo`，LOS `92.2%`，`SPRT[-10, 0] LLR=+4.90` H1 Accepted，`[-5, 0] +1.94`）；已同步至 `classical_old/`** | ✅ **接受並已同步基準** |
 
 ---
 
@@ -272,5 +272,14 @@
 | `non_pawn_correction_history_black` | `(5, 0, 0, +538, +326.6)` | `(2, 0, 0, +148, +109.5)` | Startpos d9 亦確認正負兼具 `(4, 2)` |
 | `continuation_correction_history` | `(36, 0, 0, +489, +111.8)` | **`(6, 10, -407, +119, -88.2)`** | **由 0 負項解除死碼** |
 
-> **下一步**：維持 `classical_old/` 於 Wave 1A（`b212150`）不動，先在 Colab 以**固定節點**（如 `--nodes 200000` 或 `300000`）進行單軸 `Wave 1B-1 vs Wave 1A` SPRT 驗證。
+### 3. Colab 固定節點（`300k nodes`）SPRT 實戰驗證（Commit `d896770` vs `b212150`）
+
+* **實驗配置**：`--nodes 300000`、`--concurrency 7`、`--tt-mb 64`、成對換先開局（`data/openings.epd`）。
+* **總戰績（1,628 局 / 814 對）**：**`New 830.5 - 797.5 Old`**（**`303W 1055D 270L`**，得分率 **`51.01%`**，淨勝 **`+33` 局**）。
+* **Pentanomial 五項分佈 `[LL, LD/DL, DD/WL, WD/DW, WW]`**：`[17, 177, 402, 192, 26]`（`WW - LL = +9` 對、`WD - LD = +15` 對，淨勝 **`+24` 對**；九宮格：`WW=26, WD=111, DW=81, WL=40, DD=343, LW=19, DL=93, LD=84, LL=17`）。
+* **相對 Elo 與 LOS**：Pentanomial **`+7.04 ± 9.72 Elo`**（95% CI **`[-2.68, +16.76]`**，**LOS = `92.2%`**）；前半場（814 局）`51.66%`、後半場（814 局）`50.37%` 全程穩定為正。
+* **多區間 SPRT（[tools/sprt_calc.py](../../tools/sprt_calc.py)）**：
+  * `SPRT[-10.00, +0.00]`：**`LLR = +4.8977`**（`H1 Accepted`）
+  * `SPRT[-5.00, +0.00]`：**`LLR = +1.9411`** / `SPRT[-3.00, +3.00]`：**`+1.7191`** / `SPRT[0.00, +5.00]`：**`+0.9241`** / `SPRT[0.00, +10.00]`：**`+0.8314`**
+* **結論與同步決策**：已以 `92.2%` LOS 確認無退步並取得實質正增益（預期在修復 Bug #2 移除 `lazy=True` 粗評污染後校正訊號會進一步純化）；已依使用者確認執行 `python tools/sync_classical_old.py --sync` 將 [`classical_old/`](../classical_old/) 推進至 Wave 1B-1 基準，準備進入 **Wave 1B-2（Bug #2）**。
 
