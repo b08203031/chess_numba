@@ -14,6 +14,7 @@
 | **Wave 2A** | 2026-11-22 | 零樹變動純 NPS 優化與死碼清理（搜尋／啟發式／TT／Movegen／SEE／HCE） | **0 差異**（20/20 FENs `1,056,156` nodes 100% 一致） | 96 項測試全過；20 盤面 Depth 10 × 5 次加權 NPS `485,290 → 602,738`（**+24.20%**），算術平均 NPS **+30.35%**，中位數均值 **+28.67%** | ✅ 完成 |
 | **Wave 2B** | 2026-11-22 | 補齊剩餘 Wave 2 架構優化（64B AoS `pawn_table`、`SearchContext` 80→65 欄、TT 16B 對齊、`.nbi` 多重特化收斂、`quiets` 展開） | **0 差異**（20/20 FENs `1,056,156` nodes 100% 一致） | 96 項測試熱跑 `21.39s` 全過；中位數均值 NPS `458,684 → 601,128`（**+31.05%**）；**Colab 500ms/move 實戰 780 局 `417.5 - 362.5`（53.53%，`194W 447D 139L`，`+24.54 ± 15.92 Elo`，`LLR=+2.95` H1 Accepted）** | ✅ **SPRT H1 通過** |
 | **Wave 1A** | 2026-11-22 | 安全／介面／殘局純正確性 BUG 修復（#4 #5 #6 #14 #15 #16 #17 #18 #25 #29 #30，共 11 項） | **20/20 FENs 節點 `1,056,156` 100% 一致**（一般局面零變動；僅特定殘局／畸形 FEN／開局庫輸出被修正） | 130 項測試全過；20 盤面 Depth 10 × 5 次加權 NPS `607,033`（+1.62%）；**Colab 500ms/move 實戰 2,600 局 `545W 1520D 535L`（`50.19%`，`+1.34 ± 8.24 Elo`，LOS `62.5%`，`SPRT[-10, 0] LLR=+3.58` H1 Accepted）；已同步至 `classical_old/`** | ✅ **無退化驗收 & 已同步基準** |
+| **Wave 1B-1** | 2026-11-23 | Bug #1 Part A：修正 `has_best_move` 判定（排除 `TT_FLAG_ALPHA` Fail-Low），啟用負向 Correction History | 20 FENs Depth-10 總節點 `1,056,156 → 1,059,970`（**`+0.36%`**）；`9/20` 變著、`19/20` 變分 | 72 項測試（含 [`test_wave1b_fixes.py`](../../tests/test_wave1b_fixes.py)）全過；熱匯入 `5.84s` / `0` `.numba.unresolved$`；Kiwipete 三張 STM 相對校正表負項由 `0` 轉正負均衡 | 🧪 **實作完成，待固定節點 SPRT** |
 
 ---
 
@@ -238,3 +239,38 @@
     * `SPRT[-3.00, +0.00]`：**`LLR = +0.4813`** / `SPRT[-2.00, +0.00]`：**`+0.2643`** / `SPRT[-1.75, +0.25]`：**`+0.2360`**
   * **搜尋遙測（`New` 131,740 步 vs `Old` 131,718 步）**：平均耗時 `356.9 ms` vs `357.2 ms`（`p = 0.4196`）、平均深度 `14.48` vs `14.46`（`p = 0.3769`）、每步節點 `100,597` vs `100,250`（`p = 0.0751`）、NPS `284,946` vs `283,780`（`+0.4%`, `p = 0.0241`）— 兩版搜尋速度與深度完全持平。
   * **結論與基準同步**：由於 Wave 1A 11 項修復中有 6 項為介面／防崩潰安全守衛（`OwnBook` 預設關閉且未觸發極深越界／畸形 FEN），另外 `KBNK`/`KXK` 亦多數被 `±500 cp` Adjudication 提早裁定，因此主要剩 `KBPsK` / `KRPKN` / `KRPPKRP` 貢獻微幅正增益；2,600 局 `+1.34 Elo` / `+10` 局淨勝已充分完成無退化驗收，並已同步固化至 [`classical_old/`](../classical_old/) 作為後續 **Wave 1B** 的全新對照基線。
+
+---
+
+## Wave 1B-1：修復 Bug #1 Part A — 啟用 Fail-Low 負向 Correction History（2026-11-23）
+
+> **對照基準**：Commit `b212150`（`classical_old/` 已同步至 Wave 1A；本項為嚴格單軸修復，**未改動** `ply > 0` `best_move` 更新邏輯，留待 Part B 獨立驗證）。
+
+### 1. 修復內容（[`search.py`](search.py) `# --- Update Correction History ---`）
+
+* **問題根因**：在 `ply > 0` 時，Step 14 受 `not is_loss(max_eval)` 保護，第 1 個合法著法在 `evaluation > -INFINITY` 下必將 `best_move` 設為非 `NO_MOVE`。原本寫 `has_best_move = (best_move != NO_MOVE)` 導致在全部 `TT_FLAG_ALPHA`（Fail-Low）節點中 `has_best_move` 仍為 `True`，不僅使 `(max_eval > static_score) == has_best_move` 在 `max_eval < static_score` 時 100% 拒絕更新負向校正（`CORRECTION_BONUS_NO_MOVE_DIV = 8` 完全死碼），還會在未證實上界 `static_score < max_eval <= original_alpha` 時錯誤寫入正向校正。
+* **單軸修法**：
+  * 改為 `has_best_move = (final_flag != TT_FLAG_ALPHA) and (best_move != NO_MOVE)`（對齊 SF19 `search.cpp:1631-1637`：僅於提高 `alpha` 時才認定存在已證實最佳著法）。
+  * 僅在 `if has_best_move:` 下檢查 `is_capture_or_promo`（Fail-Low 無 `bestMove`，即使第 1 步碰巧試了吃子也不阻斷全域結構性負向校正）。
+  * 加入 `if diff != 0:` 避免無意義寫入（不改動 `test_search_core_contracts.py` 所驗證之核心契約行）。
+
+### 2. 驗證與診斷結果
+
+* **單元測試**：`python -m unittest tests.test_wave1b_fixes tests.test_search_core_contracts tests.test_wave1a_fixes tests.test_lazy_smp tests.test_history -v` — **72 / 72 項全過**（`2.343s` 熱跑）。
+  * 新增 [`tests/test_wave1b_fixes.py`](../../tests/test_wave1b_fixes.py)（2 項）：契約檢查 `has_best_move` 條件，並驗證實搜 `Startpos depth=9` 下全部 5 張校正表均同時存在正項（`pos > 0`）與負項（`neg > 0`），且絕對值 $\le 1024$。
+* **Numba 快取與符號檢查**：跨進程 `warm_import = 5.84s`、`warmup_search_jit = 0.22s`；`_search` / `quiescence_search` / `_lazy_smp_helper_loop_jit` 均維持 **1** 過載、`unresolved: []`（**`0`** 個 `.numba.unresolved$`）。
+* **基準差異與衛生**：`python tools/sync_classical_old.py --diff` 顯示僅 `search.py` 上述單處差異；修改與新增檔案 `CRCRLF = 0`。
+* **20 盤面 Depth 10 搜尋樹與校正符號對比（`classical_old` Wave 1A vs `classical` Wave 1B-1）**：
+  * **總節點數**：`1,056,156 → 1,059,970`（**`+0.36%`**，樹規模極為穩定）；Weighted NPS `568,866 → 606,272`；著法變動 `9 / 20`、評分變動 `19 / 20`（唯一無變動為 `Tactical_MG` 步殺 `587` 節點）。
+  * **Kiwipete Depth-10 校正表分佈 `(pos, neg, min, max, nonzero_mean)`**：
+
+| Correction Table | Wave 1A (`classical_old`) | Wave 1B-1 (`classical`) | 變化判讀 |
+| :--- | :--- | :--- | :--- |
+| `pawn_correction_history` (W-abs) | `(10, 6, -245, +500, +37.3)` | `(1, 8, -366, +9, -173.0)` | 不再誤寫假正向，反映白方靜態微高估 |
+| `minor_correction_history` (W-abs) | `(17, 6, -479, +460, +40.9)` | `(1, 7, -608, +11, -230.2)` | 同上，恢復下修方向 |
+| `non_pawn_correction_history_white` | `(18, 0, 0, +513, +155.6)` | **`(1, 6, -551, +13, -275.9)`** | **由 0 負項解除死碼** |
+| `non_pawn_correction_history_black` | `(5, 0, 0, +538, +326.6)` | `(2, 0, 0, +148, +109.5)` | Startpos d9 亦確認正負兼具 `(4, 2)` |
+| `continuation_correction_history` | `(36, 0, 0, +489, +111.8)` | **`(6, 10, -407, +119, -88.2)`** | **由 0 負項解除死碼** |
+
+> **下一步**：維持 `classical_old/` 於 Wave 1A（`b212150`）不動，先在 Colab 以**固定節點**（如 `--nodes 200000` 或 `300000`）進行單軸 `Wave 1B-1 vs Wave 1A` SPRT 驗證。
+
