@@ -1515,6 +1515,7 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
     if not is_currently_in_check:
         if tt_hit and tt_static_eval_raw != 32767:
             raw_static_eval = np.int32(tt_static_eval_raw)
+            static_eval_is_full = True
         else:
             raw_static_eval, _, _ = _evaluate_position_jit(piece_bbs, occupancy_bbs, game_state, True, search_context)
 
@@ -3459,6 +3460,15 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                     or (move_flag == SPECIAL_MOVE_FLAG_PROMOTION)
                 )
 
+            # Bug #2: never train correction history against a lazy=True crude eval
+            # (missing tempo/pawns/king-safety/mobility/threats). Upgrade to full HCE
+            # on quiet depth >= 4 nodes that haven't upgraded yet; this also lets TT
+            # store the exact full static_eval below.
+            if not is_capture_or_promo and not static_eval_is_full:
+                raw_static_eval, _, _ = _evaluate_position_jit(piece_bbs, occupancy_bbs, game_state, False, search_context)
+                static_score = apply_correction_history_score(game_state, search_context, raw_static_eval, ply)
+                static_eval_is_full = True
+
             if not is_capture_or_promo and (max_eval > static_score) == has_best_move:
                 # Based on static_score calculation of bonus
                 diff = max_eval - static_score
@@ -3537,9 +3547,10 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
     tt_score = max_eval
     if tt_score > MATE_IN_MAX_PLY: tt_score += ply
     elif tt_score < -MATE_IN_MAX_PLY: tt_score -= ply
-    # Determine static eval to store logic
+    # Bug #2: only store full (lazy=False) HCE into TT.static_eval so QSearch never
+    # reads a crude Material+PST+Imbalance lazy score as its leaf stand_pat.
     tt_static_eval_to_store = np.int16(32767)
-    if raw_static_eval != -INFINITY and abs(raw_static_eval) < MATE_SCORE - MAX_PLY:
+    if static_eval_is_full and raw_static_eval != -INFINITY and abs(raw_static_eval) < MATE_SCORE - MAX_PLY:
         tt_static_eval_to_store = np.int16(raw_static_eval)
 
     # Propagate ttPv on fail-low (Alpha Flag)

@@ -15,6 +15,7 @@
 | **Wave 2B** | 2026-11-22 | 補齊剩餘 Wave 2 架構優化（64B AoS `pawn_table`、`SearchContext` 80→65 欄、TT 16B 對齊、`.nbi` 多重特化收斂、`quiets` 展開） | **0 差異**（20/20 FENs `1,056,156` nodes 100% 一致） | 96 項測試熱跑 `21.39s` 全過；中位數均值 NPS `458,684 → 601,128`（**+31.05%**）；**Colab 500ms/move 實戰 780 局 `417.5 - 362.5`（53.53%，`194W 447D 139L`，`+24.54 ± 15.92 Elo`，`LLR=+2.95` H1 Accepted）** | ✅ **SPRT H1 通過** |
 | **Wave 1A** | 2026-11-22 | 安全／介面／殘局純正確性 BUG 修復（#4 #5 #6 #14 #15 #16 #17 #18 #25 #29 #30，共 11 項） | **20/20 FENs 節點 `1,056,156` 100% 一致**（一般局面零變動；僅特定殘局／畸形 FEN／開局庫輸出被修正） | 130 項測試全過；20 盤面 Depth 10 × 5 次加權 NPS `607,033`（+1.62%）；**Colab 500ms/move 實戰 2,600 局 `545W 1520D 535L`（`50.19%`，`+1.34 ± 8.24 Elo`，LOS `62.5%`，`SPRT[-10, 0] LLR=+3.58` H1 Accepted）；已同步至 `classical_old/`** | ✅ **無退化驗收 & 已同步基準** |
 | **Wave 1B-1** | 2026-11-23 | Bug #1 Part A：修正 `has_best_move` 判定（排除 `TT_FLAG_ALPHA` Fail-Low），啟用負向 Correction History | 20 FENs Depth-10 總節點 `1,056,156 → 1,059,970`（**`+0.36%`**）；`9/20` 變著、`19/20` 變分 | 72 項測試全過；熱匯入 `5.84s` / `0` `.numba.unresolved$`；**Colab `300k nodes` 1,628 局 `303W 1055D 270L`（`51.01%`，`+7.04 ± 9.72 Elo`，LOS `92.2%`，`SPRT[-10, 0] LLR=+4.90` H1 Accepted，`[-5, 0] +1.94`）；已同步至 `classical_old/`** | ✅ **接受並已同步基準** |
+| **Wave 1B-2** | 2026-11-24 | Bug #2：禁止 `lazy=True` 粗評寫入 `TT.static_eval` 與校正歷史，並複用 TT 完整靜態分 | 20 FENs Depth-10 總節點 `1,059,970 → 900,152`（**`-15.08%`**）；`7/20` 變著、`18/20` 變分 | 74 項測試全過；Weighted NPS `644,881 → 643,029`（`-0.29%` 近零損失）；熱匯入 `6.51s` / `0` `.numba.unresolved$` | 🧪 **實作完成，待固定節點 SPRT** |
 
 ---
 
@@ -282,4 +283,30 @@
   * `SPRT[-10.00, +0.00]`：**`LLR = +4.8977`**（`H1 Accepted`）
   * `SPRT[-5.00, +0.00]`：**`LLR = +1.9411`** / `SPRT[-3.00, +3.00]`：**`+1.7191`** / `SPRT[0.00, +5.00]`：**`+0.9241`** / `SPRT[0.00, +10.00]`：**`+0.8314`**
 * **結論與同步決策**：已以 `92.2%` LOS 確認無退步並取得實質正增益（預期在修復 Bug #2 移除 `lazy=True` 粗評污染後校正訊號會進一步純化）；已依使用者確認執行 `python tools/sync_classical_old.py --sync` 將 [`classical_old/`](../classical_old/) 推進至 Wave 1B-1 基準，準備進入 **Wave 1B-2（Bug #2）**。
+
+---
+
+## Wave 1B-2：修復 Bug #2 — 禁止 `lazy=True` 粗評寫入 `TT.static_eval` 與校正歷史（2026-11-24）
+
+> **對照基準**：Commit `648d8ac`（`classical_old/` 已同步至 Wave 1B-1；嚴格單軸修復，未混入 Bug #3 QSearch `TT_FLAG_EXACT` 修正）。
+
+### 1. 修改明細（[`search.py`](search.py) 三處）
+
+1. **TT 完整靜態分複用**（TT Probe 後）：當 `tt_hit and tt_static_eval_raw != 32767` 時，設定 `static_eval_is_full = True`（因日後寫入 TT 的靜態分保證為 `lazy=False` 完整 HCE，可安全避免 RFP/Razoring/NMP/FP 重複計算完整評估；所有 `cached_pinned_*` 下游均已具備 `PINNED_UNCOMPUTED_SENTINEL` 檢查）。
+2. **Correction History 更新前升級完整評估**（`# --- Update Correction History ---`）：於安靜深度 $\ge 4$ 節點且 `not static_eval_is_full` 時，在執行校正更新前呼叫 `_evaluate_position_jit(..., False, search_context)` 與 `apply_correction_history_score(...)` 升級至完整 HCE 並設 `static_eval_is_full = True`（使校正歷史不再針對缺少 Tempo／兵型／王安全／機動性／威脅的粗評訓練，並讓 `store_tt` 一併寫入精確完整靜態分）。
+3. **阻斷 `lazy=True` 寫入 `TT.static_eval`**：`store_tt` 前僅當 `static_eval_is_full and raw_static_eval != -INFINITY and abs(raw_static_eval) < MATE_SCORE - MAX_PLY` 才寫入 `raw_static_eval`，否則存哨兵 `32767`，防止 QSearch 葉節點把 `lazy=True` 粗評當作 `stand_pat`。
+
+### 2. 驗證與診斷結果
+
+* **單元測試**：`python -m unittest tests.test_wave1b_fixes tests.test_search_core_contracts tests.test_wave1a_fixes tests.test_lazy_smp tests.test_history -v` — **74 / 74 項全過**。
+  * 新增 [`TestBug2LazyEvalTTIsolation`](../../tests/test_wave1b_fixes.py)：驗證結構契約，並於審計反例 `r4rk1/ppp3p1/2n4p/4p1Nq/2B2Q2/8/PPP3PP/R4R1K w - - 0 1` 與 `Kiwipete` 以 `depth = 2 / 6` 實搜確認 `probe_tt_snapshot` 讀回之 `tt_static_eval` 絕不為 `lazy_eval`（僅為 `32767` 或 `full_eval`）。
+* **Numba 快取與符號檢查**：`warm_import = 6.51s`、`warmup_search_jit = 0.23s`；`_search` / `quiescence_search` / `_lazy_smp_helper_loop_jit` 各 **1** 過載、`unresolved: []`。
+* **20 盤面 Depth 10 對照（`classical_old` Wave 1B-1 vs `classical` Wave 1B-2）**：
+  * **總節點數**：`1,059,970 → 900,152`（**`-15.08%`**，搜尋樹顯著收斂！）
+  * **Weighted NPS**：`644,881 → 643,029`（`-0.29%`，靠 TT 完整靜態分複用幾乎完全抵銷 `Correction History` 升級完整評估的開銷）
+  * **著法／評分變化**：`7 / 20` 盤面改變最佳著法、`18 / 20` 盤面改變評分（`EPD_6001 f1c4→f1b5`, `EPD_8001 e3d4→d1d4`, `EPD_10001 h2h3→d2c4`, `EPD_14001 d1a4→f4e5`, `EPD_16001 e2f4→e1g1`, `EPD_18001 c3b5→e1g1`, `EPD_22001 a2a3→c1e3`）。
+  * **Kiwipete Depth-10 校正表分佈**：5 張校正表均維持穩定負向修正（`pawn (1,10)`, `minor (1,9)`, `np_white (1,9)`, `np_black (2,0)`, `cntcv (6,14)`），且不致因 `lazy=True` 缺特徵而過度外推（`non_pawn_correction_history_white` nonzero mean 由 `-275.9` 收斂至 `-184.9`）。
+
+> **下一步**：維持 `classical_old/` 於 Wave 1B-1（`648d8ac`）不動，於 Colab 進行單軸 `Wave 1B-2 vs Wave 1B-1` 固定節點 SPRT 驗證。
+
 

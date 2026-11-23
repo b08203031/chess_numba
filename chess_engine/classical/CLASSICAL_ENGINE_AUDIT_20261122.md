@@ -229,5 +229,6 @@
 2. **Wave 1A（安全／介面／殘局純正確性 BUG 修復）— ✅ 已完成、通過 2,600 局無退化驗證並同步至 `classical_old/`**：Bug #4（`MAX_PLY` 越界）、#5（Polyglot 易位／EP）、#6（`mate_kbnk`）、#14–#16（`KBPsK` / `KRPKN` / `KXK`）、#17–#18（`eval_weights` fallback / `fen_parser`）、#25（`KRPPKRP`）、#29–#30（`reset_search_context` / `NO_MOVE`）共 11 項全數修復；20 盤面 Depth 10 節點 `1,056,156` 100% 恆等、回歸測試 [`tests/test_wave1a_fixes.py`](../../tests/test_wave1a_fixes.py)（27 項）與 130 項批次測試全過；Colab `500 ms/move` 實戰 2,600 局打出 `545W 1520D 535L`（**`+1.34 ± 8.24 Elo`**，LOS `62.5%`，`SPRT[-10, 0] LLR=+3.58` H1 Accepted）。詳見 [`CLASSICAL_OPTIMIZATION_EXP_LOG.md`](CLASSICAL_OPTIMIZATION_EXP_LOG.md) Wave 1A。
 3. **Wave 1B（高影響搜尋 BUG — 逐項固定節點 SPRT 驗證）**：
    * **Wave 1B-1（Bug #1 Part A：啟用 Fail-Low 負向 Correction History）— ✅ 已通過固定節點驗證並同步 `classical_old/`**：`300k nodes` 1,628 局打出 `303W 1055D 270L`（`51.01%`，`+7.04 ± 9.72 Elo`，LOS `92.2%`，`SPRT[-10, 0] LLR=+4.90` H1 Accepted、`[-5, 0] +1.94`）。詳見 [`CLASSICAL_OPTIMIZATION_EXP_LOG.md`](CLASSICAL_OPTIMIZATION_EXP_LOG.md) Wave 1B-1。
-   * **後續待辦依序**：Bug #1 Part B（視 SPRT 結果）→ Bug #2 → Bug #3 + #8 → Bug #7 → Bug #9/#10/#11/#12 → Bug #13 + #22。
+   * **Wave 1B-2（Bug #2：禁止 `lazy=True` 粗評寫入 `TT.static_eval` 與校正歷史）— 🧪 已實作並通過單元／快取／樹診斷（待固定節點 SPRT 驗證）**：20 FENs Depth-10 總節點降 **`-15.08%`**、Weighted NPS `-0.29%` 近零開銷，見 [`CLASSICAL_OPTIMIZATION_EXP_LOG.md`](CLASSICAL_OPTIMIZATION_EXP_LOG.md) Wave 1B-2。
+   * **後續待辦依序**：Bug #1 Part B（視 SPRT 結果）→ Bug #3 + #8 → Bug #7 → Bug #9/#10/#11/#12 → Bug #13 + #22。
 4. **Wave 3（高 ROI 搜尋／HCE 強化 — 嚴格單軸 SPRT）**：依優先序挑選 `S-1`～`S-5`、`E-1`、`E-2` 逐項驗證後決定是否同步 `classical_old/`。
