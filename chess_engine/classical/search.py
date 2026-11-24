@@ -501,7 +501,6 @@ def _classify_and_diag_main_in_check_move(
 def quiescence_search(piece_bbs, occupancy_bbs, game_state, alpha, beta, ply, search_context, q_ply):
     q_nodes = np.uint64(1)
     search_context.nodes_searched += 1
-    original_alpha = alpha
     best_move = NO_MOVE
     stand_pat = np.int32(32767)
     best_eval = np.int32(-32767)
@@ -538,7 +537,7 @@ def quiescence_search(piece_bbs, occupancy_bbs, game_state, alpha, beta, ply, se
     # M4: TT Probe in QSearch — avoids re-evaluating positions already in TT
     zobrist_key = game_state[4]
     tt_key = get_tt_key(zobrist_key, int(game_state[3]))  # GHI: halfmove-aware key for TT
-    qs_tt_flag, _qs_tt_depth, qs_tt_score_raw, qs_tt_static_eval, _qs_tt_is_pv, qs_tt_best_move = probe_tt_snapshot(
+    qs_tt_flag, _qs_tt_depth, qs_tt_score_raw, qs_tt_static_eval, qs_tt_is_pv, qs_tt_best_move = probe_tt_snapshot(
         search_context.transposition_table, tt_key
     )
     if qs_tt_flag != TT_FLAG_NONE:
@@ -624,14 +623,15 @@ def quiescence_search(piece_bbs, occupancy_bbs, game_state, alpha, beta, ply, se
             if abs(val) < MATE_IN_MAX_PLY:
                 val = np.int32(trunc_div(QS_STANDPAT_SMOOTH_A * val + QS_STANDPAT_SMOOTH_B * beta, QS_SMOOTH_DIV))
             
-            tt_score = val
-            if tt_score > MATE_IN_MAX_PLY: tt_score += ply
-            elif tt_score < -MATE_IN_MAX_PLY: tt_score -= ply
-            store_tt(
-                search_context.transposition_table, tt_key, int(_i32(0)), int(tt_score),
-                np.int16(stand_pat), int(_i32(TT_FLAG_BETA)), np.uint16(NO_MOVE),
-                search_context.tt_generation, _b_false(),
-            )
+            if qs_tt_flag == TT_FLAG_NONE:
+                tt_score = val
+                if tt_score > MATE_IN_MAX_PLY: tt_score += ply
+                elif tt_score < -MATE_IN_MAX_PLY: tt_score -= ply
+                store_tt(
+                    search_context.transposition_table, tt_key, int(_i32(0)), int(tt_score),
+                    np.int16(stand_pat), int(_i32(TT_FLAG_BETA)), np.uint16(NO_MOVE),
+                    search_context.tt_generation, bool(qs_tt_is_pv),
+                )
             return np.int32(val), q_nodes
         alpha = max(alpha, stand_pat)
 
@@ -642,8 +642,8 @@ def quiescence_search(piece_bbs, occupancy_bbs, game_state, alpha, beta, ply, se
             elif tt_score < -MATE_IN_MAX_PLY: tt_score -= ply
             store_tt(
                 search_context.transposition_table, tt_key, int(_i32(0)), int(tt_score),
-                np.int16(stand_pat), int(_i32(TT_FLAG_EXACT)), np.uint16(NO_MOVE),
-                search_context.tt_generation, _b_false(),
+                np.int16(stand_pat), int(_i32(TT_FLAG_ALPHA)), np.uint16(NO_MOVE),
+                search_context.tt_generation, bool(qs_tt_is_pv),
             )
             return np.int32(stand_pat), q_nodes
 
@@ -1016,15 +1016,15 @@ def quiescence_search(piece_bbs, occupancy_bbs, game_state, alpha, beta, ply, se
     if tt_score > MATE_IN_MAX_PLY: tt_score += ply
     elif tt_score < -MATE_IN_MAX_PLY: tt_score -= ply
 
-    tt_flag = TT_FLAG_BETA if best_eval >= beta else (TT_FLAG_ALPHA if alpha <= original_alpha else TT_FLAG_EXACT)
+    tt_flag = TT_FLAG_BETA if best_eval >= beta else TT_FLAG_ALPHA
 
     tt_static_eval_to_store = np.int16(32767)
     if not is_currently_in_check and stand_pat != 32767:
         tt_static_eval_to_store = np.int16(stand_pat)
     store_tt(
         search_context.transposition_table, tt_key, int(_i32(0)), int(tt_score),
-        tt_static_eval_to_store, int(tt_flag), np.uint16(best_move),
-        search_context.tt_generation, _b_false(),
+        tt_static_eval_to_store, int(_i32(tt_flag)), np.uint16(best_move),
+        search_context.tt_generation, bool(qs_tt_is_pv),
     )
 
     return np.int32(best_eval), q_nodes
