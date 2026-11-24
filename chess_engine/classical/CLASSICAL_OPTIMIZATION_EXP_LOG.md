@@ -15,7 +15,8 @@
 | **Wave 2B** | 2026-11-22 | 補齊剩餘 Wave 2 架構優化（64B AoS `pawn_table`、`SearchContext` 80→65 欄、TT 16B 對齊、`.nbi` 多重特化收斂、`quiets` 展開） | **0 差異**（20/20 FENs `1,056,156` nodes 100% 一致） | 96 項測試熱跑 `21.39s` 全過；中位數均值 NPS `458,684 → 601,128`（**+31.05%**）；**Colab 500ms/move 實戰 780 局 `417.5 - 362.5`（53.53%，`194W 447D 139L`，`+24.54 ± 15.92 Elo`，`LLR=+2.95` H1 Accepted）** | ✅ **SPRT H1 通過** |
 | **Wave 1A** | 2026-11-22 | 安全／介面／殘局純正確性 BUG 修復（#4 #5 #6 #14 #15 #16 #17 #18 #25 #29 #30，共 11 項） | **20/20 FENs 節點 `1,056,156` 100% 一致**（一般局面零變動；僅特定殘局／畸形 FEN／開局庫輸出被修正） | 130 項測試全過；20 盤面 Depth 10 × 5 次加權 NPS `607,033`（+1.62%）；**Colab 500ms/move 實戰 2,600 局 `545W 1520D 535L`（`50.19%`，`+1.34 ± 8.24 Elo`，LOS `62.5%`，`SPRT[-10, 0] LLR=+3.58` H1 Accepted）；已同步至 `classical_old/`** | ✅ **無退化驗收 & 已同步基準** |
 | **Wave 1B-1** | 2026-11-23 | Bug #1 Part A：修正 `has_best_move` 判定（排除 `TT_FLAG_ALPHA` Fail-Low），啟用負向 Correction History | 20 FENs Depth-10 總節點 `1,056,156 → 1,059,970`（**`+0.36%`**）；`9/20` 變著、`19/20` 變分 | 72 項測試全過；熱匯入 `5.84s` / `0` `.numba.unresolved$`；**Colab `300k nodes` 1,628 局 `303W 1055D 270L`（`51.01%`，`+7.04 ± 9.72 Elo`，LOS `92.2%`，`SPRT[-10, 0] LLR=+4.90` H1 Accepted，`[-5, 0] +1.94`）；已同步至 `classical_old/`** | ✅ **接受並已同步基準** |
-| **Wave 1B-2** | 2026-11-24 | Bug #2：禁止 `lazy=True` 粗評寫入 `TT.static_eval` 與校正歷史，並複用 TT 完整靜態分 | 20 FENs Depth-10 總節點 `1,059,970 → 900,152`（**`-15.08%`**）；`7/20` 變著、`18/20` 變分 | 74 項測試全過；Weighted NPS `644,881 → 643,029`（`-0.29%` 近零損失）；熱匯入 `6.51s` / `0` `.numba.unresolved$` | 🧪 **實作完成，待固定節點 SPRT** |
+| **Wave 1B-2** | 2026-11-24 | Bug #2：禁止 `lazy=True` 粗評寫入 `TT.static_eval` 與校正歷史，並複用 TT 完整靜態分 | 20 FENs Depth-10 總節點 `1,059,970 → 900,152`（**`-15.08%`**）；`7/20` 變著、`18/20` 變分 | 74 項測試全過；Weighted NPS `644,881 → 643,029`（`-0.29%` 近零損失）；熱匯入 `6.51s` / `0` `.numba.unresolved$`；使用者確認無退化並已同步 `classical_old/` | ✅ **已同步基準** |
+| **Wave 1B-3** | 2026-11-24 | Bug #3 + #8：禁止 QS 寫入 `TT_FLAG_EXACT` 覆寫深層 TT；修復無鎖 TT RMW 競態、`int16(-32768)` 溢位與 `probe_tt_best_move` TOCTOU | Depth-10 (18 FENs) `+20.44%` nodes；**Depth-14 (40 FENs)** `12.04M → 12.73M`（`+5.75%`），`12/40` 變著、`35/40` 變分（`mean\|dEval\| = 30.1 cp`）；**`d0_EXACT: 242,035 → 0`**、**`TT d≥6: +9.62%`** | **82 / 82** 測試全過（`6.382s`）；熱匯入 `4.30s` / `0` `.numba.unresolved$`；**Colab `300k nodes` 882 局 `452.5 - 429.5`（`51.30%`，`164W 577D 141L`，`+9.06 ± 13.15 Elo`，LOS `91.2%`，`SPRT[-10, 0] LLR=+3.13` H1 Accepted，`[-5, 0] +1.29`）** | ✅ **[-10,0] H1 通過 (882局 +9.06 Elo, 待決定同步)** |
 
 ---
 
@@ -307,6 +308,74 @@
   * **著法／評分變化**：`7 / 20` 盤面改變最佳著法、`18 / 20` 盤面改變評分（`EPD_6001 f1c4→f1b5`, `EPD_8001 e3d4→d1d4`, `EPD_10001 h2h3→d2c4`, `EPD_14001 d1a4→f4e5`, `EPD_16001 e2f4→e1g1`, `EPD_18001 c3b5→e1g1`, `EPD_22001 a2a3→c1e3`）。
   * **Kiwipete Depth-10 校正表分佈**：5 張校正表均維持穩定負向修正（`pawn (1,10)`, `minor (1,9)`, `np_white (1,9)`, `np_black (2,0)`, `cntcv (6,14)`），且不致因 `lazy=True` 缺特徵而過度外推（`non_pawn_correction_history_white` nonzero mean 由 `-275.9` 收斂至 `-184.9`）。
 
-> **下一步**：維持 `classical_old/` 於 Wave 1B-1（`648d8ac`）不動，於 Colab 進行單軸 `Wave 1B-2 vs Wave 1B-1` 固定節點 SPRT 驗證。
+> **後續紀錄**：使用者於 2026-11-24 確認 Wave 1B-2 測試結果無退步，已執行 `python tools/sync_classical_old.py --sync` 將 [`classical_old/`](../classical_old/) 同步至 Wave 1B-2，作為 Wave 1B-3（Bug #3 + #8）的對照基準。
+
+---
+
+## Wave 1B-3：修復 Bug #3（QS `TT_FLAG_EXACT` 覆寫深層 TT）與 Bug #8（無鎖 TT 競態與欄位完整性）（2026-11-24）
+
+> **對照基準**：`classical_old/` 已同步至 Wave 1B-2；本波維持 `classical_old/` 於 Wave 1B-2 不動，以便單軸 SPRT 驗證 Bug #3 + #8。
+
+### 1. 修改明細
+
+1. **[`transposition_table.py`](transposition_table.py)（Bug #8 + Bug #3 防禦守衛）**：
+   * **`penalize_tt`**：進入槽位先以區域純量快照全欄位；遇 `TT_FLAG_NONE` 跳過（`continue`）、`> TT_FLAG_BETA` 終止；先驗算 16-bit XOR checksum 才允許修改（拒絕把 SMP 撕裂條目「封成合法 checksum」）；深度未變時不寫回；有變動時以已驗證區域純量重算 checksum 並完整寫回。
+   * **`probe_tt_snapshot`**：於 `e_key == key32` 且 `e_flag == TT_FLAG_NONE` 時改為 `continue`（避免 `key32 == 0` 空格提前中斷 4-way 掃描）。
+   * **`probe_tt_best_move`**：移除經 `probe_tt(...)` 回傳可變結構指標的 TOCTOU 讀取，改為直接於區域純量快照並驗算 checksum（保留 `probe_tt` / `_EMPTY_TT_ENTRY` 匯出及 `flag == TT_FLAG_NONE` 測試契約）。
+   * **`store_tt`**：
+     * 精確匹配條件改為 `e_key == key32 and e_flag != TT_FLAG_NONE`，快照並驗證舊 checksum（`e_valid`）；若舊條目損毀則強制乾淨覆寫，不繼承撕裂的 `best_move` 或 `static_eval`。
+     * **Bug #3 守衛**：`flag == TT_FLAG_EXACT and (depth > 0 or e_depth == 0)` 禁止 `depth=0` 的 `EXACT` 條目覆寫 `depth > 0` 主搜尋條目。
+     * `replace=True` 無條件寫回 `static_eval`（來值為 `32767` 且舊條目合法時沿用 `e_static_eval`），消除算進 checksum 卻漏寫欄位的不一致。
+     * `else:`（不覆寫）路徑僅在 `updated == True` 時才以已驗證區域純量重算 checksum 並寫回；允許 `bm_u16 != 0 and flag != TT_FLAG_ALPHA` 在 `(e_best_move == 0 or (depth > 0 and e_flag == TT_FLAG_ALPHA))` 時補寫較可靠 `best_move`；次級將死老化改用 `abs(np.int32(e_score))` 修正 Numba 中 `int16(-32768)` 溢位問題。
+     * 碰撞替換迴圈改用無符號區域純量快照 `c_flag` / `c_gen` / `is_pv`。
+2. **[`search.py`](search.py) `quiescence_search`（Bug #3）**：
+   * 移除未用變數 `original_alpha`，並自 `probe_tt_snapshot` 解包 `qs_tt_is_pv`，於全部 3 處 `store_tt` 呼叫保留 `bool(qs_tt_is_pv)` 並統一傳入 `int(_i32(...))` 型別。
+   * Stand-pat beta 截斷之 `store_tt` 改為僅於 `qs_tt_flag == TT_FLAG_NONE` 時寫入（對齊 SF19 `search.cpp:1750`）。
+   * 無吃子葉節點（`move_count == 0`）改存 `TT_FLAG_ALPHA`（原誤存 `TT_FLAG_EXACT`）。
+   * 著法迴圈結尾改存 `TT_FLAG_BETA if best_eval >= beta else TT_FLAG_ALPHA`（永不於 QS 寫入 `TT_FLAG_EXACT`，對齊 SF19 `search.cpp:1877`）。
+
+### 2. 驗證與診斷結果
+
+* **單元測試**：`python -m unittest tests.test_wave1b_fixes tests.test_search_core_contracts tests.test_lazy_smp tests.test_wave1a_fixes tests.test_history -v` — **82 / 82 項全過**（`6.382s`）。
+  * 於 [`tests/test_wave1b_fixes.py`](../../tests/test_wave1b_fixes.py) 新增 `TestBug3QSearchTTNoExactOverwrite`（3 項）與 `TestBug8LocklessTTSafety`（5 項），涵蓋 QS 無 `TT_FLAG_EXACT` 契約、`depth=0` 守衛、實搜保留 `depth=12` TT 與零 `d0_EXACT`、`penalize_tt` 拒封撕裂條目、`store_tt` 撕裂清理、`static_eval` 寫回一致、`int16(-32768)` 次級老化及 `probe_tt_best_move` 純量快照；另於 `TestBug1PartANegativeCorrectionHistory` 補入黑先中局盤面（`r2q1rk1/ppp2ppp/2n1bn2/2bpp3/4P3/2NP1NP1/PPP1QPBP/R1B2RK1 b - - 0 8`）以穩定覆蓋 `non_pawn_correction_history_black` 負向樣本（Bug #3 清除 QS 假截斷後，原兩盤白先 depth-9 測試已不足以固定產生黑方非兵負向節點）。
+* **Numba 快取與符號檢查**：跨進程 `warm_import = 4.30s`、`warmup_search_jit = 0.12s`；`.nbi` 磁碟過載數 `_search = 1`、`quiescence_search = 1`、`_lazy_smp_helper_loop_jit = 1`、`probe_tt_best_move = 1`、`probe_tt_snapshot = 1`、`penalize_tt = 2`、`store_tt = 3`；LLVM IR 檢查 `unresolved_ir_lines: []`（`0` `.numba.unresolved$`）。
+* **基準差異與衛生**：`python tools/sync_classical_old.py --diff-code` 僅顯示 `search.py` 與 `transposition_table.py` 上述修復；`CRCRLF = 0`。
+
+### 3. Depth-10 連續性與 Depth-14 多資料集對照（Wave 1B-2 `classical_old` vs Wave 1B-3 `classical`，64 MB TT）
+
+* **Depth-10 連續性基準（18 盤面：16 抽樣 `data/openings.epd` + `Startpos` + `Kiwipete`）**：
+  * Total nodes：`882,030 → 1,062,334`（**`+20.44%`**，幾何平均 `1.2280x`）；QS nodes：`439,402 → 533,892`（`+21.50%`）；Weighted NPS：`785,241 → 802,418`（**`+2.19%`**）；`mv_chg = 4/18`、`eval_chg = 14/18`、`mean|dEval| = 10.6 cp`；**`d0_EXACT: 16,243 → 0`**；**`TT d≥6: 1,101 → 1,534`（`+39.33%`）**；`TT_hits: 41,225 → 46,879`。
+* **Depth-14 多資料集測試（共 40 盤面：`.epd` 與 `tuner/data/hce/val_pgn.npz`）**：
+
+| 資料集來源 | 盤面數 | 總節點 (`Old → New`) | 變動 (Geomean) | Weighted NPS | 變著 / 變分 (`mean\|dEval\|`) | `d0_EXACT` (`Old → New`) | `TT d≥6` 保留量 |
+| :--- | :---: | ---: | :---: | :---: | :---: | :---: | :---: |
+| `data/openings.epd` | 10 | `4,181,301 → 4,044,130` | `-3.28%` (`0.9898x`) | `766,596 → 756,303` (`-1.34%`) | `4/10` / `10/10` (`13.1 cp`) | `59,682 → 0` | `14,034 → 13,108` (`-6.60%`) |
+| `data/sts/STS1-STS15_LAN_v6.epd` | 10 | `2,535,525 → 3,390,789` | `+33.73%` (`1.2971x`) | `794,046 → 780,147` (`-1.75%`) | `4/10` / `8/10` (`30.2 cp`) | `43,773 → 0` | `10,840 → 15,405` (`+42.11%`) |
+| `data/hist_diag_puzzles_500.epd` | 10 | `1,484,445 → 1,667,647` | `+12.34%` (`0.9584x`) | `774,645 → 806,115` (`+4.06%`) | `2/10` / `8/10` (`69.7 cp`) | `31,532 → 0` | `6,230 → 5,872` (`-5.75%`) |
+| `val_pgn.npz` MG (`18..26` 子) | 5 | `1,758,508 → 1,940,656` | `+10.36%` (`1.3153x`) | `789,700 → 801,659` (`+1.51%`) | `2/5` / `5/5` (`14.8 cp`) | `21,596 → 0` | `7,209 → 8,352` (`+15.86%`) |
+| `val_pgn.npz` EG (`7..13` 子) | 5 | `2,078,235 → 1,687,408` | `-18.81%` (`0.9958x`) | `1,550,485 → 1,465,878` (`-5.46%`) | `0/5` / `4/5` (`8.0 cp`) | `85,452 → 0` | `4,703 → 4,417` (`-6.08%`) |
+| **總計 (`D14_ALL`)** | **40** | **`12,038,014 → 12,730,630`** | **`+5.75%`** (`1.0893x`) | **`851,886 → 830,209`** (`-2.54%`) | **`12/40` / `35/40` (`30.1 cp`)** | **`242,035 → 0`** | **`43,016 → 47,154` (`+9.62%`)** |
+
+* **關鍵判讀**：
+  * 舊版在 40 個 Depth-14 盤面合計產生 **`242,035` 筆 `depth=0, TT_FLAG_EXACT` 條目**（尤以殘局 `val_pgn_EG` 單組高達 `85,452` 筆、`VAL_EG_5000` 單盤 `51,764` 筆最甚）；修復後完全清零為 **`0`**，全庫 `depth >= 6` 深層 TT 保留量提升 **`+9.62%`**（STS 更達 `+42.11%`），`TT_hits` 由 `633,939` 增至 `651,798`。
+  * 消除 QS 誤標 `EXACT`（把帶 Delta/SEE 剪枝的界限錯當精確值）引發的假截斷後，Depth-14 總節點僅微增 `+5.75%`（殘局反降 `-18.81%`、開局 `-3.28%`），並修正多盤明顯估值失真（如 `PUZ_200 +522 → +55`、`STS_360 +38 → -35`、`OPEN_6000 +30 → -6`、`PUZ_250 e8b8(+68) → h6e6(-14)`）。
+
+### 4. 固定節點（`300k nodes`）實戰對戰驗證快照（`tournament_analysis/wave1b3_300k.pgn`，Wave 1B-3 vs Wave 1B-2）
+
+* **總戰績與統計檢定（`tools/sprt_calc.py`，882 局 / 441 對成對換先）**：
+  * **得分**：**`New 452.5 - 429.5 Old`**（**`51.30%`**，**`164W 577D 141L`**，淨勝 **`+23` 局**）。
+  * **Pentanomial 五項分佈 `[LL, LD/DL, DD/WL, WD/DW, WW]`**：`[12, 87, 219, 112, 11]`（`WW - LL = -1` 對、`WD - LD = +25` 對）。
+  * **相對 Elo 與 LOS**：Pentanomial **`+9.06 ± 13.15 Elo`**（95% CI **`[-4.09, +22.21]`**，**LOS = `91.2%`**；WDL `+9.06 ± 13.48`，LOS `90.6%`）。
+  * **多區間 SPRT（Pentanomial）**：`[-10.00, +0.00] LLR = +3.1255`（**`H1 Accepted`**）、`[-12.00, +0.00] +4.0166`（`H1 Accepted`）、`[-5.00, +0.00] +1.2852`、`[-3.00, +0.00] +0.7045`、`[-3.00, +3.00] +1.2088`、`[0.00, +5.00] +0.7294`、`[0.00, +10.00] +0.9029`。
+* **對局結構與序列穩定性（`game_stats_report.txt`，850 局樣本：`160W 556D 134L`，`51.53%`）**：
+  * 和局率 `65.41%`、平均局數 `50.3` 回合（$\sigma = 21.3$）；持白 `55.88%`（`102W 271D 52L`）、持黑 `47.18%`（`58W 285D 82L`）。
+  * 序列穩定性（425 對）：前半場 `0.501`、後半場 `0.529`；Lag-1 自相關 `-0.0483`、游程檢定 `p = 0.6981`。
+* **搜尋遙測對比（`search_stats_report.txt`，842 局樣本：`New` 42,054 步 vs `Old` 42,026 步）**：
+  * 平均搜尋深度 `16.19`（$\sigma=3.39$）vs `16.17`（$\sigma=3.37$）（`+0.02`, Welch $t=+0.969, p=0.3326$；`depth >= 14`：`85.9%` vs `85.7%`）。
+  * 每步平均節點 `182,495` vs `182,525`（`-0.0%`, $p=0.8749$）、每步耗時 `339.5 ms` vs `339.4 ms`（$p=0.8458$）、平均 NPS `597,274` vs `598,365`（`-0.2%`, $p=0.5682$）；同深度（`d = 12..24`）節點比穩定落於 **`0.993–1.006`**（多數 `0.996–1.004`）。
+
+> **下一步**：維持 `classical_old/` 於 Wave 1B-2 不動，待決定是否接受同步後（或補跑至 `[-5, 0]` 驗收），再推進後續 Bug #1 Part B / #7。
+
+
 
 

@@ -132,20 +132,57 @@ def penalize_tt(tt, zobrist_key, penalty):
     key32 = np.uint32(zobrist_key)
     for i in range(4):
         idx = base_index + i
-        if tt[idx]['key'] == key32:
-            new_depth = np.uint8(max(int(tt[idx]['depth']) - penalty, 0))
-            tt[idx]['depth'] = new_depth
-            chk = _compute_tt_checksum(
+        e_key = np.uint32(tt[idx]['key'])
+        if e_key == key32:
+            e_score = np.int16(tt[idx]['score'])
+            e_static_eval = np.int16(tt[idx]['static_eval'])
+            e_depth = np.uint8(tt[idx]['depth'])
+            e_flag = np.uint8(tt[idx]['flag'])
+            e_gen = np.uint8(tt[idx]['generation'])
+            e_best_move = np.uint16(tt[idx]['best_move'])
+            e_is_pv = bool(tt[idx]['is_pv'])
+            p0 = np.uint8(tt[idx]['padding'][0])
+            p1 = np.uint8(tt[idx]['padding'][1])
+            if e_flag == TT_FLAG_NONE:
+                continue
+            if e_flag > TT_FLAG_BETA:
+                break
+            stored_chk = np.uint16(p0) | (np.uint16(p1) << np.uint16(8))
+            expected_chk = _compute_tt_checksum(
                 key32,
-                tt[idx]['score'],
-                tt[idx]['static_eval'],
-                new_depth,
-                tt[idx]['flag'],
-                tt[idx]['best_move'],
-                tt[idx]['is_pv'],
+                e_score,
+                e_static_eval,
+                e_depth,
+                e_flag,
+                e_best_move,
+                e_is_pv,
             )
-            tt[idx]['padding'][0] = np.uint8(chk & np.uint16(0xFF))
-            tt[idx]['padding'][1] = np.uint8(chk >> np.uint16(8))
+            if stored_chk != expected_chk:
+                break
+            new_depth_i = int(e_depth) - int(penalty)
+            if new_depth_i < 0:
+                new_depth_i = 0
+            new_depth = np.uint8(new_depth_i)
+            if new_depth != e_depth:
+                chk = _compute_tt_checksum(
+                    key32,
+                    e_score,
+                    e_static_eval,
+                    new_depth,
+                    e_flag,
+                    e_best_move,
+                    e_is_pv,
+                )
+                tt[idx]['key'] = key32
+                tt[idx]['depth'] = new_depth
+                tt[idx]['score'] = e_score
+                tt[idx]['static_eval'] = e_static_eval
+                tt[idx]['flag'] = e_flag
+                tt[idx]['generation'] = e_gen
+                tt[idx]['best_move'] = e_best_move
+                tt[idx]['is_pv'] = e_is_pv
+                tt[idx]['padding'][0] = np.uint8(chk & np.uint16(0xFF))
+                tt[idx]['padding'][1] = np.uint8(chk >> np.uint16(8))
             break
 
 @nb.njit(cache=True, nogil=True, boundscheck=False, fastmath=True, inline='always')
@@ -222,7 +259,9 @@ def probe_tt_snapshot(tt, zobrist_key):
             e_is_pv = bool(tt[idx]['is_pv'])
             p0 = np.uint8(tt[idx]['padding'][0])
             p1 = np.uint8(tt[idx]['padding'][1])
-            if e_flag == TT_FLAG_NONE or e_flag > TT_FLAG_BETA:
+            if e_flag == TT_FLAG_NONE:
+                continue
+            if e_flag > TT_FLAG_BETA:
                 return np.uint8(TT_FLAG_NONE), np.int32(0), np.int32(0), np.int16(32767), False, np.uint16(0)
             stored_chk = np.uint16(p0) | (np.uint16(p1) << np.uint16(8))
             expected_chk = _compute_tt_checksum(
@@ -244,8 +283,45 @@ def probe_tt_snapshot(tt, zobrist_key):
 @nb.njit(cache=True, nogil=True, boundscheck=False, fastmath=True)
 def probe_tt_best_move(tt, zobrist_key):
     """Pure-Python-safe TT lookup returning scalar (flag, best_move) without np.record boxing."""
-    entry = probe_tt(tt, zobrist_key)
-    return np.uint8(entry['flag']), np.uint16(entry['best_move'])
+    if len(tt) < 4:
+        return np.uint8(TT_FLAG_NONE), np.uint16(0)
+
+    zk = np.uint64(zobrist_key)
+    num_buckets_minus_1 = np.uint64((len(tt) >> 2) - 1)
+    base_index = np.int64(((zk >> np.uint64(32)) & num_buckets_minus_1) << np.uint64(2))
+    key32 = np.uint32(zk)
+
+    for i in range(4):
+        idx = base_index + i
+        e_key = np.uint32(tt[idx]['key'])
+        if e_key == key32:
+            e_score = np.int16(tt[idx]['score'])
+            e_static_eval = np.int16(tt[idx]['static_eval'])
+            e_depth = np.uint8(tt[idx]['depth'])
+            e_flag = np.uint8(tt[idx]['flag'])
+            e_best_move = np.uint16(tt[idx]['best_move'])
+            e_is_pv = bool(tt[idx]['is_pv'])
+            p0 = np.uint8(tt[idx]['padding'][0])
+            p1 = np.uint8(tt[idx]['padding'][1])
+            if e_flag == TT_FLAG_NONE:
+                return np.uint8(TT_FLAG_NONE), e_best_move
+            if e_flag > TT_FLAG_BETA:
+                return np.uint8(TT_FLAG_NONE), np.uint16(0)
+            stored_chk = np.uint16(p0) | (np.uint16(p1) << np.uint16(8))
+            expected_chk = _compute_tt_checksum(
+                key32,
+                e_score,
+                e_static_eval,
+                e_depth,
+                e_flag,
+                e_best_move,
+                e_is_pv,
+            )
+            if stored_chk != expected_chk:
+                return np.uint8(TT_FLAG_NONE), np.uint16(0)
+            return e_flag, e_best_move
+
+    return np.uint8(TT_FLAG_NONE), np.uint16(0)
 
 @nb.njit(cache=True, nogil=True, boundscheck=False, fastmath=True)
 def store_tt(tt, zobrist_key, depth, score, static_eval, flag, best_move, current_generation, is_pv=False):
@@ -270,43 +346,73 @@ def store_tt(tt, zobrist_key, depth, score, static_eval, flag, best_move, curren
     # Match probe_tt(): power-of-two bucket mask using high key bits.
     base_index = np.int64(((zobrist_key >> np.uint64(32)) & num_buckets_minus_1) << np.uint64(2))
     key32 = np.uint32(zobrist_key)
+    gen_u8 = np.uint8(current_generation)
     
     # 1. 尋找完全相同的局面 (Exact Match)
     for i in range(4):
         idx = base_index + i
-        existing_entry = tt[idx]
-        if existing_entry['key'] == key32:
-            # 優先保留舊有最佳步，如果新的沒有的話
-            final_best_move = np.uint16(best_move)
-            if final_best_move == 0:
-                final_best_move = existing_entry['best_move']
-                
-            # 決定是否覆寫：Stockfish 覆寫規則
-            replace = False
-            if flag == TT_FLAG_EXACT:
+        e_key = np.uint32(tt[idx]['key'])
+        e_flag = np.uint8(tt[idx]['flag'])
+        if e_key == key32 and e_flag != TT_FLAG_NONE:
+            e_score = np.int16(tt[idx]['score'])
+            e_static_eval = np.int16(tt[idx]['static_eval'])
+            e_depth = np.uint8(tt[idx]['depth'])
+            e_gen = np.uint8(tt[idx]['generation'])
+            e_best_move = np.uint16(tt[idx]['best_move'])
+            e_is_pv = bool(tt[idx]['is_pv'])
+            p0 = np.uint8(tt[idx]['padding'][0])
+            p1 = np.uint8(tt[idx]['padding'][1])
+
+            stored_chk = np.uint16(p0) | (np.uint16(p1) << np.uint16(8))
+            expected_chk = _compute_tt_checksum(
+                key32,
+                e_score,
+                e_static_eval,
+                e_depth,
+                e_flag,
+                e_best_move,
+                e_is_pv,
+            )
+            e_valid = (e_flag <= TT_FLAG_BETA) and (stored_chk == expected_chk)
+
+            if not e_valid:
                 replace = True
-            elif existing_entry['generation'] != current_generation:
-                replace = True
+                final_best_move = np.uint16(best_move)
             else:
-                # PV nodes get a +2 virtual depth bonus to protect them from being overwritten
-                existing_pv_bonus = 2 if existing_entry['is_pv'] else 0
-                new_pv_bonus = 2 if is_pv else 0
-                if depth + new_pv_bonus > existing_entry['depth'] + existing_pv_bonus - 4:
+                # 優先保留舊有最佳步，如果新的沒有的話
+                final_best_move = np.uint16(best_move)
+                if final_best_move == 0:
+                    final_best_move = e_best_move
+                    
+                # 決定是否覆寫：Stockfish 覆寫規則（Bug #3: depth=0 不可覆寫深層有效條目）
+                replace = False
+                if flag == TT_FLAG_EXACT and (depth > 0 or e_depth == 0):
                     replace = True
+                elif e_gen != gen_u8:
+                    replace = True
+                else:
+                    # PV nodes get a +2 virtual depth bonus to protect them from being overwritten
+                    existing_pv_bonus = 2 if e_is_pv else 0
+                    new_pv_bonus = 2 if is_pv else 0
+                    if int(depth) + new_pv_bonus > int(e_depth) + existing_pv_bonus - 4:
+                        replace = True
                 
             if replace:
                 d_u8 = np.uint8(depth)
                 s_i16 = np.int16(score)
-                se_i16 = np.int16(static_eval) if static_eval != 32767 else existing_entry['static_eval']
+                if static_eval != 32767:
+                    se_i16 = np.int16(static_eval)
+                elif e_valid:
+                    se_i16 = e_static_eval
+                else:
+                    se_i16 = np.int16(32767)
                 f_u8 = np.uint8(flag)
-                gen_u8 = np.uint8(current_generation)
                 pv_b = bool(is_pv)
                 chk = _compute_tt_checksum(key32, s_i16, se_i16, d_u8, f_u8, final_best_move, pv_b)
                 tt[idx]['key'] = key32
                 tt[idx]['depth'] = d_u8
                 tt[idx]['score'] = s_i16
-                if static_eval != 32767:
-                    tt[idx]['static_eval'] = se_i16
+                tt[idx]['static_eval'] = se_i16
                 tt[idx]['flag'] = f_u8
                 tt[idx]['generation'] = gen_u8
                 tt[idx]['best_move'] = final_best_move
@@ -314,28 +420,44 @@ def store_tt(tt, zobrist_key, depth, score, static_eval, flag, best_move, curren
                 tt[idx]['padding'][0] = np.uint8(chk & np.uint16(0xFF))
                 tt[idx]['padding'][1] = np.uint8(chk >> np.uint16(8))
             else:
+                new_se = e_static_eval
+                new_depth = e_depth
+                new_bm = e_best_move
                 updated = False
-                if static_eval != 32767 and existing_entry['static_eval'] == 32767:
-                    tt[idx]['static_eval'] = np.int16(static_eval)
+                if static_eval != 32767 and e_static_eval == 32767:
+                    new_se = np.int16(static_eval)
                     updated = True
+                bm_u16 = np.uint16(best_move)
+                if bm_u16 != 0 and flag != TT_FLAG_ALPHA:
+                    if e_best_move == 0 or (depth > 0 and e_flag == TT_FLAG_ALPHA):
+                        if new_bm != bm_u16:
+                            new_bm = bm_u16
+                            updated = True
                 # Secondary aging. Important for elementary mate finding.
-                if existing_entry['depth'] >= 8 and existing_entry['flag'] != TT_FLAG_EXACT:
-                    existing_score = existing_entry['score']
-                    if abs(int(existing_score)) >= MATE_IN_MAX_PLY:
-                        new_depth = np.uint8(max(int(existing_entry['depth']) - 1, 0))
-                        if new_depth != existing_entry['depth']:
-                            tt[idx]['depth'] = new_depth
+                if e_depth >= 8 and e_flag != TT_FLAG_EXACT:
+                    if abs(np.int32(e_score)) >= MATE_IN_MAX_PLY:
+                        aged_depth = np.uint8(int(e_depth) - 1)
+                        if aged_depth != new_depth:
+                            new_depth = aged_depth
                             updated = True
                 if updated:
                     chk = _compute_tt_checksum(
                         key32,
-                        tt[idx]['score'],
-                        tt[idx]['static_eval'],
-                        tt[idx]['depth'],
-                        tt[idx]['flag'],
-                        tt[idx]['best_move'],
-                        tt[idx]['is_pv'],
+                        e_score,
+                        new_se,
+                        new_depth,
+                        e_flag,
+                        new_bm,
+                        e_is_pv,
                     )
+                    tt[idx]['key'] = key32
+                    tt[idx]['depth'] = new_depth
+                    tt[idx]['score'] = e_score
+                    tt[idx]['static_eval'] = new_se
+                    tt[idx]['flag'] = e_flag
+                    tt[idx]['generation'] = e_gen
+                    tt[idx]['best_move'] = new_bm
+                    tt[idx]['is_pv'] = e_is_pv
                     tt[idx]['padding'][0] = np.uint8(chk & np.uint16(0xFF))
                     tt[idx]['padding'][1] = np.uint8(chk >> np.uint16(8))
             return # 找到並處理完相符局面，直接退出
@@ -346,23 +468,24 @@ def store_tt(tt, zobrist_key, depth, score, static_eval, flag, best_move, curren
     
     for i in range(4):
         idx = base_index + i
-        existing_entry = tt[idx]
+        c_flag = np.uint8(tt[idx]['flag'])
         
         # 空位無條件優先使用，避免 QSearch (depth=0) 或跨世代時誤覆寫有效項目
-        if existing_entry['flag'] == TT_FLAG_NONE:
+        if c_flag == TT_FLAG_NONE:
             replace_idx = idx
             break
         
         # 計算相對老化程度
-        age = (current_generation - existing_entry['generation'] + 256) % 256
+        c_gen = np.uint8(tt[idx]['generation'])
+        age = (int(gen_u8) - int(c_gen) + 256) & 255
         if age > 15:
             age = 15  # 簡化的世代老化權重
             
         # PV nodes get a virtual depth bonus of 2, making them harder to replace
-        existing_pv_bonus = 2 if existing_entry['is_pv'] else 0
+        existing_pv_bonus = 2 if bool(tt[idx]['is_pv']) else 0
         
         # 由於深度是無符號整數(uint8)，計算 replace_value 時需轉為有符號整數(int)處理負數情況
-        replace_value = int(existing_entry['depth']) + existing_pv_bonus - age * 8
+        replace_value = int(tt[idx]['depth']) + existing_pv_bonus - age * 8
         
         # 找到取代價值最小的項目（包含空位，因其深度為 0，能自然獲得極低的 replace_value）
         if replace_value < min_replace_value:
