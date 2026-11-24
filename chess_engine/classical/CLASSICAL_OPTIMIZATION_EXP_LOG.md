@@ -17,6 +17,7 @@
 | **Wave 1B-1** | 2026-11-23 | Bug #1 Part A：修正 `has_best_move` 判定（排除 `TT_FLAG_ALPHA` Fail-Low），啟用負向 Correction History | 20 FENs Depth-10 總節點 `1,056,156 → 1,059,970`（**`+0.36%`**）；`9/20` 變著、`19/20` 變分 | 72 項測試全過；熱匯入 `5.84s` / `0` `.numba.unresolved$`；**Colab `300k nodes` 1,628 局 `303W 1055D 270L`（`51.01%`，`+7.04 ± 9.72 Elo`，LOS `92.2%`，`SPRT[-10, 0] LLR=+4.90` H1 Accepted，`[-5, 0] +1.94`）；已同步至 `classical_old/`** | ✅ **接受並已同步基準** |
 | **Wave 1B-2** | 2026-11-24 | Bug #2：禁止 `lazy=True` 粗評寫入 `TT.static_eval` 與校正歷史，並複用 TT 完整靜態分 | 20 FENs Depth-10 總節點 `1,059,970 → 900,152`（**`-15.08%`**）；`7/20` 變著、`18/20` 變分 | 74 項測試全過；Weighted NPS `644,881 → 643,029`（`-0.29%` 近零損失）；熱匯入 `6.51s` / `0` `.numba.unresolved$`；使用者確認無退化並已同步 `classical_old/` | ✅ **已同步基準** |
 | **Wave 1B-3** | 2026-11-24 | Bug #3 + #8：禁止 QS 寫入 `TT_FLAG_EXACT` 覆寫深層 TT；修復無鎖 TT RMW 競態、`int16(-32768)` 溢位與 `probe_tt_best_move` TOCTOU | Depth-10 (18 FENs) `+20.44%` nodes；**Depth-14 (40 FENs)** `12.04M → 12.73M`（`+5.75%`），`12/40` 變著、`35/40` 變分（`mean\|dEval\| = 30.1 cp`）；**`d0_EXACT: 242,035 → 0`**、**`TT d≥6: +9.62%`** | **82 / 82** 測試全過（`6.382s`）；熱匯入 `4.30s` / `0` `.numba.unresolved$`；**Colab `300k nodes` 882 局 `452.5 - 429.5`（`51.30%`，`164W 577D 141L`，`+9.06 ± 13.15 Elo`，LOS `91.2%`，`SPRT[-10, 0] LLR=+3.13` H1 Accepted，`[-5, 0] +1.29`）；已同步至 `classical_old/`** | ✅ **接受並已同步基準** |
+| **Wave 1B-4** | 2026-11-24 | Bug #7：於 `score_captures_lazy` 與 `score_captures_with_tt_lazy` 補齊升變價值增量，並將無吃子升變納入 `QS_EVASION_CAPTURE_BUCKET` | 20 標準 FENs Depth-10 `1,080,177 → 1,079,934`（**`-0.02%`**）；5 升變專題 FENs `216,505 → 201,459`（**`-6.95%`**，`Promo_QSEvasion -20.17%`、`eval 1258 → 11385`） | **84 / 84** 測試全過（`16.504s`）；Weighted NPS `643,139 → 654,694`；熱匯入 `7.11s` / `0` `.numba.unresolved$` | 🧪 **實作完成，待固定節點 SPRT** |
 
 ---
 
@@ -375,6 +376,34 @@
   * 每步平均節點 `182,495` vs `182,525`（`-0.0%`, $p=0.8749$）、每步耗時 `339.5 ms` vs `339.4 ms`（$p=0.8458$）、平均 NPS `597,274` vs `598,365`（`-0.2%`, $p=0.5682$）；同深度（`d = 12..24`）節點比穩定落於 **`0.993–1.006`**（多數 `0.996–1.004`）。
 
 > **下一步**：已於本機歸檔 `chess_numba_20261124.bundle`（移至 `archive/bundles/chess_numba_20261124.bundle`），正式接受 Wave 1B-3（`+9.06 Elo`、`LOS = 91.2%`、`SPRT[-10, 0] H1 Accepted`）並同步 [`classical_old/`](../classical_old/) 作為後續對照基線，緊接推進 **Wave 1B-4（Bug #7）**。
+
+---
+
+## Wave 1B-4：修復 Bug #7 — 升變步於吃子與 QSearch 排序評分修正（2026-11-24）
+
+> **對照基準**：Commit `c464f50`（`classical_old/` 已同步至 Wave 1B-3；本波維持 `classical_old/` 於 Wave 1B-3 不動，以便單軸驗證 Bug #7）。
+
+### 1. 修改明細（[`search_heuristics.py`](search_heuristics.py)）
+
+1. **`score_captures_lazy`（[#L329-L360](search_heuristics.py#L329-L360)）**：
+   * 單次讀取 `special_flag = get_special_move_flag(move)` 並供吃過路兵與升變共用。
+   * 當 `special_flag == SPECIAL_MOVE_FLAG_PROMOTION` 時，於 `mvv_lva` 加上 **`MG_MATERIAL_VALUES[get_promotion_piece(move) + 1] - MG_MATERIAL_VALUES[PAWN]`**（使無吃子升變依 `Q > R > B > N` 排序而非全部並列 `0` 分，吃子升變亦不再 `Q/R/B/N` 同分）。
+2. **`score_captures_with_tt_lazy`（[#L362-L416](search_heuristics.py#L362-L416)）**：
+   * 同樣為 `is_promotion = (special_flag == SPECIAL_MOVE_FLAG_PROMOTION)` 加上升變價值增量（`MG_MATERIAL_VALUES[promo + 1] - MG_MATERIAL_VALUES[PAWN]`）。
+   * 新增 **`elif is_promotion: base_score += QS_EVASION_CAPTURE_BUCKET`**（位於 `if victim_rel != -1:` 與 `elif aggressor_type >= 0:` 之間），使無吃子升變不再落入安靜逃將分支（原本會誤吃 `pawn_history` 負分而排在虧損吃子 `QxP` 之後），同時完整保留既有安靜逃將（`get_quiet_stat_score` + `QS_EVASION_QUIET_CLAMP`）契約。
+
+### 2. 驗證與診斷結果
+
+* **單元與契約測試**（清除 `*search*` / `*transposition_table*` 過期 `.nbi/.nbc` 後冷編譯重跑 `tests.test_wave1b_fixes tests.test_search_core_contracts tests.test_lazy_smp tests.test_wave1a_fixes tests.test_history`）：**84 / 84 項全過**（`16.504s`）。
+  * 於 [`tests/test_wave1b_fixes.py`](../../tests/test_wave1b_fixes.py) 新增 `TestBug7PromotionScoring`（2 項）：驗證 `score_captures_lazy` 的無吃子／吃子升變嚴格滿足 `Q > R > B > N > 0`，以及 `score_captures_with_tt_lazy` 中無吃子變后嚴格高於 `QS_EVASION_CAPTURE_BUCKET`、虧損吃子 `QxP` 與安靜逃將，且升變子類滿足 `Q > R > B > N`。
+* **Numba 快取與符號檢查**：`warm_import = 7.11s`、`warmup_search_jit = 0.33s`；`_search` / `quiescence_search` / `_lazy_smp_helper_loop_jit` 各 **1** 過載、`unresolved: []`（`0` 個 `.numba.unresolved$`）。
+* **基準差異與衛生**：`python tools/sync_classical_old.py --diff` 確認僅 `search_heuristics.py` 上述修復；`CRCRLF = 0`。
+* **Depth-10 對照基準（`classical_old` Wave 1B-3 vs `classical` Wave 1B-4）**：
+  * **20 個標準盤面**：總節點 `1,080,177 → 1,079,934`（**`-0.02%`**），`0 / 20` 變著、`0 / 20` 變分；Weighted NPS `643,139 → 654,694`（無額外熱路徑開銷）。
+  * **5 個升變專題盤面**：總節點 `216,505 → 201,459`（**`-6.95%`**），其中將軍下含無吃子升變的 `Promo_QSEvasion`（`3rk3/P7/4p3/3p4/4Q3/8/8/3K4 w - - 0 1`）節點數從 `80,920 → 64,599`（**`-20.17%`**），Depth-10 評估從 `1258 → 11385`（更早搜出 `VALUE_KNOWN_WIN` 升變線路）。
+
+> **下一步**：維持 `classical_old/` 於 Wave 1B-3（`c464f50`）不動，可選擇提交並推送至 `main` 後於 Colab 進行 `Wave 1B-4 vs Wave 1B-3` 固定節點（或限時）SPRT 驗證。
+
 
 
 

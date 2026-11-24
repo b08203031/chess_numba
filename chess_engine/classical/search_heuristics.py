@@ -2,8 +2,8 @@ import numba
 import numpy as np
 
 from chess_engine.classical.move import (
-    get_to_square, get_from_square, get_special_move_flag,
-    SPECIAL_MOVE_FLAG_EN_PASSANT
+    get_to_square, get_from_square, get_special_move_flag, get_promotion_piece,
+    SPECIAL_MOVE_FLAG_EN_PASSANT, SPECIAL_MOVE_FLAG_PROMOTION,
 )
 from chess_engine.classical.constants import (
     SCORE_TT_MOVE, BB_SQUARES, NO_MOVE,
@@ -336,17 +336,20 @@ def score_captures_lazy(piece_bbs, occupancy_bbs, game_state, moves, scores, sta
         move = moves[i]
         to_square = get_to_square(move)
         from_sq = get_from_square(move)
+        special_flag = get_special_move_flag(move)
         
         victim_type = find_piece_type_on_square_side(piece_bbs, to_square, opp_side) if (opp_occ & BB_SQUARES[to_square]) != np.uint64(0) else np.int8(-1)
         aggressor_type = find_piece_type_on_square_side(piece_bbs, from_sq, side_to_move)
         
-        if victim_type == -1 and get_special_move_flag(move) == SPECIAL_MOVE_FLAG_EN_PASSANT:
+        if victim_type == -1 and special_flag == SPECIAL_MOVE_FLAG_EN_PASSANT:
             victim_type = 0 # Pawn value for En Passant
 
         mvv_lva = 0
         victim_rel = capture_victim_index(victim_type)
         if victim_rel != -1:
             mvv_lva = MG_MATERIAL_VALUES[victim_rel] - MG_MATERIAL_VALUES[aggressor_type % 6]
+        if special_flag == SPECIAL_MOVE_FLAG_PROMOTION:
+            mvv_lva += MG_MATERIAL_VALUES[get_promotion_piece(move) + 1] - MG_MATERIAL_VALUES[PAWN]
         
         # Base score formula: mvv_lva + capture_history_bonus
         base_score = mvv_lva
@@ -371,17 +374,21 @@ def score_captures_with_tt_lazy(piece_bbs, occupancy_bbs, game_state, moves, sco
         else:
             to_square = get_to_square(move)
             from_sq = get_from_square(move)
+            special_flag = get_special_move_flag(move)
+            is_promotion = special_flag == SPECIAL_MOVE_FLAG_PROMOTION
             
             victim_type = find_piece_type_on_square_side(piece_bbs, to_square, opp_side) if (opp_occ & BB_SQUARES[to_square]) != np.uint64(0) else np.int8(-1)
             aggressor_type = find_piece_type_on_square_side(piece_bbs, from_sq, side_to_move)
             
-            if victim_type == -1 and get_special_move_flag(move) == SPECIAL_MOVE_FLAG_EN_PASSANT:
+            if victim_type == -1 and special_flag == SPECIAL_MOVE_FLAG_EN_PASSANT:
                 victim_type = 0 # Pawn value for En Passant
 
             mvv_lva = 0
             victim_rel = capture_victim_index(victim_type)
             if victim_rel != -1:
                 mvv_lva = MG_MATERIAL_VALUES[victim_rel] - MG_MATERIAL_VALUES[aggressor_type % 6]
+            if is_promotion:
+                mvv_lva += MG_MATERIAL_VALUES[get_promotion_piece(move) + 1] - MG_MATERIAL_VALUES[PAWN]
             
             base_score = mvv_lva
             if victim_rel != -1:
@@ -389,6 +396,8 @@ def score_captures_with_tt_lazy(piece_bbs, occupancy_bbs, game_state, moves, sco
                     QS_EVASION_CAPTURE_BUCKET
                     + search_context.capture_history[aggressor_type, to_square, victim_rel]
                 )
+            elif is_promotion:
+                base_score += QS_EVASION_CAPTURE_BUCKET
             elif aggressor_type >= 0:
                 # qsearch generates all evasions while in check.  Quiet evasions
                 # used to tie at zero and were therefore searched in generator
