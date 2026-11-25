@@ -463,7 +463,7 @@
 
 ---
 
-## Wave 1B-6：修復 Bug #10 — ProbCut 堆疊狀態隔離與 QS 呼叫順序修正（2026-11-25）
+## Wave 1B-6：修復 Bug #10 — ProbCut 堆疊狀態隔離與 QS 呼叫順序修正（2026-11-25）— ❌ 已回退（REVERTED）
 
 > **對照基準**：Commit `f7d271a` / `1c95172`（`classical_old/` 維持於已驗收之 Wave 1B-4，Wave 1B-5 已回退；本波單軸驗證 Bug #10）。
 
@@ -483,43 +483,53 @@
   * **總節點數**：`1,080,177 → 1,085,209`（**`+0.47%`**，僅 `EPD_24001` 單盤變動 `+5.40%` 與 `eval 8 -> 19`）。
   * **著法／評分變化**：`0 / 20` 變著、`1 / 20` 變分；Weighted NPS `552,064 → 618,492`（零額外熱路徑開銷）。
 
-### 3. 狀態與中期快照（⏳ 暫定接納並已同步基準；待 Colab 終局補錄）
+### 3. Colab 固定節點（`400k nodes`）實戰結果與處置（❌ 已回退／REVERTED，方案 A）
 
-* **Colab `400k nodes` 中期快照（598 局 / 299 對換先）**：`105W 379D 114L`（得分率 **`49.25%`**），Pentanomial **`-5.23 ± 15.81 Elo`**（95% CI **`[-21.06, +10.58]`**），Pentanomial 分佈 `[10, 63, 160, 58, 8]`，`SPRT[-3, +3] = -0.48`、`SPRT[-5, 0] = -0.21`（較 518 局 `-6.71 Elo` 回升，仍在常態波動範圍內）。
-* **處置決議**：依用戶決議先行暫定接納 Wave 1B-6（Colab 續跑中，待終局後再回補完整戰報），已執行 `python tools/sync_classical_old.py --sync` 將 [`classical_old/`](../classical_old/) 同步至 Wave 1B-6（Commit `c011bf1`）作為 Wave 1B-7 對照基線。
+* **Colab `400k nodes` 對戰結果（[`tournament_colab_runner_se_multicut copy.ipynb`](../../tournament_colab_runner_se_multicut%20copy.ipynb)，`THREADS = 1`, `workers = 7`, 64 MB TT，第 1,278 局 / 639 對換先）**：
+  * **得分**：`New 630.5 - 647.5 Old`（**`218W 825D 235L`**，得分率 **`49.33%`**，淨負 **`-17` 局**）。
+  * **Elo 與檢定**：Pentanomial **`-4.60 ± 11.30 Elo`**（95% CI `[-15.90, +6.70]`，`z = -0.849`，**`LOS = 19.8%`**），Pentanomial 分佈 `[15, 146, 337, 123, 18]`。
+  * **前後半場與軌跡**：前半 319 對 `49.61%`、後半 320 對 `49.06%`（雙半皆負，自 400 局起長期停於 `-3.5` 至 `-5.6 Elo` 區間）；`SPRT[0, +10] = -3.25`（**`H0 Accepted`**）、`SPRT[-3, +3] = -0.94`、`[-5, 0] = -0.36`、`[-10, 0] = +0.13`。
+* **處置決議（❌ 已回退／REVERTED，方案 A）**：曾於 598 局時暫定同步至 [`classical_old/`](../classical_old/)（`c011bf1`），但至 1,278 局仍呈雙半偏負且無轉正跡象。依用戶方案 A 決議，已將 `classical/search.py` 與 `classical_old/search.py` 一併回退至經 3,090 局驗證的 **Wave 1B-4 黃金基線（`f7d271a`）**，不再將未通過驗證的負偏移帶入基準。
 
 ---
 
-## Wave 1B-7：修復 Bug #11 — Lazy SMP 根節點首著所有權與根層 Fail-Low `(score, move)` 一致性（2026-11-25）
+## Wave 1B-7：修復 Bug #11 — Lazy SMP 根節點首著所有權與根層 Fail-Low `(score, move)` 一致性（2026-11-25）— ❌ 已回退（REVERTED）
 
-> **對照基準**：Commit `c011bf1`（`classical_old/` 已暫定同步至 Wave 1B-6；本波維持 `classical_old/` 於 Wave 1B-6 不動，以便單軸驗證 Bug #11）。
+> **對照基準**：Commit `c011bf1`（對戰期間為暫定 Wave 1B-6 基準；已於方案 A 一併回退至 Wave 1B-4）。
 
 ### 1. 修改明細（[`search.py`](search.py) 4 處協同修復）
 
-1. **根節點無條件優先使用己方上一輪 PV 首著（[`_search`](search.py#L1342-L1364)）**：
-   * 對齊 SF19 `search.cpp:820-823`：當 `ply == 0 and search_context.last_iteration_pv_len > 0 and search_context.last_iteration_pv[0] != NO_MOVE` 時，無條件將 `tt_move` 設為 `search_context.last_iteration_pv[0]`，並改在 `if tt_move != NO_MOVE:` 下計算 `tt_capture`（即使 `tt_hit` 為偽亦正確辨識），防止 Lazy SMP Helper 寫入共享根 TT 劫持主執行緒的首著搜尋順序。
-2. **完成態根層 Fail-Low 的 `(score, move)` 配對一致性（[`_search`](search.py#L3576-L3583)）**：
-   * 保留 `max_eval` 寫入 `store_tt` 作為節點正確上界，但於 `ply == 0 and root_cand_valid` 返回時，若 `final_flag == TT_FLAG_ALPHA` 則回傳 `(np.int32(root_cand_score), np.uint16(root_cand_move))`，杜絕 Move 2+ 拉高 `max_eval` 後與 `root_cand_move`（Move 1）錯配為 `(score_B, move_A)` 的 BUG。
-3. **Aspiration Fail-High 同步提升 `last_iteration_pv`（[`_lazy_smp_helper_loop_jit`](search.py#L4517-L4521)、[`iterative_deepening_search`](search.py#L5221-L5225)）**：
-   * 對齊 SF19 `search.cpp:403` `std::stable_sort`，於 Aspiration Fail-High（`score >= beta`）時將當輪候選 `cand_pv` 寫入 `search_context.last_iteration_pv`，確保同層放寬重搜時由新領先著法居於首位（Fail-Low 維持 Move 1 不動）。
-4. **中斷時異質 Fail-Low 候選防禦回滾（[`_lazy_smp_helper_loop_jit`](search.py#L4555-L4563)、[`apply_root_iteration_guards`](search.py#L4815-L4824)）**：
-   * 補上 `aborted_foreign_fail_low`（`stopped_in_iter and cand_valid and cand_inexact_upper and last_best_valid and cand_move != last_best_move`），當本輪因超時／節點上限中斷且新候選著法並非上一輪已完成的 `last_best_move` 卻發生 Fail-Low 時自動回滾至 `last_best_move`；若 `cand_move == last_best_move` 則保留 SF19 原生 Fail-Low 行為。
+1. **根節點無條件優先使用己方上一輪 PV 首著（`_search`）**：
+   * 對齊 SF19 `search.cpp:820-823`：當 `ply == 0 and search_context.last_iteration_pv_len > 0 and search_context.last_iteration_pv[0] != NO_MOVE` 時，無條件將 `tt_move` 設為 `search_context.last_iteration_pv[0]`，並改在 `if tt_move != NO_MOVE:` 下計算 `tt_capture`。
+2. **完成態根層 Fail-Low 的 `(score, move)` 配對一致性（`_search`）**：
+   * 保留 `max_eval` 寫入 `store_tt` 作為節點上界，於 `ply == 0 and root_cand_valid` 且 `final_flag == TT_FLAG_ALPHA` 時回傳 `(np.int32(root_cand_score), np.uint16(root_cand_move))`。
+3. **Aspiration Fail-High 同步提升 `last_iteration_pv`（`_lazy_smp_helper_loop_jit` / `iterative_deepening_search`）**：
+   * 於 Aspiration Fail-High（`score >= beta`）時將候選 `cand_pv` 寫入 `search_context.last_iteration_pv`。
+4. **中斷時異質 Fail-Low 候選防禦回滾（`_lazy_smp_helper_loop_jit` / `apply_root_iteration_guards`）**：
+   * 加入 `aborted_foreign_fail_low` 回滾至上一輪已完成 `last_best_move`。
 
 ### 2. 驗證與診斷結果
 
 * **單元與契約測試**（清除 `*search*` 舊 `.nbi/.nbc` 後冷編譯並執行 `tests.test_wave1b_fixes tests.test_search_core_contracts tests.test_lazy_smp tests.test_wave1a_fixes tests.test_history`）：**90 / 90 項全過**（`3.705s`）。
-  * 於 [`tests/test_wave1b_fixes.py`](../../tests/test_wave1b_fixes.py) 新增 `TestBug11RootFirstMoveAndFailLowConsistency`（4 項）：契約檢查無條件 PV 首著選擇、`ret_score` 根層 Fail-Low 一致性與雙處 `aborted_foreign_fail_low`；實搜確認共享 TT 遭植入敵對著法時 `ply == 0` 仍優先搜 `last_iteration_pv[0]`；實測對比子節點評分證明完成態根層 Fail-Low 回傳 `(move1_eval=1000, e2e6)` 而非錯配 `(move2_eval=1619, e2e6)`；驗證 `apply_root_iteration_guards` 對異質 Fail-Low 回滾而保留同著 Fail-Low。
+  * 於 [`tests/test_wave1b_fixes.py`](../../tests/test_wave1b_fixes.py) 曾新增 `TestBug11RootFirstMoveAndFailLowConsistency`（4 項）。
 * **Numba 快取與符號檢查**：`warm_import = 6.15s`、`warmup_search_jit = 0.21s`；`_search` / `quiescence_search` / `_lazy_smp_helper_loop_jit` 各維持 **`1`** 過載、`unresolved: []`。
 * **基準差異與衛生**：`python tools/sync_classical_old.py --diff-code` 僅顯示 `search.py` 上述 Bug #11 修改；`CRCRLF = 0`。
 * **20 盤面 Depth-10 對照（`classical_old` Wave 1B-6 vs `classical` Wave 1B-7，64 MB TT）**：
-  * **總節點數**：`1,085,209 → 1,103,553`（**`+1.69%`**）。
-  * **著法／評分變化**：`4 / 20` 盤面變著、`10 / 20` 盤面變分；Weighted NPS `602,770 → 600,135`。
+  * **總節點數**：`1,085,209 → 1,103,553`（**`+1.69%`**）；`4 / 20` 變著、`10 / 20` 變分；Weighted NPS `602,770 → 600,135`。
 * **20 盤面 Depth-15 對照（新基準深度，`classical_old` Wave 1B-6 vs `classical` Wave 1B-7，64 MB TT）**：
   * **總節點數**：`10,543,761 → 11,034,468`（**`+4.65%`**）；總搜尋耗時 `18.51s → 19.29s`。
   * **著法／評分變化**：`4 / 20` 盤面變著（`EPD_2001`, `EPD_16001`, `EPD_18001`, `EPD_20001`）、`11 / 20` 盤面變分；`Startpos`（`344,387`）、`Tactical_MG`（`848`）及多處開中局保持完全一致，`Kiwipete` 節點數 `-22.66%`（`867,338 → 670,764`）、`EPD_28001` `-30.57%`、`EPD_14001` `-26.93%`。
   * **Weighted NPS**：`569,529 → 572,178`（無熱路徑負載退化）。
   * （註：依用戶指示，後續所有新舊基準對照皆統一採 **Depth 15**。）
 
-### 3. 狀態
+### 3. Colab 2T 限時（`500 ms/move`）實戰結果與根因診斷（❌ 已回退／REVERTED，方案 A）
 
-* **⏳ 待實戰驗證**：準備於 Colab 進行 `400k nodes` 固定節點 SPRT（`Wave 1B-7 vs Wave 1B-6`）；[`classical_old/`](../classical_old/) 維持於 Wave 1B-6（Commit `c011bf1`）不動。
+* **Colab `500 ms/move`（`THREADS = 2`, `workers = 4`, 64 MB TT）實戰驗證（[`tournament_colab_runner_se_multicut.ipynb`](../../tournament_colab_runner_se_multicut.ipynb)，於 526 局 / 263 對換先觸線停機）**：
+  * **得分**：`New 247.5 - 278.5 Old`（**`87W 321D 118L`**，勝率 **`47.05%`**，淨負 **`-31` 局**）。
+  * **Elo 與顯著性**：Pentanomial **`-20.50 ± 18.52 Elo`**（95% CI **`[-38.86, -2.25]`**，`z = -2.203`，**`LOS = 1.4%`** — **95% 統計顯著退步**）；Pentanomial `[16, 63, 125, 54, 5]`（`WW:5 vs LL:16`）。
+  * **前後半場與 SPRT**：前 131 對 `49.81%` → 後 132 對 **`44.32%`**；`SPRT[0, +10] = -2.96`（**`H0 Accepted`**）、`[-10, 0] = -1.80`、`[-3, +3] = -1.43`。
+  * **遙測**：均深 `14.88 vs 14.88`、`mean_nps = 543,880 vs 541,743`（`+0.4%`），但 `51–80` 步長局勝率驟降至 **`43.6%`**（`35W 100D 60L`）。
+* **技術根因**：
+  1. 在 `ply == 0` 強行以己方舊深度 `last_iteration_pv[0]` 蓋掉共享 TT `tt_move_raw`，使 Thread 0 無法優先使用 Helper 執行緒先算出寫入 TT 的更深層最佳著，切斷了 2T Lazy SMP 共享 TT 紅利。
+  2. 完成態根層 Fail-Low 直接將 Move 1 較低分數（`root_cand_score`）回傳給外層 Aspiration Window（而非 `max_eval`），導致 Move 1 大跌時過早大幅放寬重搜視窗（與 Depth-15 基準總節點 `+4.65%` 一致；SF19 僅將 `rootMoves[0]` 與回傳給 Aspiration 的 `bestValue` 解耦而非以 Move 1 低分擴窗）。
+* **處置結果（❌ 已回退／REVERTED，方案 A）**：依用戶決議，已將 [`search.py`](search.py)、[`classical_old/search.py`](../classical_old/search.py) 與 [`tests/test_wave1b_fixes.py`](../../tests/test_wave1b_fixes.py) 全面回退至 **Wave 1B-4 黃金基線（`f7d271a`）** 並保留本戰報與診斷以免重蹈覆轍，同時進入 **Wave 1B-8（Bug #12）**。

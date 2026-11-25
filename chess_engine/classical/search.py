@@ -1340,10 +1340,7 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
     tt_score_raw = np.int32(min(max(tt_score_raw, -MATE_SCORE), MATE_SCORE))
     tt_is_pv = bool(tt_is_pv) if tt_hit else False
     tt_move = tt_move_raw if tt_hit else NO_MOVE
-    # Bug #11 (SF19 search.cpp:820): at root (ply == 0), unconditionally prioritize
-    # this thread's own last_iteration_pv[0] over shared TT so SMP helpers cannot
-    # hijack Thread 0's first root move.
-    if ply == 0 and search_context.last_iteration_pv_len > 0 and search_context.last_iteration_pv[0] != NO_MOVE:
+    if ply == 0 and tt_move == NO_MOVE and search_context.last_iteration_pv_len > 0:
         tt_move = search_context.last_iteration_pv[0]
     search_context.tt_hit_stack[ply] = tt_hit
 
@@ -1356,13 +1353,12 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
 
     # 1. ALWAYS retrieve the best move if available (Critical for Move Ordering)
     tt_capture = False
-    if tt_move != NO_MOVE:
-        tt_to = get_to_square(tt_move)
-        tt_flag_special = get_special_move_flag(tt_move)
-        enemy_side = 1 - game_state[0]
-        tt_capture = ((occupancy_bbs[enemy_side] & BB_SQUARES[tt_to]) != 0) or (tt_flag_special == SPECIAL_MOVE_FLAG_EN_PASSANT)
-
     if tt_hit:
+        if tt_move != NO_MOVE:
+            tt_to = get_to_square(tt_move)
+            tt_flag_special = get_special_move_flag(tt_move)
+            enemy_side = 1 - game_state[0]
+            tt_capture = ((occupancy_bbs[enemy_side] & BB_SQUARES[tt_to]) != 0) or (tt_flag_special == SPECIAL_MOVE_FLAG_EN_PASSANT)
 
         # 2. ONLY perform a Score Cutoff (Return) if:
         #    a. We are NOT at the Root Node (ply > 0)
@@ -1966,48 +1962,44 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                     unmake_move(piece_bbs, occupancy_bbs, game_state, pc_move, pc_unmake)
                     continue
     
-                # Bug #10 (SF19 search.cpp:1074-1085): save/set all 4 stack slots BEFORE QS
-                # and restore unconditionally across stop_flag / QS-fail / _search / cutoff paths.
-                saved_pc_stack_move = search_context.move_stack[ply]
-                saved_pc_stack_piece = search_context.piece_stack[ply]
-                saved_pc_stack_is_capture = search_context.move_is_capture_stack[ply]
-                saved_pc_stack_move_count = search_context.move_count_stack[ply]
-                pc_moved_piece_type = pc_unmake[0]
-                if pc_moved_piece_type != -1 and pc_original_side == BLACK:
-                    pc_moved_piece_type += 6
-                search_context.move_stack[ply] = pc_move
-                search_context.piece_stack[ply] = pc_moved_piece_type
-                search_context.move_is_capture_stack[ply] = True
-                search_context.move_count_stack[ply] = 0
-
                 pc_q_score, pc_q_nodes = quiescence_search(
                     piece_bbs, occupancy_bbs, game_state,
                     _i32(-probcut_beta), _i32(-probcut_beta + 1), _i32(ply + 1), search_context, _i32(0),
                 )
                 quiescence_nodes += pc_q_nodes
-                pc_q_score = np.int32(-pc_q_score)
+                pc_q_score = -pc_q_score
 
-                pc_score = pc_q_score
-                if (not search_context.stop_flag[0]) and pc_q_score >= probcut_beta:
-                    search_context.reduction_stack[ply + 1] = 0
-                    res_pc = _search(
-                        piece_bbs, occupancy_bbs, game_state, _i32(depth - probcut_r),
-                        _i32(-probcut_beta), _i32(-probcut_beta + 1), search_context, _i32(ply + 1),
-                        _u16(NO_MOVE), _b_false(), not cut_node,
-                    )
-                    pc_score = np.int32(-res_pc[0])
+                if search_context.stop_flag[0]:
+                    unmake_move(piece_bbs, occupancy_bbs, game_state, pc_move, pc_unmake)
+                    return (np.int32(0), NO_MOVE, nodes_searched, quiescence_nodes, tt_hits)
 
-                    # IMPORTANT: Must aggregate the search stats from ProbCut back into the parent
-                    child_pc_nodes = res_pc[2]; child_pc_q_nodes = res_pc[3]
-                    child_pc_tth = res_pc[4]
+                if pc_q_score < probcut_beta:
+                    unmake_move(piece_bbs, occupancy_bbs, game_state, pc_move, pc_unmake)
+                    continue
 
-                    nodes_searched += child_pc_nodes; quiescence_nodes += child_pc_q_nodes
-                    tt_hits += child_pc_tth
-
+                saved_pc_stack_move = search_context.move_stack[ply]
+                saved_pc_stack_piece = search_context.piece_stack[ply]
+                pc_moved_piece_type = pc_unmake[0]
+                if pc_moved_piece_type != -1 and pc_original_side == BLACK:
+                    pc_moved_piece_type += 6
+                search_context.move_stack[ply] = pc_move
+                search_context.piece_stack[ply] = pc_moved_piece_type
+                search_context.reduction_stack[ply + 1] = 0
+                res_pc = _search(
+                    piece_bbs, occupancy_bbs, game_state, _i32(depth - probcut_r),
+                    _i32(-probcut_beta), _i32(-probcut_beta + 1), search_context, _i32(ply + 1),
+                    _u16(NO_MOVE), _b_false(), not cut_node,
+                )
                 search_context.move_stack[ply] = saved_pc_stack_move
                 search_context.piece_stack[ply] = saved_pc_stack_piece
-                search_context.move_is_capture_stack[ply] = saved_pc_stack_is_capture
-                search_context.move_count_stack[ply] = saved_pc_stack_move_count
+                pc_score = -res_pc[0]
+                
+                # IMPORTANT: Must aggregate the search stats from ProbCut back into the parent
+                child_pc_nodes = res_pc[2]; child_pc_q_nodes = res_pc[3]
+                child_pc_tth = res_pc[4]
+                
+                nodes_searched += child_pc_nodes; quiescence_nodes += child_pc_q_nodes
+                tt_hits += child_pc_tth
 
                 unmake_move(piece_bbs, occupancy_bbs, game_state, pc_move, pc_unmake)
 
@@ -3573,14 +3565,8 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
             search_context.tt_generation, bool(tt_pv),
         )
 
-    # Bug #11: on a completed root fail-low (max_eval <= original_alpha), max_eval may
-    # come from a later null-window move B while root_cand_move/best_move stays at
-    # Move 1 (A). Keep max_eval in store_tt (node upper bound), but return
-    # (root_cand_score, root_cand_move) so the root (score, move) pair is always consistent.
-    if ply == 0 and root_cand_valid:
-        ret_score = root_cand_score if final_flag == TT_FLAG_ALPHA else np.int32(max_eval)
-        return (np.int32(ret_score), np.uint16(root_cand_move), nodes_searched, quiescence_nodes, tt_hits)
-    return (np.int32(max_eval), np.uint16(best_move), nodes_searched, quiescence_nodes, tt_hits)
+    ret_best_move = root_cand_move if (ply == 0 and root_cand_valid) else best_move
+    return (np.int32(max_eval), np.uint16(ret_best_move), nodes_searched, quiescence_nodes, tt_hits)
 
 def reset_search_diagnostics(search_context):
     """Zero tree-efficiency counters (safe from pure Python)."""
@@ -4514,11 +4500,6 @@ def _lazy_smp_helper_loop_jit(
                 beta = min(INFINITY, int(score) + delta)
                 failed_high_cnt += 1
                 delta += max(1, 44 * delta // 128)
-                if cand_valid and cand_pv_len > 0:
-                    copy_len = min(int(cand_pv_len), MAX_PLY)
-                    for i in range(copy_len):
-                        search_context.last_iteration_pv[i] = cand_pv[i]
-                    search_context.last_iteration_pv_len = np.int32(copy_len)
             else:
                 break
 
@@ -4552,15 +4533,8 @@ def _lazy_smp_helper_loop_jit(
             and (not cand_inexact_lower)
             and (not cand_inexact_upper)
         )
-        aborted_foreign_fail_low = (
-            stopped_in_iter
-            and cand_valid
-            and cand_inexact_upper
-            and last_best_valid
-            and cand_move != last_best_move
-        )
 
-        if aborted_loss_search or aborted_foreign_fail_low or (cand_valid and forgotten_mate):
+        if aborted_loss_search or (cand_valid and forgotten_mate):
             if last_best_valid:
                 cand_move = last_best_move
                 cand_score = last_best_score
@@ -4812,16 +4786,9 @@ def apply_root_iteration_guards(
         and (not bool(cand_inexact_lower))
         and (not bool(cand_inexact_upper))
     )
-    aborted_foreign_fail_low = (
-        bool(stopped_in_iter)
-        and bool(cand_valid)
-        and bool(cand_inexact_upper)
-        and bool(last_best_valid)
-        and int(cand_move) != int(last_best_move)
-    )
 
     rolled_back = False
-    if aborted_loss_search or aborted_foreign_fail_low or (bool(cand_valid) and forgotten_mate):
+    if aborted_loss_search or (bool(cand_valid) and forgotten_mate):
         if last_best_valid:
             cand_move = int(last_best_move)
             cand_score = int(last_best_score)
@@ -5218,11 +5185,6 @@ def iterative_deepening_search(
                 beta = min(INFINITY, score + delta)
                 failed_high_cnt += 1
                 delta += max(1, 44 * delta // 128)
-                if cand_valid and cand_pv:
-                    lpv_len = min(len(cand_pv), MAX_PLY)
-                    for i in range(lpv_len):
-                        search_context.last_iteration_pv[i] = np.uint16(cand_pv[i])
-                    search_context.last_iteration_pv_len = np.int32(lpv_len)
                 if search_context.diag_enabled:
                     max_delta_idx = (
                         DIAG_ASPIRATION_MAX_DELTA_BASE + aspiration_depth_slot
