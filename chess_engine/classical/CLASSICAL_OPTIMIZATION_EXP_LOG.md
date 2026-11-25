@@ -533,3 +533,32 @@
   1. 在 `ply == 0` 強行以己方舊深度 `last_iteration_pv[0]` 蓋掉共享 TT `tt_move_raw`，使 Thread 0 無法優先使用 Helper 執行緒先算出寫入 TT 的更深層最佳著，切斷了 2T Lazy SMP 共享 TT 紅利。
   2. 完成態根層 Fail-Low 直接將 Move 1 較低分數（`root_cand_score`）回傳給外層 Aspiration Window（而非 `max_eval`），導致 Move 1 大跌時過早大幅放寬重搜視窗（與 Depth-15 基準總節點 `+4.65%` 一致；SF19 僅將 `rootMoves[0]` 與回傳給 Aspiration 的 `bestValue` 解耦而非以 Move 1 低分擴窗）。
 * **處置結果（❌ 已回退／REVERTED，方案 A）**：依用戶決議，已將 [`search.py`](search.py)、[`classical_old/search.py`](../classical_old/search.py) 與 [`tests/test_wave1b_fixes.py`](../../tests/test_wave1b_fixes.py) 全面回退至 **Wave 1B-4 黃金基線（`f7d271a`）** 並保留本戰報與診斷以免重蹈覆轍，同時進入 **Wave 1B-8（Bug #12）**。
+
+---
+
+## Wave 1B-8：修復 Bug #12 — QSearch 重複局面偵測與 `move_stack`/`piece_stack` 追蹤（2026-11-26）
+
+> **對照基準**：Commit `f7d271a` / `c0220e4`（[`classical_old/`](../classical_old/) 已回退並維持於經 3,090 局驗證之 **Wave 1B-4**，本波單軸驗證 Bug #12）。
+
+### 1. 修改明細（[`search.py`](search.py) `quiescence_search` 兩處）
+
+1. **TT 探測前更新 `ply_path_stack[ply]` 並檢查 `_is_repetition_jit`（[`search.py`](search.py#L532-L542)）**：
+   * 在 `quiescence_search` 入口檢查 50 步規則與探測 `probe_tt_snapshot` 之前，寫入 `search_context.ply_path_stack[ply] = zobrist_key`；當 `ply > 0 and halfmove_clock_qs >= 2` 時呼叫 `_is_repetition_jit(zobrist_key, np.int32(halfmove_clock_qs), np.int32(ply), search_context)`，命中樹內二次或根前三次重複循環立即返回和棋 `0`。
+   * 杜絕被將軍強制進入 QS 後反覆逃將循環撐滿 `q_ply` 上限並以靜態評估折返，以及防止無路徑感知的 TT 條目掩蓋路徑重複和棋（維持 E82 禁令：QS 保持不啟用 Correction History）。
+2. **遞迴 `quiescence_search` 前後保存／設定／還原 `move_stack[ply]` 與 `piece_stack[ply]`（[`search.py`](search.py#L994-L1011)）**：
+   * 於呼叫子節點 `quiescence_search` 前保存 `saved_qs_stack_move` / `saved_qs_stack_piece` 並寫入當前 `move` 與依 `qs_side` 校正後的 `qs_moved_piece_type`，使子節點 `_is_repetition_jit` 的空步邊界檢查（`NO_MOVE`）與 `q_ply >= 1` 逃將安靜著法排序（Continuation History）取得正確上下文，返回後即刻於 `stop_flag` 檢查與 `unmake_move` 前完整還原。
+
+### 2. 驗證與診斷結果
+
+* **單元與契約測試**（清除雙方 `*search*` 舊 `.nbi/.nbc` 後冷編譯並執行 `tests.test_wave1b_fixes tests.test_search_core_contracts tests.test_lazy_smp tests.test_wave1a_fixes tests.test_history`）：**87 / 87 項全過**（`12.775s`）。
+  * 於 [`tests/test_wave1b_fixes.py`](../../tests/test_wave1b_fixes.py) 新增 `TestBug12QSearchRepetitionAndStack`（3 項）：契約檢查 `ply_path_stack[ply]` / `_is_repetition_jit` 位於 `probe_tt_snapshot` 之前且兩欄堆疊保存／還原嚴格包夾遞迴呼叫；實搜驗證在 `ply=3` 即使植入 `TT_FLAG_EXACT (-600)` 誘餌仍先測得重複返回 `0`，而 `ply=0` 維持虧損（`< -200`）；並以被將軍局面 `4k3/8/8/8/8/3p4/4r3/4K3 w - - 4 20` 預埋 `move_stack[2] = NO_MOVE` 哨兵實測子層重複救和（`0`）與雙欄哨兵完整還原。
+* **Numba 快取與符號檢查**：`warm_import = 6.76s`、`warmup_search_jit = 0.32s`；`_search` / `quiescence_search` / `_lazy_smp_helper_loop_jit` 各維持 **`1`** 過載、`unresolved: []`。
+* **基準差異與衛生**：`python tools/sync_classical_old.py --diff-code` 僅顯示 `search.py` 上述 Bug #12 兩處修復；`CRCRLF = 0`。
+* **20 盤面 Depth-15 對照（`classical_old` Wave 1B-4 vs `classical` Wave 1B-8，64 MB TT）**：
+  * **總節點數**：`10,380,617 → 9,215,297`（**`-11.23%`**）；總搜尋耗時 `18.05s → 16.60s`。
+  * **著法／評分變化**：`5 / 20` 盤面變著、`11 / 20` 盤面變分；顯著收斂盤面包括 `Kiwipete` **`-43.69%`**（`684,822 → 385,595`）、`EPD_24001` **`-47.69%`**、`EPD_18001` **`-46.50%`**、`EPD_8001` `-21.36%`、`EPD_16001` `-15.09%`、`EPD_28001` `-12.58%`。
+  * **Weighted NPS**：`575,032 → 555,022`（`-3.48%`）。
+
+### 3. 狀態
+
+* **⏳ 待實戰驗證**：準備於 Colab 進行固定節點／限時 SPRT（`Wave 1B-8 vs Wave 1B-4`）；[`classical_old/`](../classical_old/) 維持於 Wave 1B-4（Commit `f7d271a`）不動。

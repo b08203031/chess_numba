@@ -6,12 +6,14 @@ Currently covers:
 - Bug #3: Prevent quiescence_search from storing TT_FLAG_EXACT and overwriting deep TT entries.
 - Bug #8: Lockless TT snapshot/checksum safety in store_tt, penalize_tt, and probe_tt_best_move.
 - Bug #7: Promotion bonus and bucket scoring in score_captures_lazy and score_captures_with_tt_lazy.
+- Bug #12: QSearch repetition detection (_is_repetition_jit), ply_path_stack, and recursive move_stack/piece_stack tracking.
 """
 import unittest
 from pathlib import Path
 
 import numpy as np
 
+from chess_engine.classical.board_operations import make_move, unmake_move
 from chess_engine.classical.constants import (
     CORRECTION_HISTORY_LIMIT,
     CORRECTION_HISTORY_SIZE,
@@ -20,6 +22,7 @@ from chess_engine.classical.constants import (
     PAWN_HISTORY_SIZE,
     QS_EVASION_CAPTURE_BUCKET,
 )
+from chess_engine.classical.core import generate_legal_moves
 from chess_engine.classical.engine_types import SearchContext, reset_search_context
 from chess_engine.classical.evaluation import _evaluate_position_jit
 from chess_engine.classical.fen_parser import parse_fen
@@ -31,8 +34,9 @@ from chess_engine.classical.move import (
     SPECIAL_MOVE_FLAG_NORMAL,
     SPECIAL_MOVE_FLAG_PROMOTION,
     encode_move,
+    move_to_uci,
 )
-from chess_engine.classical.search import iterative_deepening_search, quiescence_search
+from chess_engine.classical.search import _i32, iterative_deepening_search, quiescence_search
 from chess_engine.classical.search_heuristics import score_captures_lazy, score_captures_with_tt_lazy
 from chess_engine.classical.transposition_table import (
     TT_FLAG_ALPHA,
@@ -416,6 +420,100 @@ class TestBug7PromotionScoring(unittest.TestCase):
         self.assertGreater(s_q, s_r)
         self.assertGreater(s_r, s_b)
         self.assertGreater(s_b, s_n)
+
+
+class TestBug12QSearchRepetitionAndStack(unittest.TestCase):
+    def test_bug12_source_contracts(self):
+        src = (ROOT / "chess_engine" / "classical" / "search.py").read_text(encoding="utf-8")
+        qs_start = src.index("def quiescence_search(")
+        qs_end = src.index("get_next_move_return_type", qs_start)
+        qs_body = src[qs_start:qs_end]
+
+        tt_probe_idx = qs_body.index("probe_tt_snapshot(")
+        pre_tt = qs_body[:tt_probe_idx]
+        self.assertIn("search_context.ply_path_stack[ply] = zobrist_key", pre_tt)
+        self.assertIn("if ply > 0 and halfmove_clock_qs >= 2 and _is_repetition_jit(", pre_tt)
+
+        rec_call_idx = qs_body.index("score, child_q_nodes = quiescence_search(")
+        stop_check_idx = qs_body.index("if search_context.stop_flag[0]:", rec_call_idx)
+        pre_rec = qs_body[:rec_call_idx]
+        for expected_pre in (
+            "saved_qs_stack_move = search_context.move_stack[ply]",
+            "saved_qs_stack_piece = search_context.piece_stack[ply]",
+            "search_context.move_stack[ply] = move",
+            "search_context.piece_stack[ply] = qs_moved_piece_type",
+        ):
+            self.assertIn(expected_pre, pre_rec)
+
+        post_rec_pre_stop = qs_body[rec_call_idx:stop_check_idx]
+        self.assertIn("search_context.move_stack[ply] = saved_qs_stack_move", post_rec_pre_stop)
+        self.assertIn("search_context.piece_stack[ply] = saved_qs_stack_piece", post_rec_pre_stop)
+
+    def test_qsearch_detects_in_check_repetition_before_tt_and_skips_ply0(self):
+        tt, ctx = _make_context(tt_mb=1)
+        p_bbs, o_bbs, g_state = parse_fen("4k3/8/8/8/8/3p4/4r3/4K3 w - - 4 20")
+
+        clear_transposition_table(tt)
+        reset_search_context(ctx)
+        ctx.ply_path_stack[0] = np.uint64(0x1111)
+        ctx.ply_path_stack[1] = g_state[4]
+        ctx.ply_path_stack[2] = np.uint64(0x2222)
+        ctx.move_stack[0] = np.uint16(1)
+        ctx.move_stack[1] = np.uint16(2)
+        ctx.move_stack[2] = np.uint16(3)
+        store_tt(
+            tt,
+            get_tt_key(g_state[4], int(g_state[3])),
+            8,
+            -600,
+            -600,
+            TT_FLAG_EXACT,
+            NO_MOVE,
+            0,
+            True,
+        )
+
+        score_ply3, _ = quiescence_search(
+            p_bbs, o_bbs, g_state, _i32(-30000), _i32(30000), _i32(3), ctx, _i32(1)
+        )
+        self.assertEqual(int(score_ply3), 0)
+        self.assertEqual(int(ctx.ply_path_stack[3]), int(g_state[4]))
+
+        clear_transposition_table(tt)
+        reset_search_context(ctx)
+        score_ply0, _ = quiescence_search(
+            p_bbs, o_bbs, g_state, _i32(-30000), _i32(30000), _i32(0), ctx, _i32(0)
+        )
+        self.assertLess(int(score_ply0), -200)
+
+    def test_qsearch_recursive_stack_update_restore_and_child_repetition_rescue(self):
+        tt, ctx = _make_context(tt_mb=1)
+        p_bbs, o_bbs, g_state = parse_fen("4k3/8/8/8/8/3p4/4r3/4K3 w - - 4 20")
+        legal = [int(m) for m in generate_legal_moves(p_bbs, o_bbs, g_state)]
+        kf1_move = next(m for m in legal if move_to_uci(m) == "e1f1")
+
+        p_tmp, o_tmp, g_tmp = p_bbs.copy(), o_bbs.copy(), g_state.copy()
+        u_tmp = make_move(p_tmp, o_tmp, g_tmp, kf1_move)
+        zkey_after_kf1 = np.uint64(g_tmp[4])
+        unmake_move(p_tmp, o_tmp, g_tmp, kf1_move, u_tmp)
+
+        clear_transposition_table(tt)
+        reset_search_context(ctx)
+        ctx.ply_path_stack[0] = np.uint64(0x1111)
+        ctx.ply_path_stack[1] = zkey_after_kf1
+        ctx.move_stack[0] = np.uint16(1)
+        ctx.move_stack[1] = np.uint16(2)
+        ctx.move_stack[2] = np.uint16(NO_MOVE)
+        ctx.piece_stack[2] = np.int8(9)
+
+        score_ply2, _ = quiescence_search(
+            p_bbs, o_bbs, g_state, _i32(-30000), _i32(30000), _i32(2), ctx, _i32(0)
+        )
+        self.assertEqual(int(score_ply2), 0)
+        self.assertEqual(int(ctx.move_stack[2]), int(NO_MOVE))
+        self.assertEqual(int(ctx.piece_stack[2]), 9)
+        self.assertEqual(int(ctx.ply_path_stack[2]), int(g_state[4]))
+        self.assertNotEqual(int(ctx.ply_path_stack[3]), 0)
 
 
 if __name__ == "__main__":
