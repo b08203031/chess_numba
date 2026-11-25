@@ -460,3 +460,29 @@
   * 與 Wave 1B-4 不同，Wave 1B-5 屬於全局每次搜尋都會觸發的 PV 重搜機制，卻在固定節點對戰呈現前後雙半均劣於基線（`LOS = 15.5%`, `-6.19 ± 11.86 Elo`, `SPRT[-3, +3] = -1.00`）。
   * 主因研判：(1) 在根節點 `ply == 0` 外層已有 Aspiration Window 迴圈，非首步在窄視窗 Fail-High（`>= beta`）時強制先用原窄視窗跑一次 `is_pv=True` 全窗口重搜（依 H9 關閉 TT 分數截斷＋全套前向剪枝）再於外層放寬視窗重搜，會形成雙重重複搜尋消耗固定節點預算；(2) 本機在 LMR 已先經 `adjusted_depth` 非 PV 驗證達 `>= beta` 後再啟重型 `is_pv=True` 全窗口驗證，於固定節點預算下投資報酬率為負。
   * **處置結果（❌ 已回退／REVERTED，方案 A）**：依用戶決議採取方案 A，已將 [`search.py`](search.py) 與 [`tests/test_wave1b_fixes.py`](../../tests/test_wave1b_fixes.py) 中的 Bug #9 修改全數回退並還原至已驗收之 Wave 1B-4 基線（[`classical_old/`](../classical_old/) Commit `f7d271a`），同時完整保留本節 1,178 局 `-6.19 ± 11.86 Elo` 實測與診斷紀錄以免重蹈退化覆轍，隨後直接推進 **Wave 1B-6（Bug #10）**。
+
+---
+
+## Wave 1B-6：修復 Bug #10 — ProbCut 堆疊狀態隔離與 QS 呼叫順序修正（2026-11-25）
+
+> **對照基準**：Commit `f7d271a` / `1c95172`（`classical_old/` 維持於已驗收之 Wave 1B-4，Wave 1B-5 已回退；本波單軸驗證 Bug #10）。
+
+### 1. 修改明細（[`search.py`](search.py) `_search` Step 12 ProbCut）
+
+1. **將堆疊設置提前至 `quiescence_search` 之前，並補齊 4 欄完整保存／還原（[#L1965-L2013](search.py#L1965-L2013)）**：
+   * 在呼叫 `quiescence_search` 之前即保存並設定 `move_stack[ply] = pc_move`、`piece_stack[ply] = pc_moved_piece_type`、`move_is_capture_stack[ply] = True`、`move_count_stack[ply] = 0`（對齊 SF19 `search.cpp:1074-1085` `capture_stage(move)` 語意），確保 ProbCut 預檢 QS 期間逃將著法排序與重複/延續歷史查詢讀到正確的當前吃子上下文。
+   * 以單一匯合出口改寫 ProbCut QS／`_search` 流程，在 `stop_flag[0]`、`pc_q_score < probcut_beta` 及 `_search` 返回／beta 截斷等**所有路徑**於 `unmake_move` 前無條件還原上述 4 欄堆疊值；修補先前遺漏 `move_is_capture_stack[ply]` 與 `move_count_stack[ply]` 殘留 `False` 時，導致子節點 fail-low（`#L3388`）與 refutation malus（`#L3208`）把 ProbCut 吃子寫進全部 quiet history 表的汙染問題。
+
+### 2. 驗證與診斷結果
+
+* **單元與契約測試**（清除 `*search*` 舊 `.nbi/.nbc` 後冷編譯並執行 `tests.test_wave1b_fixes tests.test_search_core_contracts tests.test_lazy_smp tests.test_wave1a_fixes tests.test_history`）：**86 / 86 項全過**（`14.100s`）。
+  * 於 [`tests/test_wave1b_fixes.py`](../../tests/test_wave1b_fixes.py) 新增 `TestBug10ProbCutStackIsolation`（2 項）：契約檢查 4 欄堆疊的保存／設置皆位於 `quiescence_search(` 之前且無條件還原於 `_search(` 之後／`pc_score >= probcut_beta` 之前；實搜於 `4k3/3q1ppp/2n5/8/8/2N5/PPP1PPPP/3RK3 w - - 0 1`（depth 6、`ply=1`、預埋哨兵）實測觸發 `DIAG_PROBCUT > 0`，確認 `ply=1` 4 欄哨兵完整還原且 `Rd1xd7` 未寫入 `history_table`／`butterfly_history`。
+* **Numba 快取與符號檢查**：`warm_import = 7.06s`、`warmup_search_jit = 0.29s`；`_search` / `quiescence_search` / `_lazy_smp_helper_loop_jit` 各維持 **`1`** 過載、`unresolved: []`。
+* **基準差異與衛生**：`python tools/sync_classical_old.py --diff-code` 僅顯示 `search.py` 上述 Bug #10 ProbCut 單塊修改；`CRCRLF = 0`。
+* **20 盤面 Depth-10 對照（`classical_old` Wave 1B-4 vs `classical` Wave 1B-6，64 MB TT）**：
+  * **總節點數**：`1,080,177 → 1,085,209`（**`+0.47%`**，僅 `EPD_24001` 單盤變動 `+5.40%` 與 `eval 8 -> 19`）。
+  * **著法／評分變化**：`0 / 20` 變著、`1 / 20` 變分；Weighted NPS `552,064 → 618,492`（零額外熱路徑開銷）。
+
+### 3. 狀態
+
+* **⏳ 待實戰驗證**：準備於 Colab 進行 `400k nodes` 固定節點 SPRT（`Wave 1B-6 vs Wave 1B-4`）；[`classical_old/`](../classical_old/) 維持於 Wave 1B-4（`f7d271a`）不動。

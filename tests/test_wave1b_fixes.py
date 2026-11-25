@@ -6,6 +6,7 @@ Currently covers:
 - Bug #3: Prevent quiescence_search from storing TT_FLAG_EXACT and overwriting deep TT entries.
 - Bug #8: Lockless TT snapshot/checksum safety in store_tt, penalize_tt, and probe_tt_best_move.
 - Bug #7: Promotion bonus and bucket scoring in score_captures_lazy and score_captures_with_tt_lazy.
+- Bug #10: ProbCut stack state isolation (move/piece/is_capture/move_count) and setting stack before QS.
 """
 import unittest
 from pathlib import Path
@@ -15,6 +16,7 @@ import numpy as np
 from chess_engine.classical.constants import (
     CORRECTION_HISTORY_LIMIT,
     CORRECTION_HISTORY_SIZE,
+    DIAG_PROBCUT,
     MAX_PLY,
     NO_MOVE,
     PAWN_HISTORY_SIZE,
@@ -32,7 +34,7 @@ from chess_engine.classical.move import (
     SPECIAL_MOVE_FLAG_PROMOTION,
     encode_move,
 )
-from chess_engine.classical.search import iterative_deepening_search, quiescence_search
+from chess_engine.classical.search import _search, iterative_deepening_search, quiescence_search
 from chess_engine.classical.search_heuristics import score_captures_lazy, score_captures_with_tt_lazy
 from chess_engine.classical.transposition_table import (
     TT_FLAG_ALPHA,
@@ -416,6 +418,75 @@ class TestBug7PromotionScoring(unittest.TestCase):
         self.assertGreater(s_q, s_r)
         self.assertGreater(s_r, s_b)
         self.assertGreater(s_b, s_n)
+
+
+class TestBug10ProbCutStackIsolation(unittest.TestCase):
+    def test_probcut_contract_sets_and_restores_four_stack_fields_around_qs_and_search(self):
+        src = (ROOT / "chess_engine" / "classical" / "search.py").read_text(encoding="utf-8")
+        start = src.index("# Step 12. ProbCut")
+        end = src.index("# --- Move Ordering ---", start)
+        block = src[start:end]
+
+        qs_idx = block.index("pc_q_score, pc_q_nodes = quiescence_search(")
+        search_idx = block.index("res_pc = _search(")
+        cutoff_idx = block.index("if pc_score >= probcut_beta:")
+
+        pre_qs = block[:qs_idx]
+        for expected_pre in (
+            "saved_pc_stack_move = search_context.move_stack[ply]",
+            "saved_pc_stack_piece = search_context.piece_stack[ply]",
+            "saved_pc_stack_is_capture = search_context.move_is_capture_stack[ply]",
+            "saved_pc_stack_move_count = search_context.move_count_stack[ply]",
+            "search_context.move_stack[ply] = pc_move",
+            "search_context.piece_stack[ply] = pc_moved_piece_type",
+            "search_context.move_is_capture_stack[ply] = True",
+            "search_context.move_count_stack[ply] = 0",
+        ):
+            self.assertIn(expected_pre, pre_qs)
+
+        post_search_pre_cutoff = block[search_idx:cutoff_idx]
+        for expected_restore in (
+            "search_context.move_stack[ply] = saved_pc_stack_move",
+            "search_context.piece_stack[ply] = saved_pc_stack_piece",
+            "search_context.move_is_capture_stack[ply] = saved_pc_stack_is_capture",
+            "search_context.move_count_stack[ply] = saved_pc_stack_move_count",
+        ):
+            self.assertIn(expected_restore, post_search_pre_cutoff)
+
+    def test_live_probcut_restores_stack_and_blocks_quiet_history_pollution(self):
+        tt, ctx = _make_context(tt_mb=1)
+        clear_transposition_table(tt)
+        reset_search_context(ctx)
+        ctx.diag_enabled = True
+        ctx.static_eval_stack[0] = np.int32(0)
+
+        ctx.move_stack[1] = np.uint16(0x0123)
+        ctx.piece_stack[1] = np.int8(4)
+        ctx.move_is_capture_stack[1] = False
+        ctx.move_count_stack[1] = np.int32(1)
+
+        p_bbs, o_bbs, g_state = parse_fen("4k3/3q1ppp/2n5/8/8/2N5/PPP1PPPP/3RK3 w - - 0 1")
+        _search(
+            p_bbs,
+            o_bbs,
+            g_state,
+            np.int32(6),
+            np.int32(-101),
+            np.int32(-100),
+            ctx,
+            np.int32(1),
+            np.uint16(NO_MOVE),
+            False,
+            True,
+        )
+
+        self.assertGreater(int(ctx.diag_stats[DIAG_PROBCUT]), 0)
+        self.assertEqual(int(ctx.move_stack[1]), 0x0123)
+        self.assertEqual(int(ctx.piece_stack[1]), 4)
+        self.assertFalse(bool(ctx.move_is_capture_stack[1]))
+        self.assertEqual(int(ctx.move_count_stack[1]), 1)
+        self.assertEqual(int(ctx.history_table[3, 51]), 0)
+        self.assertEqual(int(ctx.butterfly_history[3, 51]), 0)
 
 
 if __name__ == "__main__":
