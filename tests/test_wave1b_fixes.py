@@ -7,6 +7,7 @@ Currently covers:
 - Bug #8: Lockless TT snapshot/checksum safety in store_tt, penalize_tt, and probe_tt_best_move.
 - Bug #7: Promotion bonus and bucket scoring in score_captures_lazy and score_captures_with_tt_lazy.
 - Bug #10: ProbCut stack state isolation (move/piece/is_capture/move_count) and setting stack before QS.
+- Bug #11: Lazy SMP root first-move ownership, completed root fail-low (score, move) consistency, and aborted foreign fail-low guard.
 """
 import unittest
 from pathlib import Path
@@ -17,11 +18,14 @@ from chess_engine.classical.constants import (
     CORRECTION_HISTORY_LIMIT,
     CORRECTION_HISTORY_SIZE,
     DIAG_PROBCUT,
+    INFINITY,
     MAX_PLY,
     NO_MOVE,
     PAWN_HISTORY_SIZE,
     QS_EVASION_CAPTURE_BUCKET,
 )
+from chess_engine.classical.board_operations import make_move, unmake_move
+from chess_engine.classical.core import generate_legal_moves
 from chess_engine.classical.engine_types import SearchContext, reset_search_context
 from chess_engine.classical.evaluation import _evaluate_position_jit
 from chess_engine.classical.fen_parser import parse_fen
@@ -33,8 +37,18 @@ from chess_engine.classical.move import (
     SPECIAL_MOVE_FLAG_NORMAL,
     SPECIAL_MOVE_FLAG_PROMOTION,
     encode_move,
+    move_to_uci,
 )
-from chess_engine.classical.search import _search, iterative_deepening_search, quiescence_search
+from chess_engine.classical.search import (
+    _b_false,
+    _b_true,
+    _i32,
+    _search,
+    _u16,
+    apply_root_iteration_guards,
+    iterative_deepening_search,
+    quiescence_search,
+)
 from chess_engine.classical.search_heuristics import score_captures_lazy, score_captures_with_tt_lazy
 from chess_engine.classical.transposition_table import (
     TT_FLAG_ALPHA,
@@ -487,6 +501,183 @@ class TestBug10ProbCutStackIsolation(unittest.TestCase):
         self.assertEqual(int(ctx.move_count_stack[1]), 1)
         self.assertEqual(int(ctx.history_table[3, 51]), 0)
         self.assertEqual(int(ctx.butterfly_history[3, 51]), 0)
+
+
+class TestBug11RootFirstMoveAndFailLowConsistency(unittest.TestCase):
+    def test_bug11_source_contracts(self):
+        src = (ROOT / "chess_engine" / "classical" / "search.py").read_text(encoding="utf-8")
+        self.assertIn(
+            "if ply == 0 and search_context.last_iteration_pv_len > 0 and search_context.last_iteration_pv[0] != NO_MOVE:",
+            src,
+        )
+        self.assertNotIn(
+            "if ply == 0 and tt_move == NO_MOVE and search_context.last_iteration_pv_len > 0:",
+            src,
+        )
+        self.assertIn(
+            "ret_score = root_cand_score if final_flag == TT_FLAG_ALPHA else np.int32(max_eval)",
+            src,
+        )
+        self.assertGreaterEqual(src.count("aborted_foreign_fail_low"), 2)
+
+    def test_root_first_move_not_hijacked_by_helper_tt(self):
+        tt, ctx = _make_context(tt_mb=1)
+        p_bbs, o_bbs, g_state = parse_fen("4k3/8/8/8/8/8/4P3/4K3 w - - 0 1")
+        legal = [int(m) for m in generate_legal_moves(p_bbs, o_bbs, g_state)]
+        move_a = next(m for m in legal if move_to_uci(m) == "e2e4")
+        move_b = next(m for m in legal if move_to_uci(m) == "e1d1")
+        root_tt_key = get_tt_key(g_state[4], int(g_state[3]))
+
+        for pv_move, helper_tt_move in ((move_a, move_b), (move_b, move_a)):
+            clear_transposition_table(tt)
+            reset_search_context(ctx)
+            store_tt(
+                tt,
+                root_tt_key,
+                10,
+                500,
+                32767,
+                TT_FLAG_BETA,
+                np.uint16(helper_tt_move),
+                0,
+                True,
+            )
+            ctx.last_iteration_pv[0] = np.uint16(pv_move)
+            ctx.last_iteration_pv_len = np.int32(1)
+            res = _search(
+                p_bbs,
+                o_bbs,
+                g_state,
+                _i32(2),
+                _i32(25000),
+                _i32(25100),
+                ctx,
+                _i32(0),
+                _u16(NO_MOVE),
+                _b_true(),
+                _b_false(),
+            )
+            self.assertEqual(int(res[1]), int(pv_move))
+            self.assertEqual(int(ctx.pv_table[0, 0]), int(pv_move))
+
+    def test_completed_root_fail_low_returns_consistent_score_and_move(self):
+        tt, ctx = _make_context(tt_mb=1)
+        p_bbs, o_bbs, g_state = parse_fen("4k3/3p4/8/8/8/8/4Q3/4K3 w - - 0 1")
+        legal = [int(m) for m in generate_legal_moves(p_bbs, o_bbs, g_state)]
+        blunder_move = next(m for m in legal if move_to_uci(m) == "e2e6")
+        better_move = next(m for m in legal if move_to_uci(m) == "e1d2")
+
+        # Measure each move's own depth-2 child score under the fail-low window [2000, 2100]
+        # so the test proves the root return pairs Move 1 with Move 1's own score
+        # rather than a later sibling's higher max_eval.
+        clear_transposition_table(tt)
+        reset_search_context(ctx)
+        u1 = make_move(p_bbs, o_bbs, g_state, blunder_move)
+        ctx.move_stack[0] = blunder_move
+        move1_eval = -int(
+            _search(
+                p_bbs,
+                o_bbs,
+                g_state,
+                _i32(1),
+                _i32(-2100),
+                _i32(-2000),
+                ctx,
+                _i32(1),
+                _u16(NO_MOVE),
+                _b_true(),
+                _b_false(),
+            )[0]
+        )
+        unmake_move(p_bbs, o_bbs, g_state, blunder_move, u1)
+
+        clear_transposition_table(tt)
+        reset_search_context(ctx)
+        u2 = make_move(p_bbs, o_bbs, g_state, better_move)
+        ctx.move_stack[0] = better_move
+        move2_eval = -int(
+            _search(
+                p_bbs,
+                o_bbs,
+                g_state,
+                _i32(1),
+                _i32(-2001),
+                _i32(-2000),
+                ctx,
+                _i32(1),
+                _u16(NO_MOVE),
+                _b_false(),
+                _b_true(),
+            )[0]
+        )
+        unmake_move(p_bbs, o_bbs, g_state, better_move, u2)
+        self.assertLess(move1_eval, move2_eval)
+
+        clear_transposition_table(tt)
+        reset_search_context(ctx)
+        ctx.last_iteration_pv[0] = np.uint16(blunder_move)
+        ctx.last_iteration_pv_len = np.int32(1)
+        fail_low_res = _search(
+            p_bbs,
+            o_bbs,
+            g_state,
+            _i32(2),
+            _i32(2000),
+            _i32(2100),
+            ctx,
+            _i32(0),
+            _u16(NO_MOVE),
+            _b_true(),
+            _b_false(),
+        )
+        self.assertEqual(int(fail_low_res[1]), int(blunder_move))
+        self.assertEqual(int(fail_low_res[0]), move1_eval)
+        self.assertLess(int(fail_low_res[0]), move2_eval)
+
+    def test_aborted_foreign_fail_low_rolls_back_to_last_best_move(self):
+        res_foreign = apply_root_iteration_guards(
+            cand_valid=True,
+            cand_move=202,
+            cand_score=-400,
+            cand_uci_score=10,
+            cand_depth=6,
+            cand_inexact_lower=False,
+            cand_inexact_upper=True,
+            cand_pv=[202],
+            last_best_valid=True,
+            last_best_move=101,
+            last_best_score=40,
+            last_best_depth=5,
+            last_best_pv=[101, 11],
+            current_depth=6,
+            stopped_in_iter=True,
+        )
+        self.assertTrue(res_foreign[12])
+        self.assertEqual(res_foreign[0], 101)
+        self.assertEqual(res_foreign[1], 40)
+        self.assertEqual(res_foreign[3], 5)
+        self.assertFalse(res_foreign[5])
+        self.assertEqual(res_foreign[6], [101, 11])
+
+        res_same = apply_root_iteration_guards(
+            cand_valid=True,
+            cand_move=101,
+            cand_score=-400,
+            cand_uci_score=10,
+            cand_depth=6,
+            cand_inexact_lower=False,
+            cand_inexact_upper=True,
+            cand_pv=[101],
+            last_best_valid=True,
+            last_best_move=101,
+            last_best_score=40,
+            last_best_depth=5,
+            last_best_pv=[101, 11],
+            current_depth=6,
+            stopped_in_iter=True,
+        )
+        self.assertFalse(res_same[12])
+        self.assertTrue(res_same[5])
 
 
 if __name__ == "__main__":

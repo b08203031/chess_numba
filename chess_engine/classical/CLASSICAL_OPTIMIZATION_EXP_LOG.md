@@ -483,6 +483,38 @@
   * **總節點數**：`1,080,177 → 1,085,209`（**`+0.47%`**，僅 `EPD_24001` 單盤變動 `+5.40%` 與 `eval 8 -> 19`）。
   * **著法／評分變化**：`0 / 20` 變著、`1 / 20` 變分；Weighted NPS `552,064 → 618,492`（零額外熱路徑開銷）。
 
+### 3. 狀態與中期快照（⏳ 暫定接納並已同步基準；待 Colab 終局補錄）
+
+* **Colab `400k nodes` 中期快照（598 局 / 299 對換先）**：`105W 379D 114L`（得分率 **`49.25%`**），Pentanomial **`-5.23 ± 15.81 Elo`**（95% CI **`[-21.06, +10.58]`**），Pentanomial 分佈 `[10, 63, 160, 58, 8]`，`SPRT[-3, +3] = -0.48`、`SPRT[-5, 0] = -0.21`（較 518 局 `-6.71 Elo` 回升，仍在常態波動範圍內）。
+* **處置決議**：依用戶決議先行暫定接納 Wave 1B-6（Colab 續跑中，待終局後再回補完整戰報），已執行 `python tools/sync_classical_old.py --sync` 將 [`classical_old/`](../classical_old/) 同步至 Wave 1B-6（Commit `c011bf1`）作為 Wave 1B-7 對照基線。
+
+---
+
+## Wave 1B-7：修復 Bug #11 — Lazy SMP 根節點首著所有權與根層 Fail-Low `(score, move)` 一致性（2026-11-25）
+
+> **對照基準**：Commit `c011bf1`（`classical_old/` 已暫定同步至 Wave 1B-6；本波維持 `classical_old/` 於 Wave 1B-6 不動，以便單軸驗證 Bug #11）。
+
+### 1. 修改明細（[`search.py`](search.py) 4 處協同修復）
+
+1. **根節點無條件優先使用己方上一輪 PV 首著（[`_search`](search.py#L1342-L1364)）**：
+   * 對齊 SF19 `search.cpp:820-823`：當 `ply == 0 and search_context.last_iteration_pv_len > 0 and search_context.last_iteration_pv[0] != NO_MOVE` 時，無條件將 `tt_move` 設為 `search_context.last_iteration_pv[0]`，並改在 `if tt_move != NO_MOVE:` 下計算 `tt_capture`（即使 `tt_hit` 為偽亦正確辨識），防止 Lazy SMP Helper 寫入共享根 TT 劫持主執行緒的首著搜尋順序。
+2. **完成態根層 Fail-Low 的 `(score, move)` 配對一致性（[`_search`](search.py#L3576-L3583)）**：
+   * 保留 `max_eval` 寫入 `store_tt` 作為節點正確上界，但於 `ply == 0 and root_cand_valid` 返回時，若 `final_flag == TT_FLAG_ALPHA` 則回傳 `(np.int32(root_cand_score), np.uint16(root_cand_move))`，杜絕 Move 2+ 拉高 `max_eval` 後與 `root_cand_move`（Move 1）錯配為 `(score_B, move_A)` 的 BUG。
+3. **Aspiration Fail-High 同步提升 `last_iteration_pv`（[`_lazy_smp_helper_loop_jit`](search.py#L4517-L4521)、[`iterative_deepening_search`](search.py#L5221-L5225)）**：
+   * 對齊 SF19 `search.cpp:403` `std::stable_sort`，於 Aspiration Fail-High（`score >= beta`）時將當輪候選 `cand_pv` 寫入 `search_context.last_iteration_pv`，確保同層放寬重搜時由新領先著法居於首位（Fail-Low 維持 Move 1 不動）。
+4. **中斷時異質 Fail-Low 候選防禦回滾（[`_lazy_smp_helper_loop_jit`](search.py#L4555-L4563)、[`apply_root_iteration_guards`](search.py#L4815-L4824)）**：
+   * 補上 `aborted_foreign_fail_low`（`stopped_in_iter and cand_valid and cand_inexact_upper and last_best_valid and cand_move != last_best_move`），當本輪因超時／節點上限中斷且新候選著法並非上一輪已完成的 `last_best_move` 卻發生 Fail-Low 時自動回滾至 `last_best_move`；若 `cand_move == last_best_move` 則保留 SF19 原生 Fail-Low 行為。
+
+### 2. 驗證與診斷結果
+
+* **單元與契約測試**（清除 `*search*` 舊 `.nbi/.nbc` 後冷編譯並執行 `tests.test_wave1b_fixes tests.test_search_core_contracts tests.test_lazy_smp tests.test_wave1a_fixes tests.test_history`）：**90 / 90 項全過**（`3.705s`）。
+  * 於 [`tests/test_wave1b_fixes.py`](../../tests/test_wave1b_fixes.py) 新增 `TestBug11RootFirstMoveAndFailLowConsistency`（4 項）：契約檢查無條件 PV 首著選擇、`ret_score` 根層 Fail-Low 一致性與雙處 `aborted_foreign_fail_low`；實搜確認共享 TT 遭植入敵對著法時 `ply == 0` 仍優先搜 `last_iteration_pv[0]`；實測對比子節點評分證明完成態根層 Fail-Low 回傳 `(move1_eval=1000, e2e6)` 而非錯配 `(move2_eval=1619, e2e6)`；驗證 `apply_root_iteration_guards` 對異質 Fail-Low 回滾而保留同著 Fail-Low。
+* **Numba 快取與符號檢查**：`warm_import = 6.15s`、`warmup_search_jit = 0.21s`；`_search` / `quiescence_search` / `_lazy_smp_helper_loop_jit` 各維持 **`1`** 過載、`unresolved: []`。
+* **基準差異與衛生**：`python tools/sync_classical_old.py --diff-code` 僅顯示 `search.py` 上述 Bug #11 修改；`CRCRLF = 0`。
+* **20 盤面 Depth-10 對照（`classical_old` Wave 1B-6 vs `classical` Wave 1B-7，64 MB TT）**：
+  * **總節點數**：`1,085,209 → 1,103,553`（**`+1.69%`**）。
+  * **著法／評分變化**：`4 / 20` 盤面變著、`10 / 20` 盤面變分；Weighted NPS `602,770 → 600,135`。
+
 ### 3. 狀態
 
-* **⏳ 待實戰驗證**：準備於 Colab 進行 `400k nodes` 固定節點 SPRT（`Wave 1B-6 vs Wave 1B-4`）；[`classical_old/`](../classical_old/) 維持於 Wave 1B-4（`f7d271a`）不動。
+* **⏳ 待實戰驗證**：準備於 Colab 進行 `400k nodes` 固定節點 SPRT（`Wave 1B-7 vs Wave 1B-6`）；[`classical_old/`](../classical_old/) 維持於 Wave 1B-6（Commit `c011bf1`）不動。
