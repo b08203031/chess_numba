@@ -1962,44 +1962,48 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                     unmake_move(piece_bbs, occupancy_bbs, game_state, pc_move, pc_unmake)
                     continue
     
-                pc_q_score, pc_q_nodes = quiescence_search(
-                    piece_bbs, occupancy_bbs, game_state,
-                    _i32(-probcut_beta), _i32(-probcut_beta + 1), _i32(ply + 1), search_context, _i32(0),
-                )
-                quiescence_nodes += pc_q_nodes
-                pc_q_score = -pc_q_score
-
-                if search_context.stop_flag[0]:
-                    unmake_move(piece_bbs, occupancy_bbs, game_state, pc_move, pc_unmake)
-                    return (np.int32(0), NO_MOVE, nodes_searched, quiescence_nodes, tt_hits)
-
-                if pc_q_score < probcut_beta:
-                    unmake_move(piece_bbs, occupancy_bbs, game_state, pc_move, pc_unmake)
-                    continue
-
+                # Bug #10 (SF19 search.cpp:1074-1085): save/set all 4 stack slots BEFORE QS
+                # and restore unconditionally across stop_flag / QS-fail / _search / cutoff paths.
                 saved_pc_stack_move = search_context.move_stack[ply]
                 saved_pc_stack_piece = search_context.piece_stack[ply]
+                saved_pc_stack_is_capture = search_context.move_is_capture_stack[ply]
+                saved_pc_stack_move_count = search_context.move_count_stack[ply]
                 pc_moved_piece_type = pc_unmake[0]
                 if pc_moved_piece_type != -1 and pc_original_side == BLACK:
                     pc_moved_piece_type += 6
                 search_context.move_stack[ply] = pc_move
                 search_context.piece_stack[ply] = pc_moved_piece_type
-                search_context.reduction_stack[ply + 1] = 0
-                res_pc = _search(
-                    piece_bbs, occupancy_bbs, game_state, _i32(depth - probcut_r),
-                    _i32(-probcut_beta), _i32(-probcut_beta + 1), search_context, _i32(ply + 1),
-                    _u16(NO_MOVE), _b_false(), not cut_node,
+                search_context.move_is_capture_stack[ply] = True
+                search_context.move_count_stack[ply] = 0
+
+                pc_q_score, pc_q_nodes = quiescence_search(
+                    piece_bbs, occupancy_bbs, game_state,
+                    _i32(-probcut_beta), _i32(-probcut_beta + 1), _i32(ply + 1), search_context, _i32(0),
                 )
+                quiescence_nodes += pc_q_nodes
+                pc_q_score = np.int32(-pc_q_score)
+
+                pc_score = pc_q_score
+                if (not search_context.stop_flag[0]) and pc_q_score >= probcut_beta:
+                    search_context.reduction_stack[ply + 1] = 0
+                    res_pc = _search(
+                        piece_bbs, occupancy_bbs, game_state, _i32(depth - probcut_r),
+                        _i32(-probcut_beta), _i32(-probcut_beta + 1), search_context, _i32(ply + 1),
+                        _u16(NO_MOVE), _b_false(), not cut_node,
+                    )
+                    pc_score = np.int32(-res_pc[0])
+
+                    # IMPORTANT: Must aggregate the search stats from ProbCut back into the parent
+                    child_pc_nodes = res_pc[2]; child_pc_q_nodes = res_pc[3]
+                    child_pc_tth = res_pc[4]
+
+                    nodes_searched += child_pc_nodes; quiescence_nodes += child_pc_q_nodes
+                    tt_hits += child_pc_tth
+
                 search_context.move_stack[ply] = saved_pc_stack_move
                 search_context.piece_stack[ply] = saved_pc_stack_piece
-                pc_score = -res_pc[0]
-                
-                # IMPORTANT: Must aggregate the search stats from ProbCut back into the parent
-                child_pc_nodes = res_pc[2]; child_pc_q_nodes = res_pc[3]
-                child_pc_tth = res_pc[4]
-                
-                nodes_searched += child_pc_nodes; quiescence_nodes += child_pc_q_nodes
-                tt_hits += child_pc_tth
+                search_context.move_is_capture_stack[ply] = saved_pc_stack_is_capture
+                search_context.move_count_stack[ply] = saved_pc_stack_move_count
 
                 unmake_move(piece_bbs, occupancy_bbs, game_state, pc_move, pc_unmake)
 
