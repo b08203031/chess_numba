@@ -529,13 +529,22 @@ def quiescence_search(piece_bbs, occupancy_bbs, game_state, alpha, beta, ply, se
         eval_score, _, _ = _evaluate_position_jit(piece_bbs, occupancy_bbs, game_state, False, search_context)
         return np.int32(eval_score), q_nodes
 
+    # Bug #12: update ply_path_stack and detect in-tree repetition draws (including
+    # repeated check-evasion cycles) before TT probe so path-dependent draws never
+    # return stale TT scores or hit q_ply cap with static eval.
+    zobrist_key = game_state[4]
+    search_context.ply_path_stack[ply] = zobrist_key
     halfmove_clock_qs = int(game_state[3])
+    if ply > 0 and halfmove_clock_qs >= 2 and _is_repetition_jit(
+        zobrist_key, np.int32(halfmove_clock_qs), np.int32(ply), search_context
+    ):
+        return np.int32(0), q_nodes
+
     if halfmove_clock_qs >= FIFTY_MOVE_RULE_LIMIT or not has_sufficient_material(piece_bbs):
         if not _is_in_check_jit(piece_bbs, occupancy_bbs, game_state):
             return np.int32(0), q_nodes
 
     # M4: TT Probe in QSearch — avoids re-evaluating positions already in TT
-    zobrist_key = game_state[4]
     tt_key = get_tt_key(zobrist_key, int(game_state[3]))  # GHI: halfmove-aware key for TT
     qs_tt_flag, _qs_tt_depth, qs_tt_score_raw, qs_tt_static_eval, qs_tt_is_pv, qs_tt_best_move = probe_tt_snapshot(
         search_context.transposition_table, tt_key
@@ -982,10 +991,23 @@ def quiescence_search(piece_bbs, occupancy_bbs, game_state, alpha, beta, ply, se
             
         legal_moves_tried += 1
 
+        # Bug #12: maintain move_stack/piece_stack across QS recursion so child
+        # _is_repetition_jit (null-move boundary) and quiet-evasion continuation
+        # history scoring read accurate parent move context, then restore cleanly.
+        saved_qs_stack_move = search_context.move_stack[ply]
+        saved_qs_stack_piece = search_context.piece_stack[ply]
+        qs_moved_piece_type = unmake_info[0]
+        if qs_moved_piece_type != -1 and qs_side == BLACK:
+            qs_moved_piece_type += 6
+        search_context.move_stack[ply] = move
+        search_context.piece_stack[ply] = qs_moved_piece_type
+
         score, child_q_nodes = quiescence_search(
             piece_bbs, occupancy_bbs, game_state,
             _i32(-beta), _i32(-alpha), _i32(ply + 1), search_context, _i32(q_ply + 1),
         )
+        search_context.move_stack[ply] = saved_qs_stack_move
+        search_context.piece_stack[ply] = saved_qs_stack_piece
         unmake_move(piece_bbs, occupancy_bbs, game_state, move, unmake_info)
 
         # Preserve completed child telemetry even when the timer fired inside
