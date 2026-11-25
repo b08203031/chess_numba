@@ -422,7 +422,7 @@
 
 ---
 
-## Wave 1B-5：修復 Bug #9 — PV 節點零窗口 Fail-High 強制全窗口驗證（2026-11-24）
+## Wave 1B-5：修復 Bug #9 — PV 節點零窗口 Fail-High 強制全窗口驗證（2026-11-24）— ❌ 已回退（REVERTED）
 
 > **對照基準**：Commit `f7d271a`（`classical_old/` 已同步至 Wave 1B-4；本波維持 `classical_old/` 於 Wave 1B-4 不動，以便單軸驗證 Bug #9）。
 
@@ -459,9 +459,4 @@
 * **初步技術診斷與處置建議**：
   * 與 Wave 1B-4 不同，Wave 1B-5 屬於全局每次搜尋都會觸發的 PV 重搜機制，卻在固定節點對戰呈現前後雙半均劣於基線（`LOS = 15.5%`, `-6.19 ± 11.86 Elo`, `SPRT[-3, +3] = -1.00`）。
   * 主因研判：(1) 在根節點 `ply == 0` 外層已有 Aspiration Window 迴圈，非首步在窄視窗 Fail-High（`>= beta`）時強制先用原窄視窗跑一次 `is_pv=True` 全窗口重搜（依 H9 關閉 TT 分數截斷＋全套前向剪枝）再於外層放寬視窗重搜，會形成雙重重複搜尋消耗固定節點預算；(2) 本機在 LMR 已先經 `adjusted_depth` 非 PV 驗證達 `>= beta` 後再啟重型 `is_pv=True` 全窗口驗證，於固定節點預算下投資報酬率為負。
-  * **現況保護**：[`classical_old/`](../classical_old/) 仍安全維持於 Wave 1B-4（`f7d271a`），待決議先回退 Bug #9 並對齊基線，或限縮 `ply > 0`／單測驗證。
-
-
-
-
-
+  * **處置結果（❌ 已回退／REVERTED，方案 A）**：依用戶決議採取方案 A，已將 [`search.py`](search.py) 與 [`tests/test_wave1b_fixes.py`](../../tests/test_wave1b_fixes.py) 中的 Bug #9 修改全數回退並還原至已驗收之 Wave 1B-4 基線（[`classical_old/`](../classical_old/) Commit `f7d271a`），同時完整保留本節 1,178 局 `-6.19 ± 11.86 Elo` 實測與診斷紀錄以免重蹈退化覆轍，隨後直接推進 **Wave 1B-6（Bug #10）**。

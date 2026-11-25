@@ -6,14 +6,12 @@ Currently covers:
 - Bug #3: Prevent quiescence_search from storing TT_FLAG_EXACT and overwriting deep TT entries.
 - Bug #8: Lockless TT snapshot/checksum safety in store_tt, penalize_tt, and probe_tt_best_move.
 - Bug #7: Promotion bonus and bucket scoring in score_captures_lazy and score_captures_with_tt_lazy.
-- Bug #9: PV nodes always verify zero-window fail-high (>= beta) with full-window is_pv=True search.
 """
 import unittest
 from pathlib import Path
 
 import numpy as np
 
-from chess_engine.classical.board_operations import make_move, unmake_move
 from chess_engine.classical.constants import (
     CORRECTION_HISTORY_LIMIT,
     CORRECTION_HISTORY_SIZE,
@@ -34,8 +32,7 @@ from chess_engine.classical.move import (
     SPECIAL_MOVE_FLAG_PROMOTION,
     encode_move,
 )
-from chess_engine.classical.move_generator import generate_legal_moves
-from chess_engine.classical.search import _search, iterative_deepening_search, quiescence_search
+from chess_engine.classical.search import iterative_deepening_search, quiescence_search
 from chess_engine.classical.search_heuristics import score_captures_lazy, score_captures_with_tt_lazy
 from chess_engine.classical.transposition_table import (
     TT_FLAG_ALPHA,
@@ -419,56 +416,6 @@ class TestBug7PromotionScoring(unittest.TestCase):
         self.assertGreater(s_q, s_r)
         self.assertGreater(s_r, s_b)
         self.assertGreater(s_b, s_n)
-
-
-class TestBug9PVFailHighFullWindowVerification(unittest.TestCase):
-    def test_pv_research_contract_has_no_evaluation_lt_beta_guard(self):
-        src = (ROOT / "chess_engine" / "classical" / "search.py").read_text(encoding="utf-8")
-        start = src.index("if (not search_context.stop_flag[0]) and evaluation > alpha:")
-        end = src.index("if (not search_context.stop_flag[0]) and do_full_pv_search:", start)
-        block = src[start:end]
-
-        self.assertIn("do_full_pv_search = is_pv", block)
-        self.assertIn("do_full_pv_search = is_pv and evaluation > alpha", block)
-        self.assertNotIn("evaluation < beta", block)
-
-    def test_pv_node_verifies_fail_high_above_beta_with_full_window_search(self):
-        tt, ctx = _make_context(tt_mb=1)
-        fen = "4k3/4p3/8/8/8/8/4P3/4K3 w - - 0 1"
-
-        for depth in (3, 5):
-            clear_transposition_table(tt)
-            reset_search_context(ctx)
-            p_bbs, o_bbs, g_state = parse_fen(fen)
-
-            legal_moves = generate_legal_moves(p_bbs, o_bbs, g_state)
-            self.assertGreater(len(legal_moves), 2)
-            m1 = np.uint16(legal_moves[0])
-
-            root_tt_key = np.uint64(get_tt_key(g_state[4], int(g_state[3])))
-            store_tt(tt, root_tt_key, 1, -200, 32767, TT_FLAG_ALPHA, m1, 0, False)
-
-            for move in legal_moves[1:]:
-                u_info = make_move(p_bbs, o_bbs, g_state, np.uint16(move))
-                child_tt_key = np.uint64(get_tt_key(g_state[4], int(g_state[3])))
-                store_tt(tt, child_tt_key, 10, -5000, 32767, TT_FLAG_ALPHA, NO_MOVE, 0, False)
-                unmake_move(p_bbs, o_bbs, g_state, np.uint16(move), u_info)
-
-            score, _, _, _, _ = _search(
-                p_bbs,
-                o_bbs,
-                g_state,
-                np.int32(depth),
-                np.int32(-200),
-                np.int32(50),
-                ctx,
-                np.int32(0),
-                np.uint16(NO_MOVE),
-                True,
-                False,
-            )
-            self.assertNotEqual(int(score), 5000)
-            self.assertLess(abs(int(score)), 500)
 
 
 if __name__ == "__main__":
