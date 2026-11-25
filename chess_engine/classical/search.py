@@ -2977,7 +2977,9 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                     _diag_add(search_context, DIAG_LMR_CAPTURE_FAIL_HIGH)
 
             if (not search_context.stop_flag[0]) and evaluation > alpha:
-                do_full_pv_search = is_pv and evaluation < beta
+                # Bug #9 (SF19 search.cpp:1409): never skip full-window is_pv=True verification
+                # when a non-PV zero-window search returns fail-soft evaluation >= beta.
+                do_full_pv_search = is_pv
                 adjusted_depth = search_depth
                 
                 if lmr > 0:
@@ -3039,10 +3041,7 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                         if is_quiet_move:
                             _diag_add(search_context, DIAG_POST_LMR_UNVERIFIED_SAMPLE)
                     
-                    if is_pv and evaluation > alpha and evaluation < beta:
-                        do_full_pv_search = True
-                    else:
-                        do_full_pv_search = False
+                    do_full_pv_search = is_pv and evaluation > alpha
                 
                 if (not search_context.stop_flag[0]) and do_full_pv_search:
                     # Re-search with full window

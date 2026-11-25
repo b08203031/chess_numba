@@ -5,23 +5,38 @@ Currently covers:
 - Bug #2: Prevent lazy=True crude eval from polluting TT.static_eval and correction history.
 - Bug #3: Prevent quiescence_search from storing TT_FLAG_EXACT and overwriting deep TT entries.
 - Bug #8: Lockless TT snapshot/checksum safety in store_tt, penalize_tt, and probe_tt_best_move.
+- Bug #7: Promotion bonus and bucket scoring in score_captures_lazy and score_captures_with_tt_lazy.
+- Bug #9: PV nodes always verify zero-window fail-high (>= beta) with full-window is_pv=True search.
 """
 import unittest
 from pathlib import Path
 
 import numpy as np
 
+from chess_engine.classical.board_operations import make_move, unmake_move
 from chess_engine.classical.constants import (
     CORRECTION_HISTORY_LIMIT,
     CORRECTION_HISTORY_SIZE,
     MAX_PLY,
     NO_MOVE,
     PAWN_HISTORY_SIZE,
+    QS_EVASION_CAPTURE_BUCKET,
 )
 from chess_engine.classical.engine_types import SearchContext, reset_search_context
 from chess_engine.classical.evaluation import _evaluate_position_jit
 from chess_engine.classical.fen_parser import parse_fen
-from chess_engine.classical.search import iterative_deepening_search, quiescence_search
+from chess_engine.classical.move import (
+    PROMO_BISHOP,
+    PROMO_KNIGHT,
+    PROMO_QUEEN,
+    PROMO_ROOK,
+    SPECIAL_MOVE_FLAG_NORMAL,
+    SPECIAL_MOVE_FLAG_PROMOTION,
+    encode_move,
+)
+from chess_engine.classical.move_generator import generate_legal_moves
+from chess_engine.classical.search import _search, iterative_deepening_search, quiescence_search
+from chess_engine.classical.search_heuristics import score_captures_lazy, score_captures_with_tt_lazy
 from chess_engine.classical.transposition_table import (
     TT_FLAG_ALPHA,
     TT_FLAG_BETA,
@@ -349,6 +364,111 @@ class TestBug8LocklessTTSafety(unittest.TestCase):
         slot = self._slot_index(tt, zkey)
         tt[slot]["best_move"] = np.uint16(999)
         self.assertEqual(tuple(int(x) for x in probe_tt_best_move(tt, zkey)), (int(TT_FLAG_NONE), int(NO_MOVE)))
+
+
+class TestBug7PromotionScoring(unittest.TestCase):
+    def test_score_captures_lazy_orders_quiet_and_capture_promotions(self):
+        _, ctx = _make_context(tt_mb=1)
+        # White pawn a7 can push to a8=Q/R/B/N or capture b8=Q/R/B/N.
+        p_bbs, o_bbs, g_state = parse_fen("1n2k3/P7/8/8/8/8/8/4K3 w - - 0 1")
+        # squares: a7=48, a8=56, b8=57
+        quiet_promos = [
+            encode_move(48, 56, p, int(SPECIAL_MOVE_FLAG_PROMOTION))
+            for p in (PROMO_QUEEN, PROMO_ROOK, PROMO_BISHOP, PROMO_KNIGHT)
+        ]
+        cap_promos = [
+            encode_move(48, 57, p, int(SPECIAL_MOVE_FLAG_PROMOTION))
+            for p in (PROMO_QUEEN, PROMO_ROOK, PROMO_BISHOP, PROMO_KNIGHT)
+        ]
+        moves = np.array(quiet_promos + cap_promos, dtype=np.uint16)
+        scores = np.zeros(len(moves), dtype=np.int32)
+        score_captures_lazy(
+            p_bbs, o_bbs, g_state, moves, scores, 0, len(moves), ctx, np.uint64(0), np.uint64(0), 0
+        )
+        s_q, s_r, s_b, s_n, sc_q, sc_r, sc_b, sc_n = (int(x) for x in scores)
+        self.assertGreater(s_q, s_r)
+        self.assertGreater(s_r, s_b)
+        self.assertGreater(s_b, s_n)
+        self.assertGreater(s_n, 0)
+        self.assertGreater(sc_q, sc_r)
+        self.assertGreater(sc_r, sc_b)
+        self.assertGreater(sc_b, sc_n)
+        self.assertGreater(sc_q, s_q)
+
+    def test_score_captures_with_tt_lazy_puts_quiet_promotion_above_losing_capture_and_quiet_evasion(self):
+        _, ctx = _make_context(tt_mb=1)
+        # White in check (black rook d8 vs white king d1), pawn a7 can promote quiet to a8=Q/R/B/N,
+        # Queen on e4 can capture defended pawn on e6 (QxP losing capture), King d1 can evade quiet to c1.
+        p_bbs, o_bbs, g_state = parse_fen("3rk3/P7/4p3/3p4/4Q3/8/8/3K4 w - - 0 1")
+        # a7=48->a8=56, Qe4=28->xe6=44, Kd1=3->c1=2
+        q_promos = [
+            encode_move(48, 56, p, int(SPECIAL_MOVE_FLAG_PROMOTION))
+            for p in (PROMO_QUEEN, PROMO_ROOK, PROMO_BISHOP, PROMO_KNIGHT)
+        ]
+        qxp = encode_move(28, 44, 0, int(SPECIAL_MOVE_FLAG_NORMAL))
+        quiet_ev = encode_move(3, 2, 0, int(SPECIAL_MOVE_FLAG_NORMAL))
+        moves = np.array(q_promos + [qxp, quiet_ev], dtype=np.uint16)
+        scores = np.zeros(len(moves), dtype=np.int32)
+        score_captures_with_tt_lazy(
+            p_bbs, o_bbs, g_state, moves, scores, len(moves), NO_MOVE, np.uint64(0), np.uint64(0), ctx, 1
+        )
+        s_q, s_r, s_b, s_n, s_qxp, s_quiet = (int(x) for x in scores)
+        self.assertGreater(s_q, int(QS_EVASION_CAPTURE_BUCKET))
+        self.assertGreater(s_q, s_qxp)
+        self.assertGreater(s_qxp, s_quiet)
+        self.assertGreater(s_q, s_r)
+        self.assertGreater(s_r, s_b)
+        self.assertGreater(s_b, s_n)
+
+
+class TestBug9PVFailHighFullWindowVerification(unittest.TestCase):
+    def test_pv_research_contract_has_no_evaluation_lt_beta_guard(self):
+        src = (ROOT / "chess_engine" / "classical" / "search.py").read_text(encoding="utf-8")
+        start = src.index("if (not search_context.stop_flag[0]) and evaluation > alpha:")
+        end = src.index("if (not search_context.stop_flag[0]) and do_full_pv_search:", start)
+        block = src[start:end]
+
+        self.assertIn("do_full_pv_search = is_pv", block)
+        self.assertIn("do_full_pv_search = is_pv and evaluation > alpha", block)
+        self.assertNotIn("evaluation < beta", block)
+
+    def test_pv_node_verifies_fail_high_above_beta_with_full_window_search(self):
+        tt, ctx = _make_context(tt_mb=1)
+        fen = "4k3/4p3/8/8/8/8/4P3/4K3 w - - 0 1"
+
+        for depth in (3, 5):
+            clear_transposition_table(tt)
+            reset_search_context(ctx)
+            p_bbs, o_bbs, g_state = parse_fen(fen)
+
+            legal_moves = generate_legal_moves(p_bbs, o_bbs, g_state)
+            self.assertGreater(len(legal_moves), 2)
+            m1 = np.uint16(legal_moves[0])
+
+            root_tt_key = np.uint64(get_tt_key(g_state[4], int(g_state[3])))
+            store_tt(tt, root_tt_key, 1, -200, 32767, TT_FLAG_ALPHA, m1, 0, False)
+
+            for move in legal_moves[1:]:
+                u_info = make_move(p_bbs, o_bbs, g_state, np.uint16(move))
+                child_tt_key = np.uint64(get_tt_key(g_state[4], int(g_state[3])))
+                store_tt(tt, child_tt_key, 10, -5000, 32767, TT_FLAG_ALPHA, NO_MOVE, 0, False)
+                unmake_move(p_bbs, o_bbs, g_state, np.uint16(move), u_info)
+
+            score, _, _, _, _ = _search(
+                p_bbs,
+                o_bbs,
+                g_state,
+                np.int32(depth),
+                np.int32(-200),
+                np.int32(50),
+                ctx,
+                np.int32(0),
+                np.uint16(NO_MOVE),
+                True,
+                False,
+            )
+            self.assertNotEqual(int(score), 5000)
+            self.assertLess(abs(int(score)), 500)
 
 
 if __name__ == "__main__":
