@@ -23,6 +23,7 @@
 | **Wave 1B-7** | 2026-11-25 | Bug #11：Lazy SMP 根節點首著所有權與根層 Fail-Low `(score, move)` 一致性 | 20 FENs Depth-15 `10,543,761 → 11,034,468`（`+4.65%`）；`4/20` 變著、`11/20` 變分 | **90 / 90** 測試全過；**Colab 2T `500 ms/move` 526 局 `87W 321D 118L`（`47.05%`，`-20.50 ± 18.52 Elo`，LOS `1.4%`，`SPRT[0, +10] -2.96` H0 Rejected）；已回退至 Wave 1B-4** | ❌ **已回退 (REVERTED)** |
 | **Wave 1B-8** | 2026-11-26 | Bug #12：QSearch 重複局面偵測與 `move_stack`/`piece_stack` 追蹤 | 20 FENs Depth-15 `10,380,617 → 9,215,297`（**`-11.23%`**）；`5/20` 變著、`11/20` 變分 | **87 / 87** 測試全過（`12.775s`）；**Colab `400k nodes` 3,198 局 `564W 2121D 513L`（`50.80%`，`+5.54 ± 6.55 Elo`，LOS `95.1%`，`SPRT[-3, +3] LLR=+2.98` H1 Accepted）；已同步基準** | ✅ **SPRT H1 通過 & 已同步基準** |
 | **Wave 1B-9** | 2026-11-26 | Bug #13 + #22：條件式過路兵雜湊（Polyglot/SF 對齊）與 `make_null_move` 保留半步鐘 | 20 FENs Depth-15 `9,215,297 → 10,383,390`（`+12.68%`）；2 輪交替 TT 命中率 `5.47% → 6.21%`（`+13.5%`） | **93 / 93** `unittest` + **10 / 10** `test_zobrist` 全過；**Colab `400k nodes` 572 局 `106W 359D 107L`（`49.91%`，`-0.61 ± 15.79 Elo`，LOS `47.0%`，`SPRT[-10, 0] +0.51`）；使用者正式接納並同步基準** | ✅ **正式接納 & 已同步基準** |
+| **Wave 1C** | 2026-11-26 | P2 安全／契約／SMP 清理包（Bug `#20, #21, #24, #26, #27, #28, #31`） | **0 差異**（**30 / 30** FENs Depth-15 `16,023,923` nodes / 著法 / 評分 100% 恆等） | **162 / 162** 全批次測試過（含新 [`test_wave1c_fixes.py`](../../tests/test_wave1c_fixes.py) 14/14）；Numba 各 `1` 過載 / `0` `.numba.unresolved$`；Weighted NPS `538,553 → 576,379` | ✅ **零樹變動驗證完成** |
 
 ---
 
@@ -617,3 +618,28 @@
   * **Elo 與 LOS**：Pentanomial **`-0.61 ± 15.79 Elo`**（95% CI **`[-16.40, +15.18]`**，`z = -0.075`，**`LOS = 47.0%`**）。
   * **多區間 SPRT（`tools.match_core.SPRTTest`）**：`[-10, 0] +0.51` | `[-5, 0] +0.06` | `[-3, 0] -0.01` | `[-3, +3] -0.17` | `[0, +5] -0.34` | `[0, +10] -1.08`。
 * **處置決議**：依用戶指示正式接納 Wave 1B-9（修正 Polyglot 開局庫相容性與 FIDE 重複／NMP 半步鐘語意，實戰強度持平無顯著差異），已執行 `python tools/sync_classical_old.py --sync` 將 [`classical_old/`](../classical_old/) 同步至 **Wave 1B-9** 作為後續基準。
+
+---
+
+## Wave 1C：P2 安全、契約與 SMP 衛生清理包（2026-11-26）— ✅ 30 盤面 Depth 15 零變動驗證完成
+
+> **對照基準**：Commit `5fa3945`（[`classical_old/`](../classical_old/) 已同步至 **Wave 1B-9**；本波不異動 `classical_old/`，嚴格驗證單核搜尋樹零變動）。
+
+### 1. 修改明細（Bug `#20, #21, #24, #26, #27, #28, #31`）
+
+1. **Bug #20（[`move_generator.py`](move_generator.py) `get_blockers_for_king`）**：對齊 SF19 `Position::update_slider_blockers`，排除敵方 snipers 後計算阻擋子並回填 `pinners_bb`。
+2. **Bug #21（`move_generator.py` `is_move_pseudo_legal`）**：拒絕非升變步夾帶非零 `promotion_piece`；EP 嚴格驗證 `ep_sq < 64`、目標格為空且存在敵方目標兵。
+3. **Bug #24（[`search.py`](search.py) `select_best_thread`）**：修復 `(-MATE_IN_MAX_PLY, -VALUE_KNOWN_WIN]` 投票死區，允許非將死落敗特化殘局正常參與投票。
+4. **Bug #26（`search.py` Step 14b）**：將 `DIAG_HP_MARGIN_SUM` 與距離分桶限制於 `hp_margin > 0`，消除 `uint64` 下溢。
+5. **Bug #27（`search.py`）**：移除未用匯入 `TUNE_LMR_TTMOVE_RED`（維持 Slot 19 ABI 與 `FROZEN_RUNTIME_PARAMS` 凍結）。
+6. **Bug #28（`search.py` + [`engine_types.py`](engine_types.py)）**：將 `_SMP_HELPER_CONTEXT_CACHE` 改為容量上限 `4` 之 `OrderedDict` LRU 並掛接 `reset_search_context` 同步清空（新增 `clear_smp_helper_cache()`）；多執行緒 `nodes_limit > 0` 時以共享監視執行緒與 Helper `nodes_searched_array[1]` 上限同步中止，杜絕 2T+ 固定節點失控。
+7. **Bug #31（多檔邊界守衛）**：`unmake_info_signature` / `make_move` 半步鐘欄位升級為 `uint16`；[`evaluation.py`](evaluation.py) 非特化 HCE（含 lazy / early exit / 完整返回）統一夾限於 `±(VALUE_KNOWN_WIN - 1)` 並同步重新生成 [`tuner/tunable_eval.py`](../../tuner/tunable_eval.py)；`compute_full_corrected_static_eval` 遇 `PINNED_UNCOMPUTED_SENTINEL` 自動回填 `get_pinned_pieces`；QSearch 平滑補上 `abs(beta) < MATE_IN_MAX_PLY`；`enable_see_pruning` 收斂至實際 3 處 SEE 剪枝點而不誤鎖 LMP/FP；`format_score_for_uci` 改採 `>=`；[`debug_utils.py`](debug_utils.py) 消除 `uint64` 一元負號警告。
+
+### 2. 驗證與 30 盤面 Depth-15 零變動閘門
+
+* **單元與契約測試**（`test_wave1b_fixes`, `test_wave1a_fixes`, `test_tunable_eval_parity`, `test_search_core_contracts`, `test_lazy_smp`, `test_history`, `test_endgame_conformance`, `test_see` 全清重編 `148 / 148` ＋新增 [`tests/test_wave1c_fixes.py`](../../tests/test_wave1c_fixes.py) `14 / 14`）：**162 / 162 項全過**。
+* **Numba 快取與符號檢查**：`warm_import = 7.95s`、`warmup_search_jit = 1.61s`；`_search` / `quiescence_search` / `_lazy_smp_helper_loop_jit` 各維持 **`1`** 過載、`unresolved: []`。
+* **30 盤面 Depth-15 單核零樹變動對照**（`classical_old` Wave 1B-9 vs `classical` Wave 1C，20 標準 FENs ＋ 8 抽樣 `openings.epd` ＋ 2 複雜中殘局 FENs，64 MB TT）：
+  * **變動數**：**`mismatches = 0 / 30`**（總節點數 `16,023,923 → 16,023,923`、`nodes_searched`、`quiescence_nodes`、`best_eval`、`best_move` 逐盤面 100% 恆等）。
+  * **搜尋耗時與吞吐**：`29.75s → 27.80s`，Weighted NPS `538,553 → 576,379`。
+* **結論**：已達成零搜尋樹變動與全測試通過雙重閘門，[`classical_old/`](../classical_old/) 續留於 Wave 1B-9 不動，直接進入 **Wave 3-1（`S-1`）**。

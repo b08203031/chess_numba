@@ -1,4 +1,5 @@
 # chess_engine/classical/search.py
+from collections import OrderedDict
 import time
 import numba
 import numpy as np
@@ -153,7 +154,7 @@ from chess_engine.classical.constants import (
     TUNE_SEE_CAP_MARGIN, TUNE_SEE_QUIET_MARGIN, TUNE_LMR_BASE_OFFSET, TUNE_LMR_HIST_SCALE,
     TUNE_DELTA_MARGIN, TUNE_PROBCUT_MARGIN, TUNE_BAD_CAP_BONUS, TUNE_GOOD_CAP_RELIEF,
     TUNE_LMP_SCALE, TUNE_KILLER_RELIEF, TUNE_QS_SEE,
-    TUNE_LMR_CUTNODE, TUNE_LMR_NO_TTMOVE, TUNE_LMR_TTCAP, TUNE_LMR_MC_FACTOR, TUNE_LMR_TTMOVE_RED,
+    TUNE_LMR_CUTNODE, TUNE_LMR_NO_TTMOVE, TUNE_LMR_TTCAP, TUNE_LMR_MC_FACTOR,
     TUNE_SINGULAR_MARGIN_BASE, TUNE_SINGULAR_TTPV_BONUS,
     TUNE_PROBCUT_STYLE,
     TUNE_LMR_TABLE_SCALE, TUNE_LMR_NOT_IMP,
@@ -324,6 +325,9 @@ full_static_eval_return_type = numba.types.Tuple((numba.int32, numba.int32, numb
 @numba.njit(cache=True, nogil=True, boundscheck=False, fastmath=True)
 def compute_full_corrected_static_eval(piece_bbs, occupancy_bbs, game_state, search_context, ply):
     raw_eval, pinned_white, pinned_black = _evaluate_position_jit(piece_bbs, occupancy_bbs, game_state, False, search_context)
+    if pinned_white == PINNED_UNCOMPUTED_SENTINEL:
+        pinned_white = get_pinned_pieces(piece_bbs, occupancy_bbs, WHITE)
+        pinned_black = get_pinned_pieces(piece_bbs, occupancy_bbs, BLACK)
     corrected_eval = apply_correction_history_score(game_state, search_context, raw_eval, ply)
     search_context.static_eval_stack[ply] = corrected_eval
 
@@ -629,7 +633,7 @@ def quiescence_search(piece_bbs, occupancy_bbs, game_state, alpha, beta, ply, se
             _diag_add(search_context, DIAG_Q_STANDPAT_CUT)
             # B1: QSearch Stand-pat smoothing
             val = stand_pat
-            if abs(val) < MATE_IN_MAX_PLY:
+            if abs(val) < MATE_IN_MAX_PLY and abs(beta) < MATE_IN_MAX_PLY:
                 val = np.int32(trunc_div(QS_STANDPAT_SMOOTH_A * val + QS_STANDPAT_SMOOTH_B * beta, QS_SMOOTH_DIV))
             
             if qs_tt_flag == TT_FLAG_NONE:
@@ -1031,7 +1035,7 @@ def quiescence_search(piece_bbs, occupancy_bbs, game_state, alpha, beta, ply, se
         return np.int32(-MATE_SCORE + ply), q_nodes
 
     # C1: QSearch Move Loop fail-high smoothing
-    if not is_currently_in_check and best_eval > beta and abs(best_eval) < MATE_IN_MAX_PLY:
+    if not is_currently_in_check and best_eval > beta and abs(best_eval) < MATE_IN_MAX_PLY and abs(beta) < MATE_IN_MAX_PLY:
         best_eval = np.int32(trunc_div(QS_FAILHIGH_SMOOTH_A * best_eval + QS_FAILHIGH_SMOOTH_B * beta, QS_SMOOTH_DIV))
 
     tt_score = np.int32(best_eval)
@@ -2264,7 +2268,7 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                         _diag_add(search_context, DIAG_MAIN_QUIET_PRE_KING_ILLEGAL)
 
         # --- NEW: Shallow Depth Pruning (Stockfish Step 14) ---
-        if (ply > 0 and move != tt_move and search_context.enable_see_pruning and not is_loss(max_eval)
+        if (ply > 0 and move != tt_move and not is_loss(max_eval)
                 and depth <= PRUNING_SHALLOW_DEPTH and not is_currently_in_check and not is_pv):
             side_to_move = original_side
 
@@ -2346,19 +2350,20 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                                 continue
 
                 # --- Capture SEE Pruning ---
-                threshold = search_context.tune[TUNE_SEE_CAP_MARGIN] * depth
-                if ENABLE_CAPTURE_FUTILITY and cap_piece >= 0 and cap_victim >= 0:
-                    threshold = threshold - cap_hist * search_context.tune[TUNE_CAP_SEE_HIST_NUM] // CAP_SEE_CAPTHIST_DEN
-                _diag_add(search_context, DIAG_MAIN_CAP_SEE_TRY)
-                cap_victim_see = -2 if flag == SPECIAL_MOVE_FLAG_EN_PASSANT else cap_victim
-                if not _see_ge_jit(
-                    piece_bbs, occupancy_bbs, int(side_to_move), int(from_sq), int(to_sq),
-                    int(_i32(threshold)), pinned_white, pinned_black,
-                    int(_i32(cap_piece)), int(_i32(cap_victim_see)), int(_i32(get_promotion_piece(move) + 1)),
-                ):
-                    pruned_moves += 1
-                    _diag_add(search_context, DIAG_SEE_CAP_SKIP)
-                    continue
+                if search_context.enable_see_pruning:
+                    threshold = search_context.tune[TUNE_SEE_CAP_MARGIN] * depth
+                    if ENABLE_CAPTURE_FUTILITY and cap_piece >= 0 and cap_victim >= 0:
+                        threshold = threshold - cap_hist * search_context.tune[TUNE_CAP_SEE_HIST_NUM] // CAP_SEE_CAPTHIST_DEN
+                    _diag_add(search_context, DIAG_MAIN_CAP_SEE_TRY)
+                    cap_victim_see = -2 if flag == SPECIAL_MOVE_FLAG_EN_PASSANT else cap_victim
+                    if not _see_ge_jit(
+                        piece_bbs, occupancy_bbs, int(side_to_move), int(from_sq), int(to_sq),
+                        int(_i32(threshold)), pinned_white, pinned_black,
+                        int(_i32(cap_piece)), int(_i32(cap_victim_see)), int(_i32(get_promotion_piece(move) + 1)),
+                    ):
+                        pruned_moves += 1
+                        _diag_add(search_context, DIAG_SEE_CAP_SKIP)
+                        continue
             # Quiet SEE skip: also respect followPV (do not prune last-iter PV path)
             elif is_pseudo_quiet and not low_material_pruning_guard and not follow_pv:
                 see_piece = int(find_piece_type_on_square_side(
@@ -2382,15 +2387,16 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
 
                 can_prune_quiet = not pre_move_gives_check
                 if pre_move_gives_check:
-                    threshold = search_context.tune[TUNE_SEE_CAP_MARGIN] * depth
-                    _diag_add(search_context, DIAG_MAIN_CHECK_SEE_ROUTE)
-                    if flag != SPECIAL_MOVE_FLAG_CASTLING and not _see_ge_jit(
-                        piece_bbs, occupancy_bbs, int(side_to_move), int(from_sq), int(to_sq),
-                        int(_i32(threshold)), pinned_white, pinned_black,
-                        int(_i32(see_piece)), int(_i32(-2)), int(_i32(QUEEN)),
-                    ):
-                        pruned_moves += 1
-                        continue
+                    if search_context.enable_see_pruning:
+                        threshold = search_context.tune[TUNE_SEE_CAP_MARGIN] * depth
+                        _diag_add(search_context, DIAG_MAIN_CHECK_SEE_ROUTE)
+                        if flag != SPECIAL_MOVE_FLAG_CASTLING and not _see_ge_jit(
+                            piece_bbs, occupancy_bbs, int(side_to_move), int(from_sq), int(to_sq),
+                            int(_i32(threshold)), pinned_white, pinned_black,
+                            int(_i32(see_piece)), int(_i32(-2)), int(_i32(QUEEN)),
+                        ):
+                            pruned_moves += 1
+                            continue
                 else:
                     quiet_move_counter += 1
                     quiet_counted = True
@@ -2495,13 +2501,14 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                                 _diag_add(search_context, DIAG_HP_MAIN_GATE_NEAR_ZERO)
 
                             hp_margin = hp_threshold - history_score
-                            if hp_margin <= 1024:
-                                _diag_add(search_context, DIAG_HP_MARGIN_NEAR)
-                            elif hp_margin <= 4096:
-                                _diag_add(search_context, DIAG_HP_MARGIN_MID)
-                            else:
-                                _diag_add(search_context, DIAG_HP_MARGIN_FAR)
-                            _diag_add(search_context, DIAG_HP_MARGIN_SUM, hp_margin)
+                            if hp_margin > 0:
+                                if hp_margin <= 1024:
+                                    _diag_add(search_context, DIAG_HP_MARGIN_NEAR)
+                                elif hp_margin <= 4096:
+                                    _diag_add(search_context, DIAG_HP_MARGIN_MID)
+                                else:
+                                    _diag_add(search_context, DIAG_HP_MARGIN_FAR)
+                                _diag_add(search_context, DIAG_HP_MARGIN_SUM, hp_margin)
                             _diag_add(search_context, DIAG_HP_DEPTH_SUM, depth)
                             _diag_add(
                                 search_context,
@@ -2549,27 +2556,28 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                                 continue
 
                     # --- Step 14d: Quiet SEE Pruning ---
-                    see_lmr_d = (
-                        fp_lmr_d
-                        if fp_lmr_d >= 0
-                        else compute_quiet_pruning_lmr_depth(
-                            depth, quiet_move_counter, improving, search_context, ply,
-                            from_sq, to_sq, see_piece,
+                    if search_context.enable_see_pruning:
+                        see_lmr_d = (
+                            fp_lmr_d
+                            if fp_lmr_d >= 0
+                            else compute_quiet_pruning_lmr_depth(
+                                depth, quiet_move_counter, improving, search_context, ply,
+                                from_sq, to_sq, see_piece,
+                            )
                         )
-                    )
-                    threshold = (
-                        search_context.tune[TUNE_SEE_QUIET_MARGIN]
-                        * see_lmr_d * see_lmr_d
-                    )
-                    _diag_add(search_context, DIAG_MAIN_QUIET_SEE_TRY)
-                    if flag != SPECIAL_MOVE_FLAG_CASTLING and not _see_ge_jit(
-                        piece_bbs, occupancy_bbs, int(side_to_move), int(from_sq), int(to_sq),
-                        int(_i32(threshold)), pinned_white, pinned_black,
-                        int(_i32(see_piece)), int(_i32(-2)), int(_i32(QUEEN)),
-                    ):
-                        pruned_moves += 1
-                        _diag_add(search_context, DIAG_SEE_QUIET_SKIP)
-                        continue
+                        threshold = (
+                            search_context.tune[TUNE_SEE_QUIET_MARGIN]
+                            * see_lmr_d * see_lmr_d
+                        )
+                        _diag_add(search_context, DIAG_MAIN_QUIET_SEE_TRY)
+                        if flag != SPECIAL_MOVE_FLAG_CASTLING and not _see_ge_jit(
+                            piece_bbs, occupancy_bbs, int(side_to_move), int(from_sq), int(to_sq),
+                            int(_i32(threshold)), pinned_white, pinned_black,
+                            int(_i32(see_piece)), int(_i32(-2)), int(_i32(QUEEN)),
+                        ):
+                            pruned_moves += 1
+                            _diag_add(search_context, DIAG_SEE_QUIET_SKIP)
+                            continue
                 quiet_see_passed_s = True
                 _diag_add(search_context, DIAG_MAIN_QUIET_SEE_PASS)
                   
@@ -4605,7 +4613,31 @@ def _lazy_smp_helper_loop_jit(
     )
 
 
-_SMP_HELPER_CONTEXT_CACHE = {}
+_SMP_HELPER_CONTEXT_CACHE = OrderedDict()
+_SMP_HELPER_CACHE_MAX_OWNERS = 4
+
+
+def clear_smp_helper_cache():
+    """Clear cached Lazy SMP helper contexts."""
+    _SMP_HELPER_CONTEXT_CACHE.clear()
+
+
+def _reset_cached_helper_contexts(search_context):
+    """Reset any cached helper contexts owned by `search_context`."""
+    ctx_id = id(search_context)
+    entry = _SMP_HELPER_CONTEXT_CACHE.get(ctx_id)
+    if entry is None:
+        return
+    tt_ptr, tt_len, stop_ptr, pool = entry
+    if (
+        tt_ptr != search_context.transposition_table.ctypes.data
+        or tt_len != len(search_context.transposition_table)
+        or stop_ptr != search_context.stop_flag.ctypes.data
+    ):
+        return
+    from chess_engine.classical.engine_types import reset_search_context
+    for hc in pool:
+        reset_search_context(hc)
 
 
 def _get_or_create_helper_contexts(search_context, needed_count, provided_helpers=None):
@@ -4620,10 +4652,21 @@ def _get_or_create_helper_contexts(search_context, needed_count, provided_helper
         pool = provided_helpers
     else:
         ctx_id = id(search_context)
-        pool = _SMP_HELPER_CONTEXT_CACHE.get(ctx_id)
-        if pool is None:
+        entry = _SMP_HELPER_CONTEXT_CACHE.get(ctx_id)
+        if (
+            entry is not None
+            and entry[0] == main_tt_ptr
+            and entry[1] == main_tt_len
+            and entry[2] == main_stop_ptr
+        ):
+            pool = entry[3]
+            _SMP_HELPER_CONTEXT_CACHE.move_to_end(ctx_id)
+        else:
             pool = []
-            _SMP_HELPER_CONTEXT_CACHE[ctx_id] = pool
+            _SMP_HELPER_CONTEXT_CACHE[ctx_id] = (main_tt_ptr, main_tt_len, main_stop_ptr, pool)
+            _SMP_HELPER_CONTEXT_CACHE.move_to_end(ctx_id)
+            while len(_SMP_HELPER_CONTEXT_CACHE) > _SMP_HELPER_CACHE_MAX_OWNERS:
+                _SMP_HELPER_CONTEXT_CACHE.popitem(last=False)
 
     for idx in range(min(len(pool), needed_count)):
         hc = pool[idx]
@@ -4887,7 +4930,9 @@ def select_best_thread(thread_results):
         else:
             if new_decisive:
                 best_thread = th
-            elif not th.is_loss():
+            elif best_thread.is_loss() and not th.is_loss():
+                best_thread = th
+            elif (not th.is_loss()) or best_thread.is_loss():
                 best_vote = votes[best_thread.move]
                 new_vote = votes[th.move]
                 if (
@@ -4993,21 +5038,6 @@ def iterative_deepening_search(
     # before depth 1 and return NO_MOVE (reported by tournament as failure).
     nodes_searched_array[0] = np.uint64(0)
     nodes_searched_array[1] = np.uint64(0)
-    if search_context.end_time > 0.0:
-        def timer_worker():
-            end_time = search_context.end_time
-            
-            while True:
-                if search_context.stop_flag[0]:
-                    return
-                # Check time limit
-                if time.time() >= end_time:
-                    search_context.stop_flag[0] = True
-                    return
-                time.sleep(0.002) # Polling interval of 2ms for high responsiveness
-        
-        timer_thread = threading.Thread(target=timer_worker, daemon=True)
-        timer_thread.start()
 
     # Clear Counter Moves at start of search? Stockfish doesn't seem to reset them per search, 
     # but usually they are part of thread data. We can keep them or clear them.
@@ -5031,7 +5061,9 @@ def iterative_deepening_search(
         gh_arr = search_context.game_history.copy()
         gh_cnt = np.int32(search_context.game_history_count)
         tt_gen_u8 = np.uint8(tt_generation)
+        helper_node_cap = np.uint64(max(1, int(nodes_limit))) if nodes_limit > 0 else np.uint64(0)
         for idx, hc in enumerate(active_helpers):
+            hc.nodes_searched_array[1] = helper_node_cap
             p_copy = piece_bbs.copy()
             o_copy = occupancy_bbs.copy()
             g_copy = game_state.copy()
@@ -5053,6 +5085,31 @@ def iterative_deepening_search(
             t = threading.Thread(target=_helper_worker, daemon=True)
             helper_threads.append(t)
             t.start()
+
+    # [total_completed_nodes, cand_valid, last_completed_depth]
+    monitor_state = [0, False, 0]
+    if search_context.end_time > 0.0 or (nodes_limit > 0 and active_helpers):
+        def timer_worker():
+            end_time = search_context.end_time
+            check_nodes = nodes_limit > 0 and len(active_helpers) > 0
+
+            while True:
+                if search_context.stop_flag[0]:
+                    return
+                if end_time > 0.0 and time.time() >= end_time:
+                    search_context.stop_flag[0] = True
+                    return
+                if check_nodes and (monitor_state[1] or monitor_state[2] > 0):
+                    combined = monitor_state[0] + int(nodes_searched_array[0])
+                    for hc in active_helpers:
+                        combined += int(hc.nodes_searched_array[0])
+                    if combined >= nodes_limit:
+                        search_context.stop_flag[0] = True
+                        return
+                time.sleep(0.002) # Polling interval of 2ms for high responsiveness
+
+        timer_thread = threading.Thread(target=timer_worker, daemon=True)
+        timer_thread.start()
 
     for current_depth in range(1, max_depth + 1):
         if search_context.stop_flag[0]:
@@ -5129,6 +5186,7 @@ def iterative_deepening_search(
             iter_stopped = bool(search_context.stop_flag[0])
             if best_move_iter != NO_MOVE:
                 cand_valid = True
+                monitor_state[1] = True
                 cand_move = int(best_move_iter)
                 cand_score = score
                 cand_depth = current_depth
@@ -5219,6 +5277,8 @@ def iterative_deepening_search(
                 break
         
         total_nodes += search_context.nodes_searched
+        nodes_searched_array[0] = np.uint64(0)
+        monitor_state[0] = int(total_nodes)
         helper_nodes_now = (
             sum(int(hc.nodes_searched_array[0]) for hc in active_helpers)
             if active_helpers
@@ -5279,6 +5339,7 @@ def iterative_deepening_search(
 
         # --- This block only runs if the search for the current depth was fully completed ---
         last_completed_depth = current_depth
+        monitor_state[2] = int(last_completed_depth)
         last_score = cand_score if cand_valid else score
         best_move_from_last_depth = np.uint16(cand_move)
 
@@ -5323,6 +5384,8 @@ def iterative_deepening_search(
         timer_thread.join()
     for t in helper_threads:
         t.join()
+    for hc in active_helpers:
+        hc.nodes_searched_array[1] = np.uint64(0)
 
     for h_res in helper_results:
         if h_res is not None:
@@ -5438,7 +5501,7 @@ def iterative_deepening_search(
     return (final_best_move, last_score, total_search_nodes, total_q_nodes, total_tt_hits, last_completed_depth)
 
 def format_score_for_uci(score):
-    if abs(score) > MATE_IN_MAX_PLY:
+    if abs(score) >= MATE_IN_MAX_PLY:
         if score > 0:
             moves_to_mate = (MATE_SCORE - score + 1) // 2
             return f"mate {moves_to_mate}"

@@ -281,7 +281,7 @@ def make_move(piece_bbs: np.ndarray, occupancy_bbs: np.ndarray, game_state: np.n
         captured_piece_type,
         np.uint8(current_castling_rights),
         np.uint8(current_ep_square),
-        np.uint8(current_halfmove_clock),
+        np.uint16(current_halfmove_clock),
         original_zobrist_key,
         old_pawn_key,
         old_minor_key,

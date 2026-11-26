@@ -1704,6 +1704,10 @@ def _evaluate_position_jit(piece_bbs, occupancy_bbs, game_state, lazy: bool, sea
         else:
             final_score = _trunc_div(mg_score * phase + eg_score * (MAX_PHASE - phase), MAX_PHASE)
         val = np.int32(final_score) if side_to_move == 0 else np.int32(-final_score)
+        if val >= VALUE_KNOWN_WIN:
+            val = np.int32(VALUE_KNOWN_WIN - 1)
+        elif val <= -VALUE_KNOWN_WIN:
+            val = np.int32(-VALUE_KNOWN_WIN + 1)
         return val, PINNED_UNCOMPUTED_SENTINEL, PINNED_UNCOMPUTED_SENTINEL
 
     # --- 4. Pawn Structure (Cached or Uncached) ---
@@ -1738,6 +1742,10 @@ def _evaluate_position_jit(piece_bbs, occupancy_bbs, game_state, lazy: bool, sea
         else:
             final_score = _trunc_div(mg_score * phase + eg_score * (MAX_PHASE - phase), MAX_PHASE)
         val = np.int32(final_score) if side_to_move == 0 else np.int32(-final_score)
+        if val >= VALUE_KNOWN_WIN:
+            val = np.int32(VALUE_KNOWN_WIN - 1)
+        elif val <= -VALUE_KNOWN_WIN:
+            val = np.int32(-VALUE_KNOWN_WIN + 1)
         return val, PINNED_UNCOMPUTED_SENTINEL, PINNED_UNCOMPUTED_SENTINEL
 
     # --- Compute Attacks, Mobility, Threats (Optimized Single Pass) ---
@@ -1822,10 +1830,12 @@ def _evaluate_position_jit(piece_bbs, occupancy_bbs, game_state, lazy: bool, sea
     tempo = _ew_get(ew, use_ew, _EW_TEMPO, TEMPO_BONUS)
 
     # --- 11. Return side-relative score ---
-    if side_to_move == 0:  # White's turn
-        return np.int32(final_score + tempo), pinned_white, pinned_black
-    else:  # Black's turn
-        return np.int32(-final_score + tempo), pinned_white, pinned_black
+    res_score = final_score + tempo if side_to_move == 0 else -final_score + tempo
+    if res_score >= VALUE_KNOWN_WIN:
+        res_score = VALUE_KNOWN_WIN - 1
+    elif res_score <= -VALUE_KNOWN_WIN:
+        res_score = -VALUE_KNOWN_WIN + 1
+    return np.int32(res_score), pinned_white, pinned_black
 
 
 def evaluate_position(piece_bbs, occupancy_bbs, game_state, lazy: bool = False):

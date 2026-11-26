@@ -22,7 +22,8 @@ def print_board(piece_bbs, name: str = "Board State"):
     board_repr = ['.'] * 64
     for piece_idx, bb in enumerate(piece_bbs):
         while bb > 0:
-            sq = int(np.log2(bb & -bb))
+            bb_int = int(bb)
+            sq = (bb_int & -bb_int).bit_length() - 1
             board_repr[sq] = PIECE_CHARS[piece_idx]
             bb &= bb - np.uint64(1)
 
