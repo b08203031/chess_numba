@@ -91,19 +91,35 @@ def parse_fen(fen_string: str):
                 occ_all_int |= int(bb)
             if side_to_move == WHITE:
                 # Black just double-pushed: ep on rank 6, black pawn on rank 5, origin (rank 7) empty.
+                # Bug #13: also require an adjacent white pawn on rank 5 (Polyglot/SF aligned).
+                ep_file = ep_idx & 7
+                pawn_sq = ep_idx - 8
+                has_capturer = (
+                    (ep_file > 0 and _has_piece(0, pawn_sq - 1))
+                    or (ep_file < 7 and _has_piece(0, pawn_sq + 1))
+                )
                 ok = (
                     ep_idx // 8 == 5
-                    and _has_piece(6, ep_idx - 8)
+                    and _has_piece(6, pawn_sq)
                     and not (occ_all_int >> ep_idx) & 1
                     and not (occ_all_int >> (ep_idx + 8)) & 1
+                    and has_capturer
                 )
             else:
                 # White just double-pushed: ep on rank 3, white pawn on rank 4, origin (rank 2) empty.
+                # Bug #13: also require an adjacent black pawn on rank 4 (Polyglot/SF aligned).
+                ep_file = ep_idx & 7
+                pawn_sq = ep_idx + 8
+                has_capturer = (
+                    (ep_file > 0 and _has_piece(6, pawn_sq - 1))
+                    or (ep_file < 7 and _has_piece(6, pawn_sq + 1))
+                )
                 ok = (
                     ep_idx // 8 == 2
-                    and _has_piece(0, ep_idx + 8)
+                    and _has_piece(0, pawn_sq)
                     and not (occ_all_int >> ep_idx) & 1
                     and not (occ_all_int >> (ep_idx - 8)) & 1
+                    and has_capturer
                 )
             if ok:
                 en_passant_square = np.uint64(ep_idx)
