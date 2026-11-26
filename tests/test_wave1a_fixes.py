@@ -110,8 +110,12 @@ class TestFenSanitation(unittest.TestCase):
         self.assertEqual(int(b[2][2]), 64)
 
     def test_valid_en_passant_kept(self):
-        b = parse_fen("rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq e3 0 1")
-        self.assertEqual(int(b[2][2]), 20)
+        # Bug #13: capturable EP (adjacent black pawn on d4) keeps EP square,
+        # while uncapturable double-push EP without adjacent enemy pawn drops to 64.
+        b_cap = parse_fen("rnbqkbnr/ppp1pppp/8/8/3pP3/8/PPPP1PPP/RNBQKBNR b KQkq e3 0 2")
+        self.assertEqual(int(b_cap[2][2]), 20)
+        b_uncap = parse_fen("rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq e3 0 1")
+        self.assertEqual(int(b_uncap[2][2]), 64)
 
     def test_startpos_unchanged(self):
         b = parse_fen("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1")

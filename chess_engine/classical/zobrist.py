@@ -112,10 +112,24 @@ def compute_initial_hash(piece_bbs: np.ndarray, game_state: np.ndarray) -> np.ui
     # XOR 易位權限鍵值
     zobrist_key ^= CASTLING_RIGHTS_KEYS[castling_rights]
 
-    # XOR 吃過路兵直線鍵值（如果有）
+    # XOR 吃過路兵直線鍵值（Bug #13 / Polyglot 標準：僅當相鄰格確實存在可吃過路兵之己方兵）
     if en_passant_square != 64:
-        ep_file = en_passant_square % 8
-        zobrist_key ^= EN_PASSANT_FILE_KEYS[ep_file]
+        ep_file = en_passant_square & np.uint64(7)
+        ep_rank = en_passant_square >> np.uint64(3)
+        if (side_to_move == WHITE and ep_rank == 5) or (side_to_move == BLACK and ep_rank == 2):
+            pawn_rank_sq = (
+                en_passant_square - np.uint64(8)
+                if side_to_move == WHITE
+                else en_passant_square + np.uint64(8)
+            )
+            our_pawns = piece_bbs[0] if side_to_move == WHITE else piece_bbs[6]
+            adj_mask = np.uint64(0)
+            if ep_file > 0:
+                adj_mask |= np.uint64(1) << (pawn_rank_sq - np.uint64(1))
+            if ep_file < 7:
+                adj_mask |= np.uint64(1) << (pawn_rank_sq + np.uint64(1))
+            if (our_pawns & adj_mask) != np.uint64(0):
+                zobrist_key ^= EN_PASSANT_FILE_KEYS[ep_file]
 
     # 如果是白方走棋，XOR 行棋方鍵值 (依據 Polyglot 標準，白方為特殊方)
     if side_to_move == WHITE:

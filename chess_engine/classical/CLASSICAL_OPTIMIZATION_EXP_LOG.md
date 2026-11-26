@@ -575,3 +575,35 @@
 * **搜尋遙測（`New` 159,935 步 vs `Old` 159,989 步）**：
   * 平均深度 `17.01` vs `17.02`（`p = 0.4047`）、平均節點 `243,324` vs `243,333`（`-0.0%`, `p = 0.9507`）、每步耗時 `907.7 ms` vs `894.7 ms`、平均 NPS `308,323` vs `312,216`（`-1.2%`）；同深度（`d=12..24`）節點比 `0.991–1.004`。
 * **結論**：正式通過 `SPRT[-3, +3]`、`SPRT[-5, 0]` 與 `SPRT[-10, 0]` 驗收，已執行 `python tools/sync_classical_old.py --sync` 將 [`classical_old/`](../classical_old/) 同步至 **Wave 1B-8** 作為後續對照基線。
+
+---
+
+## Wave 1B-9：修復 Bug #13 + #22 — 條件式過路兵雜湊（Polyglot/SF 對齊）與 `make_null_move` 保留半步鐘（2026-11-26）
+
+> **對照基準**：Commit `38d865a`（[`classical_old/`](../classical_old/) 已同步並維持於經 3,198 局驗證之 **Wave 1B-8**，本波驗證 Bug #13 + #22）。
+
+### 1. 修改明細（[`board_operations.py`](board_operations.py)、[`zobrist.py`](zobrist.py)、[`fen_parser.py`](fen_parser.py)）
+
+1. **條件式過路兵方格與雜湊鍵（Bug #13，Polyglot / Stockfish 對齊）**：
+   * [`board_operations.py`](board_operations.py)：新增 `_ADJACENT_SQ_MASK`（`64 × uint64`，`512 B << 1 MB` 快取限制）；在 [`make_move`](board_operations.py#L249-L260) 中僅當雙步推進兵鄰近格確實存在敵方兵時才設定 `new_ep_square` 並 XOR `EN_PASSANT_FILE_KEYS`，否則保持 `64`（解決 `1. e4` / `1. e4 e5` / `1. e4 c5` 漏查 `polyglot.bin` 與雙步起手回撤重複雜湊不一致問題）。
+   * [`zobrist.py`](zobrist.py#L115-L132)：`compute_initial_hash` 僅於過路兵橫排有效且鄰近格存在可吃過路兵之己方兵時才 XOR `EN_PASSANT_FILE_KEYS`。
+   * [`fen_parser.py`](fen_parser.py#L92-L124)：`parse_fen` 同步要求鄰近格確實存在可吃過路兵之兵才保留 `en_passant_square`，否則歸為 `64`。
+2. **`make_null_move` 保留半步鐘（Bug #22，SF19 `Position::do_null_move` 對齊）**：
+   * [`board_operations.py`](board_operations.py#L401-L420)：移除 `make_null_move` 內的 `game_state[3] += 1`，防止空著推高 `halfmove_clock` 觸發 `>= 100` 假和棋與 `get_tt_key` 分桶錯位。
+
+### 2. 驗證與診斷結果
+
+* **單元與回歸測試**：
+  * `unittest`（`tests.test_wave1b_fixes tests.test_wave1a_fixes tests.test_search_core_contracts tests.test_lazy_smp tests.test_history tests.test_sync_classical_old`）：**93 / 93 項全過**（`108.916s`，含冷編譯）。
+    * 於 [`tests/test_wave1a_fixes.py`](../../tests/test_wave1a_fixes.py) 更新 `test_valid_en_passant_kept` 對齊 Bug #13；於 [`tests/test_wave1b_fixes.py`](../../tests/test_wave1b_fixes.py) 新增 `TestBug13And22ConditionalEPAndNullMoveHalfmove`（5 項），驗證 `1. e4`/`1. e4 e5`/`1. e4 c5`/`1. d4 d5` 直接命中 `polyglot.bin`、邊界直行無環繞誤判、`1. e4 e5 2. Nf3 Nf6 3. Ng1 Ng8` 雜湊與 `1. e4 e5` 完全相等、及 `make_null_move` 維持 `halfmove_clock=99` 不變。
+  * `pytest tests/test_zobrist.py -v`：**10 / 10 passed**（`3.20s`）。
+  * Perft + 逐節點 `compute_initial_hash` 一致性檢查：`Startpos d=3: 8,902`、`Kiwipete d=3: 97,862`、`Pos3_EP d=4: 43,238` 全數通過。
+* **Numba 快取與符號檢查**：`warm_import = 6.50s`、`warmup_search_jit = 1.30s`；`_search` / `quiescence_search` / `_lazy_smp_helper_loop_jit` / `make_move` / `make_null_move` / `compute_initial_hash` 各維持 **`1`** 過載、`_ADJACENT_SQ_MASK` 為 `512 B` C-contiguous、`unresolved: []`。
+* **基準差異與衛生**：`python tools/sync_classical_old.py --diff-code` 僅顯示 `board_operations.py`、`zobrist.py`、`fen_parser.py` 上述 Bug #13 + #22 修改；`CRCRLF = 0`。
+* **20 盤面 Depth-15 對照與交替診斷（`classical_old` Wave 1B-8 vs `classical` Wave 1B-9，64 MB TT）**：
+  * **20 盤面 Depth-15**：總節點數 `9,215,297 → 10,383,390`（**`+12.68%`**）、`6 / 20` 變著、`16 / 20` 變分；總耗時 `15.01s → 18.58s`、Weighted NPS `613,960 → 558,929`（受雙步推兵轉置鍵統一與 `make_null_move` TT 分桶修復重塑搜尋樹影響）。
+  * **2 輪交替 Depth-14 覆驗**（`Startpos` / `Kiwipete` / `Rook_EG`，消除單輪時脈抖動）：TT 命中率由 **`5.47%`（`38,373 / 701,718`）提升至 `6.21%`（`51,957 / 836,945`，相對 `+13.5%`）**；兩輪交替均速 `551,506 → 537,915 NPS`（`-2.46%`，屬正常誤差範圍）。
+
+### 3. 狀態
+
+* **⏳ 待實戰驗證**：準備於 Colab 進行 SPRT 對戰驗證（`Wave 1B-9 vs Wave 1B-8`）；[`classical_old/`](../classical_old/) 維持於 Wave 1B-8（Commit `38d865a`）不動。

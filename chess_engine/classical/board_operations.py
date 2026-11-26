@@ -35,6 +35,15 @@ CASTLING_UPDATE_MASK[56] -= BQ_CASTLE
 CASTLING_UPDATE_MASK[60] -= (BK_CASTLE | BQ_CASTLE)
 CASTLING_UPDATE_MASK[63] -= BK_CASTLE
 
+# --- Pre-computed Horizontal Neighbor Masks for Conditional EP (512 B << 1 MB cache limit) ---
+_ADJACENT_SQ_MASK = np.zeros(64, dtype=np.uint64)
+for _sq in range(64):
+    _f = _sq & 7
+    if _f > 0:
+        _ADJACENT_SQ_MASK[_sq] |= np.uint64(1) << np.uint64(_sq - 1)
+    if _f < 7:
+        _ADJACENT_SQ_MASK[_sq] |= np.uint64(1) << np.uint64(_sq + 1)
+
 @numba.jit(numba.int8(piece_bbs_signature, numba.uint8, numba.uint8), nopython=True, cache=True, inline='always')
 def find_piece_type_for_square(piece_bbs: np.ndarray, square: int, color: int) -> int:
     """
@@ -239,10 +248,14 @@ def make_move(piece_bbs: np.ndarray, occupancy_bbs: np.ndarray, game_state: np.n
 
     new_ep_square = np.uint64(64)
     if moving_piece_type == PAWN:
+        # Bug #13 (Polyglot/SF aligned): only record EP square & hash when an
+        # adjacent enemy pawn stands next to the double-pushed pawn.
         if side == WHITE and (to_sq - from_sq) == 16:
-            new_ep_square = np.uint64(from_sq + 8)
+            if (piece_bbs[6] & _ADJACENT_SQ_MASK[to_sq]) != np.uint64(0):
+                new_ep_square = np.uint64(from_sq + 8)
         elif side == BLACK and (from_sq - to_sq) == 16:
-            new_ep_square = np.uint64(from_sq - 8)
+            if (piece_bbs[0] & _ADJACENT_SQ_MASK[to_sq]) != np.uint64(0):
+                new_ep_square = np.uint64(from_sq - 8)
 
     if new_ep_square != current_ep_square:
         if current_ep_square != 64:
@@ -388,7 +401,7 @@ def unmake_move(piece_bbs: np.ndarray, occupancy_bbs: np.ndarray, game_state: np
 def make_null_move(game_state: np.ndarray):
     """
     執行空著（Null Move），直接修改遊戲狀態。
-    空著切換行棋方，清除吃過路兵方格，並增加半步鐘。
+    空著切換行棋方並清除吃過路兵方格，保留半步鐘（Bug #22，對齊 SF19 Position::do_null_move）。
 
     Args:
         game_state (np.ndarray): 遊戲狀態陣列。
@@ -403,5 +416,4 @@ def make_null_move(game_state: np.ndarray):
 
     game_state[0] = 1 - side_to_move
     game_state[2] = 64
-    game_state[3] += 1
     game_state[4] = new_key

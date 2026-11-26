@@ -7,13 +7,14 @@ Currently covers:
 - Bug #8: Lockless TT snapshot/checksum safety in store_tt, penalize_tt, and probe_tt_best_move.
 - Bug #7: Promotion bonus and bucket scoring in score_captures_lazy and score_captures_with_tt_lazy.
 - Bug #12: QSearch repetition detection (_is_repetition_jit), ply_path_stack, and recursive move_stack/piece_stack tracking.
+- Bug #13 & #22: Conditional En Passant square/Zobrist hash (Polyglot/SF aligned) and preserving halfmove_clock in make_null_move.
 """
 import unittest
 from pathlib import Path
 
 import numpy as np
 
-from chess_engine.classical.board_operations import make_move, unmake_move
+from chess_engine.classical.board_operations import make_move, make_null_move, unmake_move
 from chess_engine.classical.constants import (
     CORRECTION_HISTORY_LIMIT,
     CORRECTION_HISTORY_SIZE,
@@ -36,6 +37,7 @@ from chess_engine.classical.move import (
     encode_move,
     move_to_uci,
 )
+from chess_engine.classical.opening_book import OpeningBook
 from chess_engine.classical.search import _i32, iterative_deepening_search, quiescence_search
 from chess_engine.classical.search_heuristics import score_captures_lazy, score_captures_with_tt_lazy
 from chess_engine.classical.transposition_table import (
@@ -50,7 +52,7 @@ from chess_engine.classical.transposition_table import (
     probe_tt_snapshot,
     store_tt,
 )
-from chess_engine.classical.zobrist import get_tt_key
+from chess_engine.classical.zobrist import compute_initial_hash, get_tt_key
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -514,6 +516,84 @@ class TestBug12QSearchRepetitionAndStack(unittest.TestCase):
         self.assertEqual(int(ctx.piece_stack[2]), 9)
         self.assertEqual(int(ctx.ply_path_stack[2]), int(g_state[4]))
         self.assertNotEqual(int(ctx.ply_path_stack[3]), 0)
+
+
+class TestBug13And22ConditionalEPAndNullMoveHalfmove(unittest.TestCase):
+    def test_double_push_without_adjacent_enemy_pawn_leaves_ep64_and_hits_polyglot(self):
+        book = OpeningBook(str(ROOT / "chess_engine" / "polyglot.bin"))
+        self.assertIsNotNone(book.book)
+        for line in (["e2e4"], ["e2e4", "e7e5"], ["e2e4", "c7c5"], ["d2d4", "d7d5"]):
+            p_bbs, o_bbs, g_state = parse_fen(
+                "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
+            )
+            for uci in line:
+                move = next(
+                    m for m in generate_legal_moves(p_bbs, o_bbs, g_state) if move_to_uci(m) == uci
+                )
+                make_move(p_bbs, o_bbs, g_state, move)
+            self.assertEqual(int(g_state[2]), 64)
+            self.assertEqual(g_state[4], compute_initial_hash(p_bbs, g_state))
+            self.assertGreater(len(book.lookup(g_state[4], (p_bbs, o_bbs, g_state))), 0)
+
+    def test_double_push_with_adjacent_enemy_pawn_sets_ep_and_no_file_wrap(self):
+        p_bbs, o_bbs, g_state = parse_fen("4k3/8/8/8/3p4/8/4P3/4K3 w - - 0 1")
+        orig_key = g_state[4]
+        e2e4 = next(
+            m for m in generate_legal_moves(p_bbs, o_bbs, g_state) if move_to_uci(m) == "e2e4"
+        )
+        u1 = make_move(p_bbs, o_bbs, g_state, e2e4)
+        self.assertEqual(int(g_state[2]), 20)
+        self.assertEqual(g_state[4], compute_initial_hash(p_bbs, g_state))
+        d4e3 = next(
+            m for m in generate_legal_moves(p_bbs, o_bbs, g_state) if move_to_uci(m) == "d4e3"
+        )
+        u2 = make_move(p_bbs, o_bbs, g_state, d4e3)
+        self.assertEqual(g_state[4], compute_initial_hash(p_bbs, g_state))
+        unmake_move(p_bbs, o_bbs, g_state, d4e3, u2)
+        unmake_move(p_bbs, o_bbs, g_state, e2e4, u1)
+        self.assertEqual(g_state[4], orig_key)
+
+        for fen, push_uci in (
+            ("4k3/8/8/8/7p/8/P7/4K3 w - - 0 1", "a2a4"),
+            ("4k3/8/8/p7/8/8/7P/4K3 w - - 0 1", "h2h4"),
+        ):
+            p_edge, o_edge, g_edge = parse_fen(fen)
+            m_push = next(
+                m for m in generate_legal_moves(p_edge, o_edge, g_edge) if move_to_uci(m) == push_uci
+            )
+            make_move(p_edge, o_edge, g_edge, m_push)
+            self.assertEqual(int(g_edge[2]), 64)
+            self.assertEqual(g_edge[4], compute_initial_hash(p_edge, g_edge))
+
+    def test_repetition_hash_matches_after_initial_double_push_roundtrip(self):
+        p_bbs, o_bbs, g_state = parse_fen(
+            "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
+        )
+        for uci in ("e2e4", "e7e5"):
+            m = next(x for x in generate_legal_moves(p_bbs, o_bbs, g_state) if move_to_uci(x) == uci)
+            make_move(p_bbs, o_bbs, g_state, m)
+        key_after_e4_e5 = g_state[4]
+
+        for uci in ("g1f3", "g8f6", "f3g1", "f6g8"):
+            m = next(x for x in generate_legal_moves(p_bbs, o_bbs, g_state) if move_to_uci(x) == uci)
+            make_move(p_bbs, o_bbs, g_state, m)
+        self.assertEqual(g_state[4], key_after_e4_e5)
+
+    def test_compute_initial_hash_ignores_uncapturable_ep_square(self):
+        p_bbs, _, g_state = parse_fen("rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq - 0 1")
+        g_copy = g_state.copy()
+        g_copy[2] = np.uint64(20)
+        self.assertEqual(compute_initial_hash(p_bbs, g_copy), g_state[4])
+
+    def test_make_null_move_preserves_halfmove_clock(self):
+        p_bbs, _, g_state = parse_fen("4k3/8/8/3pP3/8/8/8/4K3 w - d6 99 60")
+        self.assertEqual(int(g_state[2]), 43)
+        self.assertEqual(int(g_state[3]), 99)
+        make_null_move(g_state)
+        self.assertEqual(int(g_state[0]), 1)
+        self.assertEqual(int(g_state[2]), 64)
+        self.assertEqual(int(g_state[3]), 99)
+        self.assertEqual(g_state[4], compute_initial_hash(p_bbs, g_state))
 
 
 if __name__ == "__main__":
