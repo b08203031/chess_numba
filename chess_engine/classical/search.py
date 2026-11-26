@@ -268,16 +268,19 @@ def apply_correction_history_score(game_state, search_context, raw_static_eval, 
     global_minor = search_context.minor_correction_history[minor_key & CORRECTION_HISTORY_MASK]
     side = game_state[0]
 
-    # Pawn and Minor are stored in white-absolute perspective.
-    # Non-Pawn is stored in side-exclusive tables (white table for WHITE, black table for BLACK) with side-relative values.
+    global_np_w = search_context.non_pawn_correction_history_white[np_white_key & CORRECTION_HISTORY_MASK]
+    global_np_b = search_context.non_pawn_correction_history_black[np_black_key & CORRECTION_HISTORY_MASK]
+    np_sum = global_np_w + global_np_b
+
+    # Pawn, Minor, and both Non-Pawn tables are stored in white-absolute perspective (S-1).
     if side == WHITE:
         correction_sum = (global_pawn * CORRECTION_HISTORY_PAWN_WEIGHT +
                          global_minor * CORRECTION_HISTORY_MINOR_WEIGHT +
-                         search_context.non_pawn_correction_history_white[np_white_key & CORRECTION_HISTORY_MASK] * CORRECTION_HISTORY_NON_PAWN_WEIGHT)
+                         np_sum * CORRECTION_HISTORY_NON_PAWN_WEIGHT)
     else:
         correction_sum = (-global_pawn * CORRECTION_HISTORY_PAWN_WEIGHT -
-                         global_minor * CORRECTION_HISTORY_MINOR_WEIGHT +
-                         search_context.non_pawn_correction_history_black[np_black_key & CORRECTION_HISTORY_MASK] * CORRECTION_HISTORY_NON_PAWN_WEIGHT)
+                         global_minor * CORRECTION_HISTORY_MINOR_WEIGHT -
+                         np_sum * CORRECTION_HISTORY_NON_PAWN_WEIGHT)
 
     # Continuation Correction Heuristic (cntcv)
     # Fallback to 0 if previous move is invalid (matching old baseline)
@@ -3530,18 +3533,21 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                     )
                     search_context.minor_correction_history[idx_minor] = curr_minor + scaled_minor_bonus - trunc_div(curr_minor * abs(scaled_minor_bonus), CORRECTION_HISTORY_LIMIT)
 
-                    # Update Non-Pawn Correction (side-exclusive, relative to Side to Move)
+                    # Update both White and Black Non-Pawn Correction (white-absolute, SF19 S-1 dual-side)
                     scaled_np_bonus = trunc_div(
-                        bonus * CORRECTION_NP_SCALE_NUM, CORRECTION_NP_SCALE_DEN
+                        white_bonus * CORRECTION_NP_SCALE_NUM, CORRECTION_NP_SCALE_DEN
                     )
-                    if side == WHITE:
-                        idx_np = np_white_key & CORRECTION_HISTORY_MASK
-                        curr_np = search_context.non_pawn_correction_history_white[idx_np]
-                        search_context.non_pawn_correction_history_white[idx_np] = curr_np + scaled_np_bonus - trunc_div(curr_np * abs(scaled_np_bonus), CORRECTION_HISTORY_LIMIT)
-                    else:
-                        idx_np = np_black_key & CORRECTION_HISTORY_MASK
-                        curr_np = search_context.non_pawn_correction_history_black[idx_np]
-                        search_context.non_pawn_correction_history_black[idx_np] = curr_np + scaled_np_bonus - trunc_div(curr_np * abs(scaled_np_bonus), CORRECTION_HISTORY_LIMIT)
+                    idx_np_w = np_white_key & CORRECTION_HISTORY_MASK
+                    curr_np_w = search_context.non_pawn_correction_history_white[idx_np_w]
+                    search_context.non_pawn_correction_history_white[idx_np_w] = (
+                        curr_np_w + scaled_np_bonus - trunc_div(curr_np_w * abs(scaled_np_bonus), CORRECTION_HISTORY_LIMIT)
+                    )
+
+                    idx_np_b = np_black_key & CORRECTION_HISTORY_MASK
+                    curr_np_b = search_context.non_pawn_correction_history_black[idx_np_b]
+                    search_context.non_pawn_correction_history_black[idx_np_b] = (
+                        curr_np_b + scaled_np_bonus - trunc_div(curr_np_b * abs(scaled_np_bonus), CORRECTION_HISTORY_LIMIT)
+                    )
 
                     # Update Continuation Correction History
                     if ply > 0:

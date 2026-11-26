@@ -24,6 +24,7 @@
 | **Wave 1B-8** | 2026-11-26 | Bug #12：QSearch 重複局面偵測與 `move_stack`/`piece_stack` 追蹤 | 20 FENs Depth-15 `10,380,617 → 9,215,297`（**`-11.23%`**）；`5/20` 變著、`11/20` 變分 | **87 / 87** 測試全過（`12.775s`）；**Colab `400k nodes` 3,198 局 `564W 2121D 513L`（`50.80%`，`+5.54 ± 6.55 Elo`，LOS `95.1%`，`SPRT[-3, +3] LLR=+2.98` H1 Accepted）；已同步基準** | ✅ **SPRT H1 通過 & 已同步基準** |
 | **Wave 1B-9** | 2026-11-26 | Bug #13 + #22：條件式過路兵雜湊（Polyglot/SF 對齊）與 `make_null_move` 保留半步鐘 | 20 FENs Depth-15 `9,215,297 → 10,383,390`（`+12.68%`）；2 輪交替 TT 命中率 `5.47% → 6.21%`（`+13.5%`） | **93 / 93** `unittest` + **10 / 10** `test_zobrist` 全過；**Colab `400k nodes` 572 局 `106W 359D 107L`（`49.91%`，`-0.61 ± 15.79 Elo`，LOS `47.0%`，`SPRT[-10, 0] +0.51`）；使用者正式接納並同步基準** | ✅ **正式接納 & 已同步基準** |
 | **Wave 1C** | 2026-11-26 | P2 安全／契約／SMP 清理包（Bug `#20, #21, #24, #26, #27, #28, #31`） | **0 差異**（**30 / 30** FENs Depth-15 `16,023,923` nodes / 著法 / 評分 100% 恆等） | **162 / 162** 全批次測試過（含新 [`test_wave1c_fixes.py`](../../tests/test_wave1c_fixes.py) 14/14）；Numba 各 `1` 過載 / `0` `.numba.unresolved$`；Weighted NPS `538,553 → 576,379` | ✅ **零樹變動驗證完成** |
+| **Wave 3-1 (`S-1`)** | 2026-11-26 | 雙側 Non-Pawn Correction History（白方絕對視角雙向讀寫 `np_white_key` + `np_black_key`） | 20 FENs Depth-15 `10,383,390 → 9,605,255`（**`-7.49%`**）；`7/20` 變著、`18/20` 變分 | **109 / 109** 測試全過（含新 [`test_wave3_improvements.py`](../../tests/test_wave3_improvements.py) 3/3）；`warm_import = 5.67s` / `1` 過載 / `0` `.numba.unresolved$`；Weighted NPS `586,627 → 587,144`；`classical_old/` 留待 Colab SPRT | ⏳ **待 Colab SPRT 驗證** |
 
 ---
 
@@ -643,3 +644,29 @@
   * **變動數**：**`mismatches = 0 / 30`**（總節點數 `16,023,923 → 16,023,923`、`nodes_searched`、`quiescence_nodes`、`best_eval`、`best_move` 逐盤面 100% 恆等）。
   * **搜尋耗時與吞吐**：`29.75s → 27.80s`，Weighted NPS `538,553 → 576,379`。
 * **結論**：已達成零搜尋樹變動與全測試通過雙重閘門，[`classical_old/`](../classical_old/) 續留於 Wave 1B-9 不動，直接進入 **Wave 3-1（`S-1`）**。
+
+---
+
+## Wave 3-1（`S-1`）：雙側 Non-Pawn Correction History（2026-11-26）
+
+> **對照基準**：Commit `5fa3945`（[`classical_old/`](../classical_old/) 維持於 Wave 1B-9；前置為已完成零變動驗證之 Commit `6b78708` Wave 1C）。
+
+### 1. 修改明細（[`search.py`](search.py) 兩處）
+
+1. **`apply_correction_history_score`（[#L260-L283](search.py#L260-L283)）**：
+   * 統一以**白方絕對視角**儲存並同時讀取 `non_pawn_correction_history_white[np_white_key & mask]` 與 `non_pawn_correction_history_black[np_black_key & mask]`，合計 `np_sum = global_np_w + global_np_b`（白方加權、`BLACK` 負號對稱），對齊 SF19 `search.cpp:91-100` `12906 * (wnpcv + bnpcv)`，不改動 `SearchContext` StructRef 結構。
+2. **`_search` Correction History 更新路徑（[#L3536-L3550](search.py#L3536-L3550)）**：
+   * 移除原本只更新行棋方單側非兵表的 `if side == WHITE:` 分支，對任何行棋方同時以 `white_bonus` 經 `trunc_div` 重力更新白側與黑側 Non-Pawn 校正表。
+
+### 2. 驗證與診斷結果
+
+* **單元與回歸測試**（`tests.test_wave3_improvements` `3 / 3` ＋ `tests.test_wave1c_fixes`, `tests.test_wave1b_fixes`, `tests.test_wave1a_fixes`, `tests.test_search_core_contracts`, `tests.test_lazy_smp`, `tests.test_history` `106 / 106`）：**109 / 109 項全過**（於 [`tests/test_wave3_improvements.py`](../../tests/test_wave3_improvements.py) 驗證白黑對稱查表與實搜雙表正負填充）。
+* **Numba 快取與符號檢查**：`warm_import = 5.67s`、`warmup_search_jit = 0.19s`；`_search` / `quiescence_search` / `_lazy_smp_helper_loop_jit` 各維持 **`1`** 過載、`unresolved: []`。
+* **20 盤面 Depth-15 對照（`classical_old` Wave 1B-9 vs `classical` Wave 3-1 `S-1`，64 MB TT）**：
+  * **總節點數**：`10,383,390 → 9,605,255`（**`-7.49%`**）；總搜尋耗時 `17.70s → 16.36s`；Weighted NPS `586,627 → 587,144`。
+  * **著法／評分變化**：`7 / 20` 盤面變著、`18 / 20` 盤面變分；多處開中局顯著收斂（`EPD_1 -65.45%`、`EPD_2001 -47.88%`、`EPD_10001 -45.02%`、`EPD_4001 -41.36%`、`EPD_28001 -31.03%`、`Rook_EG -11.53%`、`Kiwipete -8.00%`）。
+  * **Kiwipete Depth-15 校正表符號平衡**：`non_pawn_correction_history_black` 由舊版反相正偏 `(79, 26, -447..513, mean=+93.90)` 修正為與其他表同向的白方絕對分佈 `(70, 92, -521..624, mean=-22.40)`（對比 `np_white` `mean=-23.43`、`pawn` `mean=-32.27`、`minor` `mean=-27.81`）。
+
+### 3. 狀態
+
+* **⏳ 待實戰驗證**：準備於 Colab 進行單軸固定節點 SPRT 驗證（`Wave 3-1 S-1 (+1C)` vs `Wave 1B-9`；因 Wave 1C 已於 30 盤面 Depth 15 實測 `0 / 30` 零樹差異，本次 SPRT 嚴格對應 `S-1` 單軸影響）。[`classical_old/`](../classical_old/) 維持於 Wave 1B-9（`5fa3945`）不動。
