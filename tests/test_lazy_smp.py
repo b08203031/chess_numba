@@ -741,12 +741,12 @@ class TestLazySMP(unittest.TestCase):
             "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
         )
         legal_moves = [int(m) for m in generate_legal_moves(p_bbs, o_bbs, g_state)]
-        alt_move = next(m for m in legal_moves if move_to_uci(m) == "d2d4")
+        alt_move = next(m for m in legal_moves if move_to_uci(m) == "a2a3")
         alt_reply = next(
             m for m in generate_legal_moves(
-                *parse_fen("rnbqkbnr/pppppppp/8/8/3P4/8/PPP1PPPP/RNBQKBNR b KQkq - 0 1")
+                *parse_fen("rnbqkbnr/pppppppp/8/8/8/P7/1PPPPPPP/RNBQKBNR b KQkq - 0 1")
             )
-            if move_to_uci(m) == "d7d5"
+            if move_to_uci(m) == "a7a6"
         )
 
         def _fake_helper_loop(pb, ob, gs, max_d, h_ctx, tid, gh, gh_cnt, tt_gen):
@@ -808,7 +808,7 @@ class TestLazySMP(unittest.TestCase):
             out_lines = [ln for ln in buf.getvalue().splitlines() if ln.startswith("info depth ")]
             self.assertTrue(out_lines)
             self.assertIn("info depth 5 score cp 550 ", out_lines[-1])
-            self.assertIn(" pv d2d4 d7d5", out_lines[-1])
+            self.assertIn(" pv a2a3 a7a6", out_lines[-1])
 
     def test_multithreaded_timed_and_nodes_smoke(self):
         from chess_engine.classical.search import iterative_deepening_search, warmup_search_jit

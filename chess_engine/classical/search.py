@@ -27,6 +27,8 @@ from chess_engine.classical.move import (
 from chess_engine.classical.constants import (
     BB_SQUARES, MG_MATERIAL_VALUES, INFINITY, MAX_QUIESCENCE_DEPTH,
     ASPIRATION_WINDOW_MIN, ASPIRATION_WINDOW_BASE, ASPIRATION_WINDOW_SCALE_DIV,
+    ASPIRATION_WINDOW_GROW_NUM, ASPIRATION_EMA_SCALE, ASPIRATION_EMA_CHI_NUM,
+    ASPIRATION_EMA_CHI_DEN, ASPIRATION_EMA_MIN_WEIGHT, ASPIRATION_EMA_MAX_WEIGHT,
     MAX_PLY, LMR_MIN_DEPTH, LMR_MIN_QUIET_MOVE_INDEX,
     ENABLE_SEE_IN_QUIESCENCE, MATE_SCORE, MATE_IN_MAX_PLY, VALUE_KNOWN_WIN, NO_MOVE,
     RFP_MAX_DEPTH, RFP_NO_TT_PENALTY, RFP_SCORE_BETA_WEIGHT,
@@ -268,19 +270,16 @@ def apply_correction_history_score(game_state, search_context, raw_static_eval, 
     global_minor = search_context.minor_correction_history[minor_key & CORRECTION_HISTORY_MASK]
     side = game_state[0]
 
-    global_np_w = search_context.non_pawn_correction_history_white[np_white_key & CORRECTION_HISTORY_MASK]
-    global_np_b = search_context.non_pawn_correction_history_black[np_black_key & CORRECTION_HISTORY_MASK]
-    np_sum = global_np_w + global_np_b
-
-    # Pawn, Minor, and both Non-Pawn tables are stored in white-absolute perspective (S-1).
+    # Pawn and Minor are stored in white-absolute perspective.
+    # Non-Pawn is stored in side-exclusive tables (white table for WHITE, black table for BLACK) with side-relative values.
     if side == WHITE:
         correction_sum = (global_pawn * CORRECTION_HISTORY_PAWN_WEIGHT +
                          global_minor * CORRECTION_HISTORY_MINOR_WEIGHT +
-                         np_sum * CORRECTION_HISTORY_NON_PAWN_WEIGHT)
+                         search_context.non_pawn_correction_history_white[np_white_key & CORRECTION_HISTORY_MASK] * CORRECTION_HISTORY_NON_PAWN_WEIGHT)
     else:
         correction_sum = (-global_pawn * CORRECTION_HISTORY_PAWN_WEIGHT -
-                         global_minor * CORRECTION_HISTORY_MINOR_WEIGHT -
-                         np_sum * CORRECTION_HISTORY_NON_PAWN_WEIGHT)
+                         global_minor * CORRECTION_HISTORY_MINOR_WEIGHT +
+                         search_context.non_pawn_correction_history_black[np_black_key & CORRECTION_HISTORY_MASK] * CORRECTION_HISTORY_NON_PAWN_WEIGHT)
 
     # Continuation Correction Heuristic (cntcv)
     # Fallback to 0 if previous move is invalid (matching old baseline)
@@ -3517,7 +3516,7 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                     # Apply outer scaling (SF18: 1114 * bonus / 1024; we use OUTER_SCALE)
                     bonus = trunc_div(bonus * CORRECTION_HISTORY_OUTER_SCALE, 1024)
 
-                    # Absolute White perspective for Pawn, Minor, and Non-Pawn
+                    # Absolute White perspective for Pawn and Minor
                     white_bonus = bonus if side == WHITE else -bonus
 
                     # Update Pawn Correction (white-absolute)
@@ -3533,21 +3532,18 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
                     )
                     search_context.minor_correction_history[idx_minor] = curr_minor + scaled_minor_bonus - trunc_div(curr_minor * abs(scaled_minor_bonus), CORRECTION_HISTORY_LIMIT)
 
-                    # Update both White and Black Non-Pawn Correction (white-absolute, SF19 S-1 dual-side)
+                    # Update Non-Pawn Correction (side-exclusive, relative to Side to Move)
                     scaled_np_bonus = trunc_div(
-                        white_bonus * CORRECTION_NP_SCALE_NUM, CORRECTION_NP_SCALE_DEN
+                        bonus * CORRECTION_NP_SCALE_NUM, CORRECTION_NP_SCALE_DEN
                     )
-                    idx_np_w = np_white_key & CORRECTION_HISTORY_MASK
-                    curr_np_w = search_context.non_pawn_correction_history_white[idx_np_w]
-                    search_context.non_pawn_correction_history_white[idx_np_w] = (
-                        curr_np_w + scaled_np_bonus - trunc_div(curr_np_w * abs(scaled_np_bonus), CORRECTION_HISTORY_LIMIT)
-                    )
-
-                    idx_np_b = np_black_key & CORRECTION_HISTORY_MASK
-                    curr_np_b = search_context.non_pawn_correction_history_black[idx_np_b]
-                    search_context.non_pawn_correction_history_black[idx_np_b] = (
-                        curr_np_b + scaled_np_bonus - trunc_div(curr_np_b * abs(scaled_np_bonus), CORRECTION_HISTORY_LIMIT)
-                    )
+                    if side == WHITE:
+                        idx_np = np_white_key & CORRECTION_HISTORY_MASK
+                        curr_np = search_context.non_pawn_correction_history_white[idx_np]
+                        search_context.non_pawn_correction_history_white[idx_np] = curr_np + scaled_np_bonus - trunc_div(curr_np * abs(scaled_np_bonus), CORRECTION_HISTORY_LIMIT)
+                    else:
+                        idx_np = np_black_key & CORRECTION_HISTORY_MASK
+                        curr_np = search_context.non_pawn_correction_history_black[idx_np]
+                        search_context.non_pawn_correction_history_black[idx_np] = curr_np + scaled_np_bonus - trunc_div(curr_np * abs(scaled_np_bonus), CORRECTION_HISTORY_LIMIT)
 
                     # Update Continuation Correction History
                     if ply > 0:
@@ -4413,6 +4409,9 @@ def _lazy_smp_helper_loop_jit(
     )
 
     last_score = np.int32(0)
+    average_score = np.int32(0)
+    avg_effort = np.int64(0)
+    has_average_score = False
     last_completed_depth = np.int32(0)
     cand_valid = False
     cand_move = np.uint16(NO_MOVE)
@@ -4445,15 +4444,17 @@ def _lazy_smp_helper_loop_jit(
         beta = INFINITY
         delta = ASPIRATION_WINDOW_MIN
         if current_depth > 1 and last_completed_depth > 0:
+            center_score = int(average_score) if has_average_score else int(last_score)
             delta = max(
                 ASPIRATION_WINDOW_MIN,
-                asp_base + abs(int(last_score)) // ASPIRATION_WINDOW_SCALE_DIV,
+                asp_base + abs(center_score) // ASPIRATION_WINDOW_SCALE_DIV,
             )
-            alpha = max(-INFINITY, int(last_score) - delta)
-            beta = min(INFINITY, int(last_score) + delta)
+            alpha = max(-INFINITY, center_score - delta)
+            beta = min(INFINITY, center_score + delta)
 
         failed_high_cnt = 0
         score = np.int32(0)
+        last_step_nodes = np.int64(0)
         stopped_in_iter = False
 
         while True:
@@ -4477,6 +4478,7 @@ def _lazy_smp_helper_loop_jit(
             )
             score = res[0]
             best_move_iter = res[1]
+            last_step_nodes = np.int64(res[2]) + np.int64(res[3])
             total_search_nodes += res[2]
             total_q_nodes += res[3]
             total_tt_hits += res[4]
@@ -4530,12 +4532,12 @@ def _lazy_smp_helper_loop_jit(
                 beta = alpha
                 alpha = max(-INFINITY, int(score) - delta)
                 failed_high_cnt = 0
-                delta += max(1, 44 * delta // 128)
+                delta += max(1, ASPIRATION_WINDOW_GROW_NUM * delta // 128)
             elif score >= beta:
                 alpha = max(beta - delta, alpha)
                 beta = min(INFINITY, int(score) + delta)
                 failed_high_cnt += 1
-                delta += max(1, 44 * delta // 128)
+                delta += max(1, ASPIRATION_WINDOW_GROW_NUM * delta // 128)
             else:
                 break
 
@@ -4589,6 +4591,25 @@ def _lazy_smp_helper_loop_jit(
             break
 
         last_score = cand_score if cand_valid else np.int32(score)
+        _sc64 = np.int64(last_score)
+        _n_eff = last_step_nodes if last_step_nodes > np.int64(0) else np.int64(1)
+        if (not has_average_score) or abs(_sc64) >= VALUE_KNOWN_WIN or abs(np.int64(average_score)) >= VALUE_KNOWN_WIN:
+            average_score = np.int32(_sc64)
+            avg_effort = _n_eff
+            has_average_score = True
+        else:
+            _prev_e = avg_effort if avg_effort > np.int64(0) else np.int64(1)
+            avg_effort = _prev_e + _n_eff
+            _w = (np.int64(ASPIRATION_EMA_SCALE) * _n_eff * np.int64(ASPIRATION_EMA_CHI_DEN)) // (
+                _n_eff * np.int64(ASPIRATION_EMA_CHI_DEN) + np.int64(ASPIRATION_EMA_CHI_NUM) * _prev_e
+            )
+            if _w < np.int64(ASPIRATION_EMA_MIN_WEIGHT):
+                _w = np.int64(ASPIRATION_EMA_MIN_WEIGHT)
+            elif _w > np.int64(ASPIRATION_EMA_MAX_WEIGHT):
+                _w = np.int64(ASPIRATION_EMA_MAX_WEIGHT)
+            _num = _sc64 * _w + np.int64(average_score) * (np.int64(ASPIRATION_EMA_SCALE) - _w)
+            _scale = np.int64(ASPIRATION_EMA_SCALE)
+            average_score = np.int32(_num // _scale if _num >= 0 else -((-_num) // _scale))
         if cand_valid:
             copy_len = min(int(cand_pv_len), MAX_PLY)
             for i in range(copy_len):
@@ -4954,6 +4975,26 @@ def select_best_thread(thread_results):
     return best_thread
 
 
+def _update_aspiration_average_score(score, avg_score, avg_effort, has_avg, step_nodes):
+    """Update SF19 effort-weighted EMA aspiration center; reset across decisive bounds."""
+    n_eff = max(1, int(step_nodes))
+    sc_int = int(score)
+    if (not has_avg) or abs(sc_int) >= VALUE_KNOWN_WIN or abs(int(avg_score)) >= VALUE_KNOWN_WIN:
+        return sc_int, n_eff, True
+    prev_e = max(1, int(avg_effort))
+    new_effort = prev_e + n_eff
+    w = (ASPIRATION_EMA_SCALE * n_eff * ASPIRATION_EMA_CHI_DEN) // (
+        n_eff * ASPIRATION_EMA_CHI_DEN + ASPIRATION_EMA_CHI_NUM * prev_e
+    )
+    if w < ASPIRATION_EMA_MIN_WEIGHT:
+        w = ASPIRATION_EMA_MIN_WEIGHT
+    elif w > ASPIRATION_EMA_MAX_WEIGHT:
+        w = ASPIRATION_EMA_MAX_WEIGHT
+    num = sc_int * w + int(avg_score) * (ASPIRATION_EMA_SCALE - w)
+    new_avg = num // ASPIRATION_EMA_SCALE if num >= 0 else -((-num) // ASPIRATION_EMA_SCALE)
+    return new_avg, new_effort, True
+
+
 def iterative_deepening_search(
     piece_bbs,
     occupancy_bbs,
@@ -5005,6 +5046,9 @@ def iterative_deepening_search(
     nodes_limit = time_config.get('nodes_limit', 0)
 
     last_score = 0
+    average_score = 0
+    avg_effort = 0
+    has_average_score = False
     # Init before timer thread so nodes_limit closure never races NameError
     # ``total_nodes`` is the all-node counter used by UCI and fixed-node
     # stopping.  The public return tuple historically exposes main-search
@@ -5130,14 +5174,15 @@ def iterative_deepening_search(
         aspiration_depth_slot = min(current_depth, DIAG_ASPIRATION_DEPTH_SLOTS - 1)
         
         if current_depth > 1:
-            # HCE-tuned SF11 Dynamic Delta (等比縮放到 Centipawn)
+            # S-10: SF19 effort-weighted averageScore center + tightened linear delta
+            center_score = average_score if has_average_score else last_score
             delta = max(
                 ASPIRATION_WINDOW_MIN,
                 ASPIRATION_WINDOW_BASE
-                + abs(int(last_score)) // ASPIRATION_WINDOW_SCALE_DIV,
+                + abs(int(center_score)) // ASPIRATION_WINDOW_SCALE_DIV,
             )
-            alpha = max(-INFINITY, last_score - delta)
-            beta = min(INFINITY, last_score + delta)
+            alpha = max(-INFINITY, int(center_score) - delta)
+            beta = min(INFINITY, int(center_score) + delta)
             if search_context.diag_enabled:
                 search_context.diag_stats[
                     DIAG_ASPIRATION_ITERATIONS_BASE + aspiration_depth_slot
@@ -5167,6 +5212,7 @@ def iterative_deepening_search(
             nodes_searched_array[1] = np.uint64(0)
         failed_high_cnt = 0
         score = 0
+        last_step_nodes = 0
         stopped_in_iter = False
         
         while True:
@@ -5184,6 +5230,7 @@ def iterative_deepening_search(
             )
             score = int(res[0])
             best_move_iter = res[1]
+            last_step_nodes = int(res[2]) + int(res[3])
             
             # Always accumulate stats from the search (even if stopped or failed window)
             total_search_nodes += res[2]
@@ -5247,7 +5294,7 @@ def iterative_deepening_search(
                 beta = alpha
                 alpha = max(-INFINITY, score - delta)
                 failed_high_cnt = 0
-                delta += max(1, 44 * delta // 128)
+                delta += max(1, ASPIRATION_WINDOW_GROW_NUM * delta // 128)
                 if search_context.diag_enabled:
                     max_delta_idx = (
                         DIAG_ASPIRATION_MAX_DELTA_BASE + aspiration_depth_slot
@@ -5270,7 +5317,7 @@ def iterative_deepening_search(
                 alpha = max(beta - delta, alpha)
                 beta = min(INFINITY, score + delta)
                 failed_high_cnt += 1
-                delta += max(1, 44 * delta // 128)
+                delta += max(1, ASPIRATION_WINDOW_GROW_NUM * delta // 128)
                 if search_context.diag_enabled:
                     max_delta_idx = (
                         DIAG_ASPIRATION_MAX_DELTA_BASE + aspiration_depth_slot
@@ -5347,6 +5394,9 @@ def iterative_deepening_search(
         last_completed_depth = current_depth
         monitor_state[2] = int(last_completed_depth)
         last_score = cand_score if cand_valid else score
+        average_score, avg_effort, has_average_score = _update_aspiration_average_score(
+            last_score, average_score, avg_effort, has_average_score, last_step_nodes
+        )
         best_move_from_last_depth = np.uint16(cand_move)
 
         # Snapshot PV for next iteration's followPV tracking (SF lastIterationPV)

@@ -788,10 +788,16 @@ MINOR_KEY_INDEX = 6
 NON_PAWN_KEY_WHITE_INDEX = 7
 NON_PAWN_KEY_BLACK_INDEX = 8
 
-# --- Aspiration Windows / 期望窗口 ---
-ASPIRATION_WINDOW_MIN = 15         # HCE 適配最低初始窗口
-ASPIRATION_WINDOW_BASE = 20        # Match baseline / SF11-style HCE starting window
-ASPIRATION_WINDOW_SCALE_DIV = 120  # 分數縮放除數，數值越小，分數高時窗口擴張越快
+# --- Aspiration Windows / 期望窗口 (Wave 3-2 S-10: SF19 effort-weighted averageScore) ---
+ASPIRATION_WINDOW_MIN = 10         # HCE 適配最低初始窗口 (S-10; was 15)
+ASPIRATION_WINDOW_BASE = 14        # S-10 averageScore 搭配緊縮起始視窗 (was 20)
+ASPIRATION_WINDOW_SCALE_DIV = 120  # 線性分數縮放除數，保留高分戰術盤面剪枝效率
+ASPIRATION_WINDOW_GROW_NUM = 47    # SF19 search.cpp:438: delta += 47 * delta // 128 (was 44)
+ASPIRATION_EMA_SCALE = 32          # SF19 search.cpp:1447 effort-weighted EMA scale
+ASPIRATION_EMA_CHI_NUM = 3         # SF19 Chi = 3/2 = 1.5
+ASPIRATION_EMA_CHI_DEN = 2
+ASPIRATION_EMA_MIN_WEIGHT = 12     # 37.5% min weight for latest iteration score
+ASPIRATION_EMA_MAX_WEIGHT = 24     # 75.0% max weight for latest iteration score
 
 # --- Pruning Techniques / 剪枝技術 ---
 # Master switches for new pruning techniques / 新剪枝技術的總開關

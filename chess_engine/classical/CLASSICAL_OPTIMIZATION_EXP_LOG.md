@@ -22,9 +22,10 @@
 | **Wave 1B-6** | 2026-11-25 | Bug #10：ProbCut 堆疊狀態隔離與 QS 呼叫順序修正 | 20 標準 FENs Depth-10 `1,080,177 → 1,085,209`（`+0.47%`）；`0/20` 變著、`1/20` 變分 | **86 / 86** 測試全過；**Colab `400k nodes` 1,278 局 `218W 825D 235L`（`49.33%`，`-4.60 ± 11.30 Elo`，LOS `19.8%`，`SPRT[0, +10] LLR=-3.25` H0 Rejected）；已依方案 A 回退至 Wave 1B-4** | ❌ **已回退 (REVERTED)** |
 | **Wave 1B-7** | 2026-11-25 | Bug #11：Lazy SMP 根節點首著所有權與根層 Fail-Low `(score, move)` 一致性 | 20 FENs Depth-15 `10,543,761 → 11,034,468`（`+4.65%`）；`4/20` 變著、`11/20` 變分 | **90 / 90** 測試全過；**Colab 2T `500 ms/move` 526 局 `87W 321D 118L`（`47.05%`，`-20.50 ± 18.52 Elo`，LOS `1.4%`，`SPRT[0, +10] -2.96` H0 Rejected）；已回退至 Wave 1B-4** | ❌ **已回退 (REVERTED)** |
 | **Wave 1B-8** | 2026-11-26 | Bug #12：QSearch 重複局面偵測與 `move_stack`/`piece_stack` 追蹤 | 20 FENs Depth-15 `10,380,617 → 9,215,297`（**`-11.23%`**）；`5/20` 變著、`11/20` 變分 | **87 / 87** 測試全過（`12.775s`）；**Colab `400k nodes` 3,198 局 `564W 2121D 513L`（`50.80%`，`+5.54 ± 6.55 Elo`，LOS `95.1%`，`SPRT[-3, +3] LLR=+2.98` H1 Accepted）；已同步基準** | ✅ **SPRT H1 通過 & 已同步基準** |
-| **Wave 1B-9** | 2026-11-26 | Bug #13 + #22：條件式過路兵雜湊（Polyglot/SF 對齊）與 `make_null_move` 保留半步鐘 | 20 FENs Depth-15 `9,215,297 → 10,383,390`（`+12.68%`）；2 輪交替 TT 命中率 `5.47% → 6.21%`（`+13.5%`） | **93 / 93** `unittest` + **10 / 10** `test_zobrist` 全過；**Colab `400k nodes` 572 局 `106W 359D 107L`（`49.91%`，`-0.61 ± 15.79 Elo`，LOS `47.0%`，`SPRT[-10, 0] +0.51`）；使用者正式接納並同步基準** | ✅ **正式接納 & 已同步基準** |
+| **Wave 1B-9** | 2026-11-26 | Bug #13 + #22：條件式過路兵雜湊（Polyglot/SF 對齊）與 `make_null_move` 保留半步鐘 | 20 FENs Depth-15 `9,215,297 → 10,383,390`（`+12.68%`）；2 輪交替 TT 命中率 `5.47% → 6.21%`（`+13.5%`） | **93 / 93** `unittest` + **10 / 10** `test_zobrist` 全過；**Colab `400k nodes` 終局 1,406 局（703 對）`249W 893D 264L`（`49.47%`，`-3.71 ± 10.58 Elo`，CI `[-14.29, +6.87]`，`[-5, 0] -0.21`，depth `16.98 vs 16.99 p=0.63`）；正確性修復接納並已同步基準（`5fa3945`）** | ✅ **正式接納 & 已同步基準** |
 | **Wave 1C** | 2026-11-26 | P2 安全／契約／SMP 清理包（Bug `#20, #21, #24, #26, #27, #28, #31`） | **0 差異**（**30 / 30** FENs Depth-15 `16,023,923` nodes / 著法 / 評分 100% 恆等） | **162 / 162** 全批次測試過（含新 [`test_wave1c_fixes.py`](../../tests/test_wave1c_fixes.py) 14/14）；Numba 各 `1` 過載 / `0` `.numba.unresolved$`；Weighted NPS `538,553 → 576,379` | ✅ **零樹變動驗證完成** |
-| **Wave 3-1 (`S-1`)** | 2026-11-26 | 雙側 Non-Pawn Correction History（白方絕對視角雙向讀寫 `np_white_key` + `np_black_key`） | 20 FENs Depth-15 `10,383,390 → 9,605,255`（**`-7.49%`**）；`7/20` 變著、`18/20` 變分 | **109 / 109** 測試全過（含新 [`test_wave3_improvements.py`](../../tests/test_wave3_improvements.py) 3/3）；`warm_import = 5.67s` / `1` 過載 / `0` `.numba.unresolved$`；Weighted NPS `586,627 → 587,144`；`classical_old/` 留待 Colab SPRT | ⏳ **待 Colab SPRT 驗證** |
+| **Wave 3-1 (`S-1`)** | 2026-11-26 | 雙側 Non-Pawn Correction History（白方絕對視角雙向讀寫 `np_white_key` + `np_black_key`） | 20 FENs Depth-15 `10,383,390 → 9,605,255`（`-7.49%`）；30 FENs Depth-15 `-9.30%`；**實戰同深度比 `1.001–1.006`** | **109 / 109** 測試全過；**Colab `400k nodes` 1,492 局（746 對）`236W 1009D 247L`（`49.63%`，`-2.56 ± 9.93 Elo`，`SPRT[0, +10] LLR=-2.95 H0`，`mean_d -0.05 p=0.0052`）；已依選項 A 回退（保留 Wave 1C）** | ❌ **已回退 (REVERTED)** |
+| **Wave 3-2 (`S-10`)** | 2026-11-27 | SF19 effort 加權 `averageScore` 期望窗口中心＋緊縮線性視窗（`MIN=10, BASE=14, GROW=47`） | 20 FENs Depth-15 `10,383,390 → 8,464,667`（**`-18.48%`**）；**120 FENs 多核 Depth-15 `39.85M → 38.18M`（`-4.20%`, 幾何均值 `0.8962`）** | **126 / 126** 測試全過（含 [`test_wave3_improvements.py`](../../tests/test_wave3_improvements.py) 3/3）；`warm_import = 5.41s` / 各 `1` 過載 / `0` `.numba.unresolved$`；`classical_old/` 維持 Wave 1B-9 待 Colab SPRT | ⏳ **待 Colab SPRT 驗證** |
 
 ---
 
@@ -612,13 +613,13 @@
 
 ### 3. Colab 固定節點（`400k nodes`）實戰紀錄與接納同步（✅ 已正式接納並同步基準）
 
-* **實驗配置（[`tournament_colab_runner_se_multicut.ipynb`](../../tournament_colab_runner_se_multicut.ipynb)，Commit `129e245` vs `38d865a`）**：`--nodes 400000`、`--concurrency 8`、`--tt-mb 64`、`THREADS = 1`，嚴格成對換先開局（`data/openings.epd`），測至 **572 局 / 286 對**。
-* **總戰績與統計檢定**：
-  * **得分**：**`New 285.5 - 286.5 Old`**（**`106W 359D 107L`**，得分率 **`49.91%`**，淨負 **`-1` 局**），前半場 `50.35%` / 後半場 `49.48%`。
-  * **Pentanomial `[0, 0.5, 1, 1.5, 2]`**：**`[6, 64, 147, 63, 6]`**。
-  * **Elo 與 LOS**：Pentanomial **`-0.61 ± 15.79 Elo`**（95% CI **`[-16.40, +15.18]`**，`z = -0.075`，**`LOS = 47.0%`**）。
-  * **多區間 SPRT（`tools.match_core.SPRTTest`）**：`[-10, 0] +0.51` | `[-5, 0] +0.06` | `[-3, 0] -0.01` | `[-3, +3] -0.17` | `[0, +5] -0.34` | `[0, +10] -1.08`。
-* **處置決議**：依用戶指示正式接納 Wave 1B-9（修正 Polyglot 開局庫相容性與 FIDE 重複／NMP 半步鐘語意，實戰強度持平無顯著差異），已執行 `python tools/sync_classical_old.py --sync` 將 [`classical_old/`](../classical_old/) 同步至 **Wave 1B-9** 作為後續基準。
+* **期中紀錄（572 局 / 286 對，Commit `129e245` vs `38d865a`）**：`--nodes 400000`、`--concurrency 8`、`--tt-mb 64`、`THREADS = 1`，嚴格成對換先開局（`data/openings.epd`），打出 `New 285.5 - 286.5 Old`（`106W 359D 107L`，`49.91%`，`-0.61 ± 15.79 Elo`，`LOS = 47.0%`，`SPRT[-10, 0] +0.51`、`[-5, 0] +0.06`）。
+* **完整跑完終局（[`tournament_colab_runner_se_multicut.ipynb`](../../tournament_colab_runner_se_multicut.ipynb)，`1,406` 局 / `703` 對換先，和棋率 `63.51%`）**：
+  * **總戰績**：**`249W 893D 264L`（`49.47%`）**；持白 `52.35%`（`147W-442D-114L`）／持黑 `46.59%`（`102W-451D-150L`）；前後半場穩定（`0.496` → `0.494`）。
+  * **Pentanomial `[LL, LD/DL, DD/WL, WD/DW, WW]`**：**`[20, 168, 340, 157, 18]`**（`Elo = -3.71 ± 10.58`，95% CI **`[-14.29, +6.87]`**，`nElo = -6.37 ± 18.16`）。
+  * **多區間 SPRT**：`[0, +10] LLR = -2.99`（H0）、`[0, +5] -1.07`、`[-3, +3] -0.76`、`[-5, 0] -0.21`、`[-1.75, +0.25] -0.20`。
+  * **搜尋遙測**：平均深度 `16.98` vs `16.99`（`p = 0.63`）、同深度節點比 `0.995 – 1.006`、NPS `268,211` vs `270,216`（`-0.7%`, `p = 0.0020`）。
+* **處置決議**：依選項 A 維持接納（修正 Polyglot 開局庫相容性與 SF19 `Position::do_null_move` 半步鐘語意，深度與樹結構完全持平、CI 含 0 且無顯著退步），[`classical_old/`](../classical_old/) 維持同步於 **Wave 1B-9（`5fa3945`）**。
 
 ---
 
@@ -667,6 +668,46 @@
   * **著法／評分變化**：`7 / 20` 盤面變著、`18 / 20` 盤面變分；多處開中局顯著收斂（`EPD_1 -65.45%`、`EPD_2001 -47.88%`、`EPD_10001 -45.02%`、`EPD_4001 -41.36%`、`EPD_28001 -31.03%`、`Rook_EG -11.53%`、`Kiwipete -8.00%`）。
   * **Kiwipete Depth-15 校正表符號平衡**：`non_pawn_correction_history_black` 由舊版反相正偏 `(79, 26, -447..513, mean=+93.90)` 修正為與其他表同向的白方絕對分佈 `(70, 92, -521..624, mean=-22.40)`（對比 `np_white` `mean=-23.43`、`pawn` `mean=-32.27`、`minor` `mean=-27.81`）。
 
+### 3. Colab 固定節點（`400k nodes`）實戰檢定與回退分析（❌ 已回退 REVERTED，保留 Wave 1C）
+
+* **實驗配置（[`tournament_colab_runner_se_multicut copy 2.ipynb`](../../tournament_colab_runner_se_multicut%20copy%202.ipynb)，Commit `5f7b847` vs `5fa3945` Baseline）**：`--nodes 400000`、`--concurrency 8`、`--tt-mb 64`、`THREADS = 1`，嚴格成對換先開局（746 組獨立 FEN），測至 **1,492 局 / 746 對**觸發 `SPRT[0, +10]` 早停。
+* **總戰績與統計檢定**：
+  * **得分**：**`New 740.5 - 751.5 Old`**（**`236W 1009D 247L`**，得分率 **`49.63%`**，和棋率 `67.63%`）；持白 `52.68%`（`137W-512D-97L`）／持黑 `46.58%`（`99W-497D-150L`）；前半 `0.494` / 後半 `0.499`。
+  * **Pentanomial `[0, 0.5, 1, 1.5, 2]`**：**`[19, 167, 384, 158, 18]`**（`Elo = -2.56 ± 9.93`，95% CI **`[-12.49, +7.36]`**，`nElo = -4.55 ± 17.63`）。
+  * **多區間 SPRT**：`[0, +10] LLR = -2.95`（**H0 ❌**，Penta 精確 `-2.93`）、`[0, +5] -0.99`、`[-3, +3] -0.60`、`[-5, 0] -0.01`、`[-1.75, +0.25] -0.14`。
+* **搜尋遙測與負效應根因**：
+  * `parse_search_stats.py`（`New` 75,128 步 vs `Old` 75,153 步）：平均深度 **`16.98` vs `17.03`（`-0.05 ply`, Welch `t = -2.793, p = 5.22e-3` 顯著變淺）**、同深度節點比 **`1.001 – 1.006`**（單盤面冷測 `-7.5% ~ -9.3%` 省點在實戰整盤對局中完全消失）、NPS `280,259` vs `280,075`（`+0.1%`, `p = 0.78`）。
+  * **根因定位**：(1) 未隨雙表相加（`global_np_w + global_np_b`）重平衡 `CORRECTION_HISTORY_NON_PAWN_WEIGHT = 12749`，使 Non-Pawn 上限倍增至 `±199.2 cp`（約 ±2 兵），超越 Pawn+Minor 合計權重並在整盤對局累積後造成過度校正；(2) 未如 SF19 `search.cpp:91-92` 依行棋方 `[us]` 分離儲存白/黑先手偏差。
+* **處置決議**：依選項 A **只回退 [`search.py`](search.py) 中 `S-1` 兩處雙側讀寫還原至行棋方單側表**，保留已驗證 `0/30` 零樹變動的 **Wave 1C（`6b78708`）** 與 [`classical_old/`](../classical_old/) 的 **Wave 1B-9（`5fa3945`）** 基線。
+
+---
+
+## Wave 3-2（`S-10`）：SF19 effort 加權 `averageScore` 期望窗口（2026-11-27）
+
+> **對照基準**：Commit `5fa3945`（[`classical_old/`](../classical_old/) 維持於 Wave 1B-9；建立於已驗證零樹變動的 **Wave 1C** 之上，並已先回退 Wave 3-1 `S-1`）。
+
+### 1. 修改明細（[`constants.py`](constants.py) ＋ [`search.py`](search.py)）
+
+1. **多核心正交參數掃描發現（120 / 200 盤面 Depth 14–15）**：
+   * 單純放大或套用 SF19 二次方 `meanSquaredScore / 5000..25000` 會在高分戰術局面過度放寬窗口（戰術題節點反而暴增 `+14% ~ +25%`）；不平滑而直接縮窄 `base=14` 也會在開中局引發重搜膨脹 `+3.33%`。
+   * 當把**期望窗口中心**改為 **SF19 effort-weighted `averageScore` EMA** 後，能安全搭配**緊縮線性起始窗口**（`BASE=14`, `MIN=10`, `SCALE_DIV=120`）與 SF19 擴張步幅 `GROW_NUM=47`（`delta += max(1, 47 * delta // 128)`）。
+2. **[`constants.py`](constants.py#L787-L796) 與 [`tuner/constants_snapshot.py`](../../tuner/constants_snapshot.py)**：
+   * `ASPIRATION_WINDOW_MIN = 10`（原 `15`）、`ASPIRATION_WINDOW_BASE = 14`（原 `20`）、`ASPIRATION_WINDOW_SCALE_DIV = 120`（維持線性）、`ASPIRATION_WINDOW_GROW_NUM = 47`（原硬編碼 `44`）。
+   * EMA 常數：`ASPIRATION_EMA_SCALE = 32`、`ASPIRATION_EMA_CHI_NUM = 3`、`ASPIRATION_EMA_CHI_DEN = 2`、`ASPIRATION_EMA_MIN_WEIGHT = 12`、`ASPIRATION_EMA_MAX_WEIGHT = 24`。
+3. **[`search.py`](search.py)**：
+   * 主搜尋 `iterative_deepening_search` 透過 `_update_aspiration_average_score()`、`@njit` Helper 迴圈 `_lazy_smp_helper_loop_jit` 透過純 `int64` 整數就地更新 `average_score` 與累積 `avg_effort`（對稱零截斷整數除法、跨入/離開 `VALUE_KNOWN_WIN` 或將殺區間時直接重設不混合），各迭代以 `center_score = average_score` 取代原本震盪較大的 `last_score`。
+
+### 2. 驗證與基準測試結果
+
+* **單元與回歸測試**（`tests.test_wave3_improvements` 3/3 ＋ `test_wave1c_fixes`、`test_wave1b_fixes`、`test_wave1a_fixes`、`test_search_core_contracts`、`test_lazy_smp`、`test_history`、`test_sync_constants_snapshot`、`test_search_param_registry`）：**126 / 126 項全過（`Ran 126 tests in 6.171s, OK`）**（於 [`tests/test_wave3_improvements.py`](../../tests/test_wave3_improvements.py) 驗證 `S-1` 回退合約、EMA 邊界/負數對稱截斷/決戰重設與 1T/2T 實搜；並同步更新 [`tests/test_search_core_contracts.py`](../../tests/test_search_core_contracts.py) `ASPIRATION_WINDOW_BASE = 14` 及 [`tests/test_lazy_smp.py`](../../tests/test_lazy_smp.py) `alt_move = a2a3` 避免與 `Startpos` 主線著法衝突）。
+* **Numba 快取與符號檢查**：`warm_import = 5.41s`、`warmup_search_jit = 0.21s`；`_search` / `quiescence_search` / `_lazy_smp_helper_loop_jit` 各維持 **`1`** 過載、`unresolved: []`。
+* **20 標準盤面 Depth-15 對照（`classical_old` Wave 1B-9 vs `classical` Wave 3-2 `S-10`）**：
+  * **總節點數**：`10,383,390 → 8,464,667`（**`-18.48%`**）；`4 / 20` 變著、`19 / 20` 變分；總耗時 `17.38s → 14.84s`（Weighted NPS `597,553 → 570,295`）。
+  * 代表降幅：`EPD_2001 -52.96%`、`EPD_10001 -52.54%`、`EPD_4001 -46.88%`、`EPD_12001 -45.69%`、`Rook_EG -44.57%`、`EPD_28001 -36.86%`、`EPD_26001 -36.14%`、`EPD_16001 -26.34%`、`EPD_8001 -24.41%`、`Startpos -17.95%`、`Kiwipete -6.90%`。
+* **120 盤面多核心實搜 Depth-15 實戰基準（12 Workers，60 `hist_diag_openings_500.epd` ＋ 60 `hist_diag_puzzles_500.epd`，呼叫正式 `iterative_deepening_search`）**：
+  * **總節點數**：`39,854,125 → 38,181,475`（**`-4.20%`**），**幾何均值節點比 `0.8962`（單盤幾何平均省 `-10.38%`）**，`68 勝 / 51 負 / 1 平`，`15 / 120` 變著、`104 / 120` 變分（耗時 `10.25s → 10.05s`）。
+  * **分桶**：開局 `31,094,930 → 31,139,247`（`+0.14%`, 幾何均值 **`0.9955`**）、戰術 `8,759,195 → 7,042,228`（**`-19.60%`**, 幾何均值 **`0.8067`**）。
+
 ### 3. 狀態
 
-* **⏳ 待實戰驗證**：準備於 Colab 進行單軸固定節點 SPRT 驗證（`Wave 3-1 S-1 (+1C)` vs `Wave 1B-9`；因 Wave 1C 已於 30 盤面 Depth 15 實測 `0 / 30` 零樹差異，本次 SPRT 嚴格對應 `S-1` 單軸影響）。[`classical_old/`](../classical_old/) 維持於 Wave 1B-9（`5fa3945`）不動。
+* **⏳ 待實戰驗證**：已完成本地提交前全部檢核，[`classical_old/`](../classical_old/) 維持於 Wave 1B-9（`5fa3945`），準備推進至遠端進行 Colab `400k nodes` 單軸 SPRT 驗證。

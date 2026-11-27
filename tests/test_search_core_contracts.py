@@ -146,7 +146,7 @@ class TestSearchCoreContracts(unittest.TestCase):
         self.assertIn('DIAG_ASPIRATION_FAIL_LOW_BASE', constants)
         self.assertIn('DIAG_ASPIRATION_FAIL_HIGH_BASE', constants)
         self.assertIn('DIAG_ASPIRATION_WASTED_NODES_BASE', constants)
-        self.assertIn('ASPIRATION_WINDOW_BASE = 20', constants)
+        self.assertIn('ASPIRATION_WINDOW_BASE = 14', constants)
         self.assertIn('aspiration_depth_slot = min(', search)
         self.assertIn('DIAG_ASPIRATION_ITERATIONS_BASE + aspiration_depth_slot', search)
         self.assertIn('DIAG_ASPIRATION_WASTED_NODES_BASE + aspiration_depth_slot', search)
