@@ -997,6 +997,7 @@ PROBCUT_TT_SHORTCUT_MARGIN = 290
 # Delta Pruning (QS) — keep milder than aggressive node-exp values
 # QS delta (P0 try 300 regressed fixed-depth suite nodes → keep 350)
 DELTA_PRUNING_MARGIN = 365
+QS_MOVE_COUNT_LIMIT = 2      # SF19 search.cpp:1793 (prune non-check non-recapture after 2 legal QS moves)
 
 # --- Static Exchange Evaluation (SEE) Threshold / SEE 閾值 ---
 # QS SEE (P0 try -60: puzzle OK but no clear node win on suite → keep -80)

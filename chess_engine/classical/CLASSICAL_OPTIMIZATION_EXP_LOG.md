@@ -28,6 +28,7 @@
 | **Wave 3-2 (`S-10`)** | 2026-11-27 | SF19 effort 加權 `averageScore` 期望窗口中心＋緊縮線性視窗（`MIN=10, BASE=14, GROW=47`） | 20 FENs Depth-15 `10,383,390 → 8,464,667`（**`-18.48%`**）；**120 FENs 多核 Depth-15 `39.85M → 38.18M`（`-4.20%`, 幾何均值 `0.8962`）** | **126 / 126** 測試全過；`warm_import = 5.41s` / 各 `1` 過載 / `0` `.numba.unresolved$`；**Colab `300k nodes` 1,584 局（792 對）`337W 970D 277L`（`51.89%`, `+13.17 ± 10.33 Elo`, CI `[+2.85, +23.51]`, `SPRT[0, +10] LLR=+2.95` H1 Accepted, `mean_d +0.11 p=2.48e-10`）；已同步 `classical_old/`（`c052c97`）** | ✅ **SPRT H1 通過 & 已同步基準** |
 | **Wave 3-3a (`S-4` 評估)** | 2026-11-28 | SF19 `evalDiff` 安靜歷史（單編譯 120 FENs D14/15 ＋ 暖序列 24×8 消融） | **未進提交**：`off=+10..+38` 暖歷史膨脹 `+14.4% ~ +22.0%`；`off<=0` 靠壓低 `main`（`-842 ~ -2232`）過剪；單更新 `bf`/`pawn` 均負效益（`+0.85% ~ +7.33%`） | 受 `(piece, to)` 主歷史表與 `PRUNING_HISTORY_THRESHOLD = -7000` 直連影響，暫緩至 `S-9` 分色 butterfly 後再議 | ⏸️ **暫緩（未改實作）** |
 | **Wave 3-3 (`S-3`)** | 2026-11-28 | Cuckoo `upcoming_repetition` 早期重複和棋偵測（80 KiB 表＋`_has_upcoming_repetition_jit`＋`_search` `alpha < 0` 入口） | 2026-11-28 實作：20 FENs D15 `+15.34%`、24×8 暖序列 `+7.36%`；120 FENs 多核 D15 `-7.30%`（`gm=0.9237`）；Oracle `8,350/8,350` `0 FP/0 FN` | **Colab `300k nodes` 616 局（308 對）`104W 401D 111L`（`49.43%`, `-3.95 Elo`, CI `[-20.43, +12.51]`, `SPRT[0,+10] LLR=-1.27`, `[-3,+3] -0.34`, `[-5,0] -0.10`）；依選項 A 中止回退（保留 `classical_old/` `c052c97`）** | ❌ **已回退 (REVERTED)** |
+| **Wave 3-4 (`S-5`)** | 2026-11-28 | QSearch 戰術剪枝與精化（Non-PV TT 守衛、TT 界限精化 `best_eval`、`moveCount > 2`＋`prev_sq`/將軍/升變豁免、SEE-vs-Alpha delta、非吃子逃將略過、吃子後逼和檢查；嚴守 E82 無 Correction History） | 20 FENs D15 `8.46M → 7.80M`（**`-7.80%`**）；**120 FENs 多核 D15 `40.63M → 31.80M`（`-21.73%`, `gm=0.8084`, `80W/40L`, Open `-20.83%`, Puz `-24.93%`）**；**24×8 D12 暖序列 `-9.03%`（`gm=0.9202`）**；**300k-node 平均深度 `16.50 → 16.80`（`+0.30 ply`, 非殺局 `+0.32 ply`）** | **131 / 131** 測試全過（`4.562s`）；`warm_import = 5.88s` / `_search`, `quiescence_search`, `_lazy_smp_helper_loop_jit`, `_is_qs_stalemate_jit` 各 **`1`** 過載 / `0` `.numba.unresolved$`；Weighted NPS `577,096 → 545,317` | ⏳ **待 Colab SPRT 驗證** |
 
 ---
 
@@ -764,3 +765,56 @@
 * **本地複診結論**：
   * 擴大 9 種含王車易位、過路兵、將軍與預置歷史之盤面進行 Brute-Force Oracle 模糊檢驗（合法狀態 **`8,350 / 8,350` 次 `0 FP / 0 FN`**），排除實作邏輯漏洞；固定 `300k nodes` 下 20 標準盤面深度為 `16.55 vs 16.50`（`+0.05 ply`），未見深度塌縮。
   * 然而在非循環開中局（如 `EPD_24001` D13 `+135.5%`、分數 `+26 → -10`；`EPD_16001 +98.5%`；24×8 暖上下文 `+7.36%`）仍出現路徑相依之 `0` 分逼和邊界提早抬升 `alpha` 並與 `S-10` 窄期望視窗／TT 產生搜尋樹擾動；鑑於 `upcoming_repetition` 本屬微幅增益且負向期望趨勢明確，依**選項 A** 即時止損回退 `zobrist.py` / `search_heuristics.py` / `search.py` / `tests/test_wave3_improvements.py` 至 [`classical_old/`](../classical_old/)（`c052c97`）一致狀態（`--diff-code` `0` 差異），並改推進 **`S-5`（QSearch 戰術剪枝與精化組）**。
+
+---
+
+## Wave 3-4（`S-5`）：QSearch 戰術剪枝與精化組（2026-11-28）
+
+> **對照基準**：Commit `c052c97` / `71b2e32`（[`classical_old/`](../classical_old/) 已同步至 **Wave 1C + Wave 3-2 `S-10`**，且 `S-3` 已完整回退）。
+
+### 1. 修改明細（[`constants.py`](constants.py)、[`tuner/constants_snapshot.py`](../../tuner/constants_snapshot.py)、[`search.py`](search.py)）
+
+對齊 SF19 `stockfish_repo/src/search.cpp:1709, 1733-1735, 1784-1821, 1855-1869`，並**嚴守 E82 禁令（QSearch 維持不套用 Correction History）** 與 Bug #3／Bug #12 不變量：
+
+1. **[`constants.py`](constants.py#L993-L996) 與 [`tuner/constants_snapshot.py`](../../tuner/constants_snapshot.py)**：
+   * 新增 `QS_MOVE_COUNT_LIMIT = 2`（維持既調參 `DELTA_PRUNING_MARGIN = 365`，已由下方 11 組消融確認優於 `160–300` 與 `mc=3/off`）。
+2. **[`search.py`](search.py)**（`_is_qs_stalemate_jit`、`quiescence_search` 與全部 4 處內部呼叫點）：
+   * **PV 與非 PV 區分（`is_pv`）＋ TT Bound 精化 `best_eval`**：為 `quiescence_search` 新增第 9 參數 `numba.boolean` `is_pv`（遞迴／深度 `0` 傳入 `is_pv`，Razoring／ProbCut 傳 `_b_false()`）；僅於 `not is_pv` 允許 Step 3 早期 TT 截斷，同時對非將軍節點使用非決戰區間（`not is_decisive(qs_tt_score)`）之 TT Bound 精化 `best_eval` 後判定 stand-pat 截斷與 `alpha = max(alpha, best_eval)`，寫回 TT 時仍保存未調整之 raw `stand_pat`（絕不寫 `TT_FLAG_EXACT`）。
+   * **前置合法性與 `qs_legal_moves_seen` 計數**：在循環前讀取 `prev_sq`（`move_stack[ply - 1]` 目標格），於選擇排序後執行精確 Pre-Make 合法性檢查（含被將軍下 EP 暫態檢驗與非將軍 O(1) 雙移除射線檢驗）後才遞增 `qs_legal_moves_seen += 1`，確保每個進剪枝與計算著法數的候選皆為合法步，亦避免將被剪後無實搜步誤判為將殺。
+   * **SF19 Step 6 三重戰術剪枝（`if not is_loss(best_eval):`）**：
+     * 延遲計算 `gives_check` 僅於實際將觸發剪枝時執行，`qs_to_sq != prev_sq`（回吃）與 `is_promotion`（升變）全面豁免：
+       (a) `qs_legal_moves_seen > QS_MOVE_COUNT_LIMIT`（`> 2`）剪枝；
+       (b) Futility / Delta：`futility_base + qs_vic_val <= alpha` 且 Fail-Soft 更新 `best_eval = max(best_eval, futility_value)`；
+       (c) **SEE-vs-Alpha**（`see_alpha_thr = alpha - futility_base > tune[TUNE_QS_SEE]`）：若 `not _see_ge_jit(..., see_alpha_thr)` 且不將軍，剪枝並 Fail-Soft 更新 `best_eval = max(best_eval, min(alpha, futility_base))`。
+     * **非吃子／非升變跳過（`if not is_capture_or_promo: continue`）**：於獲得任一非必敗得分（`not is_loss(best_eval)`）後略過剩餘安靜逃將（首步逃將與絕境逃將均受 `not is_loss(best_eval)` 保護）；其後對非 TT 吃子／升變與吃子逃將套用既有 `TUNE_QS_SEE` 門檻。
+   * **吃子後逼和偵測（`_is_qs_stalemate_jit`）**：無合法吃子／升變時檢查無非兵子力、無單步推兵、王無合法空鄰格，精確判定逼和並回傳 `0`。
+
+### 2. 120 盤面單次編譯多核消融（Depth 14 ＋ 24×8 暖序列 D12）
+
+| 消融組態 | D14 120 盤面總節點 (`gm` / 勝敗) | 開局 60 盤面 (`gm`) | 戰術 60 盤面 (`gm`) | 24×8 D12 暖序列 (`gm`) |
+| :--- | :---: | :---: | :---: | :---: |
+| **`S5_full_dm365_mc2`（採用）** | **`-16.97%`** (`0.8408`, `79W/41L`) | **`-15.65%`** (`0.834`) | **`-21.46%`** (`0.847`) | `-9.03%` (`0.920`) |
+| `S5_full_dm300_mc2` | `-8.36%` (`0.8987`, `71W/49L`) | `-5.56%` (`0.916`) | `-17.97%` (`0.882`) | `-10.68%` (`0.901`) |
+| `S5_full_dm250_mc2` | `-9.67%` (`0.9041`, `71W/49L`) | `-6.81%` (`0.937`) | `-19.50%` (`0.872`) | `-2.25%` (`0.990`) |
+| `S5_full_dm200_mc2` | `-11.61%` (`0.8701`, `77W/42L`) | `-9.58%` (`0.909`) | `-18.57%` (`0.833`) | `-7.13%` (`0.934`) |
+| `S5_full_dm160_mc2` | `-15.42%` (`0.8507`, `81W/38L`) | `-14.12%` (`0.865`) | `-19.89%` (`0.837`) | `-15.77%` (`0.864`) |
+| `S5_full_dm365_mc3` | `-8.36%` (`0.8978`, `70W/49L`) | `-6.00%` (`0.934`) | `-16.47%` (`0.863`) | `-9.77%` (`0.906`) |
+| `S5_full_dm365_mcoff` | `-7.22%` (`0.8794`, `71W/48L`) | `-6.18%` (`0.887`) | `-10.79%` (`0.871`) | `-6.91%` (`0.924`) |
+| `S5_noSkipQEv_dm365` | `-6.94%` (`0.8959`, `72W/48L`) | `-5.23%` (`0.938`) | `-12.79%` (`0.855`) | `-7.79%` (`0.926`) |
+| `S5_noTTRef_dm365` | `-7.84%` (`0.9701`, `62W/58L`) | `-8.82%` (`0.887`) | `-4.51%` (`1.061`) | `-9.61%` (`0.912`) |
+| `S5_noSeeAlpha_dm365` | `-3.21%` (`0.9244`, `62W/58L`) | `+1.23%` (`1.003`) | `-18.44%` (`0.852`) | `-7.48%` (`0.927`) |
+| `S5_only_TTRef_dm365` | `-2.37%` (`0.9147`, `64W/55L`) | `+0.29%` (`0.989`) | `-11.49%` (`0.846`) | `+1.88%` (`1.000`) |
+
+> 每一項子機制（SEE-vs-Alpha、`tt_refine`、非吃子逃將跳過、`moveCount <= 2`）皆貢獻正向減節點收益，且保留既有 `DELTA_PRUNING_MARGIN = 365` 同時保有最高戰術安全性與最佳整體表現。
+
+### 3. 正式驗證與最終基準測試結果（移除消融掛鉤後重測）
+
+* **單元與合約測試**（11 組套件含 [`test_wave3_improvements.py`](../../tests/test_wave3_improvements.py) 新增 `TestWave3S5QSearchRefinement` 4 項測試，並同步 [`test_wave1b_fixes.py`](../../tests/test_wave1b_fixes.py) 與 [`test_search_core_contracts.py`](../../tests/test_search_core_contracts.py) 合約）：**`131 / 131` 項全過（`Ran 131 tests in 4.562s, OK`）**（GUI/Tk 與會清快取之參數掃描套件依隔離原則除外）。
+* **Numba 快取與符號檢查**：`warm_import = 5.88s`、`warmup_search_jit = 0.19s`；`_search`、`quiescence_search`、`_lazy_smp_helper_loop_jit`、`_is_qs_stalemate_jit` 各維持 **`1`** 過載、`unresolved: []`。
+* **120 盤面多核心實搜 Depth-15 對照（`classical_old` `S-10` vs `classical` `S-5`，12 Workers，`game_history=[root]`）**：
+  * **總節點數**：`40,632,293 → 31,802,387`（**`-21.73%`**），**幾何均值節點比 `0.8084`**，`80 勝 / 40 負 / 0 平`，`17 / 120` 變著、`107 / 120` 變分（耗時 `8.78s → 7.43s`）。
+  * **分桶**：開局 `31,701,764 → 25,097,818`（**`-20.83%`**, `gm = 0.8063`）、戰術 `8,930,529 → 6,704,569`（**`-24.93%`**, `gm = 0.8105`）。
+* **24 開局 × 8 步 Depth 12 暖序列**：`22,522,922 → 20,488,093`（**`-9.03%`**, `gm = 0.9202`，耗時 `5.74s → 4.82s`）。
+* **20 標準盤面固定 `300,000 nodes` 平均深度**：全 20 盤面 **`16.50 → 16.80`（`+0.30 ply`）**；排除將殺題 **`14.00 → 14.32`（`+0.32 ply`）**。
+* **20 標準盤面 Depth-15 對照（`bench_wave1b1_vs_old.py 15`）**：`8,464,667 → 7,804,368`（**`-7.80%`**），`4 / 20` 變著、`19 / 20` 變分（代表降幅：`EPD_1 -74.83%`, `EPD_20001 -49.11%`, `EPD_24001 -48.97%`, `Kiwipete -35.62%`, `EPD_30001 -31.38%`, `Rook_EG -17.65%`）；耗時 `14.67s → 14.31s`，Weighted NPS `577,096 → 545,317`。
+* **⏳ 狀態**：已完成本地全部檢核與基準對照，[`classical_old/`](../classical_old/) 維持於 Wave 3-2（`c052c97`），待遠端 Colab 固定節點單軸 SPRT 驗證。

@@ -60,7 +60,7 @@ class TestSearchCoreContracts(unittest.TestCase):
 
     def test_qsearch_checks_bypass_delta_but_not_final_see(self):
         search = (ROOT / 'chess_engine/classical/search.py').read_text(encoding='utf-8')
-        delta = search.index('if delta_prune_candidate:')
+        delta = search.index('if need_delta_prune:')
         protected = search.index('_diag_add(search_context, DIAG_Q_CHECK_PROTECT)', delta)
         final_see = search.index('if ENABLE_SEE_IN_QUIESCENCE', protected)
 
@@ -407,7 +407,8 @@ class TestSearchCoreContracts(unittest.TestCase):
 
     def test_qsearch_delta_pruning_known_loss_guard_and_lazy_attacker(self):
         search = (ROOT / 'chess_engine/classical/search.py').read_text(encoding='utf-8')
-        delta_gate = search.index('if ENABLE_DELTA_PRUNING and not is_loss(stand_pat):')
+        loss_gate = search.index('if not is_loss(best_eval):')
+        delta_gate = search.index('if (ENABLE_DELTA_PRUNING and not is_loss(futility_base)', loss_gate)
         gives_check_call = search.index('gives_check = _qsearch_ordinary_move_gives_check(', delta_gate)
         see_gate = search.index('if ENABLE_SEE_IN_QUIESCENCE and move != qs_tt_move:', gives_check_call)
 

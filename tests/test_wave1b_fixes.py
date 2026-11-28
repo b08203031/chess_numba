@@ -176,9 +176,9 @@ class TestBug3QSearchTTNoExactOverwrite(unittest.TestCase):
         qs_src = src[qs_start:qs_end]
 
         self.assertNotIn("original_alpha", qs_src)
-        standpat_idx = qs_src.index("if stand_pat >= beta:")
+        standpat_idx = qs_src.index("if best_eval >= beta:")
         self.assertNotIn("TT_FLAG_EXACT", qs_src[standpat_idx:])
-        self.assertIn("if qs_tt_flag == TT_FLAG_NONE:", qs_src[standpat_idx:qs_src.index("alpha = max(alpha, stand_pat)")])
+        self.assertIn("if qs_tt_flag == TT_FLAG_NONE:", qs_src[standpat_idx:qs_src.index("alpha = max(alpha, best_eval)")])
         self.assertEqual(qs_src.count("store_tt("), 3)
         self.assertEqual(qs_src.count("bool(qs_tt_is_pv)"), 3)
 
@@ -216,7 +216,7 @@ class TestBug3QSearchTTNoExactOverwrite(unittest.TestCase):
         ctx.tt_generation = np.uint8(1)
         tt_key = get_tt_key(gs[4], int(gs[3]))
         store_tt(tt, tt_key, 12, 80, 70, TT_FLAG_BETA, 555, 1, True)
-        quiescence_search(pb, ob, gs, np.int32(50), np.int32(150), np.int32(1), ctx, np.int32(0))
+        quiescence_search(pb, ob, gs, np.int32(50), np.int32(150), np.int32(1), ctx, np.int32(0), False)
         snap = probe_tt_snapshot(tt, tt_key)
         self.assertEqual(
             (int(snap[0]), int(snap[1]), int(snap[2]), int(snap[3]), bool(snap[4]), int(snap[5])),
@@ -228,7 +228,7 @@ class TestBug3QSearchTTNoExactOverwrite(unittest.TestCase):
         reset_search_context(ctx)
         ctx.tt_generation = np.uint8(1)
         store_tt(tt, tt_key, 12, 80, 70, TT_FLAG_ALPHA, 555, 1, True)
-        quiescence_search(pb, ob, gs, np.int32(50), np.int32(60), np.int32(1), ctx, np.int32(0))
+        quiescence_search(pb, ob, gs, np.int32(50), np.int32(60), np.int32(1), ctx, np.int32(0), False)
         snap_sp = probe_tt_snapshot(tt, tt_key)
         self.assertEqual(
             (int(snap_sp[0]), int(snap_sp[1]), int(snap_sp[2]), int(snap_sp[3]), bool(snap_sp[4]), int(snap_sp[5])),
@@ -243,7 +243,7 @@ class TestBug3QSearchTTNoExactOverwrite(unittest.TestCase):
         ctx.tt_generation = np.uint8(1)
         tt_key_k = get_tt_key(gs_k[4], int(gs_k[3]))
         store_tt(tt, tt_key_k, 12, 50, 40, TT_FLAG_ALPHA, 555, 1, True)
-        quiescence_search(pb_k, ob_k, gs_k, np.int32(-500), np.int32(5000), np.int32(1), ctx, np.int32(0))
+        quiescence_search(pb_k, ob_k, gs_k, np.int32(-500), np.int32(5000), np.int32(1), ctx, np.int32(0), False)
         snap_k = probe_tt_snapshot(tt, tt_key_k)
         self.assertEqual(
             (int(snap_k[0]), int(snap_k[1]), int(snap_k[2]), int(snap_k[3]), bool(snap_k[4]), int(snap_k[5])),
@@ -476,7 +476,7 @@ class TestBug12QSearchRepetitionAndStack(unittest.TestCase):
         )
 
         score_ply3, _ = quiescence_search(
-            p_bbs, o_bbs, g_state, _i32(-30000), _i32(30000), _i32(3), ctx, _i32(1)
+            p_bbs, o_bbs, g_state, _i32(-30000), _i32(30000), _i32(3), ctx, _i32(1), False
         )
         self.assertEqual(int(score_ply3), 0)
         self.assertEqual(int(ctx.ply_path_stack[3]), int(g_state[4]))
@@ -484,7 +484,7 @@ class TestBug12QSearchRepetitionAndStack(unittest.TestCase):
         clear_transposition_table(tt)
         reset_search_context(ctx)
         score_ply0, _ = quiescence_search(
-            p_bbs, o_bbs, g_state, _i32(-30000), _i32(30000), _i32(0), ctx, _i32(0)
+            p_bbs, o_bbs, g_state, _i32(-30000), _i32(30000), _i32(0), ctx, _i32(0), False
         )
         self.assertLess(int(score_ply0), -200)
 
@@ -509,7 +509,7 @@ class TestBug12QSearchRepetitionAndStack(unittest.TestCase):
         ctx.piece_stack[2] = np.int8(9)
 
         score_ply2, _ = quiescence_search(
-            p_bbs, o_bbs, g_state, _i32(-30000), _i32(30000), _i32(2), ctx, _i32(0)
+            p_bbs, o_bbs, g_state, _i32(-30000), _i32(30000), _i32(2), ctx, _i32(0), False
         )
         self.assertEqual(int(score_ply2), 0)
         self.assertEqual(int(ctx.move_stack[2]), int(NO_MOVE))

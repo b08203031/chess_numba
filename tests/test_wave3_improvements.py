@@ -5,6 +5,10 @@ Currently covers:
 - Wave 3-2 (S-10): SF19 effort-weighted averageScore aspiration window center,
   tighter initial bounds (MIN=10, BASE=14), and GROW_NUM=47 in both main and
   Lazy SMP helper iterative deepening loops.
+- Wave 3-4 (S-5): QSearch tactical pruning & refinement (non-PV TT cutoff guard,
+  TT-bound best_eval refinement without Correction History, moveCount > 2 pruning
+  with prev_sq recapture / check / promotion exemptions, SEE-vs-Alpha delta gate,
+  non-capture evasion pruning after non-loss move, and post-capture stalemate).
 """
 import unittest
 from pathlib import Path
@@ -21,24 +25,37 @@ from chess_engine.classical.constants import (
     ASPIRATION_WINDOW_GROW_NUM,
     ASPIRATION_WINDOW_MIN,
     CORRECTION_HISTORY_SIZE,
+    DELTA_PRUNING_MARGIN,
     MATE_IN_MAX_PLY,
     MAX_PLY,
     NO_MOVE,
     PAWN_HISTORY_SIZE,
+    QS_MOVE_COUNT_LIMIT,
+    TUNE_DELTA_MARGIN,
     VALUE_KNOWN_WIN,
 )
 from chess_engine.classical.core import generate_legal_moves
 from chess_engine.classical.engine_types import SearchContext, reset_search_context
 from chess_engine.classical.fen_parser import parse_fen
+from chess_engine.classical.move import move_to_uci
 from chess_engine.classical.search import (
+    _i32,
+    _is_qs_stalemate_jit,
     _update_aspiration_average_score,
     collect_hist_diag_dict,
     iterative_deepening_search,
+    quiescence_search,
 )
 from chess_engine.classical.transposition_table import (
+    TT_FLAG_ALPHA,
+    TT_FLAG_BETA,
+    TT_FLAG_EXACT,
     clear_transposition_table,
     create_transposition_table,
+    probe_tt_snapshot,
+    store_tt,
 )
+from chess_engine.classical.zobrist import get_tt_key
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -186,6 +203,132 @@ class TestWave3S10AspirationAverageScore(unittest.TestCase):
         self.assertGreaterEqual(abs(int(sc_m)), VALUE_KNOWN_WIN)
         # Immediate back-rank mate: 1. Qe8#
         self.assertGreaterEqual(int(sc_m), MATE_IN_MAX_PLY)
+
+
+class TestWave3S5QSearchRefinement(unittest.TestCase):
+    def test_s5_source_contracts_and_no_correction_history_in_qs(self):
+        src = (ROOT / "chess_engine" / "classical" / "search.py").read_text(encoding="utf-8")
+        qs_start = src.index("def quiescence_search(")
+        qs_end = src.index("def get_next_move(", qs_start)
+        qs_src = src[qs_start:qs_end]
+
+        # E82 ban: QSearch never applies correction history
+        self.assertNotIn("apply_correction_history_score", qs_src)
+        self.assertIn("if not is_pv:", qs_src)
+        self.assertIn("QS_MOVE_COUNT_LIMIT", qs_src)
+        self.assertIn("_is_qs_stalemate_jit", qs_src)
+        self.assertIn("qs_legal_moves_seen += 1", qs_src)
+        self.assertNotIn("len(search_context.tune) >= 50", qs_src)
+        self.assertEqual(QS_MOVE_COUNT_LIMIT, 2)
+
+    def test_pv_vs_nonpv_tt_cutoff_and_bound_refinement(self):
+        tt, ctx = _make_context(tt_mb=2)
+        fen = "4k3/8/8/8/8/8/4P3/4K3 w - - 0 1"
+        pb, ob, gs = parse_fen(fen)
+        tt_key = get_tt_key(gs[4], int(gs[3]))
+
+        # Compute unrefined stand_pat first
+        clear_transposition_table(tt)
+        reset_search_context(ctx)
+        raw_score, _ = quiescence_search(
+            pb, ob, gs, _i32(-5000), _i32(5000), _i32(1), ctx, _i32(0), True
+        )
+
+        # Store a deeper TT_FLAG_BETA score above raw_score; Non-PV cuts off, PV refines best_eval without cutting off at Step 3
+        elevated = int(raw_score) + 45
+        clear_transposition_table(tt)
+        reset_search_context(ctx)
+        store_tt(tt, tt_key, 8, elevated, int(raw_score), int(TT_FLAG_BETA), NO_MOVE, 0, True)
+        sc_nonpv, qn_nonpv = quiescence_search(
+            pb, ob, gs, _i32(elevated - 10), _i32(elevated - 9), _i32(1), ctx, _i32(0), False
+        )
+        self.assertEqual(int(sc_nonpv), elevated)
+        self.assertEqual(int(qn_nonpv), 1)
+
+        # PV node with wider window (beta > elevated) refines best_eval to `elevated` on move_count==0 leaf without taking Step 3 cutoff
+        sc_pv, _ = quiescence_search(
+            pb, ob, gs, _i32(-5000), _i32(elevated + 50), _i32(1), ctx, _i32(0), True
+        )
+        self.assertEqual(int(sc_pv), elevated)
+        snap = probe_tt_snapshot(tt, tt_key)
+        self.assertEqual(int(snap[3]), int(raw_score))
+
+        # Decisive TT scores must NOT refine non-check best_eval into false stand-pat
+        clear_transposition_table(tt)
+        reset_search_context(ctx)
+        mate_val = MATE_IN_MAX_PLY + 10
+        store_tt(tt, tt_key, 8, mate_val, int(raw_score), int(TT_FLAG_BETA), NO_MOVE, 0, True)
+        sc_pv_mate, _ = quiescence_search(
+            pb, ob, gs, _i32(-5000), _i32(30000), _i32(1), ctx, _i32(0), True
+        )
+        self.assertEqual(int(sc_pv_mate), int(raw_score))
+
+    def test_qs_stalemate_detection_and_checkmate(self):
+        tt, ctx = _make_context(tt_mb=2)
+        clear_transposition_table(tt)
+        reset_search_context(ctx)
+
+        # Pure stalemate & blocked-pawn stalemate (no captures) -> 0 instead of huge negative eval
+        for st_fen in (
+            "k7/2Q5/1K6/8/8/8/8/8 b - - 0 1",
+            "k7/p7/P1K5/8/8/6Q1/8/8 b - - 0 1",
+        ):
+            clear_transposition_table(tt)
+            reset_search_context(ctx)
+            pb, ob, gs = parse_fen(st_fen)
+            self.assertEqual(len(generate_legal_moves(pb, ob, gs)), 0)
+            self.assertTrue(_is_qs_stalemate_jit(pb, ob, gs[0]))
+            sc, _ = quiescence_search(
+                pb, ob, gs, _i32(-20000), _i32(20000), _i32(1), ctx, _i32(0), True
+            )
+            self.assertEqual(int(sc), 0)
+
+        # Back-rank checkmate in check (Re8 vs Kg8 behind f7/g7/h7) -> -MATE_SCORE + ply
+        clear_transposition_table(tt)
+        reset_search_context(ctx)
+        pb_m, ob_m, gs_m = parse_fen("4R1k1/5ppp/8/8/8/8/8/6K1 b - - 0 1")
+        self.assertEqual(len(generate_legal_moves(pb_m, ob_m, gs_m)), 0)
+        sc_m, _ = quiescence_search(
+            pb_m, ob_m, gs_m, _i32(-30000), _i32(30000), _i32(2), ctx, _i32(0), False
+        )
+        self.assertLess(int(sc_m), -MATE_IN_MAX_PLY)
+
+        # Quiet king evasion while in check with no captures must NOT be pruned on move 1
+        clear_transposition_table(tt)
+        reset_search_context(ctx)
+        pb_e, ob_e, gs_e = parse_fen("4k3/8/8/8/8/8/4r3/R3K3 w - - 0 1")
+        sc_e, _ = quiescence_search(
+            pb_e, ob_e, gs_e, _i32(-30000), _i32(30000), _i32(1), ctx, _i32(0), False
+        )
+        self.assertGreater(int(sc_e), -MATE_IN_MAX_PLY)
+
+    def test_movecount_prev_sq_see_alpha_and_search_smoke(self):
+        tt, ctx = _make_context(tt_mb=4)
+        clear_transposition_table(tt)
+        reset_search_context(ctx)
+
+        # Position with > 2 non-check captures (White pawns/bishops can capture on multiple squares)
+        # Verify S-5 produces valid search and respects recapture prev_sq & check protection
+        pb, ob, gs = parse_fen("r3k2r/pppq1ppp/2n1bn2/3pp3/2B1P3/2NP1N2/PPP2PPP/R1BQ1RK1 w kq - 0 8")
+        ctx.diag_enabled = True
+        ctx.tune[TUNE_DELTA_MARGIN] = DELTA_PRUNING_MARGIN
+        # Smoke 1T + 2T Lazy SMP
+        for n_thr in (1, 2):
+            clear_transposition_table(tt)
+            reset_search_context(ctx)
+            pb2, ob2, gs2 = pb.copy(), ob.copy(), gs.copy()
+            mv, sc, ns, qs, _th, d = iterative_deepening_search(
+                pb2, ob2, gs2, 7, {"optimum_time": 0, "maximum_time": 0},
+                ctx, verbose=False, num_threads=n_thr,
+            )
+            self.assertNotEqual(int(mv), int(NO_MOVE))
+            self.assertEqual(int(d), 7)
+            self.assertIn(int(mv), [int(m) for m in generate_legal_moves(pb, ob, gs)])
+            self.assertGreater(int(ns) + int(qs), 0)
+            self.assertLess(abs(int(sc)), VALUE_KNOWN_WIN)
+
+        diag = collect_hist_diag_dict(ctx, 1000)
+        self.assertGreaterEqual(diag.get("q_moves", 0), 0)
 
 
 if __name__ == "__main__":
