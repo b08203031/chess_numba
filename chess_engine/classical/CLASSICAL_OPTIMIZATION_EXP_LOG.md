@@ -29,6 +29,7 @@
 | **Wave 3-3a (`S-4` 評估)** | 2026-11-28 | SF19 `evalDiff` 安靜歷史（單編譯 120 FENs D14/15 ＋ 暖序列 24×8 消融） | **未進提交**：`off=+10..+38` 暖歷史膨脹 `+14.4% ~ +22.0%`；`off<=0` 靠壓低 `main`（`-842 ~ -2232`）過剪；單更新 `bf`/`pawn` 均負效益（`+0.85% ~ +7.33%`） | 受 `(piece, to)` 主歷史表與 `PRUNING_HISTORY_THRESHOLD = -7000` 直連影響，暫緩至 `S-9` 分色 butterfly 後再議 | ⏸️ **暫緩（未改實作）** |
 | **Wave 3-3 (`S-3`)** | 2026-11-28 | Cuckoo `upcoming_repetition` 早期重複和棋偵測（80 KiB 表＋`_has_upcoming_repetition_jit`＋`_search` `alpha < 0` 入口） | 20 FENs D15 `+15.34%`、24×8 暖序列 `+7.36%`；120 FENs 多核 D15 `-7.30%`（`gm=0.9237`）；Oracle `8,350/8,350` `0 FP/0 FN` | **Colab `300k nodes` 終局 2,216 局（1,108 對）：`New 1106.0 - 1110.0 Old`（`398W 1416D 402L`, `49.91%`, `Elo=-0.63 ± 8.47`, CI `[-9.10, +7.85]`, `SPRT[0,+10]=-3.01 H0`, `[-3,+3]=-0.20`, `[-5,0]=+0.50`, `mean_d +0.06 p=2.42e-5`）；統計持平並續留作 `S-5` 基準** | ✅ **無退化持平 & 續留基準** |
 | **Wave 3-4 (`S-5`)** | 2026-11-28 | QSearch 戰術剪枝與精化（Non-PV TT 守衛、TT 界限精化 `best_eval`、`moveCount > 2`＋`prev_sq`/將軍/升變豁免、SEE-vs-Alpha delta、非吃子逃將略過、吃子後逼和檢查；嚴守 E82 無 Correction History） | 對 `S-10`：120 FENs D15 `-21.73%`, 24×8 `-9.03%`, 300k 深度 `+0.30 ply`；**對 `S-3`（`S-3 + S-5` vs `S-3`）：120 FENs D15 `37.67M → 36.04M`（`-4.33%`, `gm=0.9622`, `68W/52L`, Open `-5.88%`）、24×8 D12 暖序列 `24.29M → 19.84M`（`-18.34%`, `gm=0.8255`）、300k 平均深度 `16.55 → 16.75`（`+0.20 ply`）** | **135 / 135** 測試全過（`13.077s`）；`warm_import = 7.21s` / 各 `1` 過載 / `0` `.numba.unresolved$`；**Colab `300k nodes` 972 局（486 對）`New 513.0 - 459.0 Old`（`222W 582D 168L`, `52.78%`, `Elo=+19.32 ± 13.63`, CI `[+5.72, +32.99]`, `SPRT[0,+10]=+2.98` H1 Accepted, `mean_d +0.36 p=4.75e-66`, `NPS +2.2%`）；已同步 `classical_old/`** | ✅ **SPRT H1 通過 & 已同步基準** |
+| **Wave 3-5 (`S-2`)** | 2026-11-29 | SF19 吃子／升變排序尺度（`14 * MG[victim] + cap_hist`）、安靜欠升變拆出吃子生成／QS、歷史導引 `STAGE_GOOD_CAPTURES` SEE 門檻（`-score // 50`） | **120 FENs 多核 D15 `36.04M → 32.29M`（`-10.39%`, `gm=0.8870`, `74W/46L`）**；**24×8 D12 暖序列 `19.84M → 17.88M`（`-9.84%`, `gm=0.8994`）**；300k 平均深度 `16.75 → 16.80`（`+0.05 ply`） | **140 / 140** 測試全過（`8.574s`）；`warm_import = 6.56s` / `warmup_search_jit = 0.18s` / 5 核心函式各 **`1`** 過載 / `0` `.numba.unresolved$`；`--diff-code` 僅存 `S-2` 單軸差異 | ⏳ **待 Colab SPRT（`S-3+S-5+S-2` vs `S-3+S-5`）** |
 
 ---
 
@@ -834,3 +835,51 @@
   * **多區間 SPRT（Penta 常態 / 精確）**：**`[0, +10] = +2.98`（H1 ✅ `@486對/972局`，精確 `+2.90`）**、`[-3, +3] = +2.41`（`+2.33`）、`[-5, 0] = +2.27`（`+2.17`）、`[0, +5] = +1.75`（`+1.70`）、`[-3, +1] = +1.69`（`+1.63`）、`[-2, +2] = +1.61`（`+1.55`）。
   * **搜尋遙測（`New` 48,751 步 vs `Old` 48,832 步）**：平均深度 **`16.63` vs `16.26`（`+0.36 ply`, Welch `t = +17.179, p = 4.75e-66` 顯著加深，`d>=14: 92.4% vs 88.0%` +4.4 pp）**、平均完成步數節點 `195,597 vs 184,239 (+6.2%)`、**NPS `272,875 vs 266,899`（`+2.2%`, Welch `t = +8.396, p = 4.69e-17` 顯著提速）**；同深度平均節點比 `1.012–1.120`（因 QSearch 剪枝更快推升主搜進入深層且降低無效 QS 空耗）。
   * **處置決議**：正式通過 **`SPRT[0, +10] H1 Accepted`**，已執行 `python tools/sync_classical_old.py --sync-code` 並驗證 `--diff-code` 一致，[`classical_old/`](../classical_old/) 已同步為 **Wave 1C + `S-10` + `S-3` + `S-5`**，作為 **Wave 3-5（`S-2`）** 單軸基準。
+
+---
+
+## Wave 3-5（`S-2`）：SF19 吃子／升變排序尺度、安靜欠升變分離與歷史導引 Good-Capture SEE（2026-11-29）
+
+> **對照基準**：Commit `25865f1`（[`classical_old/`](../classical_old/) 已同步至 **Wave 1C + `S-10` + `S-3` + `S-5`**，進行嚴格單軸對照）。
+
+### 1. 修改明細（[`constants.py`](constants.py)、[`tuner/constants_snapshot.py`](../../tuner/constants_snapshot.py)、[`move_generator.py`](move_generator.py)、[`search_heuristics.py`](search_heuristics.py)、[`search.py`](search.py)）
+
+對齊 SF19 `stockfish_repo/src/movegen.cpp:86-103` 與 `movepick.cpp:225-226, 307`：
+
+1. **[`constants.py`](constants.py#L691-L694) 與 [`tuner/constants_snapshot.py`](../../tuner/constants_snapshot.py)**：
+   * 新增 `CAPTURE_ORDER_VICTIM_MULT = 14`（對應 SF19 `7 * PieceValue[victim]` 縮放至本引擎 `MG_MATERIAL_VALUES` ≈ 1/2.15 尺度）、`CAPTURE_ORDER_AGGRESSOR_MULT = 0`（同目標多吃子大小優劣交由 SEE 階段分流，不再於排序階段壓低 `QxR` 低於 `PxP`）、`CAPTURE_GOOD_SEE_DIV = 50`（`STAGE_GOOD_CAPTURES` 動態門檻 `-candidate_score // 50`）。
+   * 區間不變量檢查：最高分 `14 * (1179 + 1179 - 100) + 10240 + 20000 = 61,852 < SCORE_TT_MOVE (100,000)`；最低分 `14 * 100 - 0 - 10240 + 20000 = 11,160 > QS_EVASION_QUIET_CLAMP (5,000)`。
+2. **[`search_heuristics.py`](search_heuristics.py#L333-L410)**：
+   * 於 `score_captures_lazy` 與 `score_captures_with_tt_lazy` 套用 `CAPTURE_ORDER_VICTIM_MULT * MG_MATERIAL_VALUES[victim_rel] - CAPTURE_ORDER_AGGRESSOR_MULT * MG_MATERIAL_VALUES[aggressor_type % 6]`（含升變價值增量），搭配 `capture_history`。
+3. **[`move_generator.py`](move_generator.py#L911-L975, L1085-L1160)**：
+   * 將**無吃子安靜欠升變**（`PROMO_ROOK` / `PROMO_BISHOP` / `PROMO_KNIGHT`）自 `generate_pseudo_legal_captures_buffer` 移入 `generate_pseudo_legal_quiets_buffer`（非將軍 QS 不再展開安靜欠升變）；吃子升變與無吃子後升變保留在 `captures_buffer`，`generate_pseudo_legal_moves_buffer` 維持不變以保 `full == captures + quiets` 零重複契約。
+4. **[`search.py`](search.py#L1204-L1241)**：
+   * 於 `get_next_move` `STAGE_GOOD_CAPTURES` 讀取選定著法評分 `candidate_score = scores[current_idx]`，計算 `see_thr = np.int32(-trunc_div(np.int32(candidate_score), CAPTURE_GOOD_SEE_DIV))`。
+   * **快路徑安全守衛**：為 O(1) `SEE_PIECE_VALUES[vic] >= SEE_PIECE_VALUES[att]` 快路徑加上 **`see_thr <= 0 and ...`** 守衛，確保嚴重負 `capture_history`（`candidate_score < 0 → see_thr > 0`）的等價吃子不會誤走 `SEE >= 0` 快路徑，能確實下放至 `STAGE_BAD_CAPTURES`。
+
+### 2. 120 盤面單次編譯多核消融（Depth 14 ＋ 24×8 暖序列 D12 ＋ 5 升變專題 D14）
+
+| 消融組態 | D14 120 盤面總節點 (`gm` / 勝敗) | 開局 60 (`gm`) | 戰術 60 (`gm`) | 24×8 D12 暖序列 (`gm`) | 5 升變專題 (`gm`) |
+| :--- | :---: | :---: | :---: | :---: | :---: |
+| `C_only_K1_L1_D0`（僅拆安靜欠升變） | `-1.69%` (`0.9953`, `34W/24L`) | `-1.02%` (`0.990`) | `-3.98%` (`1.001`) | `+1.50%` (`1.012`) | `-16.61%` (`0.706`) |
+| `K10_L0_D0` | `-8.35%` (`0.9233`, `66W/54L`) | `-6.64%` (`0.938`) | `-14.16%` (`0.909`) | `-1.15%` (`0.989`) | `+2.67%` (`0.822`) |
+| `K14_L0_D0` | `-8.21%` (`0.9135`, `77W/43L`) | `-6.12%` (`0.957`) | `-15.34%` (`0.872`) | `+5.31%` (`1.041`) | `-18.13%` (`0.684`) |
+| `K14_L1_D0` | `-8.74%` (`0.9163`, `69W/50L`) | `-5.50%` (`0.955`) | `-19.75%` (`0.879`) | `+10.31%` (`1.104`) | `-20.46%` (`0.676`) |
+| `K10_L0_D30` | `-8.33%` (`0.9181`, `65W/55L`) | `-8.33%` (`0.937`) | `-8.31%` (`0.900`) | `-1.33%` (`0.981`) | `+2.09%` (`1.078`) |
+| `K12_L0_D52` | `-10.09%` (`0.8971`, `73W/47L`) | `-6.89%` (`0.958`) | `-20.95%` (`0.840`) | `-3.41%` (`0.959`) | `-1.52%` (`0.982`) |
+| **`K14_L0_D50`（採用）** | `-9.02%` (`0.8979`, `74W/46L`) | `-7.53%` (`0.940`) | `-14.10%` (`0.858`) | **`-9.84%` (`0.899`)** | **`-4.77%` (`0.963`)** |
+| `K14_L0_D52` | **`-15.42%`** (`0.8643`, `78W/42L`) | **`-14.30%`** (`0.886`) | `-19.24%` (`0.843`) | `+1.78%` (`1.023`) | `-2.83%` (`0.976`) |
+| `K14_L0_D60` | `-10.25%` (`0.9041`, `75W/45L`) | `-8.31%` (`0.935`) | `-16.85%` (`0.874`) | `-2.76%` (`0.985`) | `-1.56%` (`0.981`) |
+
+> 子功能 `B`（`D = 50`）徹底消弭純升倍 `K=14` 在暖對局序列的 `+5.31% ~ +10.31%` 膨脹並反降 **`-9.84%`**；`K14_L0_D50` 在 120 盤面、24×8 暖序列與 5 升變專題皆同步呈現明確正向減節點。
+
+### 3. 正式驗證與最終基準測試結果（移除消融掛鉤後重測）
+
+* **單元與合約測試**（11 組套件含 [`test_wave3_improvements.py`](../../tests/test_wave3_improvements.py) 新增 `TestWave3S2CaptureOrderingAndUnderpromotions` 5 項測試，並同步調整 [`tests/test_lazy_smp.py`](../../tests/test_lazy_smp.py) `test_root_partial_iteration_preservation_live` 至 `depth=10, node_budget=8192` 因 Kiwipete D6 已縮至 865 節點）：**`140 / 140` 項全過（`Ran 140 tests in 8.574s, OK`）**（GUI/Tk 與清快取參數掃描套件依隔離原則除外）。
+* **Numba 快取與符號檢查**：`warm_import = 6.56s`、`warmup_search_jit = 0.18s`；`_search`、`quiescence_search`、`_lazy_smp_helper_loop_jit`、`_is_qs_stalemate_jit`、`_has_upcoming_repetition_jit` 各 **`1`** 過載、`unresolved: []`。
+* **120 盤面多核實搜 D15（`S-3 + S-5` vs `S-3 + S-5 + S-2`，12 Workers）**：
+  * **總節點數**：`36,035,593 → 32,293,013`（**`-10.39%`**），**幾何均值節點比 `0.8870`**，`74 勝 / 46 負 / 0 平`，`15 / 120` 變著、`104 / 120` 變分（耗時 `8.03s → 7.10s`）。
+  * **分桶**：開局 `27,999,771 → 25,759,915`（**`-8.00%`**, `gm = 0.9260`）、戰術 `8,035,822 → 6,533,098`（**`-18.70%`**, `gm = 0.8496`）。
+* **24 開局 × 8 步 D12 暖序列（含 `game_history`）**：`19,835,441 → 17,882,662`（**`-9.84%`**, `gm = 0.8994`，耗時 `4.42s → 4.15s`）。
+* **20 標準盤面固定 `300,000 nodes` 平均深度**：全 20 盤面 **`16.75 → 16.80`（`+0.05 ply`）**；排除將殺題 **`14.26 → 14.32`（`+0.05 ply`）**。
+* **⏳ 狀態**：`python tools/sync_classical_old.py --diff-code` 已確認 [`classical/`](.) 與 [`classical_old/`](../classical_old/) 僅存 `S-2` 單軸差異，待遠端 Colab 實戰 **`S-3 + S-5 + S-2` vs `S-3 + S-5`** SPRT 檢定。

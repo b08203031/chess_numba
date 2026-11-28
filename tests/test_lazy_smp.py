@@ -619,8 +619,8 @@ class TestLazySMP(unittest.TestCase):
         clear_transposition_table(ctx.transposition_table)
         reset_search_context(ctx)
 
-        # Kiwipete depth 6 with node_budget=4096 completes at least one root move before
-        # crossing 4096 nodes, so _search at ply==0 stops mid-iteration and preserves
+        # Kiwipete depth 10 with node_budget=8192 completes at least one root move before
+        # crossing 8192 nodes, so _search at ply==0 stops mid-iteration and preserves
         # the finished root candidate, its score, and pv_table[0].
         p_bbs, o_bbs, g_state = parse_fen(
             "r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1"
@@ -629,13 +629,13 @@ class TestLazySMP(unittest.TestCase):
 
         ctx.nodes_searched = np.uint64(0)
         ctx.nodes_searched_array[0] = np.uint64(0)
-        ctx.nodes_searched_array[1] = np.uint64(4096)
+        ctx.nodes_searched_array[1] = np.uint64(8192)
         ctx.stop_flag[0] = False
         res = _search(
             p_bbs,
             o_bbs,
             g_state,
-            _i32(6),
+            _i32(10),
             _i32(-INFINITY),
             _i32(INFINITY),
             ctx,
@@ -660,7 +660,7 @@ class TestLazySMP(unittest.TestCase):
             p_bbs,
             o_bbs,
             g_state,
-            _i32(6),
+            _i32(10),
             _i32(-INFINITY),
             _i32(INFINITY),
             ctx,
@@ -678,7 +678,7 @@ class TestLazySMP(unittest.TestCase):
             p_bbs,
             o_bbs,
             g_state,
-            _i32(6),
+            _i32(10),
             _i32(-INFINITY),
             _i32(INFINITY),
             ctx,
