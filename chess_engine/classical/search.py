@@ -1598,6 +1598,37 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
             if prior_reduction >= HINDSIGHT_INCREASE_MIN_PRIOR and depth >= 2:
                 if static_score + parent_eval > HINDSIGHT_EVAL_SUM_MARGIN:
                     depth -= 1
+            if (len(search_context.tune) >= 51
+                    and not is_exclusion_search
+                    and abs(static_score) < VALUE_KNOWN_WIN
+                    and abs(parent_eval) < VALUE_KNOWN_WIN):
+                prev_m_ed = search_context.move_stack[ply - 1]
+                prev_pc_ed = search_context.piece_stack[ply - 1]
+                if (prev_m_ed != NO_MOVE and prev_pc_ed != -1
+                        and not search_context.move_is_capture_stack[ply - 1]
+                        and get_special_move_flag(prev_m_ed) != SPECIAL_MOVE_FLAG_PROMOTION):
+                    prev_from_ed = get_from_square(prev_m_ed)
+                    prev_to_ed = get_to_square(prev_m_ed)
+                    prev_pt_ed = prev_pc_ed % 6
+                    if ((prev_pt_ed != PAWN and game_state[3] > 0)
+                            or (prev_pt_ed == PAWN and (prev_from_ed & 7) == (prev_to_ed & 7))):
+                        ed_raw = -(parent_eval + static_score)
+                        ed_lo = search_context.tune[44]
+                        ed_hi = search_context.tune[45]
+                        if ed_raw < ed_lo:
+                            ed_raw = ed_lo
+                        elif ed_raw > ed_hi:
+                            ed_raw = ed_hi
+                        eval_diff = ed_raw + search_context.tune[46]
+                        main_m = search_context.tune[47]
+                        bf_m = search_context.tune[48]
+                        pawn_m = search_context.tune[49]
+                        if main_m != 0:
+                            update_history(search_context.history_table, prev_pc_ed, prev_to_ed, eval_diff * main_m)
+                        if bf_m != 0:
+                            update_butterfly_history(search_context.butterfly_history, prev_from_ed, prev_to_ed, eval_diff * bf_m)
+                        if pawn_m != 0 and prev_pt_ed != PAWN and (not tt_hit or search_context.tune[50] != 0):
+                            update_pawn_history(search_context.pawn_history, pawn_key_idx, prev_pc_ed, prev_to_ed, eval_diff * pawn_m)
 
     # --- Dissonance Calculation (DGP Algorithm) ---
     dissonance = 0
