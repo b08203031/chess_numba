@@ -38,14 +38,14 @@ Apply on every development, refactor, debug, or documentation task.
 
 | Allowed without asking | Requires explicit user approval |
 | :--- | :--- |
-| Light unit tests (`unittest`) with little/no heavy JIT | Elo tournaments, long benchmarks, deep perft mass runs, SPSA games |
+| Light unit tests (`unittest`) with little/no heavy JIT; standard perft verification (incl. Startpos & Kiwipete depth 5) | Elo tournaments, long benchmarks, ultra-deep perft mass runs (depth ≥ 6), SPSA games |
 
 * First JIT compile of search/eval can take **several minutes** (order-of-magnitude: cold ~2–3+ min after 2026-07 cache work; still long). Wait for completion; **MUST NOT** spam restarts or re-launch the same compile. Details and re-measure protocol: `chess_engine/classical/JIT_COMPILE_CACHE_REPORT.md`.
 * **Batching & environment isolation for `pytest`**:
   * Run related engine/contract/tuner suites in **one** `pytest` process so `cache=False` search functions compile at most once (~5–6 min) instead of once per file.
   * Keep Tkinter/GUI tests (`tests/test_vision_and_assistant.py` — fails with `_tkinter.TclError` in headless or Tk-less shells) and cache-wiping tests (`tests/test_search_param_sweep.py`) out of batch engine runs and report any excluded/env-specific suites explicitly.
 * **Small-gain SPRT evaluation**: When reviewing a small-magnitude fix against the default `SPRT[0, +10]` runner, compute `[-5, 0]` (non-regression) and `[-3, +3]` LLR alongside 95% Elo CI via `tools.match_core.SPRTTest` before proposing `--sync` acceptance.
-* When board/make/unmake/movegen change: **recommend** the user run perft (see `board-integrity` rule) rather than auto-running heavy perft.
+* When board/make/unmake/movegen change: **MUST** run perft verification directly (see `board-integrity` rule), including **Kiwipete depth 5**.
 
 ---
 

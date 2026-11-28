@@ -1,5 +1,5 @@
 ---
-description: "Bitboard occupancy sync, make/unmake reversibility, incremental Zobrist; perft recommendation."
+description: "Bitboard occupancy sync, make/unmake reversibility, incremental Zobrist; perft verification."
 trigger: glob
 glob: "**/chess_engine/**/{board_operations,move_generator,zobrist,bitboard_utils,move,fen_parser}.py"
 ---
@@ -47,13 +47,13 @@ Broken occupancy → wrong sliders, legality, SEE, and eval.
 
 ---
 
-## 4. After changes (recommend to user)
+## 4. After changes (MUST run perft)
 
-Do not auto-run heavy perft. Suggest:
+When board/make/unmake/movegen change, run perft directly (must include **Kiwipete depth 5**):
 
 ```bash
 python -m tests.perft perft --depth 5
-python -m tests.perft perft --depth 4 --fen "r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1"
+python -m tests.perft perft --depth 5 --fen "r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1"
 ```
 
-Include EP/promotion positions if those paths changed.
+Include EP/promotion positions (e.g. Position 4 / Position 5) if those paths changed.
