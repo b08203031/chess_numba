@@ -136,3 +136,59 @@ def compute_initial_hash(piece_bbs: np.ndarray, game_state: np.ndarray) -> np.ui
         zobrist_key ^= SIDE_TO_MOVE_KEY
 
     return zobrist_key
+
+
+# --- Cuckoo Repetition Tables (SF19 Position::init / upcoming_repetition) ---
+# Stores Zobrist diffs of all 3,668 reversible non-pawn pseudo-moves (80 KiB total, << 1 MB cache limit).
+CUCKOO_TABLE_SIZE = 8192
+CUCKOO_TABLE_MASK = np.uint64(0x1FFF)
+
+
+def _init_cuckoo_tables():
+    """Build Cuckoo hash tables mapping reversible non-pawn move Zobrist diffs to moves."""
+    cuckoo_keys = np.zeros(CUCKOO_TABLE_SIZE, dtype=np.uint64)
+    cuckoo_moves = np.zeros(CUCKOO_TABLE_SIZE, dtype=np.uint16)
+    count = 0
+
+    for pc in range(12):
+        pt = pc % 6
+        if pt == 0:  # PAWN moves are irreversible
+            continue
+        for s1 in range(64):
+            r1, f1 = s1 >> 3, s1 & 7
+            for s2 in range(s1 + 1, 64):
+                r2, f2 = s2 >> 3, s2 & 7
+                dr = abs(r1 - r2)
+                df = abs(f1 - f2)
+                if pt == 1:  # KNIGHT
+                    reachable = (dr == 2 and df == 1) or (dr == 1 and df == 2)
+                elif pt == 2:  # BISHOP
+                    reachable = dr == df
+                elif pt == 3:  # ROOK
+                    reachable = dr == 0 or df == 0
+                elif pt == 4:  # QUEEN
+                    reachable = dr == df or dr == 0 or df == 0
+                else:  # KING (castling is irreversible)
+                    reachable = dr <= 1 and df <= 1
+
+                if not reachable:
+                    continue
+
+                move = np.uint16(s1 | (s2 << 6))
+                key = np.uint64(PIECE_SQUARE_KEYS[pc, s1] ^ PIECE_SQUARE_KEYS[pc, s2] ^ SIDE_TO_MOVE_KEY)
+                idx = int(key & CUCKOO_TABLE_MASK)
+                while True:
+                    cuckoo_keys[idx], key = key, cuckoo_keys[idx]
+                    cuckoo_moves[idx], move = move, cuckoo_moves[idx]
+                    if move == 0:
+                        break
+                    h1 = int(key & CUCKOO_TABLE_MASK)
+                    h2 = int((key >> np.uint64(16)) & CUCKOO_TABLE_MASK)
+                    idx = h2 if idx == h1 else h1
+                count += 1
+
+    assert count == 3668, f"Expected 3668 cuckoo entries, got {count}"
+    return cuckoo_keys, cuckoo_moves
+
+
+CUCKOO_KEYS, CUCKOO_MOVES = _init_cuckoo_tables()

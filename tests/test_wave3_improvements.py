@@ -5,16 +5,20 @@ Currently covers:
 - Wave 3-2 (S-10): SF19 effort-weighted averageScore aspiration window center,
   tighter initial bounds (MIN=10, BASE=14), and GROW_NUM=47 in both main and
   Lazy SMP helper iterative deepening loops.
+- Wave 3-3 (S-3): Cuckoo upcoming_repetition detection (tables, exact equivalence
+  against brute-force 1-ply _is_repetition_jit oracle, source contracts, smoke).
 - Wave 3-4 (S-5): QSearch tactical pruning & refinement (non-PV TT cutoff guard,
   TT-bound best_eval refinement without Correction History, moveCount > 2 pruning
   with prev_sq recapture / check / promotion exemptions, SEE-vs-Alpha delta gate,
   non-capture evasion pruning after non-loss move, and post-capture stalemate).
 """
+import random
 import unittest
 from pathlib import Path
 
 import numpy as np
 
+from chess_engine.classical.board_operations import make_move, unmake_move
 from chess_engine.classical.constants import (
     ASPIRATION_EMA_CHI_DEN,
     ASPIRATION_EMA_CHI_NUM,
@@ -46,6 +50,10 @@ from chess_engine.classical.search import (
     iterative_deepening_search,
     quiescence_search,
 )
+from chess_engine.classical.search_heuristics import (
+    _has_upcoming_repetition_jit,
+    _is_repetition_jit,
+)
 from chess_engine.classical.transposition_table import (
     TT_FLAG_ALPHA,
     TT_FLAG_BETA,
@@ -55,7 +63,13 @@ from chess_engine.classical.transposition_table import (
     probe_tt_snapshot,
     store_tt,
 )
-from chess_engine.classical.zobrist import get_tt_key
+from chess_engine.classical.zobrist import (
+    CUCKOO_KEYS,
+    CUCKOO_MOVES,
+    CUCKOO_TABLE_MASK,
+    CUCKOO_TABLE_SIZE,
+    get_tt_key,
+)
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -329,6 +343,211 @@ class TestWave3S5QSearchRefinement(unittest.TestCase):
 
         diag = collect_hist_diag_dict(ctx, 1000)
         self.assertGreaterEqual(diag.get("q_moves", 0), 0)
+
+
+def _oracle_has_upcoming_repetition(pb, ob, gs, ctx, ply: int) -> bool:
+    """Brute-force 1-ply reference matching _is_repetition_jit(ply + 1)."""
+    legal = generate_legal_moves(pb, ob, gs)
+    saved_move = ctx.move_stack[ply]
+    saved_key = ctx.ply_path_stack[ply + 1]
+    for m in legal:
+        u = make_move(pb, ob, gs, m)
+        hmc = np.int32(gs[3])
+        key = np.uint64(gs[4])
+        if hmc >= 2:
+            ctx.move_stack[ply] = np.uint16(m)
+            ctx.ply_path_stack[ply + 1] = key
+            if _is_repetition_jit(key, hmc, np.int32(ply + 1), ctx):
+                unmake_move(pb, ob, gs, m, u)
+                ctx.move_stack[ply] = saved_move
+                ctx.ply_path_stack[ply + 1] = saved_key
+                return True
+        unmake_move(pb, ob, gs, m, u)
+    ctx.move_stack[ply] = saved_move
+    ctx.ply_path_stack[ply + 1] = saved_key
+    return False
+
+
+def _play_moves(pb, ob, gs, ctx, root_uci_moves, tree_uci_moves):
+    """Apply pre-root game_history moves then in-tree search-path moves."""
+    history_keys = [np.uint64(gs[4])]
+    for uci in root_uci_moves:
+        legal = [m for m in generate_legal_moves(pb, ob, gs) if move_to_uci(m) == uci]
+        assert len(legal) == 1, f"Illegal root move {uci}"
+        make_move(pb, ob, gs, legal[0])
+        history_keys.append(np.uint64(gs[4]))
+
+    ctx.game_history_count = np.int32(len(history_keys))
+    for i, k in enumerate(history_keys):
+        ctx.game_history[i] = k
+
+    ctx.ply_path_stack[0] = np.uint64(gs[4])
+    for ply_idx, uci in enumerate(tree_uci_moves):
+        legal = [m for m in generate_legal_moves(pb, ob, gs) if move_to_uci(m) == uci]
+        assert len(legal) == 1, f"Illegal tree move {uci}"
+        m = legal[0]
+        ctx.move_stack[ply_idx] = np.uint16(m)
+        make_move(pb, ob, gs, m)
+        ctx.ply_path_stack[ply_idx + 1] = np.uint64(gs[4])
+
+    return len(tree_uci_moves)
+
+
+class TestWave3S3CuckooUpcomingRepetition(unittest.TestCase):
+    def test_cuckoo_table_invariants_and_cache_budget(self):
+        self.assertEqual(CUCKOO_KEYS.shape, (CUCKOO_TABLE_SIZE,))
+        self.assertEqual(CUCKOO_MOVES.shape, (CUCKOO_TABLE_SIZE,))
+        self.assertEqual(CUCKOO_KEYS.dtype, np.uint64)
+        self.assertEqual(CUCKOO_MOVES.dtype, np.uint16)
+        self.assertTrue(CUCKOO_KEYS.flags["C_CONTIGUOUS"])
+        self.assertTrue(CUCKOO_MOVES.flags["C_CONTIGUOUS"])
+        self.assertLessEqual(CUCKOO_KEYS.nbytes + CUCKOO_MOVES.nbytes, 100_000)
+        self.assertEqual(int(np.count_nonzero(CUCKOO_MOVES)), 3668)
+
+        for idx in range(CUCKOO_TABLE_SIZE):
+            key = np.uint64(CUCKOO_KEYS[idx])
+            mv = int(CUCKOO_MOVES[idx])
+            if mv == 0:
+                self.assertEqual(int(key), 0)
+            else:
+                h1 = int(key & CUCKOO_TABLE_MASK)
+                h2 = int((key >> np.uint64(16)) & CUCKOO_TABLE_MASK)
+                self.assertIn(idx, (h1, h2))
+
+    def test_upcoming_repetition_explicit_cases_and_null_castling_blockers(self):
+        tt, ctx = _make_context(tt_mb=2)
+        clear_transposition_table(tt)
+
+        reset_search_context(ctx)
+        pb, ob, gs = parse_fen("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1")
+        ply = _play_moves(pb, ob, gs, ctx, [], ["e2e3", "e7e6", "g1f3", "g8f6", "f3g1"])
+        got = _has_upcoming_repetition_jit(ob, gs[0], gs[4], np.int32(gs[3]), np.int32(ply), ctx)
+        self.assertTrue(got)
+        self.assertEqual(got, _oracle_has_upcoming_repetition(pb, ob, gs, ctx, ply))
+
+        reset_search_context(ctx)
+        pb, ob, gs = parse_fen("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1")
+        ply = _play_moves(pb, ob, gs, ctx, [], ["g1f3", "g8f6", "f3g1"])
+        got_root2 = _has_upcoming_repetition_jit(ob, gs[0], gs[4], np.int32(gs[3]), np.int32(ply), ctx)
+        self.assertFalse(got_root2)
+        self.assertEqual(got_root2, _oracle_has_upcoming_repetition(pb, ob, gs, ctx, ply))
+
+        reset_search_context(ctx)
+        pb, ob, gs = parse_fen("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1")
+        ply = _play_moves(
+            pb, ob, gs, ctx,
+            ["g1f3", "g8f6", "f3g1", "f6g8"],
+            ["g1f3", "g8f6", "f3g1"],
+        )
+        got_root3 = _has_upcoming_repetition_jit(ob, gs[0], gs[4], np.int32(gs[3]), np.int32(ply), ctx)
+        self.assertTrue(got_root3)
+        self.assertEqual(got_root3, _oracle_has_upcoming_repetition(pb, ob, gs, ctx, ply))
+
+        reset_search_context(ctx)
+        pb, ob, gs = parse_fen("6k1/8/8/8/8/K7/8/RR6 w - - 0 1")
+        ply = _play_moves(
+            pb, ob, gs, ctx,
+            [],
+            ["a3b3", "g8h8", "b1c1", "h8h7", "a1b1", "h7g8"],
+        )
+        got_blocked = _has_upcoming_repetition_jit(ob, gs[0], gs[4], np.int32(gs[3]), np.int32(ply), ctx)
+        self.assertFalse(got_blocked)
+        self.assertEqual(got_blocked, _oracle_has_upcoming_repetition(pb, ob, gs, ctx, ply))
+
+        reset_search_context(ctx)
+        pb, ob, gs = parse_fen("4k3/8/8/8/8/8/8/4K2N w - - 0 1")
+        ctx.ply_path_stack[0] = np.uint64(gs[4])
+        ply = _play_moves(pb, ob, gs, ctx, [], ["e1d1", "e8d8", "d1e1"])
+        ctx.move_stack[1] = np.uint16(NO_MOVE)
+        got_null = _has_upcoming_repetition_jit(ob, gs[0], gs[4], np.int32(gs[3]), np.int32(ply), ctx)
+        self.assertFalse(got_null)
+
+        reset_search_context(ctx)
+        pb, ob, gs = parse_fen("r3k2r/8/8/8/8/8/8/R3K2R w KQkq - 0 1")
+        ply = _play_moves(pb, ob, gs, ctx, ["h1g1", "h8g8", "g1h1", "g8h8"], ["a1b1", "a8b8", "b1a1"])
+        got_castle = _has_upcoming_repetition_jit(ob, gs[0], gs[4], np.int32(gs[3]), np.int32(ply), ctx)
+        self.assertFalse(got_castle)
+        self.assertEqual(got_castle, _oracle_has_upcoming_repetition(pb, ob, gs, ctx, ply))
+
+    def test_upcoming_repetition_random_reversible_walks_oracle(self):
+        rng = random.Random(20261128)
+        tt, ctx = _make_context(tt_mb=2)
+        clear_transposition_table(tt)
+
+        fens = [
+            "4k3/8/8/8/8/3N4/2B5/R2QK3 w - - 0 1",
+            "2r1k3/8/8/3q4/3Q4/8/8/4K2R w - - 0 1",
+            "3rk3/2b5/8/8/8/2n5/3R4/3QK3 w - - 0 1",
+        ]
+        for fen in fens:
+            for trial in range(40):
+                reset_search_context(ctx)
+                pb, ob, gs = parse_fen(fen)
+                root_len = rng.randint(0, 5)
+                tree_len = rng.randint(1, 9)
+                gh_keys = [np.uint64(gs[4])]
+                ok = True
+                for _ in range(root_len):
+                    legal = generate_legal_moves(pb, ob, gs)
+                    if len(legal) == 0:
+                        ok = False
+                        break
+                    m = legal[rng.randrange(len(legal))]
+                    make_move(pb, ob, gs, m)
+                    gh_keys.append(np.uint64(gs[4]))
+                if not ok:
+                    continue
+
+                ctx.game_history_count = np.int32(len(gh_keys))
+                for idx, k in enumerate(gh_keys):
+                    ctx.game_history[idx] = k
+                ctx.ply_path_stack[0] = np.uint64(gs[4])
+
+                for ply in range(tree_len):
+                    legal = generate_legal_moves(pb, ob, gs)
+                    if len(legal) == 0:
+                        break
+                    m = legal[rng.randrange(len(legal))]
+                    ctx.move_stack[ply] = np.uint16(m)
+                    make_move(pb, ob, gs, m)
+                    cur_ply = ply + 1
+                    ctx.ply_path_stack[cur_ply] = np.uint64(gs[4])
+
+                    if gs[3] >= 2 and _is_repetition_jit(gs[4], np.int32(gs[3]), np.int32(cur_ply), ctx):
+                        break
+
+                    cuckoo_res = _has_upcoming_repetition_jit(
+                        ob, gs[0], gs[4], np.int32(gs[3]), np.int32(cur_ply), ctx
+                    )
+                    oracle_res = _oracle_has_upcoming_repetition(pb, ob, gs, ctx, cur_ply)
+                    self.assertEqual(
+                        cuckoo_res,
+                        oracle_res,
+                        msg=f"Mismatch on fen={fen} trial={trial} ply={cur_ply} hmc={int(gs[3])}: cuckoo={cuckoo_res}, oracle={oracle_res}",
+                    )
+
+    def test_s3_source_contracts_and_perpetual_check_smoke(self):
+        search_src = (ROOT / "chess_engine" / "classical" / "search.py").read_text(encoding="utf-8")
+        self.assertIn("_has_upcoming_repetition_jit(", search_src)
+        self.assertIn("not is_exclusion_search", search_src)
+        self.assertNotIn("len(search_context.tune) >= 51", search_src)
+
+        tt, ctx = _make_context(tt_mb=4)
+        clear_transposition_table(tt)
+        reset_search_context(ctx)
+        pb, ob, gs = parse_fen("6k1/5p2/6p1/8/8/8/5Q2/1r3rK1 w - - 0 1")
+        for n_thr in (1, 2):
+            clear_transposition_table(tt)
+            reset_search_context(ctx)
+            pb2, ob2, gs2 = pb.copy(), ob.copy(), gs.copy()
+            mv, sc, _ns, _qs, _th, d = iterative_deepening_search(
+                pb2, ob2, gs2, 7, {"optimum_time": 0, "maximum_time": 0},
+                ctx, verbose=False, num_threads=n_thr,
+            )
+            self.assertNotEqual(int(mv), int(NO_MOVE))
+            self.assertEqual(int(d), 7)
+            self.assertIn(int(mv), [int(m) for m in generate_legal_moves(pb, ob, gs)])
+            self.assertLess(abs(int(sc)), MATE_IN_MAX_PLY)
 
 
 if __name__ == "__main__":
