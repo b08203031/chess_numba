@@ -11,6 +11,9 @@ Currently covers:
   TT-bound best_eval refinement without Correction History, moveCount > 2 pruning
   with prev_sq recapture / check / promotion exemptions, SEE-vs-Alpha delta gate,
   non-capture evasion pruning after non-loss move, and post-capture stalemate).
+- Wave 3-5 (S-2): SF19 capture/promotion ordering scale (K*MG[victim]+cap_hist),
+  quiet underpromotions moved from captures_buffer to quiets_buffer, and
+  history-guided STAGE_GOOD_CAPTURES SEE threshold (-score // CAPTURE_GOOD_SEE_DIV).
 """
 import random
 import unittest
@@ -28,31 +31,59 @@ from chess_engine.classical.constants import (
     ASPIRATION_WINDOW_BASE,
     ASPIRATION_WINDOW_GROW_NUM,
     ASPIRATION_WINDOW_MIN,
+    CAPTURE_GOOD_SEE_DIV,
+    CAPTURE_ORDER_AGGRESSOR_MULT,
+    CAPTURE_ORDER_VICTIM_MULT,
     CORRECTION_HISTORY_SIZE,
     DELTA_PRUNING_MARGIN,
+    HISTORY_MAX_CAPTURE,
     MATE_IN_MAX_PLY,
     MAX_PLY,
     NO_MOVE,
+    PAWN,
     PAWN_HISTORY_SIZE,
+    QS_EVASION_QUIET_CLAMP,
     QS_MOVE_COUNT_LIMIT,
+    ROOK,
+    SCORE_TT_MOVE,
+    STAGE_BAD_CAPTURES,
+    STAGE_GEN_CAPTURES,
+    STAGE_GOOD_CAPTURES,
     TUNE_DELTA_MARGIN,
     VALUE_KNOWN_WIN,
 )
 from chess_engine.classical.core import generate_legal_moves
 from chess_engine.classical.engine_types import SearchContext, reset_search_context
 from chess_engine.classical.fen_parser import parse_fen
-from chess_engine.classical.move import move_to_uci
+from chess_engine.classical.move import (
+    PROMO_BISHOP,
+    PROMO_KNIGHT,
+    PROMO_QUEEN,
+    PROMO_ROOK,
+    SPECIAL_MOVE_FLAG_NORMAL,
+    SPECIAL_MOVE_FLAG_PROMOTION,
+    encode_move,
+    move_to_uci,
+)
+from chess_engine.classical.move_generator import (
+    generate_pseudo_legal_captures_buffer,
+    generate_pseudo_legal_moves_buffer,
+    generate_pseudo_legal_quiets_buffer,
+)
 from chess_engine.classical.search import (
     _i32,
     _is_qs_stalemate_jit,
     _update_aspiration_average_score,
     collect_hist_diag_dict,
+    get_next_move,
     iterative_deepening_search,
     quiescence_search,
 )
 from chess_engine.classical.search_heuristics import (
     _has_upcoming_repetition_jit,
     _is_repetition_jit,
+    score_captures_lazy,
+    score_captures_with_tt_lazy,
 )
 from chess_engine.classical.transposition_table import (
     TT_FLAG_ALPHA,
@@ -548,6 +579,153 @@ class TestWave3S3CuckooUpcomingRepetition(unittest.TestCase):
             self.assertEqual(int(d), 7)
             self.assertIn(int(mv), [int(m) for m in generate_legal_moves(pb, ob, gs)])
             self.assertLess(abs(int(sc)), MATE_IN_MAX_PLY)
+
+
+class TestWave3S2CaptureOrderingAndUnderpromotions(unittest.TestCase):
+    def test_s2_source_contracts_and_no_temporary_sweep_hooks(self):
+        search_src = (ROOT / "chess_engine" / "classical" / "search.py").read_text(encoding="utf-8")
+        heur_src = (ROOT / "chess_engine" / "classical" / "search_heuristics.py").read_text(encoding="utf-8")
+        mg_src = (ROOT / "chess_engine" / "classical" / "move_generator.py").read_text(encoding="utf-8")
+
+        self.assertEqual(CAPTURE_ORDER_VICTIM_MULT, 14)
+        self.assertEqual(CAPTURE_ORDER_AGGRESSOR_MULT, 0)
+        self.assertEqual(CAPTURE_GOOD_SEE_DIV, 50)
+        self.assertNotIn("len(search_context.tune) >= 51", search_src)
+        self.assertNotIn("len(search_context.tune) >= 51", heur_src)
+        self.assertIn("CAPTURE_ORDER_VICTIM_MULT * MG_MATERIAL_VALUES", heur_src)
+        self.assertIn("see_thr = np.int32(-trunc_div(np.int32(candidate_score), CAPTURE_GOOD_SEE_DIV))", search_src)
+        self.assertIn("if (see_thr <= 0", search_src)
+        self.assertIn("quiet_underpromos = single_pushes & RANK_8", mg_src)
+        self.assertIn("quiet_underpromos = single_pushes & RANK_1", mg_src)
+
+    def test_capture_ordering_scale_and_evasion_bounds(self):
+        _, ctx = _make_context(tt_mb=1)
+        # White: Qd4(27) can take Rd8(59); Pb5(33) can take Qa6(40), Nc6(42), Pa6/c6? Let's place clean targets:
+        # Qd4(27) takes Rd5(35); Pb4(25) takes Qa5(32) & Nc5(34); Pg4(30) takes Ph5(39).
+        pb, ob, gs = parse_fen("4k3/8/8/q1nr3p/1P1Q2P1/8/8/4K3 w - - 0 1")
+        m_pxq = encode_move(25, 32, 0, int(SPECIAL_MOVE_FLAG_NORMAL))  # b4xa5 (Q)
+        m_qxr = encode_move(27, 35, 0, int(SPECIAL_MOVE_FLAG_NORMAL))  # d4xd5 (R)
+        m_pxn = encode_move(25, 34, 0, int(SPECIAL_MOVE_FLAG_NORMAL))  # b4xc5 (N)
+        m_pxp = encode_move(30, 39, 0, int(SPECIAL_MOVE_FLAG_NORMAL))  # g4xh5 (P)
+        moves = np.array([m_pxq, m_qxr, m_pxn, m_pxp], dtype=np.uint16)
+        scores = np.zeros(len(moves), dtype=np.int32)
+        score_captures_lazy(pb, ob, gs, moves, scores, 0, len(moves), ctx, np.uint64(0), np.uint64(0), 0)
+        s_pxq, s_qxr, s_pxn, s_pxp = (int(x) for x in scores)
+        self.assertGreater(s_pxq, s_qxr)
+        self.assertGreater(s_qxr, s_pxn)
+        self.assertGreater(s_pxn, s_pxp)
+        # Equal-victim tie-breaking via capture_history must preserve PxQ > QxR > PxP even at moderate history offsets
+        ctx.capture_history[PAWN, 39, PAWN] = 2000
+        score_captures_lazy(pb, ob, gs, moves, scores, 0, len(moves), ctx, np.uint64(0), np.uint64(0), 0)
+        self.assertEqual(int(scores[3]), s_pxp + 2000)
+        self.assertGreater(int(scores[1]), int(scores[3]))
+
+        # Evasion bounds: worst-case PxP with -HISTORY_MAX_CAPTURE stays > QS_EVASION_QUIET_CLAMP,
+        # and best-case PxQ=Q with +HISTORY_MAX_CAPTURE stays < SCORE_TT_MOVE.
+        m_pxq_promo = encode_move(48, 57, PROMO_QUEEN, int(SPECIAL_MOVE_FLAG_PROMOTION))  # a7xb8=Q
+        pb_e2, ob_e2, gs_e2 = parse_fen("1q2k3/P7/8/8/4r3/3p4/2P5/4K3 w - - 0 1")
+        m_pxp_ev = encode_move(10, 19, 0, int(SPECIAL_MOVE_FLAG_NORMAL))  # c2xd3 (P)
+        ctx.capture_history[PAWN, 57, 4] = HISTORY_MAX_CAPTURE
+        ctx.capture_history[PAWN, 19, PAWN] = -HISTORY_MAX_CAPTURE
+        ev_moves = np.array([m_pxq_promo, m_pxp_ev], dtype=np.uint16)
+        ev_scores = np.zeros(2, dtype=np.int32)
+        score_captures_with_tt_lazy(
+            pb_e2, ob_e2, gs_e2, ev_moves, ev_scores, 2, NO_MOVE, np.uint64(0), np.uint64(0), ctx, 1
+        )
+        self.assertLess(int(ev_scores[0]), int(SCORE_TT_MOVE))
+        self.assertGreater(int(ev_scores[1]), int(QS_EVASION_QUIET_CLAMP))
+
+    def test_quiet_underpromotions_split_captures_to_quiets_and_preserve_total(self):
+        cap_buf = np.zeros((2, 256), dtype=np.uint16)
+        quiet_buf = np.zeros((2, 256), dtype=np.uint16)
+        full_buf = np.zeros((2, 256), dtype=np.uint16)
+
+        cases = (
+            ("1n2k3/P7/8/8/8/8/8/4K3 w - - 0 1", "a7a8q", "a7xb8", {"a7a8r", "a7a8b", "a7a8n"}),
+            ("4k3/8/8/8/8/8/p7/1N2K3 b - - 0 1", "a2a1q", "a2xb1", {"a2a1r", "a2a1b", "a2a1n"}),
+        )
+        for fen, q_promo, cap_prefix, underpromos in cases:
+            pb, ob, gs = parse_fen(fen)
+            cap_cnt = int(generate_pseudo_legal_captures_buffer(pb, ob, gs, cap_buf, 0))
+            tot_cnt = int(generate_pseudo_legal_quiets_buffer(pb, ob, gs, quiet_buf, 0, 0))
+            full_cnt = int(generate_pseudo_legal_moves_buffer(pb, ob, gs, full_buf, 0))
+
+            cap_ucis = [move_to_uci(cap_buf[0, i]) for i in range(cap_cnt)]
+            quiet_ucis = [move_to_uci(quiet_buf[0, i]) for i in range(tot_cnt)]
+            full_ucis = [move_to_uci(full_buf[0, i]) for i in range(full_cnt)]
+
+            self.assertIn(q_promo, cap_ucis)
+            for up in underpromos:
+                self.assertNotIn(up, cap_ucis)
+                self.assertIn(up, quiet_ucis)
+            for sfx in ("q", "r", "b", "n"):
+                self.assertIn(f"{cap_prefix[0]}{cap_prefix[1]}{cap_prefix[3:]}{sfx}", cap_ucis)
+
+            combined = cap_ucis + quiet_ucis
+            self.assertEqual(len(combined), len(set(combined)))
+            self.assertEqual(sorted(combined), sorted(full_ucis))
+
+    def test_good_capture_see_history_relief_and_demotion_bypass(self):
+        _, ctx = _make_context(tt_mb=2)
+        # 1) Equal capture PxP (e4xd5 defended by Nc6 -> SEE == 0) with strongly negative capture_history
+        #    must bypass the victim>=attacker fast path (since see_thr > 0) and be demoted to BAD_CAPTURES.
+        # 2) Losing capture Rd1xd5 (R=562 vs B=366 defended by e6 -> SEE == -196) with high positive
+        #    capture_history must be promoted into GOOD_CAPTURES via see_thr = -score // 50 < -196.
+        fen = "4k3/8/2n1p3/3b4/8/8/8/3RK3 w - - 0 1"
+        pb, ob, gs = parse_fen(fen)
+        m_rxb = encode_move(3, 35, 0, int(SPECIAL_MOVE_FLAG_NORMAL))  # Rd1xd5 (B, SEE = -196)
+        reset_search_context(ctx)
+        ctx.mp_stage[0] = STAGE_GEN_CAPTURES
+        m_rxb_pick = get_next_move(
+            pb, ob, gs, ctx, 0, NO_MOVE, NO_MOVE, NO_MOVE, NO_MOVE, NO_MOVE,
+            np.uint64(0), np.uint64(0), 0, False, 4, np.uint64(1 << 4), 1, np.uint64(0), 0, np.uint64(0),
+        )
+        # With cap_hist = 0: score = 14*366 = 5124 -> see_thr = -102 -> SEE(-196) < -102 -> BAD_CAPTURES
+        self.assertEqual(int(m_rxb_pick), int(m_rxb))
+        self.assertEqual(int(ctx.mp_stage[0]), int(STAGE_BAD_CAPTURES))
+
+        # With high cap_hist = +8000: score = 13124 -> see_thr = -262 -> SEE(-196) >= -262 -> GOOD_CAPTURES
+        reset_search_context(ctx)
+        ctx.capture_history[ROOK, 35, 2] = 8000
+        ctx.mp_stage[0] = STAGE_GEN_CAPTURES
+        m_rxb_promoted = get_next_move(
+            pb, ob, gs, ctx, 0, NO_MOVE, NO_MOVE, NO_MOVE, NO_MOVE, NO_MOVE,
+            np.uint64(0), np.uint64(0), 0, False, 4, np.uint64(1 << 4), 1, np.uint64(0), 0, np.uint64(0),
+        )
+        self.assertEqual(int(m_rxb_promoted), int(m_rxb))
+        self.assertEqual(int(ctx.mp_stage[0]), int(STAGE_GOOD_CAPTURES))
+
+        # Equal PxP (d4xe5 defended by f6 -> SEE == 0) with cap_hist = -HISTORY_MAX_CAPTURE (-10240)
+        # score = 14*100 - 10240 = -8840 -> see_thr = +176 > 0 -> fast path bypassed -> BAD_CAPTURES
+        pb2, ob2, gs2 = parse_fen("4k3/8/5p2/4p3/3P4/8/8/4K3 w - - 0 1")
+        m_pxp = encode_move(27, 36, 0, int(SPECIAL_MOVE_FLAG_NORMAL))  # d4xe5
+        reset_search_context(ctx)
+        ctx.capture_history[PAWN, 36, PAWN] = -HISTORY_MAX_CAPTURE
+        ctx.mp_stage[0] = STAGE_GEN_CAPTURES
+        m_pxp_demoted = get_next_move(
+            pb2, ob2, gs2, ctx, 0, NO_MOVE, NO_MOVE, NO_MOVE, NO_MOVE, NO_MOVE,
+            np.uint64(0), np.uint64(0), 0, False, 4, np.uint64(1 << 4), 1, np.uint64(0), 0, np.uint64(0),
+        )
+        self.assertEqual(int(m_pxp_demoted), int(m_pxp))
+        self.assertEqual(int(ctx.mp_stage[0]), int(STAGE_BAD_CAPTURES))
+
+    def test_s2_search_smoke_on_promotion_and_capture_fens(self):
+        tt, ctx = _make_context(tt_mb=4)
+        for fen in (
+            "1n2k3/P7/8/8/8/8/8/4K3 w - - 0 1",
+            "8/8/1KP5/3r4/8/8/8/k7 w - - 0 1",
+            "r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1",
+        ):
+            clear_transposition_table(tt)
+            reset_search_context(ctx)
+            pb, ob, gs = parse_fen(fen)
+            mv, _sc, ns, _qs, _th, d = iterative_deepening_search(
+                pb, ob, gs, 6, {"optimum_time": 0, "maximum_time": 0},
+                ctx, verbose=False, num_threads=1,
+            )
+            self.assertEqual(int(d), 6)
+            self.assertGreater(int(ns), 0)
+            self.assertIn(int(mv), [int(m) for m in generate_legal_moves(pb, ob, gs)])
 
 
 if __name__ == "__main__":

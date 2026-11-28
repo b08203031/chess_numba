@@ -908,7 +908,7 @@ def generate_pseudo_legal_quiets_buffer(piece_bbs, occupancy_bbs, game_state, mo
         single_pushes = (wp_bb << 8) & empty_squares
         double_pushes = ((single_pushes & RANK_3) << 8) & empty_squares
 
-        # Single Pushes (non-promotion; quiet promotions are generated in captures_buffer)
+        # Single Pushes (non-promotion and quiet underpromotions; quiet queen promotions are in captures_buffer)
         pushes = single_pushes & ~RANK_8
         while pushes:
             to_sq = get_lsb_index(pushes)
@@ -916,6 +916,16 @@ def generate_pseudo_legal_quiets_buffer(piece_bbs, occupancy_bbs, game_state, mo
             moves_buffer[ply, move_count] = encode_move(from_sq, to_sq, 0, SPECIAL_MOVE_FLAG_NORMAL)
             move_count += 1
             pushes &= (pushes - np.uint64(1))
+
+        quiet_underpromos = single_pushes & RANK_8
+        while quiet_underpromos:
+            to_sq = get_lsb_index(quiet_underpromos)
+            from_sq = to_sq - 8
+            moves_buffer[ply, move_count] = encode_move(from_sq, to_sq, PROMO_ROOK, SPECIAL_MOVE_FLAG_PROMOTION)
+            moves_buffer[ply, move_count + 1] = encode_move(from_sq, to_sq, PROMO_BISHOP, SPECIAL_MOVE_FLAG_PROMOTION)
+            moves_buffer[ply, move_count + 2] = encode_move(from_sq, to_sq, PROMO_KNIGHT, SPECIAL_MOVE_FLAG_PROMOTION)
+            move_count += 3
+            quiet_underpromos &= (quiet_underpromos - np.uint64(1))
         
         # Double Pushes
         pushes = double_pushes
@@ -943,7 +953,7 @@ def generate_pseudo_legal_quiets_buffer(piece_bbs, occupancy_bbs, game_state, mo
         single_pushes = (bp_bb >> 8) & empty_squares
         double_pushes = ((single_pushes & RANK_6) >> 8) & empty_squares
 
-        # Single Pushes (non-promotion; quiet promotions are generated in captures_buffer)
+        # Single Pushes (non-promotion and quiet underpromotions; quiet queen promotions are in captures_buffer)
         pushes = single_pushes & ~RANK_1
         while pushes:
             to_sq = get_lsb_index(pushes)
@@ -951,6 +961,16 @@ def generate_pseudo_legal_quiets_buffer(piece_bbs, occupancy_bbs, game_state, mo
             moves_buffer[ply, move_count] = encode_move(from_sq, to_sq, 0, SPECIAL_MOVE_FLAG_NORMAL)
             move_count += 1
             pushes &= (pushes - np.uint64(1))
+
+        quiet_underpromos = single_pushes & RANK_1
+        while quiet_underpromos:
+            to_sq = get_lsb_index(quiet_underpromos)
+            from_sq = to_sq + 8
+            moves_buffer[ply, move_count] = encode_move(from_sq, to_sq, PROMO_ROOK, SPECIAL_MOVE_FLAG_PROMOTION)
+            moves_buffer[ply, move_count + 1] = encode_move(from_sq, to_sq, PROMO_BISHOP, SPECIAL_MOVE_FLAG_PROMOTION)
+            moves_buffer[ply, move_count + 2] = encode_move(from_sq, to_sq, PROMO_KNIGHT, SPECIAL_MOVE_FLAG_PROMOTION)
+            move_count += 3
+            quiet_underpromos &= (quiet_underpromos - np.uint64(1))
         
         # Double Pushes
         pushes = double_pushes
@@ -1062,16 +1082,13 @@ def generate_pseudo_legal_captures_buffer(piece_bbs, occupancy_bbs, game_state, 
         captures_west = ((wp_bb & NOT_A_FILE) << 7) & opponent_pieces_bb
         captures_east = ((wp_bb & NOT_H_FILE) << 9) & opponent_pieces_bb
 
-        # Promotion via single push (quiet promotion)
+        # Promotion via single push (quiet queen promotion only; underpromotions in quiets_buffer)
         promo_pushes = single_pushes & RANK_8
         while promo_pushes:
             to_sq = get_lsb_index(promo_pushes)
             from_sq = to_sq - 8
             moves_buffer[ply, move_count] = encode_move(from_sq, to_sq, PROMO_QUEEN, SPECIAL_MOVE_FLAG_PROMOTION)
-            moves_buffer[ply, move_count + 1] = encode_move(from_sq, to_sq, PROMO_ROOK, SPECIAL_MOVE_FLAG_PROMOTION)
-            moves_buffer[ply, move_count + 2] = encode_move(from_sq, to_sq, PROMO_BISHOP, SPECIAL_MOVE_FLAG_PROMOTION)
-            moves_buffer[ply, move_count + 3] = encode_move(from_sq, to_sq, PROMO_KNIGHT, SPECIAL_MOVE_FLAG_PROMOTION)
-            move_count += 4
+            move_count += 1
             promo_pushes &= (promo_pushes - np.uint64(1))
 
         # Capture Promotions
@@ -1132,16 +1149,13 @@ def generate_pseudo_legal_captures_buffer(piece_bbs, occupancy_bbs, game_state, 
         captures_west = ((bp_bb & NOT_H_FILE) >> 7) & opponent_pieces_bb
         captures_east = ((bp_bb & NOT_A_FILE) >> 9) & opponent_pieces_bb
 
-        # Promotion via single push (quiet promotion)
+        # Promotion via single push (quiet queen promotion only; underpromotions in quiets_buffer)
         promo_pushes = single_pushes & RANK_1
         while promo_pushes:
             to_sq = get_lsb_index(promo_pushes)
             from_sq = to_sq + 8
             moves_buffer[ply, move_count] = encode_move(from_sq, to_sq, PROMO_QUEEN, SPECIAL_MOVE_FLAG_PROMOTION)
-            moves_buffer[ply, move_count + 1] = encode_move(from_sq, to_sq, PROMO_ROOK, SPECIAL_MOVE_FLAG_PROMOTION)
-            moves_buffer[ply, move_count + 2] = encode_move(from_sq, to_sq, PROMO_BISHOP, SPECIAL_MOVE_FLAG_PROMOTION)
-            moves_buffer[ply, move_count + 3] = encode_move(from_sq, to_sq, PROMO_KNIGHT, SPECIAL_MOVE_FLAG_PROMOTION)
-            move_count += 4
+            move_count += 1
             promo_pushes &= (promo_pushes - np.uint64(1))
 
         # Capture Promotions

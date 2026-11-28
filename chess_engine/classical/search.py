@@ -54,7 +54,7 @@ from chess_engine.classical.constants import (
     CORRECTION_HISTORY_PAWN_WEIGHT, CORRECTION_HISTORY_MINOR_WEIGHT, CORRECTION_HISTORY_NON_PAWN_WEIGHT, CORRECTION_HISTORY_UPDATE_DEPTH, SCORE_MIN, SCORE_MAX,
     CORRECTION_HISTORY_CNTCV_FALLBACK, CORRECTION_HISTORY_OUTER_SCALE,
     HISTORY_MAX_CONTINUATION, HISTORY_MAX_PAWN, PAWN_HISTORY_MASK, LOW_PLY_HISTORY_MAX,
-    GOOD_QUIET_THRESHOLD,
+    GOOD_QUIET_THRESHOLD, CAPTURE_GOOD_SEE_DIV,
     FIFTY_MOVE_RULE_LIMIT, FIFTY_MOVE_SCALE_THRESHOLD, FIFTY_MOVE_MAX_SCALE,
     HISTORY_QUIET_MALUS_SCALE_NUM, HISTORY_QUIET_MALUS_SCALE_DEN,
     HISTORY_QUIET_MALUS_DECAY_NUM, HISTORY_QUIET_MALUS_DECAY_DEN,
@@ -1203,12 +1203,13 @@ def get_next_move(
             current_idx = search_context.mp_current_idx[ply]
             if current_idx < captures_end:
                 candidate_move = moves[current_idx]
+                candidate_score = scores[current_idx]
                 search_context.mp_current_idx[ply] += 1
                 
                 if candidate_move == tt_move or candidate_move == excluded_move:
                     continue
                     
-                # Lazy SEE Evaluation with threshold 0
+                # Lazy SEE Evaluation with history-guided threshold
                 c_from = get_from_square(candidate_move)
                 c_to = get_to_square(candidate_move)
                 sp_flag = get_special_move_flag(candidate_move)
@@ -1219,16 +1220,19 @@ def get_next_move(
                 else:
                     vic_type = find_piece_type_on_square_side(piece_bbs, c_to, 1 - side_to_move)
 
+                see_thr = np.int32(-trunc_div(np.int32(candidate_score), CAPTURE_GOOD_SEE_DIV))
+
                 _diag_add(search_context, DIAG_PICKER_SEE_TRY)
-                # Fast path: non-promotion captures where victim SEE value >= attacker SEE value always pass SEE >= 0
-                if (sp_flag != SPECIAL_MOVE_FLAG_PROMOTION
+                # Fast path: non-promotion captures where victim SEE value >= attacker SEE value always pass SEE >= 0 (only valid when see_thr <= 0)
+                if (see_thr <= 0
+                        and sp_flag != SPECIAL_MOVE_FLAG_PROMOTION
                         and att_type != -1 and vic_type >= 0
                         and SEE_PIECE_VALUES[vic_type % 6] >= SEE_PIECE_VALUES[att_type % 6]):
                     is_good = True
                 else:
                     is_good = _see_ge_jit(
                         piece_bbs, occupancy_bbs, int(side_to_move), int(c_from), int(c_to),
-                        int(_i32(0)), pinned_white, pinned_black,
+                        int(_i32(see_thr)), pinned_white, pinned_black,
                         int(_i32(att_type)), int(_i32(vic_type)), int(_i32(get_promotion_piece(candidate_move) + 1)),
                     )
                 

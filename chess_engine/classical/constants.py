@@ -688,6 +688,11 @@ DIAG_SIZE = DIAG_HP_CONT1_CAP_RESCUE + 1
 SCORE_TT_MOVE = 100000
 GOOD_QUIET_THRESHOLD = -1200
 
+# Capture ordering scale & good-capture SEE relief (Wave 3-5 S-2: SF19 movepick.cpp:225,307)
+CAPTURE_ORDER_VICTIM_MULT = 14      # 7 * SF19 scaled to HCE MG_MATERIAL_VALUES (~1/2.15)
+CAPTURE_ORDER_AGGRESSOR_MULT = 0    # Pure victim scale + capture_history (aggressor tie-break left to SEE)
+CAPTURE_GOOD_SEE_DIV = 50           # STAGE_GOOD_CAPTURES threshold: -score // 50
+
 # QSearch check-evasion ordering.  Captures keep a separate score bucket so
 # large accumulated quiet-history values cannot jump ahead of every capture.
 QS_EVASION_CAPTURE_BUCKET = 20000

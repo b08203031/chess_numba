@@ -7,6 +7,7 @@ from chess_engine.classical.move import (
 )
 from chess_engine.classical.constants import (
     SCORE_TT_MOVE, BB_SQUARES, NO_MOVE,
+    CAPTURE_ORDER_VICTIM_MULT, CAPTURE_ORDER_AGGRESSOR_MULT,
     HISTORY_MAX_MAIN, HISTORY_MAX_BUTTERFLY, HISTORY_MAX_CAPTURE, HISTORY_MAX_CONTINUATION,
     HISTORY_MAX_PAWN, HISTORY_WEIGHT_MAIN, HISTORY_WEIGHT_CONT_1,
     HISTORY_WEIGHT_CONT_2, HISTORY_WEIGHT_CONT_3, HISTORY_WEIGHT_CONT_4, HISTORY_WEIGHT_CONT_5,
@@ -334,7 +335,7 @@ def score_captures_lazy(piece_bbs, occupancy_bbs, game_state, moves, scores, sta
     side_to_move = game_state[0]
     opp_side = 1 - side_to_move
     opp_occ = occupancy_bbs[opp_side]
-    
+
     for i in range(start_idx, end_idx):
         move = moves[i]
         to_square = get_to_square(move)
@@ -350,11 +351,14 @@ def score_captures_lazy(piece_bbs, occupancy_bbs, game_state, moves, scores, sta
         mvv_lva = 0
         victim_rel = capture_victim_index(victim_type)
         if victim_rel != -1:
-            mvv_lva = MG_MATERIAL_VALUES[victim_rel] - MG_MATERIAL_VALUES[aggressor_type % 6]
+            mvv_lva = (
+                CAPTURE_ORDER_VICTIM_MULT * MG_MATERIAL_VALUES[victim_rel]
+                - CAPTURE_ORDER_AGGRESSOR_MULT * MG_MATERIAL_VALUES[aggressor_type % 6]
+            )
         if special_flag == SPECIAL_MOVE_FLAG_PROMOTION:
-            mvv_lva += MG_MATERIAL_VALUES[get_promotion_piece(move) + 1] - MG_MATERIAL_VALUES[PAWN]
+            mvv_lva += CAPTURE_ORDER_VICTIM_MULT * (MG_MATERIAL_VALUES[get_promotion_piece(move) + 1] - MG_MATERIAL_VALUES[PAWN])
         
-        # Base score formula: mvv_lva + capture_history_bonus
+        # Base score formula: K * victim_value + capture_history_bonus
         base_score = mvv_lva
         if victim_rel != -1:
             base_score += search_context.capture_history[aggressor_type, to_square, victim_rel]
@@ -389,9 +393,12 @@ def score_captures_with_tt_lazy(piece_bbs, occupancy_bbs, game_state, moves, sco
             mvv_lva = 0
             victim_rel = capture_victim_index(victim_type)
             if victim_rel != -1:
-                mvv_lva = MG_MATERIAL_VALUES[victim_rel] - MG_MATERIAL_VALUES[aggressor_type % 6]
+                mvv_lva = (
+                    CAPTURE_ORDER_VICTIM_MULT * MG_MATERIAL_VALUES[victim_rel]
+                    - CAPTURE_ORDER_AGGRESSOR_MULT * MG_MATERIAL_VALUES[aggressor_type % 6]
+                )
             if is_promotion:
-                mvv_lva += MG_MATERIAL_VALUES[get_promotion_piece(move) + 1] - MG_MATERIAL_VALUES[PAWN]
+                mvv_lva += CAPTURE_ORDER_VICTIM_MULT * (MG_MATERIAL_VALUES[get_promotion_piece(move) + 1] - MG_MATERIAL_VALUES[PAWN])
             
             base_score = mvv_lva
             if victim_rel != -1:
