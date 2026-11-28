@@ -25,7 +25,10 @@ from chess_engine.classical.constants import (
     DIAG_MAIN_SCORE_GEOMETRY_REBUILD,
 )
 from chess_engine.classical.see import _see_ge_jit
-from chess_engine.classical.bitboard_utils import find_piece_type_on_square_side, get_lsb_index
+from chess_engine.classical.bitboard_utils import (
+    find_piece_type_on_square_side, get_lsb_index, SQUARES_BETWEEN,
+)
+from chess_engine.classical.zobrist import CUCKOO_KEYS, CUCKOO_MOVES, SIDE_TO_MOVE_KEY
 from chess_engine.classical.engine_types import search_context_type
 from chess_engine.classical.move_generator import (
     KNIGHT_ATTACKS, get_bishop_attacks, get_rook_attacks, PAWN_ATTACKS
@@ -705,3 +708,95 @@ def _is_repetition_jit(zobrist_key, halfmove_clock, ply, search_context):
                 return True
 
     return False
+
+
+@numba.njit(
+    numba.boolean(
+        occupancy_bbs_signature, numba.uint64, numba.uint64,
+        numba.int32, numba.int32, search_context_type,
+    ),
+    cache=True,
+    nogil=True,
+    boundscheck=False,
+    fastmath=True,
+)
+def _has_upcoming_repetition_jit(
+    occupancy_bbs, side_to_move, zobrist_key, halfmove_clock, ply, search_context
+):
+    """
+    Cuckoo upcoming repetition check (Marcel van Kervinck / SF19 Position::upcoming_repetition).
+    Returns True iff the side to move has a legal reversible move reaching a position that
+    triggers an immediate _is_repetition_jit draw at ply + 1 (2-fold inside tree, 3-fold at/before root).
+    """
+    if halfmove_clock < 3 or ply <= 0:
+        return False
+
+    count = int(search_context.game_history_count)
+    gh_cap = len(search_context.game_history)
+    if count > gh_cap:
+        count = gh_cap
+    max_dist = ply + (count - 1) if count > 1 else ply
+    end = halfmove_clock if halfmove_clock < max_dist else max_dist
+    if end < 3:
+        return False
+
+    if search_context.move_stack[ply - 1] == NO_MOVE:
+        return False
+    prev_key = search_context.ply_path_stack[ply - 1]
+    other = zobrist_key ^ prev_key ^ SIDE_TO_MOVE_KEY
+
+    all_occ = occupancy_bbs[0] | occupancy_bbs[1]
+    our_occ = occupancy_bbs[side_to_move]
+
+    i = 3
+    while i <= end:
+        d1 = i - 1
+        if d1 <= ply:
+            if search_context.move_stack[ply - d1] == NO_MOVE:
+                return False
+            k1 = search_context.ply_path_stack[ply - d1]
+        else:
+            k1 = search_context.game_history[count - 1 - (d1 - ply)]
+
+        if i <= ply:
+            if search_context.move_stack[ply - i] == NO_MOVE:
+                return False
+            k2 = search_context.ply_path_stack[ply - i]
+        else:
+            k2 = search_context.game_history[count - 1 - (i - ply)]
+
+        other ^= k1 ^ k2 ^ SIDE_TO_MOVE_KEY
+        if other != np.uint64(0):
+            i += 2
+            continue
+
+        move_key = zobrist_key ^ k2
+        j = int(move_key & np.uint64(0x1FFF))
+        if CUCKOO_KEYS[j] != move_key:
+            j = int((move_key >> np.uint64(16)) & np.uint64(0x1FFF))
+
+        if CUCKOO_KEYS[j] == move_key:
+            move = CUCKOO_MOVES[j]
+            s1 = get_from_square(move)
+            s2 = get_to_square(move)
+            if ((SQUARES_BETWEEN[s1, s2] & all_occ) == np.uint64(0)
+                    and (our_occ & (BB_SQUARES[s1] | BB_SQUARES[s2])) != np.uint64(0)):
+                if ply > i:
+                    return True
+                # Position at/before root: require at least 2 occurrences within reversible window
+                if count > 0:
+                    start_k = (count - 1) if ((i - ply) & 1) == 0 else (count - 2)
+                    min_k = count - 1 - (halfmove_clock - ply)
+                    if min_k < 0:
+                        min_k = 0
+                    hits = 0
+                    for k in range(start_k, min_k - 1, -2):
+                        if search_context.game_history[k] == k2:
+                            hits += 1
+                            if hits >= 2:
+                                return True
+
+        i += 2
+
+    return False
+

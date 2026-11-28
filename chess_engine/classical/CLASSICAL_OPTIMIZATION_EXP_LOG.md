@@ -26,6 +26,8 @@
 | **Wave 1C** | 2026-11-26 | P2 安全／契約／SMP 清理包（Bug `#20, #21, #24, #26, #27, #28, #31`） | **0 差異**（**30 / 30** FENs Depth-15 `16,023,923` nodes / 著法 / 評分 100% 恆等） | **162 / 162** 全批次測試過（含新 [`test_wave1c_fixes.py`](../../tests/test_wave1c_fixes.py) 14/14）；Numba 各 `1` 過載 / `0` `.numba.unresolved$`；Weighted NPS `538,553 → 576,379` | ✅ **零樹變動驗證完成** |
 | **Wave 3-1 (`S-1`)** | 2026-11-26 | 雙側 Non-Pawn Correction History（白方絕對視角雙向讀寫 `np_white_key` + `np_black_key`） | 20 FENs Depth-15 `10,383,390 → 9,605,255`（`-7.49%`）；30 FENs Depth-15 `-9.30%`；**實戰同深度比 `1.001–1.006`** | **109 / 109** 測試全過；**Colab `400k nodes` 1,492 局（746 對）`236W 1009D 247L`（`49.63%`，`-2.56 ± 9.93 Elo`，`SPRT[0, +10] LLR=-2.95 H0`，`mean_d -0.05 p=0.0052`）；已依選項 A 回退（保留 Wave 1C）** | ❌ **已回退 (REVERTED)** |
 | **Wave 3-2 (`S-10`)** | 2026-11-27 | SF19 effort 加權 `averageScore` 期望窗口中心＋緊縮線性視窗（`MIN=10, BASE=14, GROW=47`） | 20 FENs Depth-15 `10,383,390 → 8,464,667`（**`-18.48%`**）；**120 FENs 多核 Depth-15 `39.85M → 38.18M`（`-4.20%`, 幾何均值 `0.8962`）** | **126 / 126** 測試全過（含 [`test_wave3_improvements.py`](../../tests/test_wave3_improvements.py) 3/3）；`warm_import = 5.41s` / 各 `1` 過載 / `0` `.numba.unresolved$`；Colab `300k nodes` 期中（**1,352 局 / 676 對**）：**`698.0 - 654.0`（`283W 830D 239L`, `51.63%`, `+11.3 ± 11.5 Elo`, `SPRT[0, +10] LLR = +1.98`）**；依使用者指示暫定接納並同步 `classical_old/` 作為 Wave 3-3 基準 | ✅ **暫定接納 & 已同步基準** |
+| **Wave 3-3a (`S-4` 評估)** | 2026-11-28 | SF19 `evalDiff` 安靜歷史（單編譯 120 FENs D14/15 ＋ 暖序列 24×8 消融） | **未進提交**：`off=+10..+38` 暖歷史膨脹 `+14.4% ~ +22.0%`；`off<=0` 靠壓低 `main`（`-842 ~ -2232`）過剪；單更新 `bf`/`pawn` 均負效益（`+0.85% ~ +7.33%`） | 受 `(piece, to)` 主歷史表與 `PRUNING_HISTORY_THRESHOLD = -7000` 直連影響，暫緩至 `S-9` 分色 butterfly 後再議 | ⏸️ **暫緩（未改實作）** |
+| **Wave 3-3 (`S-3`)** | 2026-11-28 | Cuckoo `upcoming_repetition` 早期重複和棋偵測（80 KiB 表＋`_has_upcoming_repetition_jit`＋`_search` `alpha < 0` 入口） | 20 FENs D15 `8.46M → 9.76M`（`+15.34%` 期望視窗互動）；**120 FENs 多核 D15 `40.63M → 37.67M`（`-7.30%`, `gm=0.9237`, `66W/52L`）**；長將殘局 `-7.12%` | **131 / 131** 測試全過（含 120 局隨機可逆路徑 1-ply brute-force 精確等價 Oracle）；`warm_import = 5.42s` / 各 `1` 過載 / `0` `.numba.unresolved$`；Weighted NPS `633,822 → 632,575`（`-0.20%`） | ⏳ **待 Colab SPRT 驗證** |
 
 ---
 
@@ -714,4 +716,41 @@
 * **期中戰績（截自 676 對 / 1,352 局，對局仍在進行中）**：
   * **得分**：**`New 698.0 - 654.0 Old`**（**`283W 830D 239L`**，得分率 **`51.63%`**，淨勝 `+44` 局）。
   * **統計估值**：**`Elo = +11.3 ± 11.5`**，**`SPRT[0, +10] LLR = +1.98`**（持續正向接近 H1 門檻 `+2.94`）。
-* **處置決議**：依使用者指示**暫定接納 Wave 3-2（`S-10`）**，將 [`classical_old/`](../classical_old/) 同步至 **Wave 1C + Wave 3-2（`S-10`）** 作為 Wave 3-3（`S-4`）對照基準。
+* **處置決議**：依使用者指示**暫定接納 Wave 3-2（`S-10`）**，將 [`classical_old/`](../classical_old/) 同步至 **Wave 1C + Wave 3-2（`S-10`）**（Commit `c052c97`）作為 Wave 3-3 對照基準。
+
+---
+
+## Wave 3-3a（`S-4` 消融評估）：`evalDiff` 靜態評估差值安靜歷史（2026-11-28）— ⏸️ 暫緩
+
+* **單次編譯 120 盤面多核消融（Depth 14/15 ＋ 24 開局×8 步 Depth 12 暖上下文）**：
+  * 若採用正偏移對齊 TEMPO（`off = +10 ~ +38`）：Depth 14 總節點 `+9.79% ~ +68.94%`、Depth 15 `+2.86% ~ +59.25%`（`off=10, m=28, p=12` 為 `+6.11% / gm=0.9970`），暖上下文 24 局全部膨脹 **`+14.41% ~ +21.96%`**（`gm = 1.1728 ~ 1.2312`），將 `history_table` 均值由 `-548.8` 上推至 `-210.4 ~ -357.6`，過度削弱 LMR／History Pruning。
+  * 若強壓偏移至負區（`off = 0..-30`）：暖上下文雖降 `-3.16% ~ -21.78%`，但實為將 `history_table` 均值壓低至 `-842.2 ~ -2231.8` 導致 `PRUNING_HISTORY_THRESHOLD = -7000` 過量剪枝。
+  * 若只單獨更新 `butterfly_history`（`+1.49% ~ +7.33%`）或 `pawn_history`（`+0.85% ~ +3.16%`），D14 總節點亦未出現淨優勢。
+* **結論**：因現行 `history_table[12, 64]` 為 `(piece, to)` 且直接以 3 倍權重接入剪枝閘門（異於 SF19 分色 `butterfly[from, to]`），故依消融結論暫不合入 `S-4`，留待 `S-9` 分色 butterfly 與歷史剪枝解耦後再重評，改直接推進 `S-3`。
+
+---
+
+## Wave 3-3（`S-3`）：Cuckoo `upcoming_repetition` 早期重複偵測（2026-11-28）
+
+> **對照基準**：Commit `c052c97`（[`classical_old/`](../classical_old/) 已同步至 **Wave 1C + Wave 3-2 `S-10`**）。
+
+### 1. 修改明細（[`zobrist.py`](zobrist.py)、[`search_heuristics.py`](search_heuristics.py)、[`search.py`](search.py)）
+
+1. **[`zobrist.py`](zobrist.py)**：
+   * 依 Marcel van Kervinck / SF19 `Position::init()` 於模組載入期建立 `CUCKOO_KEYS`（`uint64[8192]`, 64 KiB）與 `CUCKOO_MOVES`（`uint16[8192]`, 16 KiB），精確容納 3,668 筆可逆非兵走步 Zobrist 差鍵（合計 **80 KiB** `<< 1 MB` Numba 常數表快取上限，純幾何建立不循環匯入 `move_generator.py`）。
+2. **[`search_heuristics.py`](search_heuristics.py)**：
+   * 新增 `@njit(cache=True, nogil=True)` `_has_upcoming_repetition_jit(...)`：對 `i = 3, 5, ..., min(halfmove_clock, ply + count - 1)` 滾動計算可逆路徑差值 `other`，遇 `other == 0` 查 Cuckoo 雙槽 `H1/H2`，驗證 `SQUARES_BETWEEN[s1, s2]` 無阻擋子且 `our_occ` 具出發棋子；樹內（`ply > i`）以 2-fold 判定、`ply <= i`（跨入根節點或 `game_history`）嚴格掃描可逆區間檢查 3-fold（`>= 2` 次出現），並遵守 `NO_MOVE` 空步屏障與行棋方奇偶一致。
+3. **[`search.py`](search.py)**：
+   * 於 `_search` `if ply > 0:` 重複／50 步檢查之後，對 `not is_exclusion_search and alpha < 0 and halfmove_clock >= 3` 呼叫 `_has_upcoming_repetition_jit`；命中時提高 `alpha = 0`，若 `alpha >= beta` 立即截斷回傳 `0`。
+
+### 2. 驗證與基準測試結果
+
+* **單元與 Oracle 等價測試**（11 組套件含 [`test_wave3_improvements.py`](../../tests/test_wave3_improvements.py) 新增 4 項 `S-3` 測試，含 120 組隨機種子可逆棋局逐層比對 1-ply brute-force `_is_repetition_jit` Oracle）：**`131 / 131` 項全過（`9.873s, OK`）**。
+* **Numba 快取與符號檢查**：`warm_import = 5.42s`、`warmup_search_jit = 0.17s`；`_search` / `quiescence_search` / `_lazy_smp_helper_loop_jit` / `_has_upcoming_repetition_jit` 各維持 **`1`** 過載、`unresolved: []`。
+* **120 盤面多核心實搜 Depth-15 對照（`classical_old` `S-10` vs `classical` `S-3`，12 Workers，`game_history=[root]`）**：
+  * **總節點數**：`40,632,293 → 37,665,336`（**`-7.30%`**），**幾何均值節點比 `0.9237`**，`66 勝 / 52 負 / 2 平`，`12 / 120` 變著、`102 / 120` 變分（耗時 `8.75s → 8.35s`）。
+  * **分桶**：開局 `31,701,764 → 29,750,532`（**`-6.15%`**, `gm = 0.9544`）、戰術 `8,930,529 → 7,914,804`（**`-11.37%`**, `gm = 0.8940`）。
+* **長將／重複局面專題小測（6 FENs Depth-15）**：`1,073,328 → 996,930`（**`-7.12%`**，其中 `PerpetualQ_1 -40.02%`）。
+* **20 標準盤面 Depth-15 & 24 開局暖序列（`S-3` 期望邊界效應備註）**：
+  * 20 標準盤面總節點 `8,464,667 → 9,762,972`（`+15.34%`, Weighted NPS `633,822 → 632,575` 僅 **`-0.20%`** 零效能開銷），主因 `Startpos`（`+17 cp` 附近）、`EPD_6001`（`eval 172 → 57`）與 `EPD_18001` 因 `S-3` 提前 1 ply 攔截劣勢子樹的 2-fold 逼和界限、連帶移動 `S-10` 窄期望視窗（逐層深度診斷可見 `d=8..12` 多為降節點、`d=14..15` 轉折）；24 開局×8 步 Depth 12 暖序列為 `23,881,870 → 25,638,609`（`+7.36%`, `gm = 1.1053`）。
+* **⏳ 狀態**：已完成本地全部檢核，[`classical_old/`](../classical_old/) 維持於 Wave 3-2（`c052c97`），待遠端 Colab 固定節點單軸 SPRT 驗證。
