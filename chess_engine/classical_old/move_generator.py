@@ -5,7 +5,7 @@ import numba
 from chess_engine.classical_old.move import (
     encode_move, SPECIAL_MOVE_FLAG_NORMAL, SPECIAL_MOVE_FLAG_PROMOTION, SPECIAL_MOVE_FLAG_EN_PASSANT, SPECIAL_MOVE_FLAG_CASTLING,
     PROMO_QUEEN, PROMO_ROOK, PROMO_BISHOP, PROMO_KNIGHT,
-    get_from_square, get_to_square, get_special_move_flag
+    get_from_square, get_to_square, get_special_move_flag, get_promotion_piece
 )
 from chess_engine.classical_old.board_operations import make_move, unmake_move
 from chess_engine.classical_old.engine_types import (
@@ -385,27 +385,22 @@ def get_blockers_for_king(piece_bbs, occupancy_bbs, king_side):
     enemy_rooks = piece_bbs[ROOK + enemy_offset] | piece_bbs[QUEEN + enemy_offset]
     enemy_bishops = piece_bbs[BISHOP + enemy_offset] | piece_bbs[QUEEN + enemy_offset]
 
-    # Orthogonal snipers
-    if enemy_rooks:
-        snipers = ROOK_RAYS[king_sq] & enemy_rooks
-        while snipers:
-            sniper_sq = get_lsb_index(snipers)
-            between = SQUARES_BETWEEN[king_sq, sniper_sq]
-            b = between & occupied
-            if b and (b & (b - np.uint64(1))) == np.uint64(0):
-                blockers |= b
-            snipers &= snipers - np.uint64(1)
+    # Bug #20: Exclude enemy snipers from occupancy (SF19 update_slider_blockers)
+    # and populate pinners_bb whenever a single blocker belongs to king_side.
+    rook_snipers = (ROOK_RAYS[king_sq] & enemy_rooks) if enemy_rooks else np.uint64(0)
+    bishop_snipers = (BISHOP_RAYS[king_sq] & enemy_bishops) if enemy_bishops else np.uint64(0)
+    all_snipers = rook_snipers | bishop_snipers
+    occ_no_snipers = occupied ^ all_snipers
 
-    # Diagonal snipers
-    if enemy_bishops:
-        snipers = BISHOP_RAYS[king_sq] & enemy_bishops
-        while snipers:
-            sniper_sq = get_lsb_index(snipers)
-            between = SQUARES_BETWEEN[king_sq, sniper_sq]
-            b = between & occupied
-            if b and (b & (b - np.uint64(1))) == np.uint64(0):
-                blockers |= b
-            snipers &= snipers - np.uint64(1)
+    while all_snipers:
+        sniper_sq = get_lsb_index(all_snipers)
+        between = SQUARES_BETWEEN[king_sq, sniper_sq]
+        b = between & occ_no_snipers
+        if b and (b & (b - np.uint64(1))) == np.uint64(0):
+            blockers |= b
+            if b & own_pieces:
+                pinners_bb |= BB_SQUARES[sniper_sq]
+        all_snipers &= all_snipers - np.uint64(1)
 
     return blockers, pinners_bb
 
@@ -421,6 +416,8 @@ def is_move_pseudo_legal(piece_bbs, occupancy_bbs, game_state, move):
     from_sq = get_from_square(move)
     to_sq = get_to_square(move)
     special_flag = get_special_move_flag(move)
+    if special_flag != SPECIAL_MOVE_FLAG_PROMOTION and get_promotion_piece(move) != 0:
+        return False
     side_to_move = game_state[0]
 
     # Optimization: Unpack occupancy
@@ -517,7 +514,14 @@ def is_move_pseudo_legal(piece_bbs, occupancy_bbs, game_state, move):
 
         if special_flag == SPECIAL_MOVE_FLAG_EN_PASSANT:
             ep_sq = game_state[2]
-            if to_sq != ep_sq: return False
+            if ep_sq >= 64 or to_sq != ep_sq:
+                return False
+            if to_bb & all_pieces_bb:
+                return False
+            ep_cap_sq = (from_sq & 56) | (to_sq & 7)
+            enemy_pawn_idx = 6 if side_to_move == WHITE else 0
+            if not (piece_bbs[enemy_pawn_idx] & BB_SQUARES[ep_cap_sq]):
+                return False
             # Check if pawn can attack ep square
             return (attacks & from_bb) != 0
 

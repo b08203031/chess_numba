@@ -1,4 +1,5 @@
 # chess_engine/engine_types.py
+import sys
 import numba
 import numpy as np
 from numba import types
@@ -63,7 +64,7 @@ game_state_signature = numba.uint64[::1]
 piece_counts_signature = numba.types.UniTuple(numba.int32, 12)
 
 unmake_info_signature = numba.types.Tuple([
-    numba.int8, numba.int8, numba.uint8, numba.uint8, numba.uint8, numba.uint64, numba.uint64,
+    numba.int8, numba.int8, numba.uint8, numba.uint8, numba.uint16, numba.uint64, numba.uint64,
     numba.uint64, numba.uint64, numba.uint64
 ])
 
@@ -987,3 +988,6 @@ def reset_search_context(ctx):
     ctx.pawn_table_w_king_sq.fill(-1)
     ctx.pawn_table_b_king_sq.fill(-1)
     ctx.stop_flag[0] = False
+    search_mod = sys.modules.get(__package__ + ".search")
+    if search_mod is not None and hasattr(search_mod, "_reset_cached_helper_contexts"):
+        search_mod._reset_cached_helper_contexts(ctx)
