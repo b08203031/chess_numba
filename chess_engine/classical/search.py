@@ -192,7 +192,7 @@ from chess_engine.classical.search_heuristics import (
     get_quiet_stat_score, get_quiet_stat_components,
     get_continuation_pruning_score,
     compute_lmr_reduction_1024, get_lmr_stat_score,
-    _is_repetition_jit, _has_upcoming_repetition_jit,
+    _is_repetition_jit,
 )
 
 
@@ -1338,18 +1338,6 @@ def _search(piece_bbs, occupancy_bbs, game_state, depth, alpha, beta, search_con
         # 50-move rule and insufficient material cannot override checkmate
         if halfmove_clock >= FIFTY_MOVE_RULE_LIMIT or not has_sufficient_material(piece_bbs):
             if not _is_in_check_jit(piece_bbs, occupancy_bbs, game_state):
-                search_context.pv_table[ply, ply] = NO_MOVE
-                return (np.int32(0), NO_MOVE, nodes_searched, quiescence_nodes, tt_hits)
-
-        # Wave 3-3 (S-3): Cuckoo upcoming repetition detection (SF19 search.cpp:737-742)
-        if (not is_exclusion_search
-                and alpha < 0 and halfmove_clock >= 3
-                and _has_upcoming_repetition_jit(
-                    occupancy_bbs, game_state[0], zobrist_key,
-                    np.int32(halfmove_clock), np.int32(ply), search_context,
-                )):
-            alpha = np.int32(0)
-            if alpha >= beta:
                 search_context.pv_table[ply, ply] = NO_MOVE
                 return (np.int32(0), NO_MOVE, nodes_searched, quiescence_nodes, tt_hits)
     

@@ -27,7 +27,7 @@
 | **Wave 3-1 (`S-1`)** | 2026-11-26 | 雙側 Non-Pawn Correction History（白方絕對視角雙向讀寫 `np_white_key` + `np_black_key`） | 20 FENs Depth-15 `10,383,390 → 9,605,255`（`-7.49%`）；30 FENs Depth-15 `-9.30%`；**實戰同深度比 `1.001–1.006`** | **109 / 109** 測試全過；**Colab `400k nodes` 1,492 局（746 對）`236W 1009D 247L`（`49.63%`，`-2.56 ± 9.93 Elo`，`SPRT[0, +10] LLR=-2.95 H0`，`mean_d -0.05 p=0.0052`）；已依選項 A 回退（保留 Wave 1C）** | ❌ **已回退 (REVERTED)** |
 | **Wave 3-2 (`S-10`)** | 2026-11-27 | SF19 effort 加權 `averageScore` 期望窗口中心＋緊縮線性視窗（`MIN=10, BASE=14, GROW=47`） | 20 FENs Depth-15 `10,383,390 → 8,464,667`（**`-18.48%`**）；**120 FENs 多核 Depth-15 `39.85M → 38.18M`（`-4.20%`, 幾何均值 `0.8962`）** | **126 / 126** 測試全過；`warm_import = 5.41s` / 各 `1` 過載 / `0` `.numba.unresolved$`；**Colab `300k nodes` 1,584 局（792 對）`337W 970D 277L`（`51.89%`, `+13.17 ± 10.33 Elo`, CI `[+2.85, +23.51]`, `SPRT[0, +10] LLR=+2.95` H1 Accepted, `mean_d +0.11 p=2.48e-10`）；已同步 `classical_old/`（`c052c97`）** | ✅ **SPRT H1 通過 & 已同步基準** |
 | **Wave 3-3a (`S-4` 評估)** | 2026-11-28 | SF19 `evalDiff` 安靜歷史（單編譯 120 FENs D14/15 ＋ 暖序列 24×8 消融） | **未進提交**：`off=+10..+38` 暖歷史膨脹 `+14.4% ~ +22.0%`；`off<=0` 靠壓低 `main`（`-842 ~ -2232`）過剪；單更新 `bf`/`pawn` 均負效益（`+0.85% ~ +7.33%`） | 受 `(piece, to)` 主歷史表與 `PRUNING_HISTORY_THRESHOLD = -7000` 直連影響，暫緩至 `S-9` 分色 butterfly 後再議 | ⏸️ **暫緩（未改實作）** |
-| **Wave 3-3 (`S-3`)** | 2026-11-28 | Cuckoo `upcoming_repetition` 早期重複和棋偵測（80 KiB 表＋`_has_upcoming_repetition_jit`＋`_search` `alpha < 0` 入口） | 20 FENs D15 `8.46M → 9.76M`（`+15.34%` 期望視窗互動）；**120 FENs 多核 D15 `40.63M → 37.67M`（`-7.30%`, `gm=0.9237`, `66W/52L`）**；長將殘局 `-7.12%` | **131 / 131** 測試全過（含 120 局隨機可逆路徑 1-ply brute-force 精確等價 Oracle）；`warm_import = 5.42s` / 各 `1` 過載 / `0` `.numba.unresolved$`；Weighted NPS `633,822 → 632,575`（`-0.20%`） | ⏳ **待 Colab SPRT 驗證** |
+| **Wave 3-3 (`S-3`)** | 2026-11-28 | Cuckoo `upcoming_repetition` 早期重複和棋偵測（80 KiB 表＋`_has_upcoming_repetition_jit`＋`_search` `alpha < 0` 入口） | 2026-11-28 實作：20 FENs D15 `+15.34%`、24×8 暖序列 `+7.36%`；120 FENs 多核 D15 `-7.30%`（`gm=0.9237`）；Oracle `8,350/8,350` `0 FP/0 FN` | **Colab `300k nodes` 616 局（308 對）`104W 401D 111L`（`49.43%`, `-3.95 Elo`, CI `[-20.43, +12.51]`, `SPRT[0,+10] LLR=-1.27`, `[-3,+3] -0.34`, `[-5,0] -0.10`）；依選項 A 中止回退（保留 `classical_old/` `c052c97`）** | ❌ **已回退 (REVERTED)** |
 
 ---
 
@@ -732,7 +732,7 @@
 
 ---
 
-## Wave 3-3（`S-3`）：Cuckoo `upcoming_repetition` 早期重複偵測（2026-11-28）
+## Wave 3-3（`S-3`）：Cuckoo `upcoming_repetition` 早期重複偵測（2026-11-28）— ❌ 已中止並回退（REVERTED，選項 A）
 
 > **對照基準**：Commit `c052c97`（[`classical_old/`](../classical_old/) 已同步至 **Wave 1C + Wave 3-2 `S-10`**）。
 
@@ -755,4 +755,12 @@
 * **長將／重複局面專題小測（6 FENs Depth-15）**：`1,073,328 → 996,930`（**`-7.12%`**，其中 `PerpetualQ_1 -40.02%`）。
 * **20 標準盤面 Depth-15 & 24 開局暖序列（`S-3` 期望邊界效應備註）**：
   * 20 標準盤面總節點 `8,464,667 → 9,762,972`（`+15.34%`, Weighted NPS `633,822 → 632,575` 僅 **`-0.20%`** 零效能開銷），主因 `Startpos`（`+17 cp` 附近）、`EPD_6001`（`eval 172 → 57`）與 `EPD_18001` 因 `S-3` 提前 1 ply 攔截劣勢子樹的 2-fold 逼和界限、連帶移動 `S-10` 窄期望視窗（逐層深度診斷可見 `d=8..12` 多為降節點、`d=14..15` 轉折）；24 開局×8 步 Depth 12 暖序列為 `23,881,870 → 25,638,609`（`+7.36%`, `gm = 1.1053`）。
-* **⏳ 狀態**：已完成本地全部檢核，[`classical_old/`](../classical_old/) 維持於 Wave 3-2（`c052c97`），待遠端 Colab 固定節點單軸 SPRT 驗證。
+### 3. Colab 固定節點（`300k nodes`）實戰檢定與處置結論（❌ 已中止回退，選項 A）
+
+* **實驗配置（[`tournament_colab_runner_se_multicut copy 6.ipynb`](../../tournament_colab_runner_se_multicut%20copy%206.ipynb)，Commit `8ea284a` vs `c052c97` Baseline）**：`--nodes 300000`、`--concurrency 8`、`--tt-mb 64`、`THREADS = 1`，成對換先開局。
+* **跑至 308 對（616 局）中止統計**：
+  * **得分**：**`New 304.5 - 311.5 Old`**（**`104W 401D 111L`**，勝率 **`49.43%`**）；**Pentanomial `[0, 0.5, 1, 1.5, 2]`**：**`[9, 77, 144, 68, 10]`**。
+  * **Elo & SPRT**：**`Elo = -3.95`**（95% CI **`[-20.43, +12.51]`**）；`SPRT[0, +10] LLR = -1.27`、`[-3, +3] -0.34`、`[-5, 0] -0.10`（一度跌至 `-1.87` `@ 228 pairs`）。
+* **本地複診結論**：
+  * 擴大 9 種含王車易位、過路兵、將軍與預置歷史之盤面進行 Brute-Force Oracle 模糊檢驗（合法狀態 **`8,350 / 8,350` 次 `0 FP / 0 FN`**），排除實作邏輯漏洞；固定 `300k nodes` 下 20 標準盤面深度為 `16.55 vs 16.50`（`+0.05 ply`），未見深度塌縮。
+  * 然而在非循環開中局（如 `EPD_24001` D13 `+135.5%`、分數 `+26 → -10`；`EPD_16001 +98.5%`；24×8 暖上下文 `+7.36%`）仍出現路徑相依之 `0` 分逼和邊界提早抬升 `alpha` 並與 `S-10` 窄期望視窗／TT 產生搜尋樹擾動；鑑於 `upcoming_repetition` 本屬微幅增益且負向期望趨勢明確，依**選項 A** 即時止損回退 `zobrist.py` / `search_heuristics.py` / `search.py` / `tests/test_wave3_improvements.py` 至 [`classical_old/`](../classical_old/)（`c052c97`）一致狀態（`--diff-code` `0` 差異），並改推進 **`S-5`（QSearch 戰術剪枝與精化組）**。
